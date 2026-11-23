@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 5fab3e1ea1e0f5be1df4e87f296ebd97b40013c7051834776bf9077619bdd3ab -->
+<!-- diagnostic-evidence-contract: d5c39a480774e3f42a576bcb063cd648e26e03f5b386f1a2fff91d3075a45c44 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -115,12 +115,28 @@ window `limited`. The liquid input needs a liquid label at 0x20/10: the geotherm
 temp.(R6T) row there is a brine-loop temperature, not refrigerant, so a qualifying window on those
 profiles is `limited` for temperatures.
 
-This observation, and the instrument registry, count 0x20/14 as the low side only within the outdoor
-pair: a 0x20/14 refrigerant pressure beside a structural 0x20/12 pressure. An unpaired 0x20/14 row
-is the profile's only outdoor refrigerant-pressure row, and its label is no evidence of a side. The
-observation reads it as neither side, so a profile without another structural pressure is
-`unsupported_profile`.
-`/values`, MQTT and Home Assistant publish that row under its catalog label, apart from the one
+The existing five metrics publish accepted-reading counts separately from their unchanged
+min/mean/max objects. These are per-input samples in the exposed uninterrupted window, not
+elapsed-time coverage or independent calibration. The API's selected-source metadata is drawn
+from the same committed profile coverage as the tracker, under the poll mutex; it is not a fresh
+cache read. A declared input can remain selected with zero accepted readings. An unreadable
+pressure row contributes no reading for that side and does not trigger a switch of transducer.
+
+| Existing metric | Profile-selected X10A input | Selection boundary |
+|---|---|---|
+| Compressor speed | `0x30/0`, converter 152 | Requires the profile's publishable speed row. |
+| Discharge temperature | `0x20/4`, converter 105 | Requires the profile's publishable temperature row. |
+| Expansion-valve command | `0x30/3`, converter 151 | Command only; no position feedback. |
+| High pressure | `0x62/15`, converter 105; otherwise `0x20/12`, converter 105 | Select the first structurally identified refrigerant-pressure row in this priority order for the resolved profile. |
+| Low pressure | `0x20/14`, converter 105 | Select only when both `0x20/14` and `0x20/12` are structurally identified refrigerant-pressure rows in the resolved profile. |
+
+The table describes catalog inputs. Saturation-to-water, saturation-minus-liquid,
+suction-superheat and discharge-minus-saturation metrics require separate physical validation of
+the temperature and pressure measurement points and remain unavailable.
+
+The observation assigns neither side to an unpaired 0x20/14 row. A profile without another
+selected pressure input reports `unsupported_profile`. `/values`, MQTT and Home Assistant publish
+an unpaired 0x20/14 row under its catalog label, apart from the one
 relabel described under [register 0x20](REGISTERS.md#register-0x20); the register picker always
 lists the catalog label. The pair is a fact of the generated tables, not of
 measured hardware: as for 0x20/12 alone, whether real units of the paired profiles
@@ -327,6 +343,10 @@ row is **CHECKING**; after a full DHW scope day with no completed window it beco
 even if no candidate could open. This states missing hourly measurements, not full signal coverage,
 a cause or a promise that more waiting will produce a measurement.
 
+The optional timed chart plots individual accepted windows whose endpoints are known. Each bar
+pairs that window's measured rate, readable seconds and pump and draw-like markers. The aggregate
+diagnosis can include a window carried across a restart, for which the original start is estimated.
+
 **Project boundary:** These thresholds, endpoint confirmation with a 30-second closing grace,
 one-hour intervals and settling filters are project choices,
 not Daikin limits or the EU standing-loss test. Candidates tolerate at most 120 consecutive blind
@@ -344,16 +364,16 @@ The maximum is never multiplied by the window count or labelled measured daily c
 whole-tank heat loss, wasted energy, actual replacement electricity, a failed valve or a cause.
 Draws may remove useful hot water; stratification, circulation and thermosiphoning can also change
 this temperature. Zero net cooling does not mean zero heat transfer. No marker proves hydraulic
-isolation, and no accepted window excludes losses in discarded intervals. Unseen charging can
-still affect a later window. Missing replies or polling pauses establish no wiring defect.
+isolation, and no accepted window excludes losses in discarded intervals. Markers establish
+presence, not duration or cause. The timeline records no per-interval exclusion cause; aggregate
+abort reasons cannot label individual blanks, which mean only no timed completed window. Neither
+its lifecycle start nor the last complete input sample establishes continuous coverage. Unseen
+charging can still affect a later window. Missing replies or polling pauses establish no wiring defect.
 
-Changing circulation identity retires DHW evidence independently. X10A and Modbus maintain
-separate 24 h DHW-loss stores without merging; switching the displayed card source preserves both,
-and pausing diagnostics preserves completed hours and existing abort counts while discarding any open
-live candidate/settle filter without incrementing aborts. Saved cooling hours use the core
-journal's layout and schema checks. An unfinished candidate has a separate handoff compatibility
-check. See the [restart and admission rules](PLANT.md#reboot-and-persistence) and
-[evidence fields](API.md).
+Changing circulation identity retires DHW evidence independently. A pause under the same consent
+keeps completed evidence and abort counts and discards the open candidate without recording an
+abort. See the [restart and admission rules](PLANT.md#reboot-and-persistence) and the
+[timeline contract](API.md#dhw-cooling-timeline) for retention and display scope.
 
 <a id="diagnosis-cycling"></a>
 ### 3. Compressor cycling (`cycling`)
@@ -481,6 +501,31 @@ or continuous weather coverage. A compressor pause around defrost can split an o
 into separate recorded runs. The [production observation below](#diagnosis-defrost) recorded such a
 pause on the hot-water route. Its timing does not establish a space-heating start or stop.
 
+**Per-run RAM context (`run_contexts`):** [`cycling_run_context.hpp`](../main/logic/cycling_run_context.hpp)
+retains up to 48 X10A runs in volatile RAM alongside the timed cycling trace using the same
+provisional rules (`22 rps`, `+2 K` leaving-water-minus-target with `30 s` target stability and
+`30 s` post-stop refinement, `15 s` max sample gap — bridging `<= 15 s` single-poll unreadable-RPS
+interruptions without sampling the blind cycle while resetting `> 15 s` gaps without fabricating a
+stop, aligned with `stop_context.hpp`), optional `Instrument::ReturnWater` capture,
+settled flow (`>= 30 s` pump warm-up, falling back to full-run average or stop-sample flow on shorter
+runs), settled minimum speed (`>= 30 s` warm-up, falling back to full-run minimum speed), and a median
+typical heating flow (`flow_typical_l_min`) across completed `>= 600 s` space-heating runs in RAM. A
+transient `defrost == On` startup tail lasting at most `30 s` from run start reclassifies to Space
+Heating or DHW once `defrost == Off` holds continuously for `>= 15 s` in that mode (promoting
+`DefrostStart` to `DhwStart`, `AfterDefrost` after a defrost within `10 min`, or `Unknown`). Stop
+precedence orders defrost > DHW transition > target lowered > low speed above target > request withdrawal >
+normal stop (wire tokens and field units are defined in
+[API.md](API.md#history-and-24-hour-checks)); any target change withdraws `low_rps_above_target` even
+though target-changed stop attribution records only target drops. The dashboard flags
+`low_rps_above_target` stops (and short-cycling period summaries with `>= 2` such stops) as low flow
+in its explanatory copy when a run's flow is `<= 0.65 × flow_typical_l_min`. Like `stop_context`, these
+telemetry summaries prove neither minimum modulation, closed valves, an external thermostat,
+oversizing, nor the physical root cause of a stop; display fields (`run_contexts`,
+`flow_typical_l_min`) are omitted in Modbus mode while X10A RAM tracking continues in parallel,
+pausing (`enabled: false`) resets only the active tracker and pending post-stop refinement window, and
+retained trace entries clear on reboot, recovery forgetting, source/generation reset, or ring
+overwrite (`> 48` runs).
+
 <a id="diagnosis-defrost"></a>
 ### 4. Defrost events (`defrost`)
 
@@ -582,18 +627,66 @@ the listed Altherma 3 R W units (sections 6.4.3, 9.4.1, and 12.4). An Altherma 3
 exposes leaving-water flow rate in input register 49 scaled by 1/100 to `l/min` ([D3], Modbus input
 registers). One firmware-wide good/bad limit would therefore be incorrect.
 
+The [Altherma 3 R W installer guide, 4P629085-1E, 2024.04][h1-split-guide], sections 10.6.3 and
+16.2, distinguishes the heating controller difference (leaving-water setpoint minus return)
+from a measured difference. Its 10 K radiator case and startup, backup-heater and zone-priority
+exceptions are tied to the listed ERGA04–08E and EHBH/EHBX04–08E models. The split-unit drawing
+places R1T at the water outlet of the plate heat exchanger and R4T at its inlet, with R2T after
+the backup heater. The [Altherma 3 M manual, 4P620239-1B, 2022.05][h1-mono-guide], section 11,
+pp. 48–49, establishes the corresponding water-side sensor roles for EBLA09–14D and EDLA09–14D.
+Both editions were checked on 14 November 2026. The [Altherma 3 R MT ECH₂O installer guide,
+4P759885-1C, 2025.11][secondary-supply-guide], section 6.2.3, pp. 47–50, places the EKMIK mixing
+station and its separate pump in the lower-temperature main heating zone. Its layouts include
+systems with and without hydraulic separators. The guide describes the equipment and control
+topology. The X10A input mapping comes from the project catalog.
+
 **Firmware rule:** The row reports the lowest accepted flow after the internal pump ran
 continuously for at least 60 seconds. It assigns no good/bad assessment. On Modbus,
-`checkup_modbus_coverage` enables `flow` only for the `HomeHub` EKRHH profile (input 49 `/100`);
-native `Altherma4` Modbus leaves `flow` unsupported (`unavailable`, hidden in Modbus UI mode). See
-CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
+`checkup_modbus_coverage` enables `flow` only when `HomeHub` EKRHH scaling is affirmatively
+verified (`ModbusProfileBasis::Affirmative` via probe register 79)
+and the committed row carries `!cv.modbus_flow_scale_unverified`; `Probing`, `Fallback`, and native
+`Altherma4` sweeps leave `flow` unsupported (`unavailable`, withheld from Modbus checkups), and
+Modbus mode leaves `flow.hydronic` unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`,
+null metrics). See CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
 
-**Project boundary:** Sixty seconds is a pump run-up filter, not a manufacturer limit. The filter
-does not establish part load or exclude later valve movements.
+The independent X10A hydronic population uses the same completed X10A sweep for measured pre-heater
+leaving water, return water, flow and the required operating witnesses. Readable endpoints count
+toward observed time. Eligible endpoints additionally require positive flow, an active pump and
+compressor, Heating mode, the space route, both backup-heater steps off and defrost off. A declared
+special-phase witness must be readable and inactive. An ambiguous phase identity excludes the
+profile; an absent or withheld phase limits the population. Invalid witnesses, a gap or sweep longer
+than 15 seconds, a source or consent change or a monotonic clock discontinuity reset run-up.
+Toggling diagnostics off and back on within the same diagnostics generation preserves completed
+24-hour buckets while resetting live run-up continuity so paused time is never bridged.
+
+The first sample after 600 continuous eligible seconds enters the ranges. Qualified time requires
+two qualified endpoints. The signed spread is measured leaving water minus return. Water ranges
+are sample-weighted. Effort is 100 minus a valid, finite 0–100 pump command, with its own sample
+count. Dated hours use the shared journal with independent method, schema, model, source and
+consent identity. Clock loss and incomplete replay are exposed separately. See [the API
+contract](API.md#qualified-water-circuit-observations).
+
+The optional secondary comparison additionally requires the exact ERRA08–12E + ELSH/X(B) ECH₂O
+profile, an unambiguous publishable EKMIK temperature at `0x65/4` and current main-zone pump
+and external heating-request witnesses in the same sweep. It uses the water-circuit heating
+admission above and 600 seconds of continuous secondary evidence. The sample-weighted mean of
+R1T minus EKMIK retains its sign. Only consecutive accepted endpoints contribute duration.
+An interrupted, paused, clock-reversed or stale run clears the comparison. The HTTP view also
+withholds the comparison when more than 15 seconds have elapsed since the start of the latest
+accepted sweep, and Modbus diagnostics leaves it null. The live comparison adds no journal fields.
+No shipped profile currently provides this complete input set.
+
+**Project boundary:** Sixty seconds, 600 seconds and 15 seconds are project filters. No validated
+active-zone controller target is available in current queryable profiles. No 900-second pattern
+classifier, 9 K alarm or model minimum compressor speed is inferred. The secondary comparison
+keeps zone intent unknown even where multiple setpoints are visible.
 
 **Not established:** The minimum has no retained operating-mode context and is not a design-flow
 measurement. It cannot be compared generally with a model manual's commissioning minimum or
-identify a hydraulic restriction.
+identify a hydraulic restriction. The hydronic ranges do not establish steady operation, emitter
+output, bypass, restriction, sensor calibration or available pump head. The secondary temperature
+difference alone establishes neither flow through a separator nor heat lost from a buffer or
+extra electricity use.
 
 <a id="diagnosis-heater"></a>
 ### 7. Electric backup and booster heaters (`heater`)
@@ -776,3 +869,6 @@ prove that a source is technically applicable; that remains the human part of th
 [R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003
 [stop-guide-de]: https://www.daikin.de/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PDE629085-1E_German.pdf
 [stop-guide-en]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PEN629085-1E_English.pdf
+[secondary-supply-guide]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-medium-temperature/elsh-e/ELSH%28B%29-E.ELSX%28B%29-E.ERRA-EV37.ERRA-EW17.ERRA08-12EV3.ERRA08-12EW1_Installer%20reference%20guide_4PEN759885-1C_English.pdf#page=49
+[h1-split-guide]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PEN629085-1E_English.pdf
+[h1-mono-guide]: https://www.daikin.co.uk/content/dam/document-library/installation-manuals/heat/air-to-water-heat-pump-low-temperature/ebla09-14dv3/EB_DLA09-14D3V3_W1_EB_DLA-D3V3_W1_Installation%20manual_4PEN620239-1B_English.pdf

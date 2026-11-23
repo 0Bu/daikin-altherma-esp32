@@ -8,13 +8,17 @@ const HEADING = /^###\s+\d+\.\s+.+\(`([a-z0-9_]+)`\)\s*$/gm;
 const SOURCE_ANCHOR = /<a id="source-((?:d|e|r)\d+)"><\/a>/g;
 const SOURCE_ID = /\[((?:D|E|R)\d+)\]/g;
 
-// Both prose review fingerprints cover the independent observation's real production path.
+// Both prose review fingerprints cover the independent observations' real production paths.
 export const OBSERVATION_SOURCE_FILES = Object.freeze([
   "main/logic/stop_context.hpp", "main/logic/stop_context_input.hpp",
   "main/logic/observation_hourly.hpp", "main/logic/instrument.hpp", "main/logic/heartbeat.hpp",
   "main/logic/fault_trace.hpp", "main/logic/fault_persist.hpp",
-  "main/stop_observation_store.hpp", "main/stop_observation_store.cpp", "main/history.cpp",
-  "main/logic/defrost_start.hpp", "main/logic/working_figure.hpp",
+  "main/stop_observation_store.hpp", "main/stop_observation_store.cpp",
+  "main/logic/hydronic_observation.hpp", "main/logic/hydronic_input.hpp",
+  "main/logic/hydronic_hourly.hpp", "main/logic/hydronic_payload.hpp",
+  "main/hydronic_observation_store.hpp", "main/hydronic_observation_store.cpp",
+  "main/history.cpp", "main/logic/defrost_start.hpp", "main/logic/cycling_run_context.hpp",
+  "main/logic/dhw_loss_trace.hpp", "main/logic/working_figure.hpp",
   "main/logic/gas_comparison.hpp",
 ]);
 

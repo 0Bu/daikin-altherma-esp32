@@ -45,7 +45,8 @@
 #include "logic/working_figure.hpp"
 #include "weather_forecast.hpp"
 #include "logic/redact.hpp"
-#include "logic/heartbeat.hpp"   // append_stack_bytes — ONE never-sampled rendering rule
+#include "logic/heartbeat.hpp" // append_stack_bytes — ONE never-sampled rendering rule
+#include "logic/hydronic_payload.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
 #include "mqtt_ha.hpp"
@@ -630,6 +631,38 @@ append_status_outdoor_context(JsonOut& j, const logic::CheckupOutdoorReport& con
 }
 
 template <typename JsonOut>
+static __attribute__((noinline)) void append_hydronic_status(JsonOut&          j,
+                                                             DiagnosticsSource diag_effective) {
+    CheckupHydronicReport report{};
+    if (diag_effective == DiagnosticsSource::Modbus) {
+        report.observation.partial         = false;
+        report.observation.restore_pending = false;
+        // reason_code: 0 per docs/API.md
+        report.reason = logic::HydronicReason::None;
+    } else {
+        report = checkup_hydronic_report();
+    }
+    j += ",\"hydronic\":";
+    append_hydronic_json(j, report);
+    const auto& secondary = report.secondary;
+    j += ",\"secondary_supply\":";
+    if (!report.current || !secondary.samples || !secondary.source.conv) {
+        j += "null";
+        return;
+    }
+    auto sink = detail::json_output(j);
+    j += "{\"delta_k\":";
+    hydronic_json_decimal(sink, secondary.sum_milli, secondary.samples, true);
+    j += ",\"duration_s\":";
+    hydronic_json_seconds(sink, secondary.duration_us, true);
+    append_status_opt_uint(j, ",\"samples\":", true, secondary.samples);
+    append_status_opt_uint(j, ",\"source\":{\"reg\":", true, secondary.source.reg);
+    append_status_opt_uint(j, ",\"offset\":", true, secondary.source.off);
+    append_status_opt_uint(j, ",\"conv\":", true, secondary.source.conv);
+    j += "},\"zone_context\":\"unknown\"}";
+}
+
+template <typename JsonOut>
 [[gnu::noinline]] static void
 append_status_service_metric(JsonOut& j, const char* prefix,
                              const logic::RefrigerantServiceMetricSnapshot& metric) {
@@ -644,6 +677,29 @@ append_status_service_metric(JsonOut& j, const char* prefix,
     append_status_tenths_value(j, metric.mean_tenths);
     j += ",\"max\":";
     append_status_tenths_value(j, metric.max_tenths);
+    j += "}";
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void
+append_status_service_meta(JsonOut& j, const char* prefix,
+                           const logic::RefrigerantServiceMetricSnapshot& metric,
+                           const logic::RefrigerantServiceSource&         source) {
+    j += prefix;
+    j += "{\"samples\":";
+    append_json_uint(j, metric.samples);
+    j += ",\"source\":";
+    if (source.selected) {
+        j += "{\"kind\":\"x10a\",\"reg\":";
+        append_json_uint(j, source.reg);
+        j += ",\"offset\":";
+        append_json_uint(j, source.off);
+        j += ",\"conv\":";
+        append_json_uint(j, source.conv);
+        j += "}";
+    } else {
+        j += "null";
+    }
     j += "}";
 }
 
@@ -854,6 +910,79 @@ append_status_working_figure_json(JsonOut& j, const logic::WorkingFigureReport& 
     append_status_bfield(j, ",\"unpaired_buh\":", (wf.flags & logic::ENERGY_F_UNPAIRED_BUH) != 0);
     append_status_bfield(j, ",\"ct_unwired\":", (wf.flags & logic::ENERGY_F_CT_UNWIRED) != 0);
     j += "},";
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_cycling_run_contexts_json(JsonOut& j, uint32_t boot_s,
+                                                               DiagnosticsSource source) {
+    static_assert(std::is_trivially_destructible_v<logic::CheckupRunContextSnapshot>);
+    if (source != DiagnosticsSource::X10a || !checkup_has_cycling_run_contexts(source)) return;
+    ValuesTlsReader reader;
+    reader.admitted = weather_values_reader_enter();
+    if (!reader.admitted) return;
+
+    struct RunCtxBuf {
+        logic::CheckupRunContextSnapshot* p = nullptr;
+        ~RunCtxBuf() { std::free(p); }
+    } buf;
+    buf.p = static_cast<logic::CheckupRunContextSnapshot*>(
+        heap_caps_malloc(sizeof(logic::CheckupRunContextSnapshot), MALLOC_CAP_8BIT));
+    if (!buf.p) return;
+    new (buf.p) logic::CheckupRunContextSnapshot;
+    if (!checkup_cycling_run_contexts(*buf.p, boot_s, source) || !buf.p->count) return;
+
+    if (buf.p->flow_typical_tenths != logic::CHECKUP_ABSENT && buf.p->flow_typical_tenths > 0) {
+        j += ",\"flow_typical_l_min\":";
+        append_status_tenths_value(j, buf.p->flow_typical_tenths);
+    }
+    auto opt_signed = [&j](const char* name, int16_t v) __attribute__((noinline)) {
+        if (v == logic::CHECKUP_ABSENT) return;
+        j += ",\"";
+        j += name;
+        j += "\":";
+        append_status_tenths_value(j, v);
+    };
+    j += ",\"run_contexts\":[";
+    for (uint8_t i = 0; i < buf.p->count; ++i) {
+        const auto& e = buf.p->entries[i];
+        if (i) j += ",";
+        j += "{\"at\":";
+        append_json_uint(j, e.start_s);
+        j += ",\"mode\":";
+        json_append_quoted(
+            j, logic::cycling_run_mode_name(static_cast<logic::CyclingRunMode>(e.mode)));
+        j += ",\"start_kind\":";
+        json_append_quoted(
+            j, logic::cycling_start_kind_name(static_cast<logic::CyclingStartKind>(e.start_kind)));
+        if (e.flags & logic::RUN_CTX_F_STOPPED) {
+            j += ",\"stop\":";
+            append_json_uint(j, e.stop_s);
+            j += ",\"stop_kind\":";
+            json_append_quoted(
+                j, logic::cycling_stop_kind_name(static_cast<logic::CyclingStopKind>(e.stop_kind)));
+        }
+        opt_signed("start_lwt_c", e.start_lwt_tenths);
+        opt_signed("start_target_c", e.start_tgt_tenths);
+        opt_signed("start_target_prev_c", e.start_tgt_prev_tenths);
+        opt_signed("lwt_c", e.stop_lwt_tenths);
+        opt_signed("rwt_c", e.stop_rwt_tenths);
+        opt_signed("target_c", e.stop_tgt_tenths);
+        opt_signed("target_prev_c", e.stop_tgt_prev_tenths);
+        if (e.flow_tenths != logic::CHECKUP_ABSENT && e.flow_tenths >= 0) {
+            j += ",\"flow_l_min\":";
+            append_status_tenths_value(j, e.flow_tenths);
+        }
+        opt_signed("outdoor_c", e.outdoor_tenths);
+        if (e.min_rps_tenths > 0) {
+            j += ",\"min_rps\":";
+            append_status_tenths_value(j, static_cast<int>(e.min_rps_tenths));
+        }
+        if (e.flags & logic::RUN_CTX_F_LOW_RPS_ABOVE_TGT) {
+            j += ",\"low_rps_above_target\":true";
+        }
+        j += "}";
+    }
+    j += "]";
 }
 
 template <typename JsonOut>
@@ -1542,14 +1671,22 @@ static void append_status_json(JsonOut& j, bool redact) {
             trace_reader.admitted ? heap_caps_malloc(sizeof(Trace), MALLOC_CAP_8BIT) : nullptr;
         std::unique_ptr<Trace, decltype(&std::free)> trace(
             trace_storage ? new (trace_storage) Trace : nullptr, std::free);
+        // A separate <=416-byte optional allocation avoids putting exact DHW windows into the
+        // shared report/task stack. Both chart buffers use the same admission lease and snapshot.
+        using DhwTrace = logic::DhwLossTimeline;
+        void* dhw_storage =
+            trace_reader.admitted ? heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT) : nullptr;
+        std::unique_ptr<DhwTrace, decltype(&std::free)> dhw_trace(
+            dhw_storage ? new (dhw_storage) DhwTrace : nullptr, std::free);
         logic::CheckupRestore      persist;
         logic::DefrostStartReport  defrost_start;
-        const logic::CheckupReport hr =
-            checkup_report(&hrs, trace.get(), &persist, diag_effective, &defrost_start);
+        const logic::CheckupReport hr = checkup_report(&hrs, trace.get(), &persist, diag_effective,
+                                                       &defrost_start, dhw_trace.get());
         const auto                 release_trace = [&] {
             trace.reset();
-            trace_reader.release();
+            if (!dhw_trace) trace_reader.release();
         };
+        if (!dhw_trace || !dhw_trace->epoch) dhw_trace.reset();
         if (!trace || !trace->unix_s) release_trace();
         qfield("]},\"health\":{\"source\":", diagnostics_source_name(diag_effective));
         ufield(",\"covered_s\":", hr.covered_s);
@@ -1645,8 +1782,32 @@ static void append_status_json(JsonOut& j, bool redact) {
                     }
                 }
                 j += "]";
+                if (dhw_trace && dhw_trace->epoch) {
+                    ufield(",\"timeline\":{\"epoch\":", dhw_trace->epoch);
+                    ufield(",\"window_end_s\":", dhw_trace->window_end_s);
+                    ufield(",\"since_s\":", dhw_trace->since_s);
+                    append_status_opt_uint(j, ",\"observed_end_s\":", dhw_trace->observed,
+                                           dhw_trace->observed_end_s);
+                    if (dhw_trace->unix_s) ufield(",\"unix_s\":", dhw_trace->unix_s);
+                    bfield(",\"live\":", dhw_trace->live);
+                    j += ",\"windows\":[";
+                    for (size_t wi = 0; wi < dhw_trace->count; ++wi) {
+                        if (wi) j += ",";
+                        const auto& w = dhw_trace->windows[wi];
+                        ufield("{\"start_s\":", w.start_s);
+                        ufield(",\"end_s\":", w.end_s);
+                        tenths("rate_k_h", w.rate_tenths);
+                        ufield(",\"observed_s\":", w.observed_s);
+                        bfield(",\"pump_marker\":", w.pump_marker);
+                        bfield(",\"draw_marker\":", w.draw_marker);
+                        j += "}";
+                    }
+                    j += "]}";
+                }
+                dhw_trace.reset();
+                if (!trace) trace_reader.release();
                 break;
-            case logic::CheckupCheck::Cycling:
+            case logic::CheckupCheck::Cycling: {
                 // Keep legacy names; the pooled mean is null. Only complete heating runs judge.
                 num("starts", ck.a);
                 num("mean_run_s", ck.b);
@@ -1693,7 +1854,9 @@ static void append_status_json(JsonOut& j, bool redact) {
                     }
                 }
                 j += "]";
-                if (trace && trace->unix_s) {
+                const bool     have_trace   = trace && trace->unix_s != 0;
+                const uint32_t trace_boot_s = have_trace ? trace->boot_s : 0;
+                if (have_trace) {
                     ufield(",\"timeline\":{\"unix_s\":", trace->unix_s);
                     ufield(",\"window_end_s\":", trace->window_end_s);
                     ufield(",\"observed_end_s\":", trace->end_s);
@@ -1707,12 +1870,16 @@ static void append_status_json(JsonOut& j, bool redact) {
                     j += "]}";
                 }
                 release_trace();
+                if (!redact && have_trace && diag_effective == DiagnosticsSource::X10a) {
+                    append_cycling_run_contexts_json(j, trace_boot_s, diag_effective);
+                }
                 j += ",\"stop_context\":";
                 append_stop_context_json(
                     j, diag_effective == DiagnosticsSource::Modbus
                            ? StopContextPayloadFields{}
                            : stop_context_payload_fields(checkup_stop_context_report()));
                 break;
+            }
             case logic::CheckupCheck::Defrost: {
                 num("count", ck.a);
                 num("paired_count", ck.e);
@@ -1748,6 +1915,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 break;
             case logic::CheckupCheck::Flow:
                 tenths("min_l_min", ck.a);
+                append_hydronic_status(j, diag_effective);
                 break;
             case logic::CheckupCheck::Heater:
                 num("buh_min", whole_minutes(ck.a));
@@ -1785,6 +1953,7 @@ static void append_status_json(JsonOut& j, bool redact) {
             json_append_quoted(j, logic::refrigerant_service_state_name(refrigerant_service.state));
             ufield(",\"continuous_s\":", refrigerant_service.continuous_s);
             ufield(",\"samples\":", refrigerant_service.samples);
+            ufield(",\"source_generation\":", refrigerant_service.source_generation);
             qfield(",\"mode\":", logic::refrigerant_service_mode_name(refrigerant_service.mode));
             const bool has_blocker =
                 refrigerant_service.blocker != logic::RefrigerantServiceBlocker::None;
@@ -1797,29 +1966,46 @@ static void append_status_json(JsonOut& j, bool redact) {
             // observes ordinary traffic and an EEV command.  It neither establishes a
             // settled/full-load condition nor receives independent mechanical valve feedback.
             j += ",\"load_proven\":false,\"eev_feedback\":false,\"limitations\":[";
-            bool service_limitation_separator = false;
-            auto append_service_limitation = [&j, &service_limitation_separator](const char* name) {
-                if (service_limitation_separator) j += ",";
-                json_append_quoted(j, name);
-                service_limitation_separator = true;
+            static constexpr struct {
+                uint8_t     mask;
+                const char* item;
+            } kServiceLimits[] = {
+                {logic::RefrigerantServiceSpecialPhases, "\"special_phases_unavailable\""},
+                {logic::RefrigerantServiceTemperatures, "\"temperature_context_incomplete\""},
+                {logic::RefrigerantServicePressureSides, "\"pressure_sides_incomplete\""},
+                {logic::RefrigerantServiceOutdoorContext, "\"outdoor_context_incomplete\""},
             };
-            if (refrigerant_service.limitation_mask & logic::RefrigerantServiceSpecialPhases)
-                append_service_limitation("special_phases_unavailable");
-            if (refrigerant_service.limitation_mask & logic::RefrigerantServiceTemperatures)
-                append_service_limitation("temperature_context_incomplete");
-            if (refrigerant_service.limitation_mask & logic::RefrigerantServicePressureSides)
-                append_service_limitation("pressure_sides_incomplete");
-            if (refrigerant_service.limitation_mask & logic::RefrigerantServiceOutdoorContext)
-                append_service_limitation("outdoor_context_incomplete");
+            bool service_limitation_separator = false;
+            for (const auto& lim : kServiceLimits) {
+                if (!(refrigerant_service.limitation_mask & lim.mask)) continue;
+                if (service_limitation_separator) j += ",";
+                j += lim.item;
+                service_limitation_separator = true;
+            }
+            struct ServiceMetricField {
+                const char*                             prefix;
+                logic::RefrigerantServiceMetricSnapshot logic::RefrigerantServiceSnapshot::*metric;
+                logic::RefrigerantServiceSource logic::RefrigerantServiceSources::*source;
+            };
+            static constexpr ServiceMetricField kServiceMetricFields[] = {
+                {"\"compressor_rps\":", &logic::RefrigerantServiceSnapshot::rps,
+                 &logic::RefrigerantServiceSources::rps},
+                {",\"discharge_c\":", &logic::RefrigerantServiceSnapshot::discharge,
+                 &logic::RefrigerantServiceSources::discharge},
+                {",\"eev_command_pls\":", &logic::RefrigerantServiceSnapshot::eev_command,
+                 &logic::RefrigerantServiceSources::eev_command},
+                {",\"high_pressure_bar\":", &logic::RefrigerantServiceSnapshot::high_pressure,
+                 &logic::RefrigerantServiceSources::high_pressure},
+                {",\"low_pressure_bar\":", &logic::RefrigerantServiceSnapshot::low_pressure,
+                 &logic::RefrigerantServiceSources::low_pressure},
+            };
             j += "],\"metrics\":{";
-            append_status_service_metric(j, "\"compressor_rps\":", refrigerant_service.rps);
-            append_status_service_metric(j, ",\"discharge_c\":", refrigerant_service.discharge);
-            append_status_service_metric(j,
-                                         ",\"eev_command_pls\":", refrigerant_service.eev_command);
-            append_status_service_metric(
-                j, ",\"high_pressure_bar\":", refrigerant_service.high_pressure);
-            append_status_service_metric(
-                j, ",\"low_pressure_bar\":", refrigerant_service.low_pressure);
+            for (const auto& field : kServiceMetricFields)
+                append_status_service_metric(j, field.prefix, refrigerant_service.*(field.metric));
+            j += "},\"metric_meta\":{";
+            for (const auto& field : kServiceMetricFields)
+                append_status_service_meta(j, field.prefix, refrigerant_service.*(field.metric),
+                                           refrigerant_service.sources.*(field.source));
             j += "}},";
         }
     }
@@ -2323,6 +2509,8 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
         if (reg && def::homehub_is_binary(*reg)) j += ",\"binary\":true";
         if (reg && def::homehub_definition_is_altherma4(v[i].modbus_definition))
             j += ",\"profile\":\"altherma4\"";
+        if (reg && reg->offset == 49 && v[i].modbus_flow_scale_unverified)
+            j += ",\"flow_scale_unverified\":true";
         // Keep the value raw and transport-friendly. The semantic id is metadata for the browser's
         // last-mile rendering, so profile-specific state names never become transport values.
         if (reg)

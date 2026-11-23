@@ -131,82 +131,184 @@ function trendPlotFromTarget(target) {
 
 // The hour readout changes without touching the chart markup used by the poll reconciler.
 function paintCyclingChart(chart, focus = document.activeElement) {
-  if (S.cyclingScope !== chart.dataset.cycling) {
-    S.cyclingScope = chart.dataset.cycling;
+  const scope = chart.dataset.cycling;
+  const isTimeline = chart.classList.contains("checkup-cycling-timeline");
+  const model = isTimeline ? _cyclingModels.get(scope) : null;
+  const defaultRange = () => {
+    if (!isTimeline || !model?.hasContext) return null;
+    if (model.episodes.length) {
+      const latest = model.episodes[model.episodes.length - 1];
+      return [latest.from, latest.to];
+    }
+    return model.latestContextHour != null ? [model.latestContextHour, model.latestContextHour] : null;
+  };
+  if (S.cyclingScope !== scope) {
+    S.cyclingScope = scope;
     S.cyclingPin = S.cyclingHover = null;
+    S.cyclingHoverRange = null;
+    S.cyclingExpandedRun = null;
+    S.cyclingUserTouched = false;
+    S.cyclingRange = defaultRange();
+  } else if (isTimeline && model?.hasContext && !S.cyclingUserTouched) {
+    S.cyclingRange = defaultRange();
   }
-  let pin, hover, selected;
   const focusInside = focus?.matches?.("[data-bucket]") && chart.contains(focus);
+  if (!isTimeline) {
+    let pin, hover, selected;
+    for (const button of chart.querySelectorAll("[data-bucket]")) {
+      const pressed = button.dataset.bucket === S.cyclingPin;
+      if (pressed) pin = button;
+      if (button.dataset.bucket === S.cyclingHover) hover = button;
+      if (focusInside) {
+        const tab = button === focus ? 0 : -1;
+        if (button.tabIndex !== tab) button.tabIndex = tab;
+        if (!tab) selected = button;
+      }
+      if (button.getAttribute("aria-pressed") !== String(pressed)) {
+        button.classList.toggle("active", pressed);
+        button.setAttribute("aria-pressed", String(pressed));
+      }
+    }
+    if (!pin) S.cyclingPin = null;
+    if (!hover) S.cyclingHover = null;
+    const details = chart.querySelector(".checkup-run-details");
+    if (details) {
+      details.hidden = !pin;
+      const next = pin ? t("check.cycling.run_details_unavailable") : "";
+      if (details.textContent !== next) details.textContent = next;
+    }
+    const range = chart.querySelector(".vhist-range");
+    const tip = (hover || selected || pin)?.getAttribute("aria-label") || chart.dataset.tip;
+    if (range && range.textContent !== tip) range.textContent = tip;
+    return;
+  }
+
+  const activeRange = (S.scrub === "checkup-cycling" && S.cyclingHoverRange) || S.cyclingRange;
+  const pinnedRange = S.cyclingRange;
   for (const button of chart.querySelectorAll("[data-bucket]")) {
-    const pressed = button.dataset.bucket === S.cyclingPin;
-    if (pressed) pin = button;
-    if (button.dataset.bucket === S.cyclingHover) hover = button;
+    const idx = Number(button.dataset.bucket);
+    const pressed = !!pinnedRange && idx >= pinnedRange[0] && idx <= pinnedRange[1];
     if (focusInside) {
       const tab = button === focus ? 0 : -1;
       if (button.tabIndex !== tab) button.tabIndex = tab;
-      if (!tab) selected = button;
     }
     if (button.getAttribute("aria-pressed") !== String(pressed)) {
       button.classList.toggle("active", pressed);
       button.setAttribute("aria-pressed", String(pressed));
     }
   }
-  if (!pin) S.cyclingPin = null;
-  if (!hover) S.cyclingHover = null;
-  const span = chart.querySelector(".checkup-chart-span");
-  const hour = (S.scrub === "checkup-cycling" && hover) || pin;
   const details = chart.querySelector(".checkup-run-details");
   if (details) {
     // Keep the list at its pinned height while a drag previews other hours.
-    details.hidden = !pin;
-    const key = pin?.dataset.bucket;
-    if (details._bucket !== key) {
-      details._bucket = key;
-      const template = pin && chart.querySelector(`[data-hour-runs="${key}"]`);
-      if (template) details.replaceChildren(template.content.cloneNode(true));
-      else details.textContent = pin ? t(pin.hasAttribute("data-run-observed")
-        ? "check.cycling.no_timed_runs" : "check.cycling.run_details_unavailable") : "";
+    details.hidden = !pinnedRange;
+    if (pinnedRange && model) {
+      const key = JSON.stringify([scope, LANG, pinnedRange[0], pinnedRange[1], model.rev]);
+      if (details._rangeKey !== key) {
+        details._rangeKey = key;
+        const focusedRow = details.contains(document.activeElement)
+          ? document.activeElement.closest?.("tr[data-run-row]")?.dataset.runRow : null;
+        details.innerHTML = cyclingPeriodDetailsHtml(model, pinnedRange[0], pinnedRange[1]);
+        if (focusedRow) {
+          details.querySelector(`tr[data-run-row="${focusedRow}"]`)?.focus({ preventScroll: true });
+        }
+      }
+    } else {
+      details._rangeKey = "";
+      if (details.textContent) details.textContent = "";
     }
   }
+  const span = chart.querySelector(".checkup-chart-span");
+  const hourRange = activeRange || pinnedRange;
   if (span) {
-    span.hidden = !hour;
-    const label = hour?.dataset.span || "";
-    if (span.textContent !== label) span.textContent = label;
-    chart.classList.toggle("has-selected-hour", !!hour);
-    if (hour) {
-      chart.style.setProperty("--checkup-hour", hour.dataset.bucket);
-      span.classList.toggle("wide", hour.hasAttribute("data-offset-change"));
+    span.hidden = !hourRange;
+    chart.classList.toggle("has-selected-hour", !!hourRange);
+    if (hourRange && model) {
+      const [from, to] = hourRange;
+      const fromSec = model.hours[from].fromSec, toSec = model.hours[to].toSec;
+      const offsetChange = new Date(model.wall(fromSec)).getTimezoneOffset() !==
+        new Date(model.wall(toSec)).getTimezoneOffset();
+      const label = offsetChange
+        ? `${model.offsetStamp.format(model.wall(fromSec))}–${model.offsetStamp.format(model.wall(toSec))}`
+        : `${model.clock(fromSec)}–${model.clock(toSec)}`;
+      if (span.textContent !== label) span.textContent = label;
+      chart.style.setProperty("--checkup-hour-start", String(from));
+      chart.style.setProperty("--checkup-hour-span", String(to - from + 1));
+      chart.style.setProperty("--checkup-hour", String(from));
+      span.classList.toggle("wide", offsetChange || to - from >= 6);
+    } else if (span.textContent) {
+      span.textContent = "";
     }
-    return;
   }
-  const range = chart.querySelector(".vhist-range");
-  const tip = (hover || selected || pin)?.getAttribute("aria-label") || chart.dataset.tip;
-  if (range.textContent !== tip) range.textContent = tip;
 }
 
 function wireCyclingChart(host) {
   const chartFrom = target => target.closest?.(".checkup-cycling-chart");
-  const toggle = (chart, button) => {
-    S.cyclingHover = null;
-    S.cyclingPin = S.cyclingPin === button.dataset.bucket ? null : button.dataset.bucket;
+  const isTimelineChart = chart => chart?.classList.contains("checkup-cycling-timeline");
+  const toggleSingle = (chart, button, shiftKey) => {
+    if (isTimelineChart(chart)) {
+      const b = Number(button.dataset.bucket);
+      S.cyclingHoverRange = null;
+      S.cyclingUserTouched = true;
+      if (shiftKey && S.cyclingRange) {
+        S.cyclingRange = [Math.min(S.cyclingRange[0], b), Math.max(S.cyclingRange[1], b)];
+      } else if (S.cyclingRange && S.cyclingRange[0] === b && S.cyclingRange[1] === b) {
+        S.cyclingRange = null;
+      } else {
+        S.cyclingRange = [b, b];
+      }
+    } else {
+      S.cyclingHover = null;
+      S.cyclingPin = S.cyclingPin === button.dataset.bucket ? null : button.dataset.bucket;
+    }
     paintCyclingChart(chart);
   };
-  let drag, watchdog;
+  const toggleRunRow = (chart, row) => {
+    const runKey = row.dataset.runRow;
+    const sub = runKey && chart.querySelector(`[data-run-sub="${runKey}"]`);
+    if (!sub) return;
+    S.cyclingExpandedRun = S.cyclingExpandedRun === runKey ? null : runKey;
+    for (const tr of chart.querySelectorAll("tr[data-run-row]")) {
+      const open = tr.dataset.runRow === S.cyclingExpandedRun;
+      tr.setAttribute("aria-expanded", String(open));
+      const s = chart.querySelector(`[data-run-sub="${tr.dataset.runRow}"]`);
+      if (s) s.hidden = !open;
+    }
+  };
+  let drag, watchdog, skipOutsideClick = false;
   const finish = (e) => {
     if (!drag || (e && e.pointerId !== drag.id)) return;
-    const { chart, button, id, x, y, moved } = drag;
+    const { chart, timeline, button, startBucket, currentBucket, id, x, y, moved } = drag;
     drag = null;
     clearTimeout(watchdog);
     const active = S.scrub === "checkup-cycling";
     if (active) S.scrub = null;
     try { chart.releasePointerCapture(id); } catch {}
     S.cyclingHover = null;
+    S.cyclingHoverRange = null;
+    if (moved && e?.type === "pointerup") {
+      skipOutsideClick = true;
+      setTimeout(() => { skipOutsideClick = false; }, 100);
+    }
     if (chart.isConnected && !chart.closest("[hidden]")) {
-      if (active && e?.type === "pointerup" && !moved &&
-          Math.hypot(e.clientX - x, e.clientY - y) <= 4 &&
-          document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-bucket]") === button)
-        toggle(chart, button);
-      else paintCyclingChart(chart);
+      const tapHit = active && e?.type === "pointerup" && !moved &&
+        Math.hypot(e.clientX - x, e.clientY - y) <= 4;
+      if (timeline) {
+        if (active && (!e || e.type === "pointerup")) {
+          if (tapHit) {
+            if (document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-bucket]") === button)
+              toggleSingle(chart, button, e.shiftKey);
+            else paintCyclingChart(chart);
+          } else if (moved) {
+            S.cyclingUserTouched = true;
+            S.cyclingRange = [Math.min(startBucket, currentBucket), Math.max(startBucket, currentBucket)];
+            paintCyclingChart(chart);
+          } else paintCyclingChart(chart);
+        } else paintCyclingChart(chart);
+      } else {
+        if (tapHit && document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-bucket]") === button)
+          toggleSingle(chart, button, false);
+        else paintCyclingChart(chart);
+      }
     }
   };
   S.cancelCyclingDrag = () => finish();
@@ -219,21 +321,39 @@ function wireCyclingChart(host) {
     const chart = chartFrom(e.target), button = e.target.closest("[data-bucket]");
     if (!chart || !button || drag || S.scrub || e.button !== 0) return;
     e.preventDefault();
-    drag = { chart, button, id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    const timeline = isTimelineChart(chart);
+    const startBucket = Number(button.dataset.bucket);
+    drag = { chart, timeline, button, startBucket, currentBucket: startBucket,
+      id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
     S.scrub = "checkup-cycling";
-    S.cyclingHover = button.dataset.bucket;
+    if (timeline) S.cyclingHoverRange = [startBucket, startBucket];
+    else S.cyclingHover = button.dataset.bucket;
     try { chart.setPointerCapture(e.pointerId); } catch {}
     paintCyclingChart(chart);
     arm();
   });
   host.addEventListener("pointermove", (e) => {
-    let chart, button;
+    let chart, button, colIdx = null;
     if (drag) {
       if (e.pointerId !== drag.id) return;
       if (S.scrub !== "checkup-cycling") return finish(e);
       chart = drag.chart;
-      drag.moved ||= Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4;
       const grid = chart.querySelector(".checkup-chart-cols"), r = grid.getBoundingClientRect();
+      if (drag.timeline) {
+        if (r.width) {
+          colIdx = Math.max(0, Math.min(23, Math.floor((e.clientX - r.left) * 24 / r.width)));
+          drag.moved ||= Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4 || colIdx !== drag.startBucket;
+          drag.currentBucket = colIdx;
+          const next = [Math.min(drag.startBucket, colIdx), Math.max(drag.startBucket, colIdx)];
+          if (S.cyclingHoverRange?.[0] !== next[0] || S.cyclingHoverRange?.[1] !== next[1]) {
+            S.cyclingHoverRange = next;
+            paintCyclingChart(chart);
+          }
+        }
+        arm();
+        return;
+      }
+      drag.moved ||= Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4;
       if (r.width && e.clientX >= r.left && e.clientX <= r.right)
         button = grid.children[Math.min(23, Math.floor((e.clientX - r.left) * 24 / r.width))];
       arm();
@@ -241,6 +361,9 @@ function wireCyclingChart(host) {
       if (e.pointerType !== "mouse") return;
       chart = chartFrom(e.target);
       button = e.target.closest("[data-bucket]");
+    }
+    if (chart && isTimelineChart(chart)) {
+      return;
     }
     const key = button?.dataset.bucket || null;
     if (chart && key !== S.cyclingHover) {
@@ -250,8 +373,10 @@ function wireCyclingChart(host) {
   });
   host.addEventListener("pointerout", (e) => {
     const chart = chartFrom(e.target);
-    if (!drag && !S.trendRebuilding && chart && !chart.contains(e.relatedTarget) && S.cyclingHover != null) {
+    if (!drag && !S.trendRebuilding && chart && !chart.contains(e.relatedTarget) &&
+        (S.cyclingHover != null || S.cyclingHoverRange != null)) {
       S.cyclingHover = null;
+      S.cyclingHoverRange = null;
       paintCyclingChart(chart);
     }
   });
@@ -259,26 +384,46 @@ function wireCyclingChart(host) {
   for (const event of ["pointerup", "pointercancel", "lostpointercapture"])
     document.addEventListener(event, finish);
   document.addEventListener("click", (e) => {
-    const chart = chartFrom(e.target), button = chart && e.target.closest("[data-bucket]");
-    if (chart && button && e.detail === 0) toggle(chart, button);
-    if (!chart && S.cyclingPin != null) {
+    const suppressOutside = skipOutsideClick;
+    skipOutsideClick = false;
+    const chart = chartFrom(e.target);
+    if (chart) {
+      const runRow = e.target.closest("tr[data-run-row]");
+      if (runRow) { toggleRunRow(chart, runRow); return; }
+      const button = e.target.closest("[data-bucket]");
+      if (button && e.detail === 0) toggleSingle(chart, button, e.shiftKey);
+      return;
+    }
+    if (!suppressOutside && (S.cyclingPin != null || S.cyclingRange != null)) {
       S.cyclingPin = S.cyclingHover = null;
+      if (S.cyclingRange != null) S.cyclingUserTouched = true;
+      S.cyclingRange = S.cyclingHoverRange = null;
       const current = host.querySelector("[data-cycling]");
       if (current) paintCyclingChart(current);
     }
   });
   host.addEventListener("keydown", (e) => {
     const chart = chartFrom(e.target);
-    if (!chart || !e.target.matches("[data-bucket]")) return;
+    if (!chart) return;
+    if (e.target.matches("tr[data-run-row]")) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggleRunRow(chart, e.target);
+      }
+      return;
+    }
+    if (!e.target.matches("[data-bucket]")) return;
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
       S.cyclingPin = S.cyclingHover = null;
+      S.cyclingRange = S.cyclingHoverRange = null;
+      S.cyclingUserTouched = true;
       return paintCyclingChart(chart);
     }
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      if (!e.repeat) toggle(chart, e.target);
+      if (!e.repeat) toggleSingle(chart, e.target, e.shiftKey);
       return;
     }
     const buttons = [...chart.querySelectorAll("[data-bucket]")], i = buttons.indexOf(e.target);
@@ -291,6 +436,7 @@ function wireCyclingChart(host) {
     const chart = chartFrom(e.target);
     if (chart) {
       S.cyclingHover = null;
+      S.cyclingHoverRange = null;
       paintCyclingChart(chart, e.target);
     }
   });

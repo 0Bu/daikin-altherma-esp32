@@ -23,10 +23,14 @@ reset() {
     cp main/checkup.cpp "$WORK/main/checkup.cpp"
     cp main/logic/stop_context.hpp main/logic/stop_context_input.hpp \
        main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp main/logic/defrost_start.hpp \
-       main/logic/fault_trace.hpp main/logic/fault_persist.hpp \
+       main/logic/fault_trace.hpp main/logic/fault_persist.hpp main/logic/cycling_run_context.hpp main/logic/dhw_loss_trace.hpp \
+       main/logic/hydronic_observation.hpp main/logic/hydronic_input.hpp \
+       main/logic/hydronic_hourly.hpp main/logic/hydronic_payload.hpp \
        main/logic/working_figure.hpp main/logic/gas_comparison.hpp \
        "$WORK/main/logic/"
-    cp main/stop_observation_store.hpp main/stop_observation_store.cpp main/history.cpp "$WORK/main/"
+    cp main/stop_observation_store.hpp main/stop_observation_store.cpp \
+       main/hydronic_observation_store.hpp main/hydronic_observation_store.cpp \
+       main/history.cpp "$WORK/main/"
     cp main/hp_poll.cpp "$WORK/main/hp_poll.cpp"
     cp main/http_status.cpp "$WORK/main/http_status.cpp"
     cp main/def/overlay.hpp "$WORK/main/def/overlay.hpp"
@@ -150,6 +154,10 @@ reset
 printf '\n// selftest: changed diagnostic meaning\n' >> "$WORK/main/logic/checkup.hpp"
 run_case "stale review fingerprint is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
 
+reset
+printf '\n// selftest: changed DHW timed-window retention\n' >> "$WORK/main/logic/dhw_loss_trace.hpp"
+run_case "changed DHW timeline source is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+
 echo "== 10. changed register evidence without review =="
 reset
 printf '\n| selftest | Protection Retry Qty |\n' >> "$WORK/docs/REGISTERS.md"
@@ -174,6 +182,42 @@ if old not in s: sys.exit(1)
 open(p, 'w').write(s.replace(old, '        j += ",\\\"full_window\\\":";\n', 1))
 PY
 run_case "changed status evidence contract is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+
+echo "== Hydronic settling, sweep start and serializer are part of the evidence =="
+reset
+patch_file "$WORK/main/logic/hydronic_observation.hpp" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+source = p.read_text()
+assert source.count('600000000') == 1
+p.write_text(source.replace('600000000', '900000000'))
+PY
+run_case "changed hydronic settling rule is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+reset
+patch_file "$WORK/main/hp_poll.cpp" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+old = "sweep_started_us);"
+assert s.count(old) == 1
+p.write_text(s.replace(old, "esp_timer_get_time());"))
+PY
+run_case "changed hydronic sweep timestamp is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+reset
+patch_file "$WORK/main/http_status.cpp" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+start = s.index("void append_hydronic_status(")
+end = s.index("append_status_service_metric(", start)
+helper = s[start:end]
+assert helper.count("secondary_supply") == 1
+p.write_text(s[:start] + helper.replace("secondary_supply", "new_secondary_supply") + s[end:])
+PY
+run_case "changed secondary supply output key is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
 
 echo "== 13. reviewed implementation can be deliberately re-stamped =="
 reset

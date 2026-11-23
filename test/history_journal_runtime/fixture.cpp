@@ -109,6 +109,30 @@ bool                  hp_poll_generation_matches(uint32_t generation) { return g
 uint32_t              circulation_source_generation() { return 1; }
 CirculationPumpSample circulation_pump_sample() { return {}; }
 void                  checkup_stop_context_expire(int64_t) { ++journal_sdk::stop_expiry; }
+
+void                      checkup_hydronic_expire(int64_t) {}
+bool                      hydronic_forgotten = false;
+void                      hydronic_observation_start(bool, uint32_t) { hydronic_forgotten = false; }
+bool                      hydronic_observation_suppressed() { return hydronic_forgotten; }
+void                      hydronic_observation_set_diagnostics(bool, uint32_t) {}
+void                      hydronic_observation_bind(uint32_t, uint32_t, uint32_t, uint32_t, bool) {}
+void                      hydronic_observation_reset() {}
+void                      hydronic_observation_record(const logic::HydronicDelta&) {}
+void                      hydronic_observation_seal() {}
+HydronicObservationReport hydronic_observation_report() { return {}; }
+void                      hydronic_observation_flash_index_reset() {}
+void                      hydronic_observation_flash_index_incomplete() {}
+void                      hydronic_observation_flash_index(int64_t, uint64_t, uint16_t,
+                                                           const logic::HydronicHourlyPayload&) {}
+bool                      hydronic_observation_flash_next(HydronicObservationReader, int64_t&,
+                                                          logic::HydronicHourlyPayload&) {
+    return false;
+}
+void hydronic_observation_flash_appended(int64_t, uint64_t, uint16_t,
+                                         const logic::HydronicHourlyPayload&) {}
+void hydronic_observation_flash_failed() {}
+void hydronic_observation_flash_service(HydronicObservationReader) {}
+void hydronic_observation_forget() { hydronic_forgotten = true; }
 bool checkup_flash_next(int64_t, int64_t, int64_t& bucket, logic::CheckupJournalPayload& payload,
                         DiagnosticsSource source) {
     if (source == DiagnosticsSource::Modbus) {
@@ -515,7 +539,8 @@ void observe_forget() {
     const uint32_t epoch = history_epoch();
     forget_result        = history_flash_forget();
     forget_called        = true;
-    require(s_flash_forgotten.load() && stop_observation_suppressed(),
+    require(s_flash_forgotten.load() && stop_observation_suppressed() &&
+                hydronic_observation_suppressed(),
             "forget_immediately_suppresses_both_owners");
     require(history_epoch() != epoch, "forget_invalidates_history_reader_lease");
 }
@@ -771,8 +796,9 @@ void seed_cycling(const char* transport_path, const std::string& phase) {
         require(history_flash_service_journal(3, 0) == 1 && cycling_ack == 9,
                 "barrier_is_immediate_and_acked_after_verified_commit");
     } else if (phase == "torn" || phase == "corrupt" || phase == "incompatible") {
-        sdk::now_us += 190000000;
-        cycling_offer_unix_s += 190;
+        constexpr int64_t next_interval_s = HISTORY_FLASH_CYCLING_INTERVAL_S + 10;
+        sdk::now_us += next_interval_s * 1000000;
+        cycling_offer_unix_s += static_cast<uint32_t>(next_interval_s);
         if (phase == "incompatible") cycling_offer_model = 303;
         require(history_flash_service_journal(3, 0) == 3,
                 "newer_checkpoint_prefix_lands_before_failure");

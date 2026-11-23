@@ -1,13 +1,10 @@
-// translation-source: 6e972a2b4ae88155965a5f3be3d4db1e55237b0aaa203b0f7b4b2df64578e5c3
+// translation-source: 21658cb9aa5673bd6390bf55b45b1a1a9849fc5a5439233310598402221f0c32
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
-  /* sys.x10a_down */ "X10A offline",
-  /* sys.mb_carrying */ "Betriebsart unbekannt — Werte aus dem Modbus",
   /* sys.mb_only */ "X10A offline — Werte aus dem Modbus",
-  /* sys.mb_source */ "X10A offline · Modbus",
   /* mode.stop */ "Stopp",
   /* mode.heat */ "Heizen",
   /* mode.cool */ "Kühlen",
@@ -64,7 +61,6 @@ I18N.de = localeValues([
   /* bug.title */ "Fehler melden",
   /* bug.intro */ "Beschreibe das Problem kurz. Das Gerät ergänzt seinen Zustand, seine Messwerte und sein Protokoll. Netzwerknamen, Adressen und Servernamen werden vorher entfernt.",
   /* bug.what */ "Was passiert",
-  /* bug.what_ph */ "Die Speichertemperatur zeigt seit heute Morgen 12800 °C in Home Assistant.",
   /* bug.need_text */ "Beschreibe zuerst, was passiert — ein bis zwei Sätze genügen.",
   /* bug.continue */ "Bericht erstellen",
   /* bug.step2_title */ "Bericht prüfen",
@@ -88,7 +84,6 @@ I18N.de = localeValues([
   /* src.delta */ (d, u) => `Abweichung ${d}${u ? " " + u : ""}`,
   /* src.disagree */ "Die beiden Quellen widersprechen sich bei diesem Zustand",
   /* conn.homehub */ "HomeHub",
-  /* conn.searching */ "Suche…",
   /* group.Modbus */ "Modbus",
   /* conn.title */ "Verbindungen",
   /* conn.offline */ "Offline",
@@ -157,8 +152,6 @@ I18N.de = localeValues([
   /* service.state.observing */ "MISST",
   /* service.state.limited */ "LÜCKENHAFT",
   /* service.state.interrupted */ "PAUSIERT",
-  /* service.row.window */ "Bisher erfasst",
-  /* service.row.reason */ "Warum dieser Status?",
   /* service.reason.unsupported_profile */ "Dieses Modell stellt nicht alle benötigten Messwerte bereit.",
   /* service.reason.compressor_not_running */ "Der Verdichter läuft gerade nicht.",
   /* service.reason.unsupported_or_unknown_mode */ "Normaler Raumheizbetrieb ist nicht bestätigt.",
@@ -189,6 +182,26 @@ I18N.de = localeValues([
   /* check.status.experimental */ "TESTWEISE",
   /* check.status.unavailable */ "ENTFÄLLT",
   /* check.status.no_window */ "KEIN FENSTER",
+  /* check.dhw.maximum */ "Höchstwert",
+  /* check.dhw.measurement */ "Nettoabkühlung am Speichersensor R5T über eine Stunde.",
+  /* check.dhw.hint */ "Ein Fenster ohne erfasste Pumpen-/Zapfmerkmale erreichte die interne Hinweisschwelle.",
+  /* check.dhw.before_snapshot */ (d) => `${d} vor dem Datenstand`,
+  /* check.dhw.marker_yes */ "erfasst",
+  /* check.dhw.marker_no */ "nicht erfasst",
+  /* check.dhw.pump */ "Interne Pumpe",
+  /* check.dhw.draw */ "Zapfähnlicher Abfall",
+  /* check.dhw.previous */ "Vorheriges abgeschlossenes Fenster",
+  /* check.dhw.next */ "Nächstes abgeschlossenes Fenster",
+  /* check.dhw.timeline_unavailable */ "Keine Fenster mit Zeitangaben verfügbar. Aus den Summen wird kein Verlauf abgeleitet.",
+  /* check.dhw.timeline_empty */ "Keine abgeschlossenen Fenster mit Zeitangaben in dieser 24-h-Ansicht verfügbar.",
+  /* check.dhw.chart_title */ "Abkühlung je abgeschlossenem Fenster",
+  /* check.dhw.timed_scope */ (n) => `Fenster seit Neustart/Zurücksetzen: ${n}, bis zu 24 h. Höchstwert und Zähler können auch auf gespeicherten Stundenwerten beruhen, nicht nur auf den gezeichneten Fenstern.`,
+  /* check.dhw.blank */ "Leer: kein abgeschlossenes Fenster mit Zeitangaben verfügbar, nicht null Abkühlung. Markierungen zeigen Merkmale, keine Laufzeiten.",
+  /* check.dhw.snapshot */ "Datenstand",
+  /* check.dhw.stale */ "Aktuelle Messwerte zur Speicherauskühlung fehlen oder sind veraltet; abgeschlossene Fenster bleiben historische Beobachtungen.",
+  /* check.dhw.limit */ "R5T misst einen Punkt im geschichteten Speicher, keine Speicherenergie. Pumpen- und Zapfmerkmale beweisen weder Ursache noch Wasserentnahme.",
+  /* check.dhw.basis */ "Datengrundlage",
+  /* check.dhw.energy */ "Rechenbeispiel · keine gemessene Energie",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Beispiel für eine Stunde: 200 l Wasser kühlen gleichmäßig mit ${a} K/h ab → ${b} kWh Wärme. Nachheizen: ${c}–${d} kWh Strom bei angenommenem COP 2,5–3 (Wärme ÷ Strom). Keine gemessene Energie.`,
   /* check.detail.dhw_context */ (a, b, c) => `Fenster: interne Pumpe ${a}; zapfungsähnlicher Abfall ${b}; ohne Pumpen-/Zapfmerkmal ≥0,8 K/h ${c}. Überschneidungen möglich.`,
   /* check.detail.value_label */ "Messwert:",
@@ -242,6 +255,49 @@ I18N.de = localeValues([
   /* check.cycling.no_timed_runs */ "Keine Startzeit in dieser Stunde erfasst.",
   /* check.cycling.run_details_unavailable */ "Für diese Stunde sind keine einzelnen Start- und Stoppzeiten verfügbar.",
   /* check.cycling.saved_starts */ (s) => `Davon stammen ${s} aus Stundenwerten vor dem Neustart.`,
+  /* check.cycling.short_runs */ (n) => `${n} < 5 min`,
+  /* check.cycling.col_stop */ "Warum gestoppt?",
+  /* check.cycling.stop_low_flow */ "Vorlauf über Ziel · wenig Durchfluss",
+  /* check.cycling.stop_low_rps */ "Vorlauf über Ziel · niedrige Drehzahl",
+  /* check.cycling.stop_req_off */ "Anforderung beendet",
+  /* check.cycling.stop_tgt_drop */ "Zieltemperatur gesenkt",
+  /* check.cycling.stop_defrost */ "Für Abtauung pausiert",
+  /* check.cycling.stop_defrost_done */ "Abtauvorgang beendet",
+  /* check.cycling.stop_dhw */ "Auf Warmwasser gewechselt",
+  /* check.cycling.stop_normal_dhw */ "Warmwasserlauf beendet",
+  /* check.cycling.stop_normal */ "Regulär beendet",
+  /* check.cycling.out_cond */ (v) => ` (${v} außen)`,
+  /* check.cycling.find_low_flow */ (minFlow, typ) => `Kurze Läufe, wenig Durchfluss: Vorlauf in Minuten über Ziel bei ${minFlow}${typ}.`,
+  /* check.cycling.find_low_rps */ (flow, cond) => `Kurze Läufe, niedrige Drehzahl${cond}: Vorlauf kurz nach Start über Ziel (${flow}).`,
+  /* check.cycling.find_control */ "Regelungsstopp: Anforderung aus oder Ziel gesenkt.",
+  /* check.cycling.find_defrost_dhw */ (cond) => `Abtauung & Warmwasser${cond}: Heizung dafür pausiert.`,
+  /* check.cycling.find_defrost */ (cond) => `Abtauung${cond}: Heizung zum Abtauen pausiert.`,
+  /* check.cycling.find_dhw */ "Warmwasser: Heizung dafür pausiert.",
+  /* check.cycling.find_steady */ (flow) => flow ? `Stetiger Heizbetrieb: min. ${flow}.` : "Stetiger Heizbetrieb.",
+  /* check.cycling.pause_tag */ (d) => ` nach ${d} Pause`,
+  /* check.cycling.cond_tag */ (lwt, tgt) => tgt ? `Vorlauf ${lwt}, Ziel ${tgt}` : `Vorlauf ${lwt}`,
+  /* check.cycling.from_tag */ (prev) => ` von ${prev}`,
+  /* check.cycling.rwt_tag */ (rwt) => `Rücklauf ${rwt}`,
+  /* check.cycling.typ_tag */ (typ) => `, sonst ${typ}`,
+  /* check.cycling.s_cool */ (at, pause, lwt, tgt) => `Start ${at}${pause}: Vorlauf ${lwt}, Ziel ${tgt}, Anforderung an.`,
+  /* check.cycling.s_req */ (at, pause, cond) => `Start ${at}${pause} mit Anforderung${cond}.`,
+  /* check.cycling.s_tgt */ (at, pause, prev, tgt, cond) => `Start ${at}${pause}: Ziel${prev} auf ${tgt} erhöht${cond}.`,
+  /* check.cycling.s_defrost_after */ (at, pause, cond) => `Weiter ${at}${pause}, Abtauung beendet${cond}.`,
+  /* check.cycling.s_dhw_after */ (at, pause, cond) => `Weiter ${at}${pause}, Warmwasser beendet${cond}.`,
+  /* check.cycling.s_defrost */ (at, pause) => `Start ${at}${pause} zum Abtauen.`,
+  /* check.cycling.s_dhw */ (at, pause, cond) => `Start ${at}${pause} für Warmwasser${cond}.`,
+  /* check.cycling.s_gen */ (at, pause, cond) => `Start ${at}${pause}${cond}.`,
+  /* check.cycling.e_low_flow */ (to, lwt, tgt, rwt, flow, typ) => `Stopp ${to}: Vorlauf ${lwt} über Ziel ${tgt}${rwt} bei ${flow}${typ}.`,
+  /* check.cycling.e_low_rps */ (to, lwt, tgt, rwt, flow, rps) => `Stopp ${to}: Vorlauf ${lwt} über Ziel ${tgt}${rwt} bei ${flow} und ${rps}.`,
+  /* check.cycling.e_req */ (to, vals) => `Stopp ${to}: Anforderung aus${vals}.`,
+  /* check.cycling.e_tgt */ (to, prev, tgt, vals) => `Stopp ${to}: Ziel${prev} auf ${tgt} gesenkt${vals}.`,
+  /* check.cycling.e_defrost_run */ (to, vals) => `Abtauung beendet ${to}${vals}.`,
+  /* check.cycling.e_defrost_pause */ (to, vals) => `Stopp ${to} für Abtauung${vals}.`,
+  /* check.cycling.e_dhw */ (to, vals) => `Stopp ${to}: Wechsel auf Warmwasser${vals}.`,
+  /* check.cycling.e_norm */ (to, vals) => `Ende ${to}${vals}.`,
+  /* check.cycling.e_ongoing */ "Bei letzter Messung noch aktiv.",
+  /* check.cycling.cause_unavailable */ "Keine Details",
+  /* check.cycling.cause_since_boot */ "Ursachen für Start und Stopp werden erst ab dem letzten Neustart erfasst.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · Mittel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -285,7 +341,17 @@ I18N.de = localeValues([
   /* service.metric.eev */ "Expansionsventil-Befehl",
   /* service.metric.hp */ "Hochdruck",
   /* service.metric.lp */ "Niederdruck",
+  /* check.hydronic.labels */ "Wasserspreizung|Pumpenansteuerung|Beobachtet / geeignet / qualifiziert|Belegzeitraum|Qualifizierter Zeitraum|Aktuell|Datenbestand|Stundenblöcke|Soll-Wasserspreizung",
+  /* check.hydronic.reasons */ "Nach Projektfilter qualifiziert|Diagnose aus|Keine aktuelle Quelle|Ungültiger Messwert|Pumpe aus|Warmwasserpfad|Zusatzheizer als An gemeldet|Verbleibende Anlaufzeit|Beobachtungsuhr fehlt|Quelle gewechselt|Diagnosefreigabe geändert|Zählergrenze erreicht|Für diesen Start deaktiviert|Qualifikation unbekannt",
+  /* check.hydronic.limits */ "Reglerphasen nicht beobachtbar|Pumpenansteuerung fehlt|Wiederherstellung ausstehend",
+  /* check.hydronic.counts */ (w, c) => `Wasserwerte ${w} · Ansteuerungswerte ${c}`,
+  /* check.hydronic.states */ "Quelle nicht bestätigt|Datiert|Undatiert|24-Stunden-Abdeckung unvollständig|Speicherung ausstehend|Zählergrenze erreicht: Untergrenzen",
+  /* check.hydronic.loss */ (n) => `Speicherverlustmeldungen ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Vorlauftemperaturdifferenz (Wärmepumpe minus Mischkreis): ${d} · ${s} · Messwerte: ${n}. Mischzweck unbekannt; Wärmeverlust braucht mehr Daten.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · Mittel ${b} · max. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "berücksichtigter Messwert" : "berücksichtigte Messwerte"}`,
+  /* service.metric.input_none */ "Kein gewählter Eingang",
+  /* service.metric.meta_limit */ "Zahlen sind berücksichtigte Messwerte, keine zeitliche Abdeckung. Ein gewählter Eingang belegt keinen aktuellen Messwert.",
   /* service.limit.special_phases_unavailable */ "Regelungsphasen",
   /* service.limit.temperature_context_incomplete */ "Temperaturkontext",
   /* service.limit.pressure_sides_incomplete */ "Druckseite(n)",
@@ -785,7 +851,6 @@ I18N.de = localeValues([
   /* wx.longitude */ "Längengrad",
   /* wx.waiting */ "Warte auf Prognose",
   /* wx.fetching */ "Open-Meteo-Prognose wird geladen…",
-  /* wx.unavailable */ "Nicht verfügbar",
   /* wx.error */ "Fehler Open-Meteo-Prognose",
   /* wx.detail.status */ "Status:",
   /* wx.status.fresh */ "Aktuell",
@@ -869,7 +934,6 @@ I18N.de = localeValues([
   /* board.btninv */ "Aktiv bei LOW — Taster zieht den Pin auf GND",
   /* board.hint */ "Werksreset: Taster 5 s halten. Ist das Verlaufsjournal nicht bereit, wird nichts gelöscht. Löscht WLAN- und andere Einstellungen, den aufgezeichneten Verlauf, Zustandsdauern, den unbearbeiteten Absturz-Dump und den gespeicherten Datensatz zur MQTT-Bereinigung. Board-, LED- und Tastereinstellungen bleiben erhalten, wenn möglich. Bei einem Löschfehler kann es sein, dass nur ein Teil der Daten gelöscht wurde. Neustart erst, wenn alle Löschschritte erfolgreich waren. Wenn der Reset nicht startet oder abbricht, /diag prüfen. Ohne angeschlossenen Taster „Keine“ wählen.",
   /* card.hardware */ "Hardware",
-  /* card.hw_off */ "Keine",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
   /* card.hw_btn */ (pin) => `GPIO${pin}`,
   /* card.hw_board_m5stack */ "Das M5Stack AtomS3 Lite ist ein kompaktes ESP32-S3-Board mit integrierter WS2812-RGB-Status-LED.",
@@ -898,7 +962,6 @@ I18N.de = localeValues([
   /* card.diagnostics */ "Anlagendiagnose",
   /* card.diagnostics_help */ "Aktiviert die 24-Stunden-Anlagendiagnose, die Heizkurven-Diagnose sowie Zusatzquellen wie Raumtemperatur, Wetterprognose und Leistung der Zirkulationspumpe.",
   /* diagnostics.off */ "Aus",
-  /* diagnostics.on */ "Ein",
   /* diagnostics.saved_on */ "Anlagendiagnose eingeschaltet — Erfassung beginnt jetzt",
   /* diagnostics.saved_off */ "Anlagendiagnose ausgeschaltet — Erfassung beendet",
   /* probe.toggle */ "Protokolldiagnose",
@@ -1015,6 +1078,8 @@ I18N.de = localeValues([
   /* lang.saved */ "Sprache gespeichert",
   /* check.detail.dhw_reason.blind_modbus */ "Messwerte fehlen: Modbus schweigt oder Abfrage pausiert",
   /* check.detail.source_stale_modbus */ "Keine frische Modbus-Abfrage; aktueller Zustand unbekannt. Historie bleibt erhalten.",
+  /* mb.flow_scale_help */ "Unbestätigte /100-Skalierung (Prüfung/Fallback); L/min am Gerät prüfen. Aus Bewegung, ΔT, Leistung und 24h-Check ausgeschlossen.",
+  /* hist.modbus_flow_unverified */ "Unbestätigte /100-Skalierung (Prüfung/Fallback); am Gerät prüfen.",
   /* wf.label */ "Arbeitszahl",
   /* wf.short.partial */ "vorl.",
   /* wf.short.limited */ "eingeschr.",
@@ -1092,7 +1157,7 @@ MODEL_DESCRIPTION_I18N.de = modelDescriptionValues([
   /* health_cycling */ ["Bei Messlücken können Starts fehlen.", "Eine feste normale Startzahl gibt es nicht. Bei genügend Messdaten gelten Heizläufe hier als unauffällig, wenn die abgeschlossenen Läufe im Schnitt mindestens 10 Minuten dauern."],
   /* health_defrost */ ["Abtaustarts und ihr Anteil an der Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus.","Interne Regel: ≥3 zugeordnete Vorgänge und >15 %. Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; kein Daikin-Störungsgrenzwert."],
   /* health_pressure */ ["24-Stunden-Wasserdruckverlauf im geschlossenen Hydraulikkreis (X10A, 5-Minuten-Minima).","Orientierung im Verlauf: >1,0 bar Normal, ≤1,0 bar Niedrig, ≤0,5 bar Kritisch (Diagnosebefund ab 60 s durchgehend). Zulässiger Füll- und Betriebsdruck richtet sich nach dem genauen Gerätehandbuch und der Anlagenhöhe; der Messwert allein belegt weder Leckage noch Defekt."],
-  /* health_flow */ ["Niedrigster Durchfluss nach 60 durchgehend beobachteten Sekunden mit laufender interner Pumpe.","Kein allgemeiner Normalwert. Kein Nenndurchfluss oder Teillastnachweis. Anleitungsgrenzen benötigen dasselbe Modell, dieselbe Betriebsart und Bedingungen; der Wert allein belegt keine Unterversorgung."],
+  /* health_flow */ ["Minimum nach 60 s durchgehendem Betrieb der internen Pumpe; separat: nach Stichproben gewichtete Wasserspreizung, Durchfluss und Pumpenansteuerung nach 600 s Heiz-Anlauf laut Projektregel.", "Kein allgemeiner Normalwert. Kein Nenndurchfluss oder Teillastnachweis. Werte am gemeinsamen wasserseitigen Wärmetauscher. Die Ansteuerung ist keine gemessene Drehzahl oder Förderhöhe. 600-s-Projektfilter (Lücken ≤15 s), kein Beharrungsnachweis. Kein Sollvergleich oder hydraulischer Ursachennachweis aus diesen Werten."],
   /* health_heater */ ["Beobachtete An-Zeit des Zusatzheizers (BUH) und Speicherheizstabs (BSH).","Es gibt keine feste normale Laufzeit; sie hängt vom Heiz- und Warmwasserbedarf ab. Laufzeit ist kein Energieverbrauch und belegt kein unnötiges Heizen."],
   /* health_retries */ ["Vergleichbare Anstiege in fünf experimentellen Zählern, auch im Stillstand oder an Verdichter-Zustandsgrenzen.","Für diese experimentellen Zähler ist kein Normalbereich belegt. Lücken, Rücksetzungen und fehlende Anstiege zählen nicht. Stabile Zähler schließen Begrenzung nicht aus und belegen keine Ursache."],
   /* free_heap */ ["Arbeitsspeicher, den die Firmware gerade nicht verwendet. Kurze Schwankungen sind normal, weil WLAN, MQTT und Web-Anfragen vorübergehend Speicher belegen; der 24-Stunden-Verlauf ist aussagekräftiger als ein Einzelwert.","eine stabile Linie mit Einbrüchen, die sich erholen; dauerhafter Rückgang kann auf nicht freigegebenen Speicher hinweisen. Ein kompatibler Neustart bei erhaltener Spannung kann den RAM-Verlauf bewahren. Wenn der RAM nicht übernommen werden kann, kommen nur passende, datierte 5-Minuten-Intervalle aus dem Flash-Journal nach dem Zeitabgleich zurück. Das 5-Minuten-Raster kann kurze Unterbrechungen verbergen; längere können Lücken hinterlassen. Offene und jüngste ungespeicherte Intervalle können fehlen; ohne Journal gibt es keine Flash-Wiederherstellung."],
@@ -1103,3 +1168,69 @@ MODEL_DESCRIPTION_I18N.de = modelDescriptionValues([
   /* candidates_nocap */ ["Mehrere Daikin-Modellfamilien liefern auf der Serviceschnittstelle dieselben Register. Deshalb lässt sich der genaue Handelsname dort nicht unterscheiden. Die Überschrift bleibt bewusst „Daikin Altherma“, statt ein Modell zu raten.","diese Außeneinheit meldet ihre eigene Nennleistung nicht; die Kandidaten können deshalb verschiedenen Leistungsklassen angehören. Die Firmware dekodiert die Werte mit der anhand der Inneneinheit am besten passenden Variante, aber nicht mit voller Gewissheit. Vergleiche die Außengeräte-Kennung unten mit dem Typenschild."],
   /* oueeprom */ ["Die Kennungsbytes der Außeneinheit, unverändert von der Serviceschnittstelle angezeigt. Da keine öffentliche Zuordnung zu Handelsnamen bekannt ist, zeigt die Firmware die Kennung, statt daraus einen Modellnamen zu raten.","bei einer mehrdeutigen Erkennung Zeichen für Zeichen mit dem Typenschild der Außeneinheit vergleichen."],
 ]);
+
+FAULT_CODE_I18N.de = faultCodeValues([
+  "Problem mit dem Wasserdurchfluss", // 7H
+  "Fehler am Rücklauftemperaturfühler", // 80
+  "Fehler am Vorlauftemperaturfühler", // 81
+  "Frostschutz des Wärmetauschers ausgelöst", // 89
+  "Ungewöhnlicher Temperaturanstieg am Warmwasseraustritt", // 8F
+  "Ungewöhnlicher Anstieg der Vorlauftemperatur", // 8H
+  "Fehler der Nulldurchgangserkennung", // A1
+  "Problem mit Hochdruckbegrenzung oder Frostschutz", // A5
+  "Zusatzheizer überhitzt oder nicht angeschlossen", // AA
+  "Speicherheizstab überhitzt", // AC
+  "Speicherdesinfektion zum Legionellenschutz nicht abgeschlossen", // AH
+  "Aufheizzeit für Warmwasser überschritten", // AJ
+  "Fehler am Volumenstromsensor", // C0
+  "Fehler am Temperaturfühler des Wärmetauschers", // C4
+  "Fehler an einem Wärmetauscherfühler", // C5
+  "Fehler am Raumtemperaturfühler", // CJ
+  "Platine der Außeneinheit defekt", // E1
+  "Fehler der Fehlerstromerkennung", // E2
+  "Hochdruckschalter der Außeneinheit ausgelöst", // E3
+  "Fehler beim Kältemittel-Saugdruck", // E4
+  "Inverter-Verdichtermotor der Außeneinheit überhitzt", // E5
+  "Verdichter der Außeneinheit startet nicht", // E6
+  "Fehler am Lüftermotor der Außeneinheit", // E7
+  "Überspannung am Eingang der Außeneinheit", // E8
+  "Fehler am elektronischen Expansionsventil", // E9
+  "Umschaltproblem zwischen Kühlen und Heizen an der Außeneinheit", // EA
+  "Ungewöhnlicher Temperaturanstieg im Speicher", // EC
+  "Temperaturfehler an der Heißgasleitung der Außeneinheit", // F3
+  "Ungewöhnlich hoher Druck der Außeneinheit beim Kühlen", // F6
+  "Ungewöhnlich hoher Druck der Außeneinheit; Hochdruckschalter ausgelöst", // FA
+  "Fehler am Spannungs- oder Stromsensor der Außeneinheit", // H0
+  "Fehler an einem externen Temperaturfühler", // H1
+  "Fehler am Hochdruckschalter der Außeneinheit", // H3
+  "Fehler am Überlastschutz des Verdichters", // H5
+  "Fehler am Positionserkennungssensor der Außeneinheit", // H6
+  "Fehler am CT-Strommesssystem des Außeneinheit-Verdichters", // H8
+  "Fehler am Außentemperaturfühler der Außeneinheit", // H9
+  "Fehler am Speichertemperaturfühler", // HC
+  "Fehler am Wasserdrucksensor", // HJ
+  "Fehler am Heißgasleitungsfühler der Außeneinheit", // J3
+  "Fehler am Wärmetauscherfühler der Außeneinheit", // J6
+  "Fehler am Hochdrucksensor der Außeneinheit", // JA
+  "Fehler an der Inverterplatine", // L1
+  "Unzulässiger Temperaturanstieg im Schaltkasten der Außeneinheit", // L3
+  "Unzulässiger Temperaturanstieg am Inverter-Kühlkörper der Außeneinheit", // L4
+  "Gleichstrom-Überstrom am Inverter der Außeneinheit erkannt", // L5
+  "Thermoschutz der Inverterplatine ausgelöst", // L8
+  "Blockierschutz des Verdichters ausgelöst", // L9
+  "Fehler im Kommunikationssystem der Außeneinheit", // LC
+  "Phasenunsymmetrie oder Phasenausfall der Stromversorgung", // P1
+  "Ungewöhnliche Gleichspannung erkannt", // P3
+  "Fehler am Kühlkörper-Temperaturfühler der Außeneinheit", // P4
+  "Leistungseinstellung passt nicht zur Anlage", // PJ
+  "Kältemittelmangel an der Außeneinheit", // U0
+  "Phasenfolgefehler oder Phasenausfall", // U1
+  "Netzspannungsfehler der Außeneinheit", // U2
+  "Estrichtrocknungsprogramm der Fußbodenheizung nicht korrekt abgeschlossen", // U3
+  "Kommunikationsproblem zwischen Innen- und Außeneinheit", // U4
+  "Kommunikationsproblem mit der Bedieneinheit", // U5
+  "Übertragungsfehler zwischen Haupt-CPU und Inverter-CPU der Außeneinheit", // U7
+  "Kommunikationsproblem mit LAN-Adapter, Raumthermostat oder USB-Gerät", // U8
+  "Innen- und Außeneinheit sind falsch kombiniert oder nicht kompatibel", // UA
+  "Vertauschte Rohrleitungen oder fehlerhafte Kommunikationsverdrahtung erkannt", // UF
+], "Aktuell wird kein Fehlercode übertragen.", "Keine Kurzbeschreibung für diesen Code hinterlegt.");

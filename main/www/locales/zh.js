@@ -1,13 +1,10 @@
-// translation-source: 6e972a2b4ae88155965a5f3be3d4db1e55237b0aaa203b0f7b4b2df64578e5c3
+// translation-source: 21658cb9aa5673bd6390bf55b45b1a1a9849fc5a5439233310598402221f0c32
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
-  /* sys.x10a_down */ "X10A 离线",
-  /* sys.mb_carrying */ "运行模式未知 — 数据来自 Modbus",
   /* sys.mb_only */ "X10A 离线 — 数据来自 Modbus",
-  /* sys.mb_source */ "X10A 离线 · Modbus",
   /* mode.stop */ "停止",
   /* mode.heat */ "供暖",
   /* mode.cool */ "制冷",
@@ -64,7 +61,6 @@ I18N.zh = localeValues([
   /* bug.title */ "报告问题",
   /* bug.intro */ "请简述问题。设备会附加状态、读数和日志，并先移除网络名称、地址及服务器名称。",
   /* bug.what */ "发生了什么",
-  /* bug.what_ph */ "从今天早上开始，Home Assistant 中的水箱温度显示为 12800 °C。",
   /* bug.need_text */ "请先描述问题，一两句话即可。",
   /* bug.continue */ "准备报告",
   /* bug.step2_title */ "检查报告",
@@ -88,7 +84,6 @@ I18N.zh = localeValues([
   /* src.delta */ (d, u) => `差值 ${d}${u ? " " + u : ""}`,
   /* src.disagree */ "两个数据源的状态不一致",
   /* conn.homehub */ "HomeHub",
-  /* conn.searching */ "正在搜索…",
   /* group.Modbus */ "Modbus",
   /* conn.title */ "连接",
   /* conn.offline */ "离线",
@@ -157,8 +152,6 @@ I18N.zh = localeValues([
   /* service.state.observing */ "记录中",
   /* service.state.limited */ "部分缺失",
   /* service.state.interrupted */ "已暂停",
-  /* service.row.window */ "目前已记录",
-  /* service.row.reason */ "为什么是此状态？",
   /* service.reason.unsupported_profile */ "此型号不能提供全部所需读数。",
   /* service.reason.compressor_not_running */ "压缩机未运行。",
   /* service.reason.unsupported_or_unknown_mode */ "未确认正常空间供暖。",
@@ -189,6 +182,26 @@ I18N.zh = localeValues([
   /* check.status.experimental */ "实验性",
   /* check.status.unavailable */ "不可用",
   /* check.status.no_window */ "无测量窗口",
+  /* check.dhw.maximum */ "已记录最大值",
+  /* check.dhw.measurement */ "水箱传感器 R5T 测得的一小时净降温。",
+  /* check.dhw.hint */ "某个未记录到水泵或类似取水标记的小时窗口达到了本项目的提示阈值。",
+  /* check.dhw.before_snapshot */ (d) => `快照前 ${d}`,
+  /* check.dhw.marker_yes */ "已记录",
+  /* check.dhw.marker_no */ "未记录",
+  /* check.dhw.pump */ "内部水泵",
+  /* check.dhw.draw */ "类似取水的下降",
+  /* check.dhw.previous */ "上一个完整窗口",
+  /* check.dhw.next */ "下一个完整窗口",
+  /* check.dhw.timeline_unavailable */ "带时间的窗口不可用。不会根据汇总值推算历史。",
+  /* check.dhw.timeline_empty */ "此24小时视图中没有可用的带时间的完整窗口。",
+  /* check.dhw.chart_title */ "每个完整窗口的降温",
+  /* check.dhw.timed_scope */ (n) => `重启或重置后带时间的窗口：${n}，最多 24 h。最大值和计数也可能来自保存的小时数据，而非仅来自图中窗口。`,
+  /* check.dhw.blank */ "空白表示没有可用的已完成窗口时间记录，并非零降温。标记只表示曾出现，不表示持续时间。",
+  /* check.dhw.snapshot */ "快照",
+  /* check.dhw.stale */ "热水箱降温诊断的当前读数缺失或已过时；已完成的窗口仍是历史观测。",
+  /* check.dhw.limit */ "R5T 只测量分层水箱中的一个点，并非水箱能量。水泵及类似取水的标记既不能证明原因，也不能证明实际取水。",
+  /* check.dhw.basis */ "数据详情",
+  /* check.dhw.energy */ "计算示例 · 非能量实测",
   /* check.detail.dhw_energy */ (a, b, c, d) => `一小时示例：200 l水均匀以${a} K/h降温→${b} kWh热量；按假设COP 2.5–3（热量÷电能）补热需${c}–${d} kWh电能。非能量实测。`,
   /* check.detail.dhw_context */ (a, b, c) => `小时窗口：内部水泵${a}；类似取水骤降${b}；无标记且≥0.8 K/h${c}。计数可重叠。`,
   /* check.detail.value_label */ "数值：",
@@ -242,6 +255,49 @@ I18N.zh = localeValues([
   /* check.cycling.no_timed_runs */ "这一小时没有带时间记录的启动。",
   /* check.cycling.run_details_unavailable */ "这一小时没有单次运行的时间记录。",
   /* check.cycling.saved_starts */ (s) => `其中 ${s}来自重启前的每小时统计。`,
+  /* check.cycling.short_runs */ (n) => `${n} < 5 min`,
+  /* check.cycling.col_stop */ "停止原因",
+  /* check.cycling.stop_low_flow */ "供水超目标 · 流量偏低",
+  /* check.cycling.stop_low_rps */ "供水超目标 · 低转速",
+  /* check.cycling.stop_req_off */ "压缩机请求结束",
+  /* check.cycling.stop_tgt_drop */ "目标温度下调",
+  /* check.cycling.stop_defrost */ "化霜暂停",
+  /* check.cycling.stop_defrost_done */ "化霜结束",
+  /* check.cycling.stop_dhw */ "切换至热水",
+  /* check.cycling.stop_normal_dhw */ "热水运行结束",
+  /* check.cycling.stop_normal */ "正常停止",
+  /* check.cycling.out_cond */ (v) => `（室外 ${v}）`,
+  /* check.cycling.find_low_flow */ (minFlow, typ) => `低流量短周期：数分内供水超目标（${minFlow}${typ}）。`,
+  /* check.cycling.find_low_rps */ (flow, cond) => `低转速短周期${cond}：启动后供水超目标（${flow}）。`,
+  /* check.cycling.find_control */ "控制停机：请求关或目标下调。",
+  /* check.cycling.find_defrost_dhw */ (cond) => `化霜与热水${cond}：暂停供暖。`,
+  /* check.cycling.find_defrost */ (cond) => `化霜${cond}：暂停供暖除霜。`,
+  /* check.cycling.find_dhw */ "热水：暂停供暖加热热水。",
+  /* check.cycling.find_steady */ (flow) => flow ? `平稳供暖：最低 ${flow}。` : "平稳供暖。",
+  /* check.cycling.pause_tag */ (d) => `，停机 ${d} 后`,
+  /* check.cycling.cond_tag */ (lwt, tgt) => tgt ? `供水 ${lwt}，目标 ${tgt}` : `供水 ${lwt}`,
+  /* check.cycling.from_tag */ (prev) => `自 ${prev} `,
+  /* check.cycling.rwt_tag */ (rwt) => `回水 ${rwt}`,
+  /* check.cycling.typ_tag */ (typ) => `，通常 ${typ}`,
+  /* check.cycling.s_cool */ (at, pause, lwt, tgt) => `${at}${pause} 启动：供水 ${lwt}，目标 ${tgt}，请求开启。`,
+  /* check.cycling.s_req */ (at, pause, cond) => `${at}${pause} 请求开启启动${cond}。`,
+  /* check.cycling.s_tgt */ (at, pause, prev, tgt, cond) => `${at}${pause} 目标${prev}调高至 ${tgt}${cond}。`,
+  /* check.cycling.s_defrost_after */ (at, pause, cond) => `${at}${pause} 化霜结束恢复${cond}。`,
+  /* check.cycling.s_dhw_after */ (at, pause, cond) => `${at}${pause} 热水结束恢复${cond}。`,
+  /* check.cycling.s_defrost */ (at, pause) => `${at}${pause} 为化霜启动。`,
+  /* check.cycling.s_dhw */ (at, pause, cond) => `${at}${pause} 为热水启动${cond}。`,
+  /* check.cycling.s_gen */ (at, pause, cond) => `${at}${pause} 启动${cond}。`,
+  /* check.cycling.e_low_flow */ (to, lwt, tgt, rwt, flow, typ) => `${to} 停机：供水 ${lwt} 高于目标 ${tgt}${rwt}，流量 ${flow}${typ}。`,
+  /* check.cycling.e_low_rps */ (to, lwt, tgt, rwt, flow, rps) => `${to} 停机：供水 ${lwt} 高于目标 ${tgt}${rwt}，${flow}、${rps}。`,
+  /* check.cycling.e_req */ (to, vals) => `${to} 停机：请求关闭${vals}。`,
+  /* check.cycling.e_tgt */ (to, prev, tgt, vals) => `${to} 停机：目标${prev}下调至 ${tgt}${vals}。`,
+  /* check.cycling.e_defrost_run */ (to, vals) => `化霜结束 ${to}${vals}。`,
+  /* check.cycling.e_defrost_pause */ (to, vals) => `${to} 为化霜停机${vals}。`,
+  /* check.cycling.e_dhw */ (to, vals) => `${to} 停机：切换至热水${vals}。`,
+  /* check.cycling.e_norm */ (to, vals) => `结束 ${to}${vals}。`,
+  /* check.cycling.e_ongoing */ "最近读数时仍在运行。",
+  /* check.cycling.cause_unavailable */ "无详情",
+  /* check.cycling.cause_since_boot */ "启停原因仅从上次重启后开始记录。",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m} 分钟`,
@@ -285,7 +341,17 @@ I18N.zh = localeValues([
   /* service.metric.eev */ "膨胀阀指令",
   /* service.metric.hp */ "高压",
   /* service.metric.lp */ "低压",
+  /* check.hydronic.labels */ "水温差|水泵指令|已观测／候选／已采用|证据时间|已采用数据时间|当前|样本总体|小时分组|目标水温差",
+  /* check.hydronic.reasons */ "已通过项目筛选|诊断已关闭|无当前数据源|读数无效|水泵已关闭|生活热水路径|辅助加热器报告开启|剩余启动时间|观测时钟不可用|数据源已变更|诊断授权已变更|已达计数上限|本次启动期间已禁用|资格未知",
+  /* check.hydronic.limits */ "无法观测控制器阶段|水泵指令不可用|等待恢复",
+  /* check.hydronic.counts */ (w, c) => `水侧读数 ${w} · 指令读数 ${c}`,
+  /* check.hydronic.states */ "来源未确认|有时间戳|无时间戳|24 小时覆盖不完整|等待保存|计数器已达上限：显示下限",
+  /* check.hydronic.loss */ (n) => `存储丢失报告 ${n} 次`,
+  /* check.hydronic.secondary */ (d, s, n) => `供水温差（热泵减混水）：${d} · ${s} · 读数${n}次。混水目的未知，热损失需更多测量。`,
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
+  /* service.metric.samples */ n => `已纳入读数：${n}`,
+  /* service.metric.input_none */ "未选定输入",
+  /* service.metric.meta_limit */ "计数是已纳入的读数，并非时间覆盖率。选定输入不代表存在当前读数。",
   /* service.limit.special_phases_unavailable */ "控制阶段",
   /* service.limit.temperature_context_incomplete */ "温度背景",
   /* service.limit.pressure_sides_incomplete */ "压力侧",
@@ -785,7 +851,6 @@ I18N.zh = localeValues([
   /* wx.longitude */ "经度",
   /* wx.waiting */ "等待天气预报",
   /* wx.fetching */ "正在获取 Open-Meteo 预报…",
-  /* wx.unavailable */ "不可用",
   /* wx.error */ "Open-Meteo 预报错误",
   /* wx.detail.status */ "状态：",
   /* wx.status.fresh */ "最新",
@@ -869,7 +934,6 @@ I18N.zh = localeValues([
   /* board.btninv */ "低电平有效（按钮将引脚接到 GND）",
   /* board.hint */ "要恢复出厂设置，请按住按钮 5 秒。如果历史日志尚未就绪，则不会清除任何数据。重置会清除 Wi-Fi 等设置、已记录的历史数据、状态持续时间、原始崩溃转储和已保存的 MQTT 清理记录。开发板、LED 和按钮的设置会尽可能保留。清除失败时，可能已有部分数据被清除。只有所有清除操作都成功，设备才会重启。如果重置未开始或未完成，请查看 /diag。未连接按钮时，请选择“无”。",
   /* card.hardware */ "硬件",
-  /* card.hw_off */ "无",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
   /* card.hw_btn */ (pin) => `GPIO${pin}`,
   /* card.hw_board_m5stack */ "M5Stack AtomS3 Lite 是一款紧凑型 ESP32-S3 开发板，内置 WS2812 RGB 状态 LED。",
@@ -898,7 +962,6 @@ I18N.zh = localeValues([
   /* card.diagnostics */ "设备诊断",
   /* card.diagnostics_help */ "启用 24 小时设备检查、气候补偿曲线诊断，以及室温、天气预报和循环泵功率等附加来源。",
   /* diagnostics.off */ "已停用",
-  /* diagnostics.on */ "已启用",
   /* diagnostics.saved_on */ "设备诊断已启用 — 现在开始采集",
   /* diagnostics.saved_off */ "设备诊断已停用 — 已停止采集",
   /* probe.toggle */ "协议诊断",
@@ -1015,6 +1078,8 @@ I18N.zh = localeValues([
   /* lang.saved */ "语言已保存",
   /* check.detail.dhw_reason.blind_modbus */ "读数缺失：Modbus 无响应或轮询暂停",
   /* check.detail.source_stale_modbus */ "无新鲜Modbus样本；当前状态未知。保留历史。",
+  /* mb.flow_scale_help */ "未确认的 /100 流量换算（待定/回退）；请对照机组显示 L/min。已从流向、ΔT、热功率和 24h 检查中排除。",
+  /* hist.modbus_flow_unverified */ "未确认的 Modbus /100 换算（待定/回退）；请对照机组显示。",
   /* wf.label */ "性能系数",
   /* wf.short.partial */ "暂定",
   /* wf.short.limited */ "受限",
@@ -1161,13 +1226,7 @@ INSPECT_I18N.zh = inspectValues(
       : "泵/流量未证明空间支路循环。"], // heat
     ["空间运行", "空间供暖或制冷运行", "空间冷暖运行信号；不是温控需求或压缩机证明。"], // spaceh
     ["室温", "室温", "参考区域温度与目标；含义取决于位置。"], // room
-    ["循环泵", "循环泵速度", "驱动公共回路及 3WV 支路；停机后也可延时/保护运行，须结合流量。", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `水泵报停但测得 ${fmt1(d.flow)} l/min；可能为外泵、延时或信号冲突。`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `${fmt0(d.pump)}%；${fmt1(d.flow)} l/min。` : `${fmt0(d.pump)}%，无流量；循环未确认。`
-      : waterMoving(d) ? `无泵速；测得 ${fmt1(d.flow)} l/min。`
-      : d.pumpOn === true ? d.flow != null ? `泵启动但仅 ${fmt1(d.flow)} l/min；循环未确认。` : "泵启动但无流量。"
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `泵停止；显示 ${fmt1(d.flow)} l/min，未证明循环。` : "泵停止，无流量。"
-      : `泵状态不可靠；${fmt1(d.flow)} l/min 未证明循环。`], // pump
+    ["循环泵", "循环泵", "反向 X10A 信号（0 = 最大，100 = 停机，[0, 100] → 100–0 %）不测量 RPM，也不证明旋转、扬程或流量；开关状态与流量分开查看。", (d) => pumpNowText(d, [(n) => `水泵指令 ${n} %。`, "泵状态为开启。", "水泵报告停机。", "水泵开关状态未知。", (n) => `实测流量 ${n} l/min。`, "无流量数据。", "报告停机与实测流量矛盾，可能存在外泵、延时停机或旧信号。", "尚不能确认水循环。"])], // pump
     [(d) => pelMeasured(d) ? "电功率 · HomeHub" : "电功率估算", "电功率", (d) => pelMeasured(d)
       ? "HomeHub 输入 51 的耗电；校准、测点和所含加热器未公开，不是认证总表。"
       : "COP/EER 输入估算：CT 按声明相与 230 V，未知真实电压/功率因数；逆变器电流仅含压缩机。", (d) => d.pelHeld ? "停机后逆变器电流是旧值，不能显示耗电/效率。"
@@ -1190,8 +1249,6 @@ INSPECT_I18N.zh = inspectValues(
     ["流量", "水流量", "公共水路流量；最低值随型号，须结合泵和压力。"], // flow
     ["流量开关状态", "流量开关状态", "X10A 二进制输入；不测 l/min 或确认最低流量。", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A 启动；结合泵和 ${fmt1(d.flow)} l/min。` : `X10A 未启动；结合 ${fmt1(d.flow)} l/min 与 7H/C0。`], // flow_switch
     ["水压", "水路压力", "水压，非制冷剂压力；范围取决于型号/安装。"], // wp
-    ["X10A 服务端口", "X10A 数据源", "有线只读 X10A 连接；读数显示为蓝色。"], // x10a
-    ["Modbus TCP", "Modbus 数据源", "独立只读 Modbus TCP 连接（HomeHub/Altherma 4）；读数显示为青蓝色。"], // modbus
   ],
 );
 
@@ -1274,7 +1331,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
   ["PHE 回水 R4T；须结合流量/压缩机/模式，无统一 5 K。"], // 35
   ["公共水流量；最低值随型号/模式，过低可触发 7H。"], // 36
   ["水压；许多手册要求 >1 bar，≤1.0 bar 时查确切型号手册。"], // 37
-  ["反向水泵速度命令：0 表示最高转速，100 表示停止。"], // 38
+  ["反向 X10A 指令：0 = 最大，100 = 停机（[0, 100] → 100–0 %）。不测 RPM 也不证明旋转、扬程或流量；请分开查看开关状态与流量。"], // 38
   ["泵状态；须结合流量，运行不证明换热。"], // 39
   ["太阳能回路泵状态；不同于热泵水路泵。"], // 40
   ["配置所命名泵速；刻度/回路随型号。"], // 41
@@ -1374,7 +1431,7 @@ MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["测量有缺口时，部分启动可能漏计。", "启动次数没有固定的正常值。数据充足时，本项检查将已完成的供暖运行平均达到 10 分钟视为时长足够。"], // health_cycling
   ["除霜", "≥3次配对、>15%压缩机运行时间，仅计压缩机及除霜状态均可读时段。项目规则非Daikin限值；缺少湿度及整个盘管温度。"], // health_defrost
   ["封闭水路24小时水压曲线（X10A，5分钟最小值）。", "曲线说明：>1.0 bar正常，≤1.0 bar偏低，≤0.5 bar危急（连续60秒触发诊断）。允许充注与运行压力取决于具体机型手册及系统高度；单凭读数不能证明漏水或故障。"], // health_pressure
-  ["水泵60秒后流量", "限值需同机型/模式/条件；非额定，也不证明不足。"], // health_flow
+  ["内置水泵连续运行 60 秒后的最低流量；另附供暖启动 600 秒后按样本加权的水温差、流量与水泵指令统计。", "非额定流量，也不证明部分负荷。仅覆盖公共水侧换热器。水泵指令不代表转速或扬程。600 秒项目筛选（允许 ≤15 秒间隔）不证明稳定运行，也不作目标对比或水力成因判断。"], // health_flow
   ["BUH/BSH的ON时间", "非能量，不证明加热多余。"], // health_heater
   ["5个实验计数器", "可比增长；忽略缺口/重置。稳定不排除限功率，也不证明原因。"], // health_retries
   ["RAM 24小时曲线稳定或回升正常；持续下降可能泄漏。兼容通电重启可保留RAM曲线。5分钟粒度可能隐藏短暂停机。否则，须时间同步，闪存仅恢复日志内带时间的兼容区间。未完/最近未存区间可能丢失。"], // free_heap

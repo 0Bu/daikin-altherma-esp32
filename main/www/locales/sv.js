@@ -1,13 +1,10 @@
-// translation-source: 6e972a2b4ae88155965a5f3be3d4db1e55237b0aaa203b0f7b4b2df64578e5c3
+// translation-source: 21658cb9aa5673bd6390bf55b45b1a1a9849fc5a5439233310598402221f0c32
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
-  /* sys.x10a_down */ "X10A frånkopplad",
-  /* sys.mb_carrying */ "Okänt driftläge — värden från Modbus",
   /* sys.mb_only */ "X10A frånkopplad — värden från Modbus",
-  /* sys.mb_source */ "X10A frånkopplad · Modbus",
   /* mode.stop */ "Stopp",
   /* mode.heat */ "Uppvärmning",
   /* mode.cool */ "Kylning",
@@ -64,7 +61,6 @@ I18N.sv = localeValues([
   /* bug.title */ "Rapportera fel",
   /* bug.intro */ "Beskriv problemet kort. Status, mätningar och logg bifogas efter att nätverksnamn, adresser och servernamn tagits bort.",
   /* bug.what */ "Vad händer?",
-  /* bug.what_ph */ "Tanktemperaturen har visats 12800 °C i Home Assistant sedan i morse.",
   /* bug.need_text */ "Beskriv först vad som händer — en eller två meningar är nog.",
   /* bug.continue */ "Skapa rapport",
   /* bug.step2_title */ "Kontrollera rapporten",
@@ -88,7 +84,6 @@ I18N.sv = localeValues([
   /* src.delta */ (d, u) => `Avvikelse ${d}${u ? " " + u : ""}`,
   /* src.disagree */ "De två källorna är oense om detta tillstånd",
   /* conn.homehub */ "HomeHub",
-  /* conn.searching */ "Söker…",
   /* group.Modbus */ "Modbus",
   /* conn.title */ "Anslutningar",
   /* conn.offline */ "Frånkopplad",
@@ -157,8 +152,6 @@ I18N.sv = localeValues([
   /* service.state.observing */ "MÄTER",
   /* service.state.limited */ "DELVIS",
   /* service.state.interrupted */ "PAUSAD",
-  /* service.row.window */ "Registrerat hittills",
-  /* service.row.reason */ "Varför denna status?",
   /* service.reason.unsupported_profile */ "Den här modellen ger inte alla mätvärden som behövs.",
   /* service.reason.compressor_not_running */ "Kompressorn är inte igång.",
   /* service.reason.unsupported_or_unknown_mode */ "Normal rumsuppvärmning är inte bekräftad.",
@@ -189,6 +182,26 @@ I18N.sv = localeValues([
   /* check.status.experimental */ "TESTVIS",
   /* check.status.unavailable */ "EJ AKTUELL",
   /* check.status.no_window */ "INGET MÄTFÖNSTER",
+  /* check.dhw.maximum */ "Registrerat maximum",
+  /* check.dhw.measurement */ "Nettoavkylning under en timme vid tankgivare R5T.",
+  /* check.dhw.hint */ "En timme utan registrerade pump-/tappningsmarkörer nådde projektets vägledande tröskel.",
+  /* check.dhw.before_snapshot */ (d) => `${d} före ögonblicksbilden`,
+  /* check.dhw.marker_yes */ "registrerad",
+  /* check.dhw.marker_no */ "inte registrerad",
+  /* check.dhw.pump */ "Intern pump",
+  /* check.dhw.draw */ "Tappningsliknande fall",
+  /* check.dhw.previous */ "Föregående avslutade mätfönster",
+  /* check.dhw.next */ "Nästa avslutade mätfönster",
+  /* check.dhw.timeline_unavailable */ "Mätfönster med tider är inte tillgängliga. Ingen historik härleds från summorna.",
+  /* check.dhw.timeline_empty */ "Inga avslutade tidsstämplade mätfönster i denna 24-timmarsvy.",
+  /* check.dhw.chart_title */ "Avkylning per avslutat mätfönster",
+  /* check.dhw.timed_scope */ (n) => `Mätfönster med tider sedan omstart/nollställning: ${n}, upp till 24 h. Maxvärdet och antalen kan även bygga på sparade timdata, inte bara de visade mätfönstren.`,
+  /* check.dhw.blank */ "Tomt: inget avslutat tidsstämplat mätfönster tillgängligt, inte noll avkylning. Markörer visar förekomst, inte varaktighet.",
+  /* check.dhw.snapshot */ "Ögonblicksbild",
+  /* check.dhw.stale */ "Aktuella mätvärden för tankavsvalningen saknas eller är inaktuella; avslutade mätfönster förblir historiska observationer.",
+  /* check.dhw.limit */ "R5T mäter en punkt i en skiktad tank, inte tankens energi. Pump- och tappningsliknande markörer bevisar varken orsak eller vattenuttag.",
+  /* check.dhw.basis */ "Dataunderlag",
+  /* check.dhw.energy */ "Räkneexempel · inte uppmätt energi",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Exempel för en timme: 200 l vatten svalnar jämnt med ${a} K/h → ${b} kWh värme; återvärmning ${c}–${d} kWh el vid antagen COP 2,5–3 (värme ÷ el). Inte uppmätt energi.`,
   /* check.detail.dhw_context */ (a, b, c) => `Timfönster: intern pump ${a}; tappningsliknande fall ${b}; omärkt ≥0,8 K/h ${c}. Kan överlappa.`,
   /* check.detail.value_label */ "Mätning:",
@@ -242,6 +255,49 @@ I18N.sv = localeValues([
   /* check.cycling.no_timed_runs */ "Inga starttider har registrerats under den här timmen.",
   /* check.cycling.run_details_unavailable */ "Tider för enskilda körningar saknas för den här timmen.",
   /* check.cycling.saved_starts */ (s) => `Av dessa kommer ${s} från timvärden före omstarten.`,
+  /* check.cycling.short_runs */ (n) => `${n} < 5 min`,
+  /* check.cycling.col_stop */ "Varför den stannade",
+  /* check.cycling.stop_low_flow */ "Framledning över mål · lågt flöde",
+  /* check.cycling.stop_low_rps */ "Framledning över mål · lågt varvtal",
+  /* check.cycling.stop_req_off */ "Kompressorbehov upphörde",
+  /* check.cycling.stop_tgt_drop */ "Måltemperatur sänkt",
+  /* check.cycling.stop_defrost */ "Pausad för avfrostning",
+  /* check.cycling.stop_defrost_done */ "Avfrostning klar",
+  /* check.cycling.stop_dhw */ "Växlade till varmvatten",
+  /* check.cycling.stop_normal_dhw */ "Varmvattenkörning avslutad",
+  /* check.cycling.stop_normal */ "Normalt stopp",
+  /* check.cycling.out_cond */ (v) => ` (${v} ute)`,
+  /* check.cycling.find_low_flow */ (minFlow, typ) => `Korta körningar, lågt flöde: över mål på min (${minFlow}${typ}).`,
+  /* check.cycling.find_low_rps */ (flow, cond) => `Korta körningar, lågt varv${cond}: över mål tidigt (${flow}).`,
+  /* check.cycling.find_control */ "Styrstopp: behov av eller mål sänkt.",
+  /* check.cycling.find_defrost_dhw */ (cond) => `Avfrostn. & VV${cond}: paus för avfrostning och VV.`,
+  /* check.cycling.find_defrost */ (cond) => `Avfrostning${cond}: paus för avfrostning.`,
+  /* check.cycling.find_dhw */ "Varmvatten: paus för VV.",
+  /* check.cycling.find_steady */ (flow) => flow ? `Stadig värme: min. ${flow}.` : "Stadig värme.",
+  /* check.cycling.pause_tag */ (d) => ` efter ${d} paus`,
+  /* check.cycling.cond_tag */ (lwt, tgt) => tgt ? `framledning ${lwt}, mål ${tgt}` : `framledning ${lwt}`,
+  /* check.cycling.from_tag */ (prev) => ` från ${prev}`,
+  /* check.cycling.rwt_tag */ (rwt) => `retur ${rwt}`,
+  /* check.cycling.typ_tag */ (typ) => `, vanligtvis ${typ}`,
+  /* check.cycling.s_cool */ (at, pause, lwt, tgt) => `Start ${at}${pause}: framledning ${lwt}, mål ${tgt}, behov på.`,
+  /* check.cycling.s_req */ (at, pause, cond) => `Start ${at}${pause} med behov på${cond}.`,
+  /* check.cycling.s_tgt */ (at, pause, prev, tgt, cond) => `Start ${at}${pause}: mål höjt${prev} till ${tgt}${cond}.`,
+  /* check.cycling.s_defrost_after */ (at, pause, cond) => `Fortsatte ${at}${pause}, avfrostning klar${cond}.`,
+  /* check.cycling.s_dhw_after */ (at, pause, cond) => `Fortsatte ${at}${pause}, varmvatten klart${cond}.`,
+  /* check.cycling.s_defrost */ (at, pause) => `Start ${at}${pause} för avfrostning.`,
+  /* check.cycling.s_dhw */ (at, pause, cond) => `Start ${at}${pause} för varmvatten${cond}.`,
+  /* check.cycling.s_gen */ (at, pause, cond) => `Start ${at}${pause}${cond}.`,
+  /* check.cycling.e_low_flow */ (to, lwt, tgt, rwt, flow, typ) => `Stopp ${to}: framledning ${lwt} över mål ${tgt}${rwt} vid ${flow}${typ}.`,
+  /* check.cycling.e_low_rps */ (to, lwt, tgt, rwt, flow, rps) => `Stopp ${to}: framledning ${lwt} över mål ${tgt}${rwt} vid ${flow} och ${rps}.`,
+  /* check.cycling.e_req */ (to, vals) => `Stopp ${to}: behov av${vals}.`,
+  /* check.cycling.e_tgt */ (to, prev, tgt, vals) => `Stopp ${to}: mål sänkt${prev} till ${tgt}${vals}.`,
+  /* check.cycling.e_defrost_run */ (to, vals) => `Avfrostning klar ${to}${vals}.`,
+  /* check.cycling.e_defrost_pause */ (to, vals) => `Stopp ${to} för avfrostning${vals}.`,
+  /* check.cycling.e_dhw */ (to, vals) => `Stopp ${to}: byte till varmvatten${vals}.`,
+  /* check.cycling.e_norm */ (to, vals) => `Slut ${to}${vals}.`,
+  /* check.cycling.e_ongoing */ "Aktiv vid senaste mätning.",
+  /* check.cycling.cause_unavailable */ "Inga detaljer",
+  /* check.cycling.cause_since_boot */ "Orsaker till start och stopp registreras först från senaste omstarten.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -285,7 +341,17 @@ I18N.sv = localeValues([
   /* service.metric.eev */ "Expansionsventilkommando",
   /* service.metric.hp */ "Högtryck",
   /* service.metric.lp */ "Lågtryck",
+  /* check.hydronic.labels */ "Vattentemperaturskillnad|Pumpkommando|Observerat / lämpligt / kvalificerat|Beläggens tider|Kvalificerade tider|Nu|Datamängd|Timblock|Mål för vattnets temperaturskillnad",
+  /* check.hydronic.reasons */ "Kvalificerat av projektfiltret|Diagnostik av|Ingen aktuell källa|Ogiltigt mätvärde|Pump av|Varmvattenväg|Tillsatsvärmare rapporterad på|Återstående uppstart|Observationsklocka saknas|Källa ändrad|Diagnostiksamtycke ändrat|Räknargräns nådd|Inaktiverat för denna uppstart|Kvalificering okänd",
+  /* check.hydronic.limits */ "Regulatorfaser kan inte observeras|Pumpkommando saknas|Väntar på återställning",
+  /* check.hydronic.counts */ (w, c) => `Vattenavläsningar ${w} · kommandoavläsningar ${c}`,
+  /* check.hydronic.states */ "Obekräftad källa|Daterad|Odaterad|Ofullständiga 24 h|Väntar på lagring|Räknare mättade: undre gränser",
+  /* check.hydronic.loss */ (n) => `Rapporter om lagringsförlust ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Framledningsskillnad (värmepump minus blandad krets): ${d} · ${s} · mätvärden: ${n}. Blandningssyfte okänt; värmeförlust kräver fler mätvärden.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · medel ${b} · max. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "inkluderad avläsning" : "inkluderade avläsningar"}`,
+  /* service.metric.input_none */ "Ingen vald ingång",
+  /* service.metric.meta_limit */ "Antalen är inkluderade avläsningar, inte tidstäckning. En vald ingång bevisar inte en aktuell avläsning.",
   /* service.limit.special_phases_unavailable */ "Reglerfaser",
   /* service.limit.temperature_context_incomplete */ "Temperaturkontext",
   /* service.limit.pressure_sides_incomplete */ "Trycksida/or",
@@ -785,7 +851,6 @@ I18N.sv = localeValues([
   /* wx.longitude */ "Longitud",
   /* wx.waiting */ "Väntar på prognos",
   /* wx.fetching */ "Hämtar Open-Meteo-prognos…",
-  /* wx.unavailable */ "Otillgänglig",
   /* wx.error */ "Fel i Open-Meteo-prognosen",
   /* wx.detail.status */ "Status:",
   /* wx.status.fresh */ "Uppdaterad",
@@ -869,7 +934,6 @@ I18N.sv = localeValues([
   /* board.btninv */ "Aktiv vid LOW — knappen drar stiftet till GND",
   /* board.hint */ "Håll knappen intryckt i 5 sekunder för att återställa fabriksinställningarna. Om historikjournalen inte är redo raderas ingenting. Återställningen raderar Wi-Fi-inställningar och övriga inställningar, sparad historik, tillståndstider, den råa kraschdumpen och den sparade posten för MQTT-rensning. Inställningarna för kort, LED och knapp behålls om möjligt. Om raderingen misslyckas kan en del data redan ha raderats. Enheten startar om först när all radering har lyckats. Kontrollera /diag om återställningen inte startar eller slutförs. Välj «Ingen» om ingen knapp är ansluten.",
   /* card.hardware */ "Maskinvara",
-  /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
   /* card.hw_btn */ (pin) => `GPIO${pin}`,
   /* card.hw_board_m5stack */ "M5Stack AtomS3 Lite är ett kompakt ESP32-S3-kort med inbyggd WS2812 RGB-status-LED.",
@@ -898,7 +962,6 @@ I18N.sv = localeValues([
   /* card.diagnostics */ "Anläggningsdiagnos",
   /* card.diagnostics_help */ "Aktiverar 24-timmars anläggningsdiagnos, värmekurvediagnos och tilläggskällor som rumstemperatur, väderprognos och cirkulationspumpens effekt.",
   /* diagnostics.off */ "Av",
-  /* diagnostics.on */ "På",
   /* diagnostics.saved_on */ "Anläggningsdiagnos aktiverad — insamling startar nu",
   /* diagnostics.saved_off */ "Anläggningsdiagnos avaktiverad — insamling stoppad",
   /* probe.toggle */ "Protokolldiagnos",
@@ -1015,6 +1078,8 @@ I18N.sv = localeValues([
   /* lang.saved */ "Språk sparat",
   /* check.detail.dhw_reason.blind_modbus */ "avläsningar saknas: Modbus svarar inte eller avläsningen pausad",
   /* check.detail.source_stale_modbus */ "Inget färskt Modbus-prov; aktuellt tillstånd okänt. Historik behålls.",
+  /* mb.flow_scale_help */ "Obekräftad /100-skalning (sökning/reserv); jämför L/min med enheten. Undantagen från flödesanimation, ΔT, effekt och 24h-test.",
+  /* hist.modbus_flow_unverified */ "Obekräftad Modbus /100-skalning (väntar/reserv); jämför med enheten.",
   /* wf.label */ "Värmefaktor",
   /* wf.short.partial */ "prel.",
   /* wf.short.limited */ "begr.",
@@ -1178,13 +1243,7 @@ INSPECT_I18N.sv = inspectValues(
       : "Pump/flöde bevisar inte cirkulation i rumsgrenen."], // heat
     ["Rumsdrift", "Rumsuppvärmning eller -kylning", "Normal rumsdriftssignal; inte termostatbegäran eller bevis på kompressordrift."], // spaceh
     ["Rumstemperatur", 0, "Referenszonens temperatur och mål; betydelsen beror på givarplaceringen."], // room
-    ["Cirkulationspump", "Cirkulationspumpens hastighet", "Driver gemensam krets/vald 3WV-gren och kan gå efter kompressorstopp; tolka med flödet.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Pumpen rapporterar stopp men ${fmt1(d.flow)} l/min mäts; extern pump, eftergång eller signalmotsägelse är möjlig.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `${fmt0(d.pump)} %; ${fmt1(d.flow)} l/min.` : `${fmt0(d.pump)} %; flödesmätning saknas och cirkulation är inte bekräftad.`
-      : waterMoving(d) ? `Inget pumpvarvtal; ${fmt1(d.flow)} l/min mäts.`
-      : d.pumpOn === true ? d.flow != null ? `Pump aktiv, men bara ${fmt1(d.flow)} l/min; cirkulation ej bekräftad.` : "Pump aktiv; flödesmätning saknas."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pump stoppad; ${fmt1(d.flow)} l/min visas, cirkulation ej bekräftad.` : "Pump stoppad; flödesmätning saknas."
-      : `Pumpstatus osäker; ${fmt1(d.flow)} l/min bevisar inte cirkulation.`], // pump
+    ["Cirkulationspump", "Cirkulationspump", "Inverterad X10A-signal (0 = max, 100 = stopp, [0, 100] → 100–0 %) mäter inga RPM och bevisar inte rotation, tryckhöjd eller flöde; läs PÅ/AV och flöde separat.", (d) => pumpNowText(d, [(n) => `Pumpkommando ${n} %.`, "Pumpstatus är PÅ.", "Pumpen rapporterar stopp (AV).", "Pumpens PÅ/AV-status är okänd.", (n) => `Uppmätt flöde ${n} l/min.`, "Ingen flödesmätning.", "Rapporterat AV motsäger flödet; extern pump, eftergång eller föråldrade signaler möjlig.", "Cirkulation är inte bekräftad."])], // pump
     [(d) => pelMeasured(d) ? "Eleffekt · HomeHub" : "Uppskattad eleffekt", "Eleffekt", (d) => pelMeasured(d)
       ? "HomeHub-ingång 51; kalibrering, mätpunkt och inkluderade värmare är inte offentligt belagda."
       : "COP/EER-underlag: CT antar 230 V/fas utan känd spänning/effektfaktor; växelriktarström avser kompressorn.", (d) => d.pelHeld ? "Växelriktarströmmen är gammal efter stopp; el/verkningsgrad döljs."
@@ -1207,8 +1266,6 @@ INSPECT_I18N.sv = inspectValues(
     ["Vattenflöde", 0, "Gemensamt vattenflöde; miniminivån beror på modell och ska tolkas med pump/tryck."], // flow
     ["Flödesvakt", 0, "Binär X10A-status; mäter inte l/min eller bekräftar minimiflöde.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? d.flow == null ? "X10A-status aktiv; flödesmätning saknas." : `X10A-status aktiv; jämför pump och ${fmt1(d.flow)} l/min.` : d.flow == null ? "X10A-status inaktiv; flödesmätning saknas." : `X10A-status inaktiv; jämför ${fmt1(d.flow)} l/min och 7H/C0.`], // flow_switch
     ["Vattentryck", 0, "Vattentryck, inte köldmedietryck; tillåtet intervall beror på modell/installation."], // wp
-    ["X10A-serviceport", "X10A-datakälla", "Trådbunden skrivskyddad X10A-anslutning; värden visas i blått."], // x10a
-    ["Modbus TCP", "Modbus-datakälla", "Oberoende skrivskyddad Modbus TCP-anslutning (HomeHub/Altherma 4); värden i petrol."], // modbus
   ],
 );
 
@@ -1291,7 +1348,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
   ["R4T-retur till PHE; bedöm ΔT med flöde, kompressor och läge, inte en universell 5 K-regel."], // 35
   ["Vattenflöde i gemensam krets; minimum beror på modell/läge och lågt värde kan utlösa 7H."], // 36
   ["Hydraultryck: många handböcker kräver >1 bar; vid ≤1,0 bar gäller handboken för exakt modell."], // 37
-  ["Inverterat pumpkommando: 0 är maxhastighet och 100 är stopp."], // 38
+  ["Inverterat X10A-kommando: 0 = max, 100 = stopp ([0, 100] → 100–0 %). Mäter inga RPM och bevisar inte rotation, tryckhöjd eller flöde; läs PÅ/AV och flöde separat."], // 38
   ["Pumpstatus; bevisar inte nyttig värme och kan vara aktiv utan kompressor. Jämför flödet."], // 39
   ["Status för pumpen i en konfigurerad solvärmekrets."], // 40
   ["Angiven hastighet för pumpen som profilen namnger."], // 41
@@ -1391,7 +1448,7 @@ MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Vid luckor i mätningarna kan vissa starter saknas i räkningen.", "Det finns inget fast normalt antal starter. Med tillräckliga data bedömer den här kontrollen avslutade värmekörningar på minst 10 minuter i genomsnitt som tillräckligt långa."], // health_cycling
   ["Avfrostning", "≥3 parade, >15% av kompressorns drifttid där både kompressor- och avfrostningsstatus kan läsas. Intern regel, inte Daikin; fuktighet och hela värmeväxlarens temperatur saknas."], // health_defrost
   ["24-timmars vattentryckskurva i sluten hydraulkrets (X10A, 5-minutersminima).", "Kurvhänvisning: >1,0 bar normalt, ≤1,0 bar lågt, ≤0,5 bar kritiskt (diagnos vid ≥60 s i följd). Tillåtet påfyllnings- och drifttryck beror på exakt modellmanual och anläggningshöjd; värdet ensamt bevisar varken läckage eller fel."], // health_pressure
-  ["Flöde efter 60 s pump", "Gräns kräver samma modell/läge/förhållanden; inte nominellt eller bevis på för lågt flöde."], // health_flow
+  ["Lägsta flöde efter 60 s kontinuerlig drift av intern pump; separat: stickprovsviktad statistik för vattentemperaturskillnad, flöde och pumpkommando efter 600 s uppvärmningsstart.", "Inte nominellt flöde eller bevis på dellast. Avser den gemensamma vattenvärmeväxlaren. Pumpkommando mäter inte varvtal eller lyfthöjd. 600 s projektfilter (luckor ≤15 s) visar inte stabil drift; ingen måljämförelse eller hydraulisk orsak."], // health_flow
   ["BUH/BSH ON-tid", "inte energi eller bevis på onödig värme."], // health_heater
   ["5 experimentella räknare", "jämförbara ökningar; luckor/reset utesluts. Stabilitet utesluter inte begränsning eller bevisar orsak."], // health_retries
   ["RAM 24 h: stabilt eller återhämtade fall; varaktigt fall, möjlig läcka; kompatibel omstart med ström kan behålla RAM-kurvan. Annars bara daterade kompatibla 5 min från flashjournal efter tidssynk; steg på 5 min kan dölja korta stopp; öppna/senaste osparade kan saknas."], // free_heap

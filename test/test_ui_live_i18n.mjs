@@ -154,7 +154,7 @@ function assertPersistentBannerRepaints(name, status) {
   });
   assert.equal(idleModbus.mode, "mode.dhw", "the HomeHub DHW flag remains the mode headline");
   assert.equal(idleModbus.status, "sys.standby",
-    "Modbus-only DHW with every activity witness off must say that the plant is not running without repeating header pill status");
+    "Modbus-only DHW with every activity witness off must say that the plant is not running without repeating link status");
   assert.equal(idleModbus.tone, "idle",
     "Modbus-only DHW standby must mute the dot instead of treating a known mode as active");
 

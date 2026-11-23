@@ -1,13 +1,10 @@
-// translation-source: 6e972a2b4ae88155965a5f3be3d4db1e55237b0aaa203b0f7b4b2df64578e5c3
+// translation-source: 21658cb9aa5673bd6390bf55b45b1a1a9849fc5a5439233310598402221f0c32
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
-  /* sys.x10a_down */ "X10A hors ligne",
-  /* sys.mb_carrying */ "Mode de fonctionnement inconnu — relevés Modbus",
   /* sys.mb_only */ "X10A hors ligne — relevés Modbus",
-  /* sys.mb_source */ "X10A hors ligne · Modbus",
   /* mode.stop */ "Arrêt",
   /* mode.heat */ "Chauffage",
   /* mode.cool */ "Rafraîchissement",
@@ -64,7 +61,6 @@ I18N.fr = localeValues([
   /* bug.title */ "Signaler un bogue",
   /* bug.intro */ "Décrivez brièvement le problème. L’appareil ajoutera son état, ses relevés et son journal après avoir supprimé les noms de réseau, les adresses et les noms de serveur.",
   /* bug.what */ "Ce qui se passe",
-  /* bug.what_ph */ "Depuis ce matin, la température du ballon indique 12800 °C dans Home Assistant.",
   /* bug.need_text */ "Décrivez d’abord ce qui se passe — une ou deux phrases suffisent.",
   /* bug.continue */ "Préparer le rapport",
   /* bug.step2_title */ "Vérifier le rapport",
@@ -88,7 +84,6 @@ I18N.fr = localeValues([
   /* src.delta */ (d, u) => `Différence ${d}${u ? " " + u : ""}`,
   /* src.disagree */ "Les deux sources ne concordent pas sur cet état",
   /* conn.homehub */ "HomeHub",
-  /* conn.searching */ "Recherche…",
   /* group.Modbus */ "Modbus",
   /* conn.title */ "Connexions",
   /* conn.offline */ "Hors ligne",
@@ -157,8 +152,6 @@ I18N.fr = localeValues([
   /* service.state.observing */ "ENREGISTRE",
   /* service.state.limited */ "PARTIEL",
   /* service.state.interrupted */ "EN PAUSE",
-  /* service.row.window */ "Enregistré jusqu’ici",
-  /* service.row.reason */ "Pourquoi cet état ?",
   /* service.reason.unsupported_profile */ "Ce modèle ne fournit pas toutes les mesures nécessaires.",
   /* service.reason.compressor_not_running */ "Le compresseur ne fonctionne pas.",
   /* service.reason.unsupported_or_unknown_mode */ "Chauffage normal des locaux non confirmé.",
@@ -189,6 +182,26 @@ I18N.fr = localeValues([
   /* check.status.experimental */ "À L’ESSAI",
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "AUCUNE FENÊTRE",
+  /* check.dhw.maximum */ "Maximum enregistré",
+  /* check.dhw.measurement */ "Refroidissement net sur une heure à la sonde R5T du ballon.",
+  /* check.dhw.hint */ "Une heure sans indice de pompe ou de puisage enregistré a atteint le seuil indicatif du projet.",
+  /* check.dhw.before_snapshot */ (d) => `${d} avant l’instantané`,
+  /* check.dhw.marker_yes */ "enregistré",
+  /* check.dhw.marker_no */ "non enregistré",
+  /* check.dhw.pump */ "Pompe interne",
+  /* check.dhw.draw */ "Chute évoquant un puisage",
+  /* check.dhw.previous */ "Fenêtre terminée précédente",
+  /* check.dhw.next */ "Fenêtre terminée suivante",
+  /* check.dhw.timeline_unavailable */ "Fenêtres horodatées indisponibles. Aucun historique n’est déduit des totaux.",
+  /* check.dhw.timeline_empty */ "Aucune fenêtre horodatée terminée disponible dans cette vue sur 24 h.",
+  /* check.dhw.chart_title */ "Refroidissement par fenêtre terminée",
+  /* check.dhw.timed_scope */ (n) => `Fenêtres horodatées depuis le redémarrage/la remise à zéro : ${n}, sur 24 h au plus. Le maximum et les décomptes peuvent aussi provenir de données horaires sauvegardées, pas seulement des fenêtres tracées.`,
+  /* check.dhw.blank */ "Vide : aucune fenêtre horodatée terminée disponible, pas un refroidissement nul. Les marques indiquent une présence, pas une durée.",
+  /* check.dhw.snapshot */ "Instantané",
+  /* check.dhw.stale */ "Les mesures actuelles du refroidissement du ballon ECS manquent ou sont périmées ; les fenêtres terminées restent des observations historiques.",
+  /* check.dhw.limit */ "R5T mesure un point du ballon stratifié, pas son énergie. Les indices de pompe et de puisage ne prouvent ni la cause ni une consommation d’eau.",
+  /* check.dhw.basis */ "Détail des données",
+  /* check.dhw.energy */ "Exemple de calcul · pas d’énergie mesurée",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Exemple sur une heure : 200 l d’eau refroidis uniformément à ${a} K/h → ${b} kWh de chaleur ; recharge de ${c}–${d} kWh électriques à COP supposé 2,5–3 (chaleur ÷ électricité). Pas d’énergie mesurée.`,
   /* check.detail.dhw_context */ (a, b, c) => `Fenêtres : pompe interne ${a} ; chute évoquant un puisage ${b} ; sans indice ≥0,8 K/h ${c}. Recoupement possible.`,
   /* check.detail.value_label */ "Valeur :",
@@ -242,6 +255,49 @@ I18N.fr = localeValues([
   /* check.cycling.no_timed_runs */ "Aucune heure de démarrage relevée sur cette période.",
   /* check.cycling.run_details_unavailable */ "Les horaires des cycles individuels sont indisponibles pour cette heure.",
   /* check.cycling.saved_starts */ (s) => `Sur ce total, ${s} proviennent des relevés horaires d’avant le redémarrage.`,
+  /* check.cycling.short_runs */ (n) => `${n} < 5 min`,
+  /* check.cycling.col_stop */ "Raison de l’arrêt",
+  /* check.cycling.stop_low_flow */ "Départ au-dessus de la consigne · faible débit",
+  /* check.cycling.stop_low_rps */ "Départ au-dessus de la consigne · bas régime",
+  /* check.cycling.stop_req_off */ "Fin de demande compresseur",
+  /* check.cycling.stop_tgt_drop */ "Consigne abaissée",
+  /* check.cycling.stop_defrost */ "Pause pour dégivrage",
+  /* check.cycling.stop_defrost_done */ "Dégivrage terminé",
+  /* check.cycling.stop_dhw */ "Passage en ECS",
+  /* check.cycling.stop_normal_dhw */ "Cycle ECS terminé",
+  /* check.cycling.stop_normal */ "Arrêt normal",
+  /* check.cycling.out_cond */ (v) => ` (${v} ext.)`,
+  /* check.cycling.find_low_flow */ (minFlow, typ) => `Cycles courts, faible débit : sur consigne en min (${minFlow}${typ}).`,
+  /* check.cycling.find_low_rps */ (flow, cond) => `Cycles courts, bas régime${cond} : sur consigne tôt (${flow}).`,
+  /* check.cycling.find_control */ "Arrêt sur contrôle : demande off ou consigne baissée.",
+  /* check.cycling.find_defrost_dhw */ (cond) => `Dégivrage & ECS${cond} : pause pour dégivrage et ECS.`,
+  /* check.cycling.find_defrost */ (cond) => `Dégivrage${cond} : pause pour dégivrer.`,
+  /* check.cycling.find_dhw */ "ECS : pause pour ECS.",
+  /* check.cycling.find_steady */ (flow) => flow ? `Chauffage stable : min. ${flow}.` : "Chauffage stable.",
+  /* check.cycling.pause_tag */ (d) => ` après ${d} de pause`,
+  /* check.cycling.cond_tag */ (lwt, tgt) => tgt ? `départ ${lwt}, consigne ${tgt}` : `départ ${lwt}`,
+  /* check.cycling.from_tag */ (prev) => ` de ${prev}`,
+  /* check.cycling.rwt_tag */ (rwt) => `retour ${rwt}`,
+  /* check.cycling.typ_tag */ (typ) => `, habituel ${typ}`,
+  /* check.cycling.s_cool */ (at, pause, lwt, tgt) => `Début ${at}${pause} : départ ${lwt}, consigne ${tgt}, demande active.`,
+  /* check.cycling.s_req */ (at, pause, cond) => `Début ${at}${pause} : demande active${cond}.`,
+  /* check.cycling.s_tgt */ (at, pause, prev, tgt, cond) => `Début ${at}${pause} : consigne relevée${prev} à ${tgt}${cond}.`,
+  /* check.cycling.s_defrost_after */ (at, pause, cond) => `Reprise ${at}${pause}, fin de dégivrage${cond}.`,
+  /* check.cycling.s_dhw_after */ (at, pause, cond) => `Reprise ${at}${pause}, fin d’ECS${cond}.`,
+  /* check.cycling.s_defrost */ (at, pause) => `Début ${at}${pause} pour dégivrage.`,
+  /* check.cycling.s_dhw */ (at, pause, cond) => `Début ${at}${pause} pour ECS${cond}.`,
+  /* check.cycling.s_gen */ (at, pause, cond) => `Début ${at}${pause}${cond}.`,
+  /* check.cycling.e_low_flow */ (to, lwt, tgt, rwt, flow, typ) => `Arrêt ${to} : départ ${lwt} au-dessus de ${tgt}${rwt} à ${flow}${typ}.`,
+  /* check.cycling.e_low_rps */ (to, lwt, tgt, rwt, flow, rps) => `Arrêt ${to} : départ ${lwt} au-dessus de ${tgt}${rwt} à ${flow} et ${rps}.`,
+  /* check.cycling.e_req */ (to, vals) => `Arrêt ${to} : demande coupée${vals}.`,
+  /* check.cycling.e_tgt */ (to, prev, tgt, vals) => `Arrêt ${to} : consigne abaissée${prev} à ${tgt}${vals}.`,
+  /* check.cycling.e_defrost_run */ (to, vals) => `Fin de dégivrage ${to}${vals}.`,
+  /* check.cycling.e_defrost_pause */ (to, vals) => `Arrêt ${to} pour dégivrage${vals}.`,
+  /* check.cycling.e_dhw */ (to, vals) => `Arrêt ${to} : passage en ECS${vals}.`,
+  /* check.cycling.e_norm */ (to, vals) => `Fin ${to}${vals}.`,
+  /* check.cycling.e_ongoing */ "Actif au dernier relevé.",
+  /* check.cycling.cause_unavailable */ "Sans détails",
+  /* check.cycling.cause_since_boot */ "Les causes de démarrage et d'arrêt sont enregistrées à partir du dernier redémarrage.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -285,7 +341,17 @@ I18N.fr = localeValues([
   /* service.metric.eev */ "Commande de vanne de détente",
   /* service.metric.hp */ "Haute pression",
   /* service.metric.lp */ "Basse pression",
+  /* check.hydronic.labels */ "Écart thermique de l’eau|Commande de pompe|Observé / admissible / qualifié|Dates des preuves|Dates qualifiées|Actuel|Ensemble retenu|Tranches horaires|Écart cible de température de l’eau",
+  /* check.hydronic.reasons */ "Qualifié par le filtre du projet|Diagnostic désactivé|Aucune source actuelle|Mesure invalide|Pompe arrêtée|Circuit ECS|Appoint électrique signalé actif|Démarrage restant|Horloge d’observation indisponible|Source modifiée|Autorisation de diagnostic modifiée|Limite du compteur atteinte|Désactivé pour ce démarrage|Qualification inconnue",
+  /* check.hydronic.limits */ "Phases du régulateur non observables|Commande de pompe indisponible|Restauration en attente",
+  /* check.hydronic.counts */ (w, c) => `Mesures d’eau ${w} · mesures de commande ${c}`,
+  /* check.hydronic.states */ "Source non confirmée|Daté|Non daté|Couverture de 24 h incomplète|Enregistrement en attente|Compteurs saturés : bornes inférieures",
+  /* check.hydronic.loss */ (n) => `Signalements de perte de stockage ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Écart de température de départ (pompe à chaleur moins circuit mélangé) : ${d} · ${s} · mesures : ${n}. But inconnu ; pertes de chaleur : plus de mesures requises.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · moyenne ${b} · max. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "mesure retenue" : "mesures retenues"}`,
+  /* service.metric.input_none */ "Aucune entrée sélectionnée",
+  /* service.metric.meta_limit */ "Les nombres sont des mesures retenues, pas une couverture temporelle. Une entrée sélectionnée ne prouve pas une mesure actuelle.",
   /* service.limit.special_phases_unavailable */ "Phases du régulateur",
   /* service.limit.temperature_context_incomplete */ "Contexte de température",
   /* service.limit.pressure_sides_incomplete */ "Côté(s) de pression",
@@ -785,7 +851,6 @@ I18N.fr = localeValues([
   /* wx.longitude */ "Longitude",
   /* wx.waiting */ "En attente des prévisions",
   /* wx.fetching */ "Récupération des prévisions Open-Meteo…",
-  /* wx.unavailable */ "Indisponible",
   /* wx.error */ "Erreur de prévisions Open-Meteo",
   /* wx.detail.status */ "État :",
   /* wx.status.fresh */ "Actuelles",
@@ -869,7 +934,6 @@ I18N.fr = localeValues([
   /* board.btninv */ "Actif au niveau bas (le bouton relie la broche à GND)",
   /* board.hint */ "Pour rétablir les réglages d’usine, maintenez le bouton enfoncé 5 s. La réinitialisation n’efface rien si le journal d’historique n’est pas prêt. Elle efface les réglages Wi-Fi et les autres paramètres, l’historique enregistré, les durées d’état, le vidage mémoire brut après un plantage et le registre sauvegardé pour le nettoyage MQTT. Les réglages de la carte, de la LED et du bouton sont conservés si possible. En cas d’échec d’un effacement, une partie des données peut déjà avoir été effacée. L’appareil ne redémarre que si tous les effacements réussissent. Si la réinitialisation ne démarre pas ou ne se termine pas, consultez /diag. Si aucun bouton n’est raccordé, choisissez « Aucun ».",
   /* card.hardware */ "Matériel",
-  /* card.hw_off */ "Aucun",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
   /* card.hw_btn */ (pin) => `GPIO${pin}`,
   /* card.hw_board_m5stack */ "La M5Stack AtomS3 Lite est une carte ESP32-S3 compacte dotée d’une LED d’état RGB WS2812 intégrée.",
@@ -898,7 +962,6 @@ I18N.fr = localeValues([
   /* card.diagnostics */ "Diagnostic de l’installation",
   /* card.diagnostics_help */ "Active la vérification de l’installation sur 24 heures, le diagnostic de la courbe de chauffe et des sources supplémentaires telles que la température ambiante, les prévisions météorologiques et la puissance de la pompe de circulation.",
   /* diagnostics.off */ "Désactivé",
-  /* diagnostics.on */ "Activé",
   /* diagnostics.saved_on */ "Diagnostic de l’installation activé — la collecte commence maintenant",
   /* diagnostics.saved_off */ "Diagnostic de l’installation désactivé — collecte arrêtée",
   /* probe.toggle */ "Diagnostic du protocole",
@@ -1015,6 +1078,8 @@ I18N.fr = localeValues([
   /* lang.saved */ "Langue enregistrée",
   /* check.detail.dhw_reason.blind_modbus */ "relevés manquants : Modbus sans réponse ou interrogation en pause",
   /* check.detail.source_stale_modbus */ "Pas de mesure Modbus récente ; état actuel inconnu. Historique conservé.",
+  /* mb.flow_scale_help */ "Échelle /100 non confirmée (sonde/repli) ; comparez L/min à l’afficheur. Exclu du flux, ΔT, puissance et bilan 24 h.",
+  /* hist.modbus_flow_unverified */ "Échelle Modbus /100 non vérifiée (sonde/repli) ; comparez à l’unité.",
   /* wf.label */ "Facteur de performance",
   /* wf.short.partial */ "prov.",
   /* wf.short.limited */ "lim.",
@@ -1163,13 +1228,7 @@ INSPECT_I18N.fr = inspectValues(
       : "Pompe et débit actuels ne prouvent aucune circulation dans la branche locaux."], // heat
     ["Fonctionnement des locaux", "Fonctionnement chauffage ou froid des locaux", "Signal de fonctionnement normal chauffage/froid des locaux. Ce n’est pas la demande du thermostat et il ne prouve pas à lui seul le fonctionnement du compresseur."], // spaceh
     ["Température ambiante", 0, "Température et consigne de la zone de référence ; elles dépendent du placement du capteur."], // room
-    ["Circulateur", "Vitesse du circulateur", "Fait circuler l’eau dans la boucle commune et la branche choisie par la 3WV. Il peut rester actif compresseur arrêté pour post-circulation, protection ou égalisation ; vitesse et débit se lisent ensemble.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `La pompe interne se dit arrêtée, mais le capteur mesure ${fmt1(d.flow)} l/min. Circulation externe, post-circulation ou signaux divergents sont possibles ; vérifier les deux.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Vitesse ${fmt0(d.pump)} % ; débit mesuré ${fmt1(d.flow)} l/min.` : `Vitesse ${fmt0(d.pump)} %, mais aucun débit ; circulation non confirmée.`
-      : waterMoving(d) ? `Le capteur mesure ${fmt1(d.flow)} l/min sans vitesse de pompe exploitable.`
-      : d.pumpOn === true ? d.flow != null ? `Pompe active, mais seulement ${fmt1(d.flow)} l/min ; circulation non établie.` : "Pompe active, mais débit absent ; circulation non confirmée."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pompe arrêtée ; capteur à ${fmt1(d.flow)} l/min. Ces signaux ne prouvent aucune circulation.` : "Pompe arrêtée et aucun débit disponible."
-      : `État pompe non fiable ; ${fmt1(d.flow)} l/min ne suffit pas à prouver la circulation.`], // pump
+    ["Circulateur", "Circulateur", "Signal X10A inversé (0 = max, 100 = arrêt, [0, 100] → 100–0 %) ; ne prouve ni RPM, ni rotation, hauteur ou débit. Lisez ON/OFF et débit séparément, même à l’arrêt.", (d) => pumpNowText(d, [(n) => `Commande pompe ${n} %.`, "État pompe ON.", "La pompe signale l’arrêt (OFF).", "État ON/OFF de la pompe inconnu.", (n) => `Débit mesuré ${n} l/min.`, "Aucune mesure de débit.", "L’état OFF signalé contredit le débit ; circulation externe, post-circulation ou signal obsolète possibles.", "Circulation non établie."])], // pump
     [(d) => pelMeasured(d) ? "Puissance électrique · HomeHub" : "Puissance électrique estimée", "Puissance électrique", (d) => pelMeasured(d)
       ? "Consommation annoncée par l’entrée HomeHub 51. L’UI ne la calcule pas, mais le guide public ne prouve ni étalonnage, ni point de mesure, ni appoints inclus ; ce n’est pas un compteur certifié de l’installation."
       : "Estimation pour COP/EER. Avec CT, toutes les phases déclarées sont sommées puis multipliées par 230 V supposés ; tension et facteur de puissance réels sont inconnus. Le courant d’onduleur ne couvre que le compresseur.", (d) => d.pelHeld ? "Compresseur arrêté : le courant d’onduleur vient du dernier cycle et n’est pas actuel ; puissance et rendement ne peuvent être indiqués."
@@ -1192,8 +1251,6 @@ INSPECT_I18N.fr = inspectValues(
     ["Débit", "Débit d’eau", "Débit du circuit commun. Le minimum dépend du modèle ; à lire avec pompe et pression."], // flow
     ["État du fluxostat", 0, "Entrée binaire X10A ; elle ne mesure pas les l/min ni le débit minimal.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A actif ; comparer avec pompe et ${fmt1(d.flow)} l/min.` : `X10A inactif ; pompe active, comparer ${fmt1(d.flow)} l/min et défauts 7H/C0.`], // flow_switch
     ["Pression d’eau", 0, "Pression du circuit hydraulique, pas du fluide frigorigène. La plage admise dépend du modèle et de l’installation ; consulter le manuel exact."], // wp
-    ["Port de service X10A", "Source de données X10A", "Liaison filaire X10A en lecture seule ; ses valeurs s’affichent en bleu."], // x10a
-    ["Modbus TCP", "Source de données Modbus", "Liaison Modbus TCP indépendante en lecture seule (HomeHub/Altherma 4) ; valeurs en pétrole."], // modbus
   ],
 );
 
@@ -1276,7 +1333,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
   ["Retour R4T au PHE ; évaluer le ΔT avec débit, compresseur et mode, jamais avec 5 K universels."], // 35
   ["Débit du circuit commun ; le minimum dépend du modèle et du mode, et une valeur basse peut causer 7H."], // 36
   ["Pression hydraulique : beaucoup de manuels exigent >1 bar ; à ≤1,0 bar consulter la notice du modèle exact."], // 37
-  ["Commande de pompe inversée : 0 est la vitesse maximale et 100 l’arrêt."], // 38
+  ["Commande X10A inversée : 0 = max, 100 = arrêt ([0, 100] → 100–0 %). Ne mesure pas les RPM ni ne prouve rotation, hauteur ou débit ; lisez ON/OFF et débit séparément."], // 38
   ["État pompe ; ne prouve pas la chaleur utile et peut agir sans compresseur : comparer au débit."], // 39
   ["État du circulateur d’un circuit solaire thermique configuré."], // 40
   ["Vitesse indiquée de la pompe nommée par ce profil."], // 41
@@ -1376,7 +1433,7 @@ MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Des mesures manquantes peuvent laisser certains démarrages non comptés.", "Il n’existe pas de nombre normal fixe de démarrages. Avec suffisamment de données, ce contrôle considère qu’une durée moyenne d’au moins 10 minutes est suffisante pour les cycles de chauffage terminés."], // health_cycling
   ["Dégivrage ", "≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
   ["Courbe 24 h de la pression d’eau du circuit hydraulique fermé (X10A, minimums sur 5 min).", "Repères sur la courbe : >1,0 bar normale, ≤1,0 bar basse, ≤0,5 bar critique (diagnostic dès 60 s continues). La pression de remplissage et de service admissible dépend du manuel exact de l’appareil et de la hauteur du réseau ; la mesure seule ne prouve ni fuite ni panne."], // health_pressure
-  ["Débit après 60 s de pompe", "Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow
+  ["Débit minimal après 60 s de marche continue de la pompe interne ; séparément : statistiques pondérées par échantillon d’écart thermique de l’eau, débit et commande de pompe après 600 s de mise en chauffe.", "Ni débit nominal ni preuve de charge partielle. Couvre l’échangeur à eau commun. La commande de pompe ne mesure ni vitesse ni hauteur manométrique. Filtre projet de 600 s (lacunes ≤15 s), sans prouver régime établi, comparaison cible ni cause hydraulique."], // health_flow
   ["Temps ON de BUH/BSH ", "pas énergie ni preuve de chaleur inutile."], // health_heater
   ["5 compteurs expérimentaux ", "hausses comparables ; lacunes/reset ignorés. Stabilité n’exclut pas limitation ni ne prouve cause."], // health_retries
   ["RAM 24 h stable, creux résorbés; baisse durable: fuite possible. Redémarrage compatible alimenté: courbe RAM possible. Sinon, journal flash requis: 5 min datées compatibles après synchro. Le pas de 5 min peut cacher un bref arrêt. Ouvert/récents non sauvés peuvent manquer."], // free_heap

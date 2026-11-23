@@ -581,18 +581,20 @@ inline constexpr bool history_journal_retry_due(bool paused, int64_t now_us,
 // trend sources close every five-minute bucket and both X10A and Modbus checkups write two records
 // per hour: each hour once when it completes, and at most once more in a late-completion replay.
 // The independent stop-context logical source adds four records/hour: close, seam coverage, late
-// stop revision, and one reset barrier. Both cycling traces add up to four slots per three-minute
+// stop revision, and one reset barrier. HYDR independently reserves four records/hour as a design
+// allowance for close, seam revision, reset barrier and shutdown partial hour; this is not a
+// measured maximum under unbounded churn. Both cycling traces add up to four slots per four-minute
 // checkpoint, and both fault traces add one slot per fifteen-minute checkpoint. Repeated explicit
 // resets or shutdowns consume wear reserve and can shorten retention.
 inline constexpr size_t HISTORY_FLASH_CYCLING_MAX_PARTS  = 4;
-inline constexpr size_t HISTORY_FLASH_CYCLING_INTERVAL_S = 180;
+inline constexpr size_t HISTORY_FLASH_CYCLING_INTERVAL_S = 240;
 inline constexpr size_t HISTORY_FLASH_FAULT_INTERVAL_S   = 900;
 inline constexpr size_t HISTORY_FLASH_FUTURE_HOURS       = 72;
 inline constexpr size_t HISTORY_FLASH_FUTURE_SAMPLES =
     HISTORY_FLASH_FUTURE_HOURS * 60u * 60u / HISTORY_DT_S;
 inline constexpr size_t HISTORY_FLASH_FUTURE_RECORDS =
     HISTORY_FLASH_FUTURE_SAMPLES * 4u +
-    (2u + 2u + 4u +
+    (2u + 2u + 4u + 4u +
      2u * (3600u / HISTORY_FLASH_CYCLING_INTERVAL_S * HISTORY_FLASH_CYCLING_MAX_PARTS) +
      2u * (3600u / HISTORY_FLASH_FAULT_INTERVAL_S)) *
         HISTORY_FLASH_FUTURE_HOURS;

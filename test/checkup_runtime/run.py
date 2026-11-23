@@ -35,7 +35,14 @@ CASES = [
     "stop_forget_during_report",
     "stop_forget_before_checkup_start", "stop_forget_report_lock_failure",
     "stop_forget_checkup_alloc_failure", "stop_unstarted_report_pending", "defrost_start_context",
-    "modbus_dual_source", "x10a_modbus_fault_trace_lifecycle",
+    "modbus_dual_source", "x10a_modbus_fault_trace_lifecycle", "modbus_flow_scale_gate",
+    "hydronic_waiting", "hydronic_population", "hydronic_age", "hydronic_expiry",
+    "hydronic_consent_lock", "hydronic_source_lock", "hydronic_shared_witness", "hydronic_shutdown",
+    "hydronic_reader_generation", "hydronic_pause_resume",
+    "x10a_cycling_run_contexts",
+    "dhw_trace_capture", "dhw_trace_pause", "dhw_trace_source_reset",
+    "dhw_trace_circulation_reset", "dhw_trace_forget", "dhw_trace_forget_before_start",
+    "dhw_trace_unavailable", "dhw_trace_forget_during_snapshot", "dhw_trace_reset_during_snapshot",
 ]
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -45,7 +52,10 @@ parser.add_argument("--sanitizer", choices=["none", "undefined"], default="none"
 args = parser.parse_args()
 ROOT = args.root.resolve()
 SOURCE = (ROOT / "main/checkup.cpp").resolve()
-STORE = (ROOT / "main/stop_observation_store.cpp").resolve()
+STORES = [
+    ("stop", (ROOT / "main/stop_observation_store.cpp").resolve()),
+    ("hydronic", (ROOT / "main/hydronic_observation_store.cpp").resolve()),
+]
 FIXTURE = (HERE / "fixture.cpp").resolve()
 if not SOURCE.is_file():
     parser.error("--root must contain main/checkup.cpp")
@@ -147,7 +157,8 @@ def preflight(tag, unit, required):
 
 
 fixture_deps = preflight("fixture", fixture_args(SOURCE), {FIXTURE, SOURCE})
-store_deps = preflight("store", [str(STORE)], {STORE})
+stores = [(tag, [str(path)], preflight(tag, [str(path)], {path})) for tag, path in STORES]
+store_deps = set().union(*(deps for _, _, deps in stores))
 inputs = fixture_deps | store_deps | {Path(__file__).resolve()}
 inputs.update((HERE / "stubs").rglob("*.h"))
 inputs.update((HERE / "stubs").rglob("*.hpp"))
@@ -161,7 +172,7 @@ def build(source, digest, tag):
     # the first dependency file. Check each object before linking or running any case.
     units = [
         ("fixture", fixture_args(source), (fixture_deps - {SOURCE}) | {source}),
-        ("store", [str(STORE)], store_deps),
+        *stores,
     ]
     expected_hashes = {path: before[path] for path in (fixture_deps | store_deps) - {SOURCE}}
     expected_hashes[source] = digest
@@ -190,8 +201,9 @@ def build(source, digest, tag):
 
 baseline = build(SOURCE, source_digest, "baseline")
 vacuity_controls = []
-for case in ["buh_unknown_case", "fault_unknown_case", "consent_sampling_unknown_case",
-             "consent_caller_unknown_case"]:
+for case in ["buh_unknown_case", "fault_unknown_case", "dhw_trace_unknown_case",
+             "consent_sampling_unknown_case",
+             "consent_caller_unknown_case", "hydronic_unknown_case"]:
     result = command([str(baseline), case], timeout=15)
     if result.returncode != 1 or "FAIL oracle=unknown_case case=" + case not in result.stdout:
         raise RuntimeError("Unknown case was not rejected: " + case + "\n" + result.stdout + result.stderr)
@@ -206,7 +218,7 @@ for case in CASES:
     print(result.stdout.strip(), flush=True)
 
 source_text = source_bytes.decode("utf-8")
-entry = "    uint32_t consent_epoch, bool profile_confirmed) {\n"
+entry = "                    uint32_t consent_epoch, bool profile_confirmed, int64_t sweep_started_us) {\n"
 guard = (
     "    if (!s_diagnostics_enabled.load(std::memory_order_acquire) ||\n"
     "        consent_epoch != s_diagnostics_epoch.load(std::memory_order_acquire))\n"
@@ -333,6 +345,120 @@ if source_text.count(defrost_observe) != 1:
 mutations.append(("gate_defrost_with_stop_read_fence",
                   source_text.replace(defrost_observe, "if (now >= s_stop_read_fence_us) " + defrost_observe),
                   "defrost_start_context", "defrost_start_sees_unreadable_sample_during_stop_read_fence"))
+cov_call = "const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile, basis);"
+if source_text.count(cov_call) != 1:
+    raise RuntimeError("Expected one Modbus coverage call with profile basis")
+mutations.append(("omit_modbus_basis_from_flow_coverage",
+                  source_text.replace(cov_call, "const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile);"),
+                  "modbus_flow_scale_gate", "fallback_basis_withholds_flow_check"))
+unverified_guard = "if (cov.flow && !cv.modbus_flow_scale_unverified) s.flow_ok = tenths(cv, s.flow_tenths);"
+if source_text.count(unverified_guard) != 1:
+    raise RuntimeError("Expected one Modbus unverified flow row guard")
+mutations.append(("admit_unverified_modbus_flow_row",
+                  source_text.replace(unverified_guard, "if (cov.flow) s.flow_ok = tenths(cv, s.flow_tenths);"),
+                  "modbus_flow_scale_gate", "unverified_row_49_never_enters_flow_min"))
+hydronic_record_call = "        const auto delta = logic::hydronic_record("
+hydronic_fence = "        sweep_started_us < s_hydronic_read_fence_us ||\n"
+hydronic_collect_call = (
+    "        const auto sample =\n"
+    "            logic::hydronic_collect(s_hydronic_inputs, values, count, rps_known, rps_running);"
+)
+hydronic_accepted_clock = "    const int64_t accepted_us = esp_timer_get_time();"
+hydronic_lock_sig = (
+    "__attribute__((noinline)) void record_hydronic_locked(const CachedValue* values, size_t count,\n"
+    "                                                      bool rps_known, bool rps_running,\n"
+    "                                                      uint32_t source_generation,\n"
+    "                                                      int64_t  sweep_started_us) {"
+)
+hydronic_lock_call = (
+    "    record_hydronic_locked(v, n, rps_known, rps_running, source_generation, sweep_started_us);"
+)
+hydronic_reader_guard = (
+    "    if (s_x10a.source_confirmed && !hp_poll_generation_matches(s_hydronic_generation)) {"
+)
+hydronic_pause_reset = "        s_hydronic.reset_continuity();"
+for label, anchor in [
+    ("hydronic record call", hydronic_record_call),
+    ("hydronic reader fence", hydronic_fence),
+    ("hydronic shared witness", hydronic_collect_call),
+    ("hydronic accepted clock", hydronic_accepted_clock),
+    ("hydronic lock signature", hydronic_lock_sig),
+    ("hydronic lock call", hydronic_lock_call),
+    ("hydronic reader generation guard", hydronic_reader_guard),
+    ("hydronic pause continuity reset", hydronic_pause_reset),
+]:
+    if source_text.count(anchor) != 1:
+        raise RuntimeError("Expected one production " + label + " anchor")
+mutations += [
+    ("force_hydronic_early_qualification",
+     source_text.replace(hydronic_record_call,
+                         "        s_hydronic.eligible_since_us = accepted_us - 600000000;\n" +
+                         hydronic_record_call),
+     "hydronic_population", "hydronic_not_before_600s"),
+    ("omit_hydronic_reader_fence",
+     source_text.replace(hydronic_fence, ""),
+     "hydronic_expiry", "hydronic_expiry_fences_inflight"),
+    ("override_hydronic_shared_compressor",
+     source_text.replace(hydronic_collect_call,
+                         hydronic_collect_call.replace("rps_known, rps_running", "true, true")),
+     "hydronic_shared_witness", "hydronic_unknown_shared_witness_blocks"),
+    ("use_hydronic_prelock_admission_clock",
+     source_text.replace(
+         hydronic_lock_sig,
+         hydronic_lock_sig.replace("int64_t  sweep_started_us)",
+                                   "int64_t  sweep_started_us, int64_t prelock_now)"))
+     .replace(hydronic_lock_call,
+              "    record_hydronic_locked(v, n, rps_known, rps_running, source_generation, sweep_started_us, now);")
+     .replace(hydronic_accepted_clock, "    const int64_t accepted_us = prelock_now;"),
+     "hydronic_age", "hydronic_admission_clock_after_lock"),
+    ("omit_hydronic_reader_generation_guard",
+     source_text.replace(hydronic_reader_guard, "    if (false) {"),
+     "hydronic_reader_generation", "hydronic_source_epoch_reader_withdraws_before_reset"),
+    ("omit_hydronic_pause_continuity_reset",
+     source_text.replace(hydronic_pause_reset, "        /* omitted pause continuity reset */"),
+     "hydronic_pause_resume", "hydronic_same_gen_resume_restores_24h_population"),
+]
+
+# Exercise the actual production trace wiring and privacy fences, not a parallel implementation.
+for name, needle, replacement, occurrences, case, oracle in [
+    ("omit_dhw_trace_producer", "dhw_loss_step_traced(slot.dhw_state, slot.P().dhw.pending, s, dhw_trace, now);",
+     "dhw_loss_step_traced(slot.dhw_state, slot.P().dhw.pending, s, nullptr, now);", 2,
+     "dhw_trace_capture", "dhw_trace_both_real_source_windows"),
+    ("omit_dhw_trace_circulation_reset",
+     "    slot.P().dhw.reset();\n    slot.dhw_trace.reset();\n    // The independent reset",
+     "    slot.P().dhw.reset();\n    // The independent reset", 1,
+     "dhw_trace_circulation_reset", "dhw_trace_dhw_reset_discards_consuming_sample"),
+    ("omit_dhw_trace_producer_forget",
+     "auto* const dhw_trace = slot.dhw_trace_forgotten.load(std::memory_order_acquire)",
+     "auto* const dhw_trace = false", 2,
+     "dhw_trace_forget_before_start", "dhw_trace_forget_before_start_suppresses_both_producers"),
+    ("omit_dhw_trace_initial_output_clear", "    if (dhw_trace) dhw_trace->clear();\n", "", 1,
+     "dhw_trace_unavailable", "dhw_trace_absent_mutex_clears_output"),
+    ("ignore_dhw_wall_anchor_bracket",
+     "dhw_trace->window_end_s, before_us, after_us, unix_s, ms",
+     "dhw_trace->window_end_s, after_us, after_us, unix_s, ms", 1,
+     "dhw_trace_capture", "dhw_trace_ambiguous_clock_bracket_keeps_relative_window"),
+    ("omit_dhw_trace_final_withdrawal_guard",
+     "if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire))", "if (false)", 1,
+     "dhw_trace_forget_during_snapshot", "dhw_trace_withdrawal_during_clock_read_clears_captured_output"),
+    ("reuse_full_old_dhw_scope_while_reset_pending",
+     "!dhw_reset_pending &&\n                    logic::dhw_loss_scope_full(",
+     "logic::dhw_loss_scope_full(", 1,
+     "dhw_trace_circulation_reset", "dhw_pending_reset_collects_despite_full_old_scope"),
+]:
+    if source_text.count(needle) != occurrences:
+        raise RuntimeError("Expected production DHW mutation anchor: " + name)
+    mutations.append((name, source_text.replace(needle, replacement), case, oracle))
+
+dhw_snapshot_call = "    if (dhw_trace) copy_dhw_trace_locked(slot, dhw_trace, now_us, source_fresh);\n"
+apply_freshness = "    logic::checkup_apply_freshness(report, source_fresh, source_age_s, span_s);\n"
+if source_text.count(dhw_snapshot_call) != 1 or source_text.count(apply_freshness) != 1:
+    raise RuntimeError("Expected production DHW snapshot and report freshness anchors")
+mutations.append(("read_dhw_snapshot_after_aggregate",
+                  source_text.replace(dhw_snapshot_call, "").replace(
+                      apply_freshness, dhw_snapshot_call + apply_freshness),
+                  "dhw_trace_reset_during_snapshot",
+                  "dhw_reset_during_clock_read_retires_aggregate_and_progress"))
 negative_controls = []
 mutant_hashes = {}
 for name, contents, case, oracle in mutations:

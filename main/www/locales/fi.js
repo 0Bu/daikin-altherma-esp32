@@ -1,13 +1,10 @@
-// translation-source: 6e972a2b4ae88155965a5f3be3d4db1e55237b0aaa203b0f7b4b2df64578e5c3
+// translation-source: 21658cb9aa5673bd6390bf55b45b1a1a9849fc5a5439233310598402221f0c32
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
-  /* sys.x10a_down */ "X10A ei yhteyttä",
-  /* sys.mb_carrying */ "Toimintatila tuntematon — arvot Modbusista",
   /* sys.mb_only */ "X10A ei yhteyttä — arvot Modbusista",
-  /* sys.mb_source */ "X10A ei yhteyttä · Modbus",
   /* mode.stop */ "Pysäytetty",
   /* mode.heat */ "Lämmitys",
   /* mode.cool */ "Jäähdytys",
@@ -64,7 +61,6 @@ I18N.fi = localeValues([
   /* bug.title */ "Ilmoita viasta",
   /* bug.intro */ "Kuvaile ongelma lyhyesti. Laite lisää tilansa, mittausarvot ja lokin poistettuaan verkkojen nimet, osoitteet ja palvelinnimet.",
   /* bug.what */ "Mitä tapahtuu",
-  /* bug.what_ph */ "Säiliön lämpötila on näyttänyt Home Assistantissa 12800 °C tänä aamuna.",
   /* bug.need_text */ "Kuvaile ensin tapahtuma — yksi tai kaksi lausetta riittää.",
   /* bug.continue */ "Valmistele raportti",
   /* bug.step2_title */ "Tarkista raportti",
@@ -88,7 +84,6 @@ I18N.fi = localeValues([
   /* src.delta */ (d, u) => `Ero ${d}${u ? " " + u : ""}`,
   /* src.disagree */ "Lähteiden tilat eivät täsmää",
   /* conn.homehub */ "HomeHub",
-  /* conn.searching */ "Etsitään…",
   /* group.Modbus */ "Modbus",
   /* conn.title */ "Yhteydet",
   /* conn.offline */ "Ei yhteyttä",
@@ -157,8 +152,6 @@ I18N.fi = localeValues([
   /* service.state.observing */ "TALLENTAA",
   /* service.state.limited */ "OSITTAIN",
   /* service.state.interrupted */ "TAUOLLA",
-  /* service.row.window */ "Tallennettu tähän asti",
-  /* service.row.reason */ "Miksi tämä tila?",
   /* service.reason.unsupported_profile */ "Tämä malli ei tarjoa kaikkia tarvittavia mittauksia.",
   /* service.reason.compressor_not_running */ "Kompressori ei käy.",
   /* service.reason.unsupported_or_unknown_mode */ "Tavallista tilalämmitystä ei ole vahvistettu.",
@@ -189,6 +182,26 @@ I18N.fi = localeValues([
   /* check.status.experimental */ "KOKEILU",
   /* check.status.unavailable */ "EI KOSKE",
   /* check.status.no_window */ "EI MITTAUSJAKSOA",
+  /* check.dhw.maximum */ "Tallennettu enimmäisarvo",
+  /* check.dhw.measurement */ "Tunnin nettojäähtyminen varaajan R5T-anturilla.",
+  /* check.dhw.hint */ "Tunti ilman tallennettuja pumpun tai vedenoton merkkejä saavutti projektin ohjeellisen kynnyksen.",
+  /* check.dhw.before_snapshot */ (d) => `${d} ennen tilannekuvaa`,
+  /* check.dhw.marker_yes */ "tallennettu",
+  /* check.dhw.marker_no */ "ei tallennettu",
+  /* check.dhw.pump */ "Sisäinen pumppu",
+  /* check.dhw.draw */ "Vedenoton kaltainen lasku",
+  /* check.dhw.previous */ "Edellinen valmis mittausjakso",
+  /* check.dhw.next */ "Seuraava valmis mittausjakso",
+  /* check.dhw.timeline_unavailable */ "Ajoitettuja jaksoja ei ole saatavilla. Historiaa ei päätellä summista.",
+  /* check.dhw.timeline_empty */ "Ei valmiita aikaleimattuja mittausjaksoja tässä 24 tunnin näkymässä.",
+  /* check.dhw.chart_title */ "Jäähtyminen valmiissa jaksossa",
+  /* check.dhw.timed_scope */ (n) => `Ajoitetut jaksot käynnistyksen/nollauksen jälkeen: ${n}, enintään 24 h. Maksimi ja lukumäärät voivat perustua myös tallennettuihin tuntitietoihin, eivät vain piirrettyihin jaksoihin.`,
+  /* check.dhw.blank */ "Tyhjä kohta: valmista aikaleimattua jaksoa ei ole saatavilla, ei nollajäähtymistä. Merkit kertovat esiintymisestä, eivät kestosta.",
+  /* check.dhw.snapshot */ "Tilannekuva",
+  /* check.dhw.stale */ "Varaajan jäähtymisen nykyiset mittaustiedot puuttuvat tai ovat vanhentuneet; päättyneet jaksot säilyvät historiallisina havaintoina.",
+  /* check.dhw.limit */ "R5T mittaa yhtä kohtaa kerrostuneessa varaajassa, ei varaajan energiaa. Pumpun ja vedenoton kaltaiset merkit eivät osoita syytä eivätkä vedenottoa.",
+  /* check.dhw.basis */ "Tietojen perusteet",
+  /* check.dhw.energy */ "Laskuesimerkki · ei mitattua energiaa",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Tunnin esimerkki: 200 l vettä jäähtyy tasaisesti ${a} K/h → ${b} kWh lämpöä; korvaamiseen ${c}–${d} kWh sähköä oletetulla COP 2,5–3 (lämpö ÷ sähkö). Ei mitattu energia.`,
   /* check.detail.dhw_context */ (a, b, c) => `Jaksot: sisäinen pumppu ${a}; vedenoton kaltainen lasku ${b}; merkitön ≥0,8 K/h ${c}. Voivat olla päällekkäisiä.`,
   /* check.detail.value_label */ "Arvo:",
@@ -242,6 +255,49 @@ I18N.fi = localeValues([
   /* check.cycling.no_timed_runs */ "Tältä tunnilta ei ole kirjattu käynnistysaikoja.",
   /* check.cycling.run_details_unavailable */ "Tältä tunnilta ei ole saatavilla yksittäisten käyntijaksojen aikoja.",
   /* check.cycling.saved_starts */ (s) => `Näistä ${s} on tallennettu tuntitietoihin ennen uudelleenkäynnistystä.`,
+  /* check.cycling.short_runs */ (n) => `${n} < 5 min`,
+  /* check.cycling.col_stop */ "Miksi pysähtyi",
+  /* check.cycling.stop_low_flow */ "Menovesi yli tavoitteen · pieni virtaus",
+  /* check.cycling.stop_low_rps */ "Menovesi yli tavoitteen · matala kierros",
+  /* check.cycling.stop_req_off */ "Kompressoripyyntö päättyi",
+  /* check.cycling.stop_tgt_drop */ "Tavoitelämpötilaa laskettiin",
+  /* check.cycling.stop_defrost */ "Tauko sulatusta varten",
+  /* check.cycling.stop_defrost_done */ "Sulatus päättyi",
+  /* check.cycling.stop_dhw */ "Vaihto käyttöveteen",
+  /* check.cycling.stop_normal_dhw */ "Käyttövesijakso päättyi",
+  /* check.cycling.stop_normal */ "Normaali pysäytys",
+  /* check.cycling.out_cond */ (v) => ` (ulkolämpö ${v})`,
+  /* check.cycling.find_low_flow */ (minFlow, typ) => `Lyhyet jaksot, pieni virtaus: yli tavoitteen minuuteissa (${minFlow}${typ}).`,
+  /* check.cycling.find_low_rps */ (flow, cond) => `Lyhyet jaksot, matala kierros${cond}: yli tavoitteen pian (${flow}).`,
+  /* check.cycling.find_control */ "Ohjauspysäytys: pyyntö pois tai tavoite laski.",
+  /* check.cycling.find_defrost_dhw */ (cond) => `Sulatus & käyttövesi${cond}: tauko sulatukselle ja käyttövedelle.`,
+  /* check.cycling.find_defrost */ (cond) => `Sulatus${cond}: tauko sulatukselle.`,
+  /* check.cycling.find_dhw */ "Käyttövesi: tauko käyttövedelle.",
+  /* check.cycling.find_steady */ (flow) => flow ? `Tasainen lämmitys: min. ${flow}.` : "Tasainen lämmitys.",
+  /* check.cycling.pause_tag */ (d) => `, tauko ${d}`,
+  /* check.cycling.cond_tag */ (lwt, tgt) => tgt ? `menovesi ${lwt}, tavoite ${tgt}` : `menovesi ${lwt}`,
+  /* check.cycling.from_tag */ (prev) => ` ${prev} →`,
+  /* check.cycling.rwt_tag */ (rwt) => `paluu ${rwt}`,
+  /* check.cycling.typ_tag */ (typ) => `, yleensä ${typ}`,
+  /* check.cycling.s_cool */ (at, pause, lwt, tgt) => `Käynnistys ${at}${pause}: menovesi ${lwt}, tavoite ${tgt}, pyyntö päällä.`,
+  /* check.cycling.s_req */ (at, pause, cond) => `Käynnistys ${at}${pause}: pyyntö päällä${cond}.`,
+  /* check.cycling.s_tgt */ (at, pause, prev, tgt, cond) => `Käynnistys ${at}${pause}: tavoite nostettu${prev} ${tgt}${cond}.`,
+  /* check.cycling.s_defrost_after */ (at, pause, cond) => `Jatkui ${at}${pause} sulatuksen jälkeen${cond}.`,
+  /* check.cycling.s_dhw_after */ (at, pause, cond) => `Jatkui ${at}${pause} käyttöveden jälkeen${cond}.`,
+  /* check.cycling.s_defrost */ (at, pause) => `Käynnistys ${at}${pause} sulatukselle.`,
+  /* check.cycling.s_dhw */ (at, pause, cond) => `Käynnistys ${at}${pause} käyttövedelle${cond}.`,
+  /* check.cycling.s_gen */ (at, pause, cond) => `Käynnistys ${at}${pause}${cond}.`,
+  /* check.cycling.e_low_flow */ (to, lwt, tgt, rwt, flow, typ) => `Pysäytys ${to}: menovesi ${lwt} yli tavoitteen ${tgt}${rwt}, virtaus ${flow}${typ}.`,
+  /* check.cycling.e_low_rps */ (to, lwt, tgt, rwt, flow, rps) => `Pysäytys ${to}: menovesi ${lwt} yli tavoitteen ${tgt}${rwt}, ${flow} ja ${rps}.`,
+  /* check.cycling.e_req */ (to, vals) => `Pysäytys ${to}: pyyntö pois${vals}.`,
+  /* check.cycling.e_tgt */ (to, prev, tgt, vals) => `Pysäytys ${to}: tavoite laskettu${prev} ${tgt}${vals}.`,
+  /* check.cycling.e_defrost_run */ (to, vals) => `Sulatus päättyi ${to}${vals}.`,
+  /* check.cycling.e_defrost_pause */ (to, vals) => `Pysäytys ${to} sulatukselle${vals}.`,
+  /* check.cycling.e_dhw */ (to, vals) => `Pysäytys ${to}: vaihto käyttöveteen${vals}.`,
+  /* check.cycling.e_norm */ (to, vals) => `Päättyi ${to}${vals}.`,
+  /* check.cycling.e_ongoing */ "Kävi vielä viime lukemalla.",
+  /* check.cycling.cause_unavailable */ "Ei tarkempia tietoja",
+  /* check.cycling.cause_since_boot */ "Käynnistys- ja pysäytyssyyt tallennetaan vasta viimeisimmästä uudelleenkäynnistyksestä alkaen.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · keskiarvo ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -285,7 +341,17 @@ I18N.fi = localeValues([
   /* service.metric.eev */ "Paisuntaventtiilin ohjaus",
   /* service.metric.hp */ "Korkeapaine",
   /* service.metric.lp */ "Matalapaine",
+  /* check.hydronic.labels */ "Veden lämpötilaero|Pumpun ohjaus|Havaittu / kelvollinen / hyväksytty|Havaintojen ajat|Hyväksyttyjen tietojen ajat|Nyt|Otosjoukko|Tuntilohkot|Veden lämpötilaeron tavoite",
+  /* check.hydronic.reasons */ "Hyväksytty projektisuodattimella|Diagnostiikka pois|Ei nykyistä lähdettä|Virheellinen lukema|Pumppu pois|Käyttövesireitti|Lisälämmitin ilmoittaa olevansa päällä|Käynnistymistä jäljellä|Havaintokello puuttuu|Lähde vaihtunut|Diagnostiikkasuostumus muuttunut|Laskurin raja saavutettu|Poistettu käytöstä tämän käynnistyksen ajaksi|Kelpoisuus tuntematon",
+  /* check.hydronic.limits */ "Säätimen vaiheita ei voi havaita|Pumpun ohjaus puuttuu|Palautus odottaa",
+  /* check.hydronic.counts */ (w, c) => `Vesilukemia ${w} · ohjauslukemia ${c}`,
+  /* check.hydronic.states */ "Lähdettä ei vahvistettu|Aikaleima tiedossa|Aikaleima puuttuu|Vajaa 24 h|Tallennus odottaa|Laskurit täynnä: alarajat",
+  /* check.hydronic.loss */ (n) => `Tallennushäviöilmoitukset ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Menoveden lämpötilaero (lämpöpumppu miinus sekoituspiiri): ${d} · ${s} · lukemia: ${n}. Sekoituksen syy tuntematon; lämpöhäviö vaatii lisää mittauksia.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · keskiarvo ${b} · maks. ${c} ${d}`,
+  /* service.metric.samples */ n => `Hyväksyttyjä lukemia: ${n}`,
+  /* service.metric.input_none */ "Ei valittua tuloa",
+  /* service.metric.meta_limit */ "Määrät ovat hyväksyttyjä lukemia, eivät ajallista kattavuutta. Valittu tulo ei todista nykyistä lukemaa.",
   /* service.limit.special_phases_unavailable */ "Ohjausvaiheet",
   /* service.limit.temperature_context_incomplete */ "Lämpötilatausta",
   /* service.limit.pressure_sides_incomplete */ "Painepuoli/puolet",
@@ -785,7 +851,6 @@ I18N.fi = localeValues([
   /* wx.longitude */ "Pituusaste",
   /* wx.waiting */ "Odottaa ennustetta",
   /* wx.fetching */ "Haetaan Open-Meteo-ennustetta…",
-  /* wx.unavailable */ "Ei saatavilla",
   /* wx.error */ "Open-Meteo-ennustevirhe",
   /* wx.detail.status */ "Tila:",
   /* wx.status.fresh */ "Ajantasainen",
@@ -869,7 +934,6 @@ I18N.fi = localeValues([
   /* board.btninv */ "Aktiivinen LOW (painike kytkee nastan GND:hen)",
   /* board.hint */ "Palauta tehdasasetukset pitämällä painiketta painettuna 5 s. Jos historialoki ei ole valmis, palautus ei poista mitään. Se poistaa Wi-Fi-asetukset ja muut asetukset, tallennetun historian, tilojen kestot, kaatumisen raa’an muistivedoksen ja tallennetun MQTT-siivoustietueen. Kortin, LEDin ja painikkeen asetukset säilytetään, jos mahdollista. Jos poisto epäonnistuu, osa tiedoista on voitu jo poistaa. Laite käynnistyy uudelleen vain, jos kaikki poistot onnistuvat. Jos palautus ei ala tai jää kesken, tarkista /diag. Jos painiketta ei ole kytketty, valitse ”Ei mitään”.",
   /* card.hardware */ "Laitteisto",
-  /* card.hw_off */ "Ei mitään",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
   /* card.hw_btn */ (pin) => `GPIO${pin}`,
   /* card.hw_board_m5stack */ "M5Stack AtomS3 Lite on pieni ESP32-S3-kortti, jossa on WS2812 RGB -tila-LED.",
@@ -898,7 +962,6 @@ I18N.fi = localeValues([
   /* card.diagnostics */ "Laitteistodiagnostiikka",
   /* card.diagnostics_help */ "Ottaa käyttöön 24 tunnin tarkastuksen, lämmityskäyrän diagnostiikan sekä huonelämpötilan, sääennusteen ja kiertopumpun tehon kaltaiset lisälähteet.",
   /* diagnostics.off */ "Pois",
-  /* diagnostics.on */ "Päällä",
   /* diagnostics.saved_on */ "Laitteistodiagnostiikka käytössä · keruu alkaa nyt",
   /* diagnostics.saved_off */ "Laitteistodiagnostiikka poistettu · keruu pysäytetty",
   /* probe.toggle */ "Protokolladiagnostiikka",
@@ -1015,6 +1078,8 @@ I18N.fi = localeValues([
   /* lang.saved */ "Kieli tallennettu",
   /* check.detail.dhw_reason.blind_modbus */ "lukemat puuttuvat: Modbus ei vastaa tai lukeminen keskeytetty",
   /* check.detail.source_stale_modbus */ "Ei tuoretta Modbus-näytettä; nykytila tuntematon. Historia säilyy.",
+  /* mb.flow_scale_help */ "Vahvistamaton /100-skaalaus (kesken/vara); vertaa L/min näyttöön. Ei animaatioon, ΔT:hen, tehoon tai 24 h testiin.",
+  /* hist.modbus_flow_unverified */ "Vahvistamaton Modbus /100 -skaalaus (kesken/vara); vertaa näyttöön.",
   /* wf.label */ "Lämpökerroin",
   /* wf.short.partial */ "alust.",
   /* wf.short.limited */ "raj.",
@@ -1124,7 +1189,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["R4T yhteisessä PHE-paluussa; R1T−R4T on PHE:n ΔT, ei lämmönluovuttajien eikä yleinen 5 K sääntö."], // 35
   ["Yhteisen vesipiirin virtaus; vähimmäinen riippuu mallista ja tilasta, ja pieni virtaus voi aiheuttaa 7H:n."], // 36
   ["Suljetun vesipiirin paine; sallittu alue on mallikohtainen, ja arvolla ≤1,0 bar tarkista kyseisen mallin ohje."], // 37
-  ["Pumpun nopeuskomento käyttää käänteistä asteikkoa: 0 = täysi nopeus, 100 = pysäytys."], // 38
+  ["Käänteinen X10A-komento: 0 = maks, 100 = seis ([0, 100] → 100–0 %). Ei mittaa RPM:ää eikä todista pyörimistä, nostokorkeutta tai virtaamaa; lue PÄÄLLÄ/POIS ja virtaama erikseen."], // 38
   ["Vesikiertopumpun tila; käynti ei yksin todista hyödyllistä lämmönsiirtoa, joten vertaa virtaukseen."], // 39
   ["Määritetyn aurinkolämpöpiirin pumppu, eri kuin lämpöpumpun vesikiertopumppu."], // 40
   ["Profiilin nimeämän pumpun nopeus; asteikko ja piiri ovat mallikohtaisia, todellinen virtaus on eri arvo."], // 41
@@ -1224,7 +1289,7 @@ MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Mittauskatkojen vuoksi osa käynnistyksistä voi jäädä laskematta.", "Käynnistysten määrälle ei ole kiinteää normaaliarvoa. Kun tietoja on riittävästi, tämä tarkistus pitää päättyneiden lämmitysjaksojen vähintään 10 minuutin keskiarvoa riittävänä."], // health_cycling
   ["Sulatus", "≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
   ["24 tunnin vedenpainekäyrä suljetussa vesipiirissä (X10A, 5 minuutin minimit).", "Käyrän ohje: >1,0 bar normaali, ≤1,0 bar matala, ≤0,5 bar kriittinen (diagnoosi ≥60 s yhtäjaksoisesti). Sallittu täyttö- ja käyttöpaine riippuu mallin ohjeesta ja järjestelmän korkeudesta; lukema yksin ei todista vuotoa tai vikaa."], // health_pressure
-  ["Virtaus 60 s pumpun jälkeen", "Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow
+  ["Alin virtaus 60 s jatkuvan sisäisen pumpun käynnin jälkeen; erikseen: näytteillä painotetut veden lämpötilaeron, virtauksen ja pumpun ohjauksen tilastot 600 s lämmityksen alkujakson jälkeen.", "Ei nimellisvirtaus eikä osakuorman todiste. Koskee yhteistä vesipuolen lämmönvaihdinta. Pumpun ohjaus ei ole pyörimisnopeus eikä nostokorkeus. 600 s projektisuodatin (katkot ≤15 s) ei todista vakaata käyntiä, tavoitevertailua eikä hydraulista syytä."], // health_flow
   ["BUH/BSH ON-aika", "ei energiaa tai turhan lämmön todiste."], // health_heater
   ["5 kokeellista laskuria", "vertailukelpoiset nousut; aukot/reset pois. Vakaus ei sulje pois rajoitusta eikä todista syytä."], // health_retries
   ["RAM 24 h vakaa, laskut palautuvat; jatkuva lasku: ehkä vuoto; sopiva käynnistys virta päällä voi säilyttää RAM-käyrän. Muuten vain flash-lokin sopivat päivätyt 5 min aikasynkin jälkeen; 5 min välein lyhyt katko ei aina näy; avoin/uusimmat tallentamatta voivat puuttua."], // free_heap
@@ -1362,13 +1427,7 @@ INSPECT_I18N.fi = inspectValues(
       : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Jälkilämmin vesi kiertää tiloihin. R1T ${degC(d.lwt)}; luovuttimien jälkeen ei ole anturia. Tämä ei ole aktiivista jäähdytystä.` : `Vesi menee ${activeSpaceKind(d) === "cool" ? "jäähdytys" : activeSpaceKind(d) === "heat" ? "lämmitys" : "tila"}piiriin. R1T ${degC(d.lwt)}; luovuttimien jälkeen ei ole anturia.` : "Pumppu ja virtaama eivät vahvista tilapiirin kiertoa."], // heat
     ["Tilalämmitys/-jäähdytys", "Tilalämmityksen tai -jäähdytyksen toiminta", "Tilapiirin normaalin lämmityksen/jäähdytyksen tila. Ei termostaattipyyntö eikä yksin vahvista kompressoria."], // spaceh
     ["Huonelämpötila", "Huonelämpötila", "Vertailuvyöhykkeen lämpötila; tarkastele tavoitteen ja tilan kanssa."], // room
-    ["Kiertovesipumppu", "Kiertovesipumpun nopeus", "Siirtää vettä yhteisessä piirissä ja 3WV:n valitsemalla reitillä. Voi käydä kompressorin seistessä jälkikierron tai suojauksen vuoksi; nopeus ei yksin vahvista virtaamaa.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Pumppu ilmoittaa pysähtyneensä, mutta anturi näyttää ${fmt1(d.flow)} l/min. Syynä voi olla ulkoinen kierto, jälkikäynti tai ristiriitainen/vanha signaali; tarkista molemmat.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Nopeus ${fmt0(d.pump)} %; virtaama ${fmt1(d.flow)} l/min.` : `Nopeus ${fmt0(d.pump)} %, mutta virtaamamittausta ei ole; kiertoa ei vahvistettu.`
-      : waterMoving(d) ? `Virtaama ${fmt1(d.flow)} l/min ilman käyttökelpoista pumppunopeutta.`
-      : d.pumpOn === true ? d.flow != null ? `Pumppu PÄÄLLÄ, mutta virtaama vain ${fmt1(d.flow)} l/min; kiertoa ei vahvistettu.` : "Pumppu PÄÄLLÄ, mutta virtaamamittausta ei ole; kiertoa ei vahvistettu."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pumppu pysähtynyt; anturi näyttää ${fmt1(d.flow)} l/min. Arvot eivät vahvista kiertoa.` : "Pumppu pysähtynyt, virtaamamittausta ei ole."
-      : `Luotettavaa pumpputilaa ei ole; ${fmt1(d.flow)} l/min ei vahvista kiertoa.`], // pump
+    ["Kiertovesipumppu", "Kiertovesipumppu", "Käänteinen X10A-signaali (0 = maks, 100 = seis, [0, 100] → 100–0 %); ei mittaa RPM:ää tai todista pyörimistä, nostokorkeutta tai virtaamaa. Lue PÄÄLLÄ/POIS ja virtaama erikseen.", (d) => pumpNowText(d, [(n) => `Pumpun ohjaus ${n} %.`, "Pumpun tila on PÄÄLLÄ.", "Pumppu ilmoittaa pysähdyksen (POIS).", "Pumpun PÄÄLLÄ/POIS-tila tuntematon.", (n) => `Mitattu virtaama ${n} l/min.`, "Ei virtaamamittausta.", "Ilmoitettu POIS on ristiriidassa virtaaman kanssa; ulkoinen kierto, jälkikäynti tai vanha signaali mahdollinen.", "Kiertoa ei ole vahvistettu."])], // pump
     [(d) => pelMeasured(d) ? "Sähköteho · HomeHub" : "Sähköteho (arvio)", "Sähköteho", (d) => pelMeasured(d) ? "HomeHub-rekisterin 51 sähköteho. Dokumentaatio ei vahvista kalibrointia, mittauskohtaa tai kaikkien lämmittimien sisältymistä; tämä ei ole sertifioitu järjestelmämittari." : "COP/EER-arvio: CT-vaiheiden summa × oletettu 230 V. Jännite ja tehokerroin ovat tuntemattomia; invertterivirta kattaa vain kompressorin ja CT-raja riippuu kytkennästä.", (d) => d.pelHeld ? "Kompressori on pysähtynyt, joten invertterivirta on edelliseltä käynniltä; sähkötehoa ja hyötysuhdetta ei voi ilmoittaa."
       : d.pel == null ? "Profiilissa ei ole nykyistä virtamittausta, joten COP/EER ei ole laskettavissa."
       : d.pelSrc === "MB" ? "Arvo HomeHub-rekisteristä 51; tarkkaa mittausrajaa ei ole dokumentoitu."
@@ -1384,8 +1443,6 @@ INSPECT_I18N.fi = inspectValues(
     ["Vesivirtaama", "Vesivirtaama", "Yhteisen piirin virtaama; vaadittu minimi riippuu mallista ja tilasta."], // flow
     ["Virtauskytkimen tila", "Virtauskytkimen tila", "X10A:n binääritila; ei mittaa l/min-arvoa eikä vahvista mallin minimivirtaamaa.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A PÄÄLLÄ; vertaa pumppuun ja arvoon ${fmt1(d.flow)} l/min.` : `X10A POIS; pumpun käydessä vertaa arvoa ${fmt1(d.flow)} l/min ja vikaa 7H/C0.`], // flow_switch
     ["Vedenpaine", "Vedenpaine", "Suljetun vesipiirin paine. Sallittu alue riippuu mallista, korkeuserosta ja paisuntasäiliöstä; katso ohjekirja."], // wp
-    ["X10A-huoltoportti", "X10A-tietolähde", "Langallinen vain luku -X10A-yhteys; arvot näkyvät sinisenä."], // x10a
-    ["Modbus TCP", "Modbus-tietolähde", "Itsenäinen vain luku -Modbus TCP -yhteys (HomeHub/Altherma 4); arvot petroolina."], // modbus
   ],
 );
 

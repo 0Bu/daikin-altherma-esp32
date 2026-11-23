@@ -44,8 +44,11 @@ struct CachedValue {
                                // the page is current (logic/ou_stale.hpp). /values says so
                                // beside the row.
     uint8_t modbus_definition =
-        0;             // immutable catalog row that decoded this Modbus value; 0 = none.
-                       // Uses a padding byte: provenance does not enlarge X10A snapshots.
+        0; // immutable catalog row that decoded this Modbus value; 0 = none.
+           // Uses a padding byte: provenance does not enlarge X10A snapshots.
+    bool modbus_flow_scale_unverified =
+        false;         // true when offset 49 (Flow rate) comes from an Altherma 4, probing, or
+                       // fallback sweep whose /100 EKRHH scaling has not been confirmed.
     uint16_t conv = 0; // the X10A row's converter id, in ValueDef's own type — the metadata
                        // its consumers need, and the reason none of the DERIVED facts are
                        // cached beside it: `conv_is_binary(conv)` says whether /values should

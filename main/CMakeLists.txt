@@ -21,14 +21,17 @@ idf_component_register(
         "env3.cpp"
         "history.cpp"
         "checkup.cpp"
+        "hydronic_observation_store.cpp"
         "stop_observation_store.cpp"
         "state_dwell.cpp"
         "http_server.cpp"
         "http_common.cpp"
         "http_client_diag.cpp"
         "http_deadline.cpp"
-        "http_status.cpp"
+        # Place http_status.cpp past Xtensa's 256 KiB l32r literal-pool island so its status
+        # helpers remain natively decoded by objdump while packed_config.py decodes http_config.cpp.
         "http_config.cpp"
+        "http_status.cpp"
         "http_ota.cpp"
         "mcp_server.cpp"
         "provisioning.cpp"
@@ -195,6 +198,7 @@ set_source_files_properties(
     http_deadline.cpp
     http_ota.cpp
     http_server.cpp
+    hydronic_observation_store.cpp
     mqtt_retirement_store.cpp
     provisioning.cpp
     safe_mode.cpp
@@ -235,7 +239,7 @@ set(UI_MINIFIER_VENDOR
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
 # Browsers do not consistently negotiate Brotli on this trusted-LAN HTTP origin. Keep gzip so the
 # payload's Content-Encoding is usable by every supported browser, and gate the measured response.
-set(UI_GZIP_MAX_BYTES 179200)
+set(UI_GZIP_MAX_BYTES 181248)
 idf_build_get_property(PYTHON PYTHON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
 file(STRINGS "${APP_JS_MANIFEST}" APP_JS_ENTRIES ENCODING UTF-8)

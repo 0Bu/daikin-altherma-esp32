@@ -3,8 +3,11 @@
 // whole-plant health claim while the C++ report remains technically conservative.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
+import { cyclingPollStopped, withChromiumAppearanceSlot, withCyclingCleanup } from "./test_browser_cycling.mjs";
 
 const i18nBase = readAppFragments(["i18n.js"]);
 const shippedLocales = JSON.parse(i18nBase.match(/const UI_LANGS = Object.freeze\((\[[^\n]+\])\)/)[1]);
@@ -17,6 +20,7 @@ const checkupSource = fs.readFileSync(new URL("../main/checkup.cpp", import.meta
 const pollSource = fs.readFileSync(new URL("../main/hp_poll.cpp", import.meta.url), "utf8");
 const modbusPollSource = fs.readFileSync(new URL("../main/hp_modbus.cpp", import.meta.url), "utf8");
 const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
+const hydronicSource = fs.readFileSync(new URL("../main/logic/hydronic_payload.hpp", import.meta.url), "utf8");
 
 // The executable card navigation test covers diagnosis opt-in and its order before Model.
 // GROUP_ORDER, independent of match precedence, determines the order of the live-value groups.
@@ -52,10 +56,39 @@ for (const key of [
   "draw_windows", "pump_windows", "quiet_high_windows",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
   "aborts", "best_aborted_s", "blocked", "abort_reasons",
+  "secondary_supply", "delta_k", "zone_context",
 ]) {
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
 }
+assert.match(statusSource,
+             /case logic::CheckupCheck::Flow:\s*tenths\("min_l_min", ck\.a\);\s*append_hydronic_status\(j, diag_effective\);/,
+             "flow check serializer must retain min_l_min and delegate hydronic details");
+assert.match(statusSource,
+             /if\s*\(diag_effective == DiagnosticsSource::Modbus\)\s*\{[\s\S]*?report\.observation\.partial\s*=\s*false;[\s\S]*?report\.observation\.restore_pending\s*=\s*false;[\s\S]*?report\.reason\s*=\s*logic::HydronicReason::None;[\s\S]*?\}\s*else\s*\{\s*report\s*=\s*checkup_hydronic_report\(\);\s*\}/,
+             "Modbus diagnostics mode must serialize an empty hydronic observation with reason_code 0 instead of leaking X10A data");
+for (const key of [
+  "confirmed", "current", "dated", "coverage_partial", "restore_pending", "persistence_pending",
+  "dropped", "observed_hours", "method", "window_s", "settling_s", "max_gap_s", "reason_code",
+  "reason", "scope", "weighting", "settling_remaining_s", "source_generation", "schema_fp",
+  "current_limitations_mask", "population_limitations_mask", "population_saturated",
+  "observed_s", "candidate_s", "qualified_s", "samples", "command_samples",
+  "first_evidence_unix_s", "last_evidence_unix_s", "first_accepted_unix_s", "last_accepted_unix_s",
+  "target_delta_k", "target_supported",
+]) {
+  assert.match(hydronicSource,
+               new RegExp(`(?:w\\.(?:flag|u64|sec|ts|key)|\\{)\\s*\\(?\\s*"${key}"`),
+               `missing hydronic serializer key ${key}`);
+}
+assert.match(hydronicSource,
+             /const bool\s+known\s*=\s*confirmed\s*&&\s*observation\.dated\s*&&\s*totals\.first_evidence_unix_us\s*>=\s*0;/,
+             "hydronic JSON ranges and dates must stay gated on confirmed dated history");
+assert.match(hydronicSource,
+             /w\.range\("spread_k",\s*"spread",\s*"k",\s*totals\.spread,\s*totals\.samples,\s*known\)/);
+assert.match(hydronicSource,
+             /w\.range\("flow_l_min",\s*"flow",\s*"l_min",\s*totals\.flow,\s*totals\.samples,\s*known\)/);
+assert.match(hydronicSource,
+             /w\.range\("pump_command_pct",\s*"pump_command",\s*"pct",\s*totals\.command,\s*totals\.command_samples,\s*known\)/);
 assert.match(statusSource, /if\s*\(v\s*<\s*0\)\s*\{\s*j\s*\+=\s*"null";\s*return;\s*\}/,
              "unestablished check numbers must serialize as null");
 assert.match(style, /\.vrow-val\.dim\s*\{[^}]*color:\s*var\(--muted\)/s,
@@ -109,6 +142,19 @@ vm.runInContext(
      status: checkupStatusText,
      detail: checkupDetailHtml,
      chart: checkupCyclingChartHtml,
+     timeline: checkupCyclingTimelineHtml,
+     periodDetails: (trace, checkObj, from, to, source = "x10a") => {
+       checkupCyclingTimelineHtml(trace, "test-scope", checkObj, source);
+       return cyclingPeriodDetailsHtml(_cyclingModels.get("test-scope"), from, to);
+     },
+     shortRuns: checkupCyclingShortRunCount,
+     chartPeriodDetails: (c, from, to) => {
+       checkupCyclingChartHtml(c);
+       const model = _cyclingModels.values().next().value;
+       return model ? cyclingPeriodDetailsHtml(model, from, to) : "";
+     },
+     setStatus: (st) => { S.status = st; },
+     setExpandedRun: (key) => { S.cyclingExpandedRun = key; },
      card: checkupCardHtml,
      ready: checkupSourceReadyFor,
      copy: I18N,
@@ -351,7 +397,182 @@ assert.ok(detail.indexOf("checkup-cycling-assessment") < detail.indexOf("checkup
 assert.ok(detail.indexOf("checkup-cycling-grid") < detail.indexOf("data-checkup-hours"));
 assert.match(detail, /Heating runs are short on average\./);
 assert.match(detail, /Gaps in the readings can leave some starts uncounted\./);
-assert.match(detail, /Normal:<\/span> There is no fixed normal number of starts\./);
+assert.doesNotMatch(detail, /Normal:<\/span>/);
+
+const timedShortDetail = ui.detail({
+  ...cycling,
+  timeline: {
+    unix_s: 1794582660, window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+    records: [
+      1 * 8 + 1, 82810 * 8 + 5, 82810 * 8 + 3, 82990 * 8 + 1, 82995 * 8 + 6,
+      83200 * 8 + 5, 83200 * 8 + 3, 83400 * 8 + 1, 83405 * 8 + 6,
+    ],
+  },
+});
+assert.match(timedShortDetail, /12 runs · avg\. 5 min · 2 &lt; 5 min/);
+
+const evictedRunHtml = ui.periodDetails(
+  {
+    unix_s: 1794582660, window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+    records: [
+      1 * 8 + 1, 82810 * 8 + 5, 82810 * 8 + 3, 83000 * 8 + 1, 83000 * 8 + 6,
+      83600 * 8 + 5, 83600 * 8 + 3, 83900 * 8 + 1, 83900 * 8 + 6,
+    ],
+  },
+  { run_contexts: [{ at: 83600, stop: 83900, mode: "space", start_kind: "request_on", stop_kind: "normal" }] },
+  23,
+  23,
+);
+assert.match(evictedRunHtml, /No cause details/);
+assert.match(evictedRunHtml, /Normal stop/);
+assert.doesNotMatch(evictedRunHtml.split("83600")[0], /Normal stop/);
+
+// Pre-reboot / gap-bridging run details contracts
+{
+  const preBootTrace = {
+    unix_s: 1794582660, window_end_s: 86400, observed_end_s: 86400, boot_s: 2000, live: true, run_edges: true,
+    records: [
+      1 * 8 + 1, 79500 * 8 + 5, 79500 * 8 + 3, 79800 * 8 + 1, 79800 * 8 + 6,
+      80100 * 8 + 5, 80100 * 8 + 3, 80160 * 8 + 0,
+      86000 * 8 + 5, 86000 * 8 + 3, 86010 * 8 + 0, 86015 * 8 + 3, 86120 * 8 + 1, 86120 * 8 + 6,
+      86150 * 8 + 5, 86150 * 8 + 3, 86160 * 8 + 0, 86180 * 8 + 3, 86220 * 8 + 1, 86220 * 8 + 6,
+    ],
+  };
+  const x10aPreBootNoCtx = ui.periodDetails(preBootTrace, {}, 22, 22, "x10a");
+  assert.match(x10aPreBootNoCtx, /Start and stop details are recorded from the last restart onward\./);
+  assert.doesNotMatch(ui.periodDetails(preBootTrace, {}, 22, 22, "modbus"), /last restart onward/);
+  const withCtxPreBoot22 = ui.periodDetails(preBootTrace, {
+    run_contexts: [{ at: 86000, stop: 86120, mode: "space", start_kind: "request_on", stop_kind: "normal" }],
+  }, 22, 22, "x10a");
+  assert.match(withCtxPreBoot22, /Start and stop details are recorded from the last restart onward\./);
+  assert.match(withCtxPreBoot22, /No cause details/);
+  assert.match(withCtxPreBoot22, /Stop unknown/);
+  assert.doesNotMatch(withCtxPreBoot22, /data-run-row/);
+  const withCtxPostBoot23 = ui.periodDetails(preBootTrace, {
+    run_contexts: [{ at: 86000, stop: 86120, mode: "space", start_kind: "request_on", stop_kind: "normal" }],
+  }, 23, 23, "x10a");
+  assert.match(withCtxPostBoot23, /2 min.*Normal stop/);
+  assert.match(withCtxPostBoot23, /Stop unknown/);
+  assert.equal(ui.shortRuns({
+    timeline: preBootTrace,
+  }), 1, "<=15s intra-boot gap bridges short run while >15s gap stays censored");
+}
+
+const makeRollingCheck = (shift) => ({
+  hours_epoch: 1,
+  timeline: {
+    boot_s: 6000 + shift,
+    live: true,
+    unix_s: 1794582660 + shift,
+    window_end_s: 86400,
+    observed_end_s: 86400,
+    run_edges: true,
+    records: [
+      [1, 1],
+      [79260 - shift, 5], [79260 - shift, 3], [79440 - shift, 1], [79440 - shift, 6],
+      [83600 - shift, 5], [83600 - shift, 3], [83900 - shift, 1], [83900 - shift, 6],
+    ].map(([at, kind]) => at * 8 + kind),
+  },
+  run_contexts: [
+    { at: 79260 - shift, stop: 79440 - shift, mode: "space", start_kind: "request_on", stop_kind: "normal" },
+    { at: 83600 - shift, stop: 83900 - shift, mode: "space", start_kind: "request_on", stop_kind: "normal" },
+  ],
+});
+try {
+  const initialCheck = makeRollingCheck(0);
+  const shiftedCheck = makeRollingCheck(8);
+  const assertRowOpen = (html, rowKey, label) => {
+    assert.match(html, new RegExp(`data-run-row="${rowKey}"[^>]*aria-expanded="true"`), `${label}: row ${rowKey} expanded`);
+    assert.match(html, new RegExp(`data-run-sub="${rowKey}"><td`), `${label}: subrow ${rowKey} visible`);
+  };
+  ui.setExpandedRun("b:3200");
+  assertRowOpen(ui.periodDetails(initialCheck.timeline, initialCheck, 22, 23), "b:3200", "initial boot run");
+  assertRowOpen(ui.periodDetails(shiftedCheck.timeline, shiftedCheck, 22, 23), "b:3200", "shifted boot run");
+
+  const restoredKey = `u:${1794582660 + 79260 - 86400}`;
+  ui.setExpandedRun(restoredKey);
+  assertRowOpen(ui.periodDetails(initialCheck.timeline, initialCheck, 22, 23), restoredKey, "initial restored run");
+  assertRowOpen(ui.periodDetails(shiftedCheck.timeline, shiftedCheck, 22, 23), restoredKey, "shifted restored run");
+
+  ui.setExpandedRun("b:3200");
+  ui.setStatus({ boot_id: "rolling-omit-test", uptime_s: 6008, health: { source: "x10a" }, history: { epoch: 1 } });
+  assertRowOpen(ui.chartPeriodDetails(shiftedCheck, 22, 23), "b:3200", "live chart before omission");
+  ui.setStatus({ boot_id: "rolling-omit-test", uptime_s: 6016, health: { source: "x10a" }, history: { epoch: 1 } });
+  assertRowOpen(ui.chartPeriodDetails({ hours_epoch: 1 }, 22, 23), "b:3200", "extrapolated chart during omission");
+} finally {
+  ui.setStatus(null);
+  ui.setExpandedRun(null);
+}
+
+const fluentCheck = {
+  hours_epoch: 1,
+  flow_typical_l_min: 17.6,
+  timeline: {
+    unix_s: 1794582660,
+    window_end_s: 86400,
+    observed_end_s: 86400,
+    run_edges: true,
+    records: [
+      [1, 1],
+      [79260, 5], [79260, 3], [79428, 1], [79428, 6],
+      [79600, 5], [79600, 3], [79750, 1], [79750, 6],
+      [79900, 5], [79900, 3], [80080, 1], [80080, 6],
+      [80200, 5], [80200, 3], [80380, 1], [80380, 6],
+      [80500, 5], [80500, 3], [80680, 1], [80680, 6],
+      [80800, 5], [80800, 2], [80920, 1], [80920, 6],
+      [81100, 5], [81100, 3], [81280, 1], [81280, 6],
+      [82900, 5], [82900, 3], [83100, 1], [83100, 6],
+      [83300, 5], [83300, 4],
+    ].map(([at, kind]) => at * 8 + kind),
+  },
+  run_contexts: [
+    { at: 79260, stop: 79428, mode: "space", start_kind: "cooldown_restart", stop_kind: "request_withdrawal",
+      start_lwt_c: 39.1, start_target_c: 41.1, lwt_c: 45.1, rwt_c: 41.9, target_c: 41.1, flow_l_min: 15.0 },
+    { at: 79600, stop: 79750, mode: "space", start_kind: "target_raised", stop_kind: "target_changed",
+      start_lwt_c: 38.6, start_target_c: 40.0, start_target_prev_c: 39.5, lwt_c: 43.7, rwt_c: 41.0, target_c: 39.5, target_prev_c: 40.0, flow_l_min: 15.4 },
+    { at: 79900, stop: 80080, mode: "space", start_kind: "request_on", stop_kind: "low_rps_above_target",
+      start_lwt_c: 29.0, start_target_c: 32.0, lwt_c: 35.1, rwt_c: 33.6, target_c: 32.0, flow_l_min: 8.2, min_rps: 18.0 },
+    { at: 80200, stop: 80380, mode: "space", start_kind: "after_defrost", stop_kind: "low_rps_above_target",
+      start_lwt_c: 30.0, start_target_c: 33.0, lwt_c: 36.2, rwt_c: 34.4, target_c: 33.0, flow_l_min: 17.2, min_rps: 19.0 },
+    { at: 80500, stop: 80680, mode: "space", start_kind: "after_dhw", stop_kind: "normal",
+      start_lwt_c: 31.0, start_target_c: 34.0, lwt_c: 34.2, rwt_c: 31.5, target_c: 34.0, flow_l_min: 16.8 },
+    { at: 80800, stop: 80920, mode: "other", start_kind: "defrost_start", stop_kind: "defrost",
+      lwt_c: 24.0, rwt_c: 23.0, flow_l_min: 18.0 },
+    { at: 81100, stop: 81280, mode: "space", start_kind: "request_on", stop_kind: "defrost",
+      start_lwt_c: 31.0, start_target_c: 34.0, lwt_c: 33.0, rwt_c: 30.5, target_c: 34.0, flow_l_min: 17.0 },
+    { at: 82900, stop: 83100, mode: "space", start_kind: "unknown", stop_kind: "dhw_transition",
+      start_lwt_c: 32.0, start_target_c: 35.0, lwt_c: 35.0, rwt_c: 32.1, target_c: 35.0, flow_l_min: 16.2 },
+    { at: 83300, mode: "dhw", start_kind: "dhw_start", start_lwt_c: 41.0 },
+  ],
+};
+const extractRunExplains = html => [...html.matchAll(/<p class="checkup-run-explain">([\s\S]*?)<\/p>/g)]
+  .map(([, inner]) => inner.replace(/<[^>]+>/g, ""));
+try {
+  for (const lang of locales) {
+    ui.setLang(lang);
+    const explains = extractRunExplains(ui.periodDetails(fluentCheck.timeline, fluentCheck, 22, 23));
+    assert.equal(explains.length, fluentCheck.run_contexts.length, `${lang} renders every run explanation`);
+    for (const explain of explains) {
+      assert.doesNotMatch(explain, /[()（）]/, `${lang} run explanation avoids parentheses: ${explain}`);
+    }
+  }
+  ui.setLang("de");
+  const deExplains = extractRunExplains(ui.periodDetails(fluentCheck.timeline, fluentCheck, 22, 23));
+  assert.match(deExplains[0], /^Start \d{2}:\d{2}:\d{2}: Vorlauf 39,1 °C, Ziel 41,1 °C, Anforderung an\. Stopp \d{2}:\d{2}:\d{2}: Anforderung aus · Vorlauf 45,1 °C, Ziel 41,1 °C, Rücklauf 41,9 °C, 15,0 L\/min\.$/);
+  assert.match(deExplains[1], /^Start \d{2}:\d{2}:\d{2} nach 2:52 min Pause: Ziel von 39,5 °C auf 40,0 °C erhöht · Vorlauf 38,6 °C\. Stopp \d{2}:\d{2}:\d{2}: Ziel von 40,0 °C auf 39,5 °C gesenkt · Vorlauf 43,7 °C, Rücklauf 41,0 °C, 15,4 L\/min\.$/);
+  for (const text of deExplains) {
+    assert.doesNotMatch(text, /; Stopp\.|Anford\.|[()（）]/, `de concise wording avoids abbreviations/parentheses: ${text}`);
+  }
+  ui.setLang("en");
+  const enExplains = extractRunExplains(ui.periodDetails(fluentCheck.timeline, fluentCheck, 22, 23));
+  assert.match(enExplains[0], /^Started \d{2}:\d{2}:\d{2}: flow 39\.1 °C, target 41\.1 °C, request on\. Stopped \d{2}:\d{2}:\d{2}: request off · flow 45\.1 °C, target 41\.1 °C, return 41\.9 °C, 15\.0 L\/min\.$/);
+  assert.match(enExplains[1], /^Started \d{2}:\d{2}:\d{2} after 2:52 min pause: target raised from 39\.5 °C to 40\.0 °C · flow 38\.6 °C\. Stopped \d{2}:\d{2}:\d{2}: target lowered from 40\.0 °C to 39\.5 °C · flow 43\.7 °C, return 41\.0 °C, 15\.4 L\/min\.$/);
+  for (const text of enExplains) {
+    assert.doesNotMatch(text, /; stopped\.|\breq\.|[()（）]/, `en concise wording avoids abbreviations/parentheses: ${text}`);
+  }
+} finally {
+  ui.setLang("en");
+}
 
 const restoredCycling = { ...cycling, starts: 27, hours: [
   { starts: 22, restored: true }, { starts: 5 }, { starts: 9, restored: true, expired: true },
@@ -445,14 +666,16 @@ assert.doesNotMatch(detail, /type="range"/, "hour buttons own selection");
 assert.match(detail, /data-bucket="-1"/, "restored logical bucket identifiers may be negative");
 const hourMarkup = (html, bucket) => html.match(
   new RegExp(`<button[^>]*data-bucket="${bucket}"[^>]*>.*?</button>`))?.[0] || "";
-const modeSegments = (hour) => [...hour.matchAll(/<i class="(space|dhw|other)"/g)].map(match => match[1]);
-assert.deepEqual(modeSegments(hourMarkup(detail, -1)), ["space", "dhw", "other"],
+const fillMarkup = hour => hour.match(/<s\b[^>]*><\/s>/)?.[0] || "";
+const fillModes = hour => (hour.match(/data-modes="([^"]*)"/)?.[1] || "").split(" ").filter(Boolean);
+assert.deepEqual(fillModes(hourMarkup(detail, -1)), ["space", "dhw", "other"],
   "a mixed hour keeps each positively observed mode and its unassigned remainder");
-assert.deepEqual(modeSegments(hourMarkup(detail, 0)), [],
-  "an observed zero does not create a runtime segment");
+assert.deepEqual(fillModes(hourMarkup(detail, 0)), [],
+  "an observed zero does not invent running or missing data");
 const openHour = hourMarkup(detail, 1);
-assert.match(openHour, /<i class="gap"/, "elapsed unread time appears as a separate gap");
-assert.doesNotMatch(openHour, /<i class="future"/, "unelapsed time leaves the bar unfilled");
+assert.deepEqual(fillModes(openHour), ["other"], "missing and unassigned time share one Unknown fill");
+assert.doesNotMatch(openHour, /height:|<i\b/, "time lengths never size or stack the category colours");
+assert.match(openHour, /20 min of 30 min observed/, "the exact coverage remains accessible");
 hasAssessment(ui.detail(cyclingWithHours), "en", "waiting");
 assert.doesNotMatch(detail, /Incomplete classification|90% covered/);
 const qualifiedHours = ui.chart({ ...cyclingWithHours, starts: 5, hours: [
@@ -467,27 +690,27 @@ assert.match(qualifiedHours, /data-tip="≥5 starts · 1 h 10 min"/,
   "the chart readout reports the sum of witnessed starts as a lower bound");
 assert.match(unassigned, /<b class="warn">3<\/b>/);
 assert.doesNotMatch(unassigned, /Ø/, "hourly runtime and starts do not establish an average");
-assert.deepEqual(modeSegments(unassigned), ["other"]);
-assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 1)), ["dhw"]);
-assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 2)), ["space"]);
-assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 3)), ["other"],
+assert.deepEqual(fillModes(unassigned), ["other"]);
+assert.deepEqual(fillModes(hourMarkup(qualifiedHours, 1)), ["dhw"]);
+assert.deepEqual(fillModes(hourMarkup(qualifiedHours, 2)), ["space"]);
+assert.deepEqual(fillModes(hourMarkup(qualifiedHours, 3)), ["other"],
   "a malformed mode pair leaves observed runtime unassigned");
 for (const html of [detail, qualifiedHours])
   assert.doesNotMatch(html, /checkup-stop-box|witnessed stops|Stop context/,
     "stop telemetry does not expand the cycling card");
 const legacyOpen = hourMarkup(ui.chart({ ...cyclingWithHours, hours_epoch: undefined,
   hours: [{ starts: 2, run_s: 600, observed_s: 1200, space_s: 600, end_unix_s: 1792887600 }] }), 23);
-assert.doesNotMatch(legacyOpen, /<i class="space"/,
-  "legacy mode fields cannot establish witnessed heating");
-assert.match(legacyOpen, /<i class="other"/, "retain observed legacy runtime without assigning it to heating");
-assert.doesNotMatch(legacyOpen, /<i class="gap"/, "legacy open hour cannot establish elapsed unread time");
+assert.deepEqual(fillModes(legacyOpen), ["other"],
+  "legacy mode fields cannot establish witnessed heating; observed runtime stays Unknown");
+assert.match(legacyOpen, /20 min observed · elapsed time unknown/,
+  "legacy open hour cannot establish elapsed unread time");
 const legacyHours = ui.chart({ ...cyclingWithHours, hours_epoch: undefined, hours: [
   { starts: 1, run_s: 120, observed_s: 120 },
   { starts: 0, run_s: 0, observed_s: 0 },
 ] });
 const legacyClosed = hourMarkup(legacyHours, 22);
 assert.match(legacyClosed, /2 min observed · elapsed time unknown/);
-assert.deepEqual(modeSegments(legacyClosed), ["other"],
+assert.deepEqual(fillModes(legacyClosed), ["other"],
   "a legacy closed record shows its witnessed runtime without an inferred gap");
 assert.doesNotMatch(legacyHours, /checkup-gap-key/);
 const startup = ui.chart({ ...cyclingWithHours, hours_epoch: 2,
@@ -496,12 +719,17 @@ assert.equal((startup.match(/<button[^>]*data-bucket=/g) || []).length, 1,
   "an incomplete ring leaves older positions unavailable to keyboard selection");
 const startupHour = hourMarkup(startup, 0);
 assert.match(startupHour, /No data/, "zero elapsed time and no start witness establish no count");
-assert.doesNotMatch(startupHour, /<i class="gap"/, "the newly opened hour has no elapsed gap");
+assert.deepEqual(fillModes(startupHour), [], "a just-opened hour has no elapsed time to mark Unknown");
+assert.match(startupHour, /0 s of 0 s observed/, "the new hour has no fabricated elapsed time");
 assert.match(startup, /data-tip="No data"/, "no readable time or start witness establishes no chart total");
 assert.equal((startup.match(/<span class="checkup-chart-col" aria-hidden="true" inert><\/span>/g) || []).length,
   23, "positions outside the retained ring are blank and inert without tracks");
-assert.doesNotMatch(startup, /class="gap"|checkup-gap-key/,
-  "padding does not imply elapsed time or a sampling gap");
+assert.equal((startup.match(/data-modes=/g) || []).length, 1,
+  "padding never creates an Unknown fill or implies elapsed time");
+const unreadOpenHour = ui.chart({ ...cyclingWithHours, hours_epoch: 2,
+  hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 1 }] });
+assert.deepEqual(fillModes(hourMarkup(unreadOpenHour, 0)), ["other"],
+  "a positive elapsed interval without readings is Unknown");
 const expiredHour = ui.chart({ ...cyclingWithHours, hours: [
   { bucket: 0, expired: true, starts: 9, run_s: 1200, observed_s: 1800, space_s: 1200, dhw_s: 0 },
   { bucket: 1, starts: 1, run_s: 120, observed_s: 300, elapsed_s: 300, space_s: 120, dhw_s: 0 },
@@ -511,11 +739,15 @@ assert.equal((expiredHour.match(/<span class="checkup-chart-col" aria-hidden="tr
   23, "expired evidence leaves its chart position blank like unused positions");
 assert.match(hourMarkup(expiredHour, 1), /tabindex="0"/, "the open hour remains the keyboard entry");
 assert.match(expiredHour, /data-tip="≥1 start · 2 min"/, "only unexpired evidence contributes to the chart total");
-assert.doesNotMatch(expiredHour, /class="gap"|checkup-gap-key/, "expired evidence does not establish a sampling gap");
+assert.equal((expiredHour.match(/data-modes=/g) || []).length, 1,
+  "expired evidence does not create an Unknown fill");
+assert.deepEqual(fillModes(hourMarkup(expiredHour, 1)), ["space"], "the current fully observed slot has no invented gap");
 const edgeOnly = { id: "cycling", verdict: "collecting", starts: 1, observed_s: 0, hours_epoch: 2,
   hours: [{ bucket: 0, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 }] };
 assert.match(ui.chart(edgeOnly), /data-tip="≥1 start"/,
   "the chart reports its witnessed starts as a lower bound and omits unobserved runtime");
+assert.deepEqual(fillModes(hourMarkup(ui.chart(edgeOnly), 0)), [],
+  "a start at the hour boundary does not imply a missing interval");
 assert.equal(ui.value(edgeOnly), "≥1");
 assert.match(ui.detail(edgeOnly), /≥1 start/);
 assert.equal(ui.value({ ...edgeOnly, observed_s: 60 }), "≥1");
@@ -536,9 +768,67 @@ const restoredHour = hourMarkup(restored, -1);
 assert.match(restoredHour, /Saved time.*3 min observed · elapsed time unknown/,
   "a dated restore gives the saved time and readable duration but no elapsed duration");
 assert.doesNotMatch(restoredHour, /Interval end/);
-assert.deepEqual(modeSegments(restoredHour), ["space"], "restoration retains positively attributed runtime");
-assert.doesNotMatch(restored, /class="gap"|checkup-gap-key/,
+assert.deepEqual(fillModes(restoredHour), ["space"], "restoration retains positively attributed runtime");
+assert.equal(fillModes(restoredHour).includes("other"), false,
   "a short restored record does not imply missing time before its end");
+
+// Chronological proportional segments: each active band fills bottom-to-top by duration share.
+const hourlyMix = (space, dhw, other = 0, observed = 3600) => hourMarkup(ui.chart({
+  ...cyclingWithHours, hours: [{ bucket: 0, starts: 1, run_s: space + dhw + other,
+    observed_s: observed, elapsed_s: 3600, space_s: space, dhw_s: dhw }],
+}), 0);
+const mostlyWater = hourlyMix(1, 3599), mostlyHeating = hourlyMix(3599, 1);
+assert.deepEqual(fillModes(mostlyWater), ["space", "dhw"]);
+assert.notEqual(fillMarkup(mostlyWater), fillMarkup(mostlyHeating),
+  "swapping one-second and 3599-second modes produces distinct proportional fills");
+assert.match(fillMarkup(mostlyWater),
+  /linear-gradient\(to top, var\(--flow-hot\) 0\.00%, var\(--flow-hot\) 0\.03%, var\(--brand\) 0\.03%, var\(--brand\) 100\.00%\)/);
+assert.match(fillMarkup(mostlyHeating),
+  /linear-gradient\(to top, var\(--flow-hot\) 0\.00%, var\(--flow-hot\) 99\.97%, var\(--brand\) 99\.97%, var\(--brand\) 100\.00%\)/);
+assert.notEqual(mostlyWater.match(/aria-label="([^"]*)"/)[1], mostlyHeating.match(/aria-label="([^"]*)"/)[1],
+  "actual mode durations remain distinct in accessible readouts");
+assert.deepEqual(fillModes(hourlyMix(60, 60, 60, 180)), ["space", "dhw", "other"],
+  "unassigned runtime plus a sampling gap contributes gray only once");
+assert.notEqual(fillMarkup(hourlyMix(60, 60, 60, 180)), fillMarkup(hourlyMix(1200, 1200, 1200)),
+  "gap and runtime lengths proportionally determine the category shares");
+assert.deepEqual(fillModes(hourMarkup(observedZero, 0)), [], "observed off-time stays uncolored");
+
+const timedChart = records => ui.timeline({ unix_s: 1794582660,
+  window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+  records: records.map(([at, kind]) => at * 8 + kind),
+}, "presence-test");
+const heatThenWater = timedChart([[0, 1], [82800, 3], [82801, 4]]);
+const waterThenHeat = timedChart([[0, 1], [82800, 4], [86399, 3]]);
+assert.notEqual(fillMarkup(hourMarkup(heatThenWater, 23)), fillMarkup(hourMarkup(waterThenHeat, 23)),
+  "timed mode order and durations remain distinct in chronological proportional segments");
+const sandwichTimed = hourMarkup(timedChart([[0, 1], [82800, 3], [83520, 4], [84600, 3]]), 23);
+assert.match(fillMarkup(sandwichTimed),
+  /linear-gradient\(to top, var\(--flow-hot\) 0\.00%, var\(--flow-hot\) 20\.00%, var\(--brand\) 20\.00%, var\(--brand\) 50\.00%, var\(--flow-hot\) 50\.00%, var\(--flow-hot\) 100\.00%\)/,
+  "alternating 20% space -> 30% DHW -> 50% space fills chronologically in bottom-to-top order");
+const mixedTrace = timedChart([[0, 1], [82800, 3], [83400, 2], [84000, 0], [84600, 4]]);
+const mixedTimedHour = hourMarkup(mixedTrace, 23);
+assert.deepEqual(fillModes(mixedTimedHour), ["space", "dhw", "other"],
+  "the timed trace deduplicates Other and Gap before blending");
+assert.match(mixedTimedHour, /Unclear purpose.*Sampling gap/,
+  "the accessible name distinguishes observed unassigned runtime from missing samples");
+assert.doesNotMatch(mixedTimedHour, /No data/, "the hour has readable samples");
+const idleTimed = hourMarkup(heatThenWater, 0);
+assert.deepEqual(fillModes(idleTimed), []);
+assert.match(idleTimed, /0 starts/, "readable off-time retains its observed zero");
+assert.doesNotMatch(idleTimed, /No data/, "readable off-time is never turned into missing evidence");
+const missingTimed = hourMarkup(timedChart([[82800, 3]]), 0);
+assert.deepEqual(fillModes(missingTimed), ["other"]);
+assert.match(missingTimed, /No data/, "a gray unread bin retains its missing-evidence name");
+assert.match(missingTimed, /<b><\/b>/, "an unread bin cannot fabricate a zero count");
+for (const lang of locales) {
+  ui.setLang(lang);
+  const chart = ui.chart(cyclingWithHours);
+  const legend = [...chart.matchAll(/<span class="checkup-chart-key"><i[^>]*><\/i>([^<]+)<\/span>/g)]
+    .map(match => match[1]);
+  assert.deepEqual(legend, ["mode.heat", "mode.dhw", "check.fault_unknown"].map(key =>
+    escapeText(ui.text(lang, key))), `${lang}: exactly Heating, Hot water and Unknown, with no gap key`);
+}
+ui.setLang("en");
 
 // Low-level evidence remains readable by API consumers. The card shows only the completed
 // run count, one explanation for unclear purpose, and a brief assessment.
@@ -554,6 +844,114 @@ hasAssessment(detail, "en", "waiting");
 assert.doesNotMatch(detail, /transition 1|restart\/journal|start not witnessed|90% covered|≥10 min/);
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6.5 l/min");
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: NaN }), "");
+
+// Core H1 hydronic spread/flow/command observation tests (X10A flow check): independent dated population,
+// strict gating, sub-second duration preservation, locale translation completeness, and target-delta absence.
+const hydronicFlow = {
+  id: "flow", verdict: "ok", evidence: "observation", min_l_min: 8.4,
+  hydronic: {
+    confirmed: true, current: true, dated: true, coverage_partial: false,
+    restore_pending: false, persistence_pending: false, dropped: 0, observed_hours: 1,
+    method: 1, window_s: 86400, settling_s: 600, max_gap_s: 15,
+    reason_code: 0, reason: "none", scope: "unit_water_heat_exchanger", weighting: "sample",
+    settling_remaining_s: null, source_generation: 3, schema_fp: 0x12345678,
+    current_limitations_mask: 0, population_limitations_mask: 0, population_saturated: false,
+    observed_s: 20, candidate_s: 20, qualified_s: 20, samples: 4, command_samples: 3,
+    first_evidence_unix_s: 1791880000, last_evidence_unix_s: 1791880020,
+    first_accepted_unix_s: 1791880005, last_accepted_unix_s: 1791880020,
+    spread_k: { min: -0.5, mean: 1.2, max: 3.4 },
+    flow_l_min: { min: 7.5, mean: 8.2, max: 9.1 },
+    pump_command_pct: { min: 40, mean: 55, max: 70 },
+    target_delta_k: null, target_supported: false,
+  },
+};
+const hydroDetail = (patch = {}, extra = {}) =>
+  ui.detail({ ...hydronicFlow, ...extra, hydronic: { ...hydronicFlow.hydronic, ...patch } });
+detail = hydroDetail();
+assert.match(detail, /Water spread: min -0\.5 · mean 1\.2 · max 3\.4 K/);
+assert.match(detail, /flow: min 7\.5 · mean 8\.2 · max 9\.1 l\/min/);
+assert.match(detail, /Pump command: min 40 · mean 55 · max 70 %/);
+assert.match(detail, /Water readings 4 · command readings 3/);
+assert.match(detail, /Observed \/ eligible \/ qualified: 20 s \/ 20 s \/ 20 s/);
+assert.match(detail, /Evidence dates: .* – .* UTC/);
+assert.match(detail, /Qualified dates: .* – .* UTC/);
+assert.match(detail, /Hourly buckets: 1/);
+assert.match(detail, /Current: Qualified by project filter/);
+assert.match(detail, /Population: Dated/);
+assert.match(detail, /Target water temperature difference: No data/);
+assert.doesNotMatch(detail, /Supply temperature difference|No assessable signal in this profile/);
+assert.match(hydroDetail({ target_supported: true }), /Target water temperature difference: No data/);
+
+const saturatedDetail = hydroDetail({
+  coverage_partial: true, restore_pending: true, persistence_pending: true,
+  population_saturated: true, dropped: 2,
+  current_limitations_mask: 3, population_limitations_mask: 7,
+});
+assert.match(saturatedDetail, /Water spread: min -0\.5 · mean 1\.2 · max 3\.4 K/);
+assert.match(saturatedDetail, /Water readings ≥4 · command readings ≥3/);
+assert.match(saturatedDetail, /Observed \/ eligible \/ qualified: ≥20 s \/ ≥20 s \/ ≥20 s/);
+assert.match(saturatedDetail, /Hourly buckets: ≥1/);
+assert.match(saturatedDetail, /Controller phases unobservable · Pump command unavailable · Saturated: lower bounds/);
+assert.match(saturatedDetail, /Dated · Partial 24 h · Restoration pending · Storage pending · Controller phases unobservable · Pump command unavailable · Saturated: lower bounds/);
+const saturatedPop = saturatedDetail.match(/Population: [^<]*/)?.[0] || "";
+assert.equal((saturatedPop.match(/Saturated: lower bounds/g) || []).length, 1,
+             "Population row must print Saturated: lower bounds once when both population_saturated and mask bit 4 are set");
+const saturatedOnlyPop = hydroDetail({ population_saturated: true, population_limitations_mask: 3 }).match(/Population: [^<]*/)?.[0] || "";
+assert.equal((saturatedOnlyPop.match(/Saturated: lower bounds/g) || []).length, 1,
+             "Population row must keep Saturated: lower bounds when mask bit 4 is unset");
+assert.match(saturatedDetail, /Storage loss notices ≥2/);
+
+assert.match(hydroDetail({ reason_code: 13, current: true, settling_remaining_s: 45 }), /Run-up remaining 45 s/);
+assert.match(hydroDetail({ reason_code: 13, current: false, settling_remaining_s: 45 }), /Current: Qualification unknown · No data/);
+assert.doesNotMatch(hydroDetail({ reason_code: 13, current: false, settling_remaining_s: 45 }), /Run-up remaining/);
+assert.ok(hydroDetail({ reason_code: 14, current: false }).includes(ui.text("en", "service.reason.poll_gap")),
+          "poll-gap code must keep its explanation even when current is false");
+
+const epoch0Date = new Date(0).toLocaleString("en", { dateStyle: "short", timeStyle: "short", timeZone: "UTC" }) + " UTC";
+assert.ok(hydroDetail({ first_evidence_unix_s: 0, last_evidence_unix_s: 60 }).includes(epoch0Date),
+          "Unix epoch 0 is a valid dated timestamp and must not turn into No data");
+assert.match(hydroDetail({ qualified_s: 0.000001 }), /0\.000001 s/,
+             "microsecond qualified duration must not round down to 0 s");
+assert.match(hydroDetail({ method: 2 }), /Current: Qualification unknown/);
+assert.doesNotMatch(hydroDetail({ method: 2 }), /Water spread:/);
+const secondarySupply = {
+  delta_k: -2.5, duration_s: 15, samples: 4,
+  source: { reg: 0x65, offset: 4, conv: 105 }, zone_context: "unknown",
+};
+const secondaryDetail = (comparison, hydronic = hydronicFlow.hydronic) =>
+  ui.detail({ ...hydronicFlow, hydronic, secondary_supply: comparison });
+assert.match(secondaryDetail(secondarySupply), /Supply temperature difference .* -2\.5 K/);
+assert.match(secondaryDetail({ ...secondarySupply, delta_k: 2.5 }), /Supply temperature difference .* \+2\.5 K/);
+for (const unavailable of [null, { ...secondarySupply, delta_k: null }, { ...secondarySupply, delta_k: NaN },
+  { ...secondarySupply, samples: 0 }, { ...secondarySupply, duration_s: -1 },
+  { ...secondarySupply, zone_context: "other" }])
+  assert.doesNotMatch(secondaryDetail(unavailable), /Supply temperature difference/);
+assert.doesNotMatch(secondaryDetail(secondarySupply, { ...hydronicFlow.hydronic, current: false }),
+  /Supply temperature difference/);
+assert.doesNotMatch(secondaryDetail(secondarySupply, { ...hydronicFlow.hydronic, confirmed: false, current: true }),
+  /Supply temperature difference/);
+for (const bad of [null, undefined, NaN, Infinity, -1, "0"]) {
+  const badHtml = hydroDetail({
+    samples: bad, command_samples: bad, observed_hours: bad,
+    observed_s: bad, candidate_s: bad, qualified_s: bad,
+    spread_k: { min: bad, mean: bad, max: bad },
+  });
+  assert.doesNotMatch(badHtml, /undefined|NaN|Infinity|-1\b/);
+  assert.match(badHtml, /Water spread: No data/);
+}
+for (const lang of locales) {
+  ui.setLang(lang);
+  assert.ok(secondaryDetail(secondarySupply).includes(escapeText(ui.text(lang,
+    "check.hydronic.secondary", (-2.5).toLocaleString(lang) + " K",
+    ui.text(lang, "hist.duration_sec", "15"), "4"))), `${lang}: signed secondary observation`);
+  for (let code = 0; code <= 20; code++) {
+    const body = hydroDetail({ reason_code: code, reason: "raw_reason_must_not_leak" });
+    assert.equal((body.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/H1/${code}`);
+    assert.doesNotMatch(body, /check\.hydronic|service\.reason|raw_reason_must_not_leak|undefined|NaN|Infinity/,
+                        `${lang}/H1/${code}: raw key or non-finite leak`);
+  }
+}
+ui.setLang("en");
 
 // Water pressure uses 24-hour curve-first diagnosis when X10A history is available, and falls back
 // cleanly to concise threshold state labels when no history buffer is advertised.
@@ -687,6 +1085,41 @@ context.S.status.health = { status: "collecting", checks: [collecting] };
 assert.match(ui.card(), />Collecting data<\/span>/);
 context.S.status.health.checks = [{ id: "future_check", verdict: "warn", opaque: "<must-not-render>" }];
 assert.equal(ui.card(), "");
+
+// Retained dated H1 population keeps the offline X10A flow row visible without overriding badge status
+// or spilling onto unconfirmed / undated / method!=1 records.
+context.S.status = {
+  hp: { connected: false },
+  diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
+  health: {
+    status: "unavailable",
+    checks: [
+      { id: "fault", verdict: "unavailable", active: null },
+      { ...hydronicFlow, verdict: "unavailable", min_l_min: null,
+        hydronic: { ...hydronicFlow.hydronic, current: false, reason_code: 14 } },
+    ],
+  },
+};
+const offlineHydroCard = ui.card(false);
+assert.ok(offlineHydroCard.includes("health_flow"),
+          "offline X10A card must retain confirmed dated H1 flow row");
+assert.ok(!offlineHydroCard.includes("health_fault"),
+          "H1 retention must not fabricate visibility for unrelated unavailable checks");
+assert.match(offlineHydroCard, /class="vrow-val checkup-val dim">N\/A<\/span>/);
+assert.doesNotMatch(offlineHydroCard, /badge|No hint|0\/0|>OK</);
+for (const unconfirmed of [
+  { method: 2 },
+  { confirmed: false },
+  { dated: false },
+  { first_evidence_unix_s: null },
+]) {
+  context.S.status.health.checks = [{
+    ...hydronicFlow, verdict: "unavailable", min_l_min: null,
+    hydronic: { ...hydronicFlow.hydronic, ...unconfirmed },
+  }];
+  assert.equal(ui.card(false), "", "offline X10A card must omit unconfirmed/undated H1 records");
+}
+context.S.status.health = { status: "ok", persist: "fresh", checks: [] };
 
 // Every shipped language must have dynamic copies for the changed states, not English fallback keys.
 for (const lang of locales) {
@@ -843,11 +1276,21 @@ for (const lang of locales) {
         assert.match(diagnosis, /checkup-cycling-assessment/);
         assert.match(diagnosis, /data-checkup-hours/);
         const normal = `<span class="vdesc-n">${ui.text(lang, "normal.label")}</span>`;
-        assert.ok(body.includes(normal), `${lang}/${id}: Normal block`);
+        assert.ok(!body.includes(normal), `${lang}/${id}: cycling omits redundant Normal block`);
         assert.ok(body.startsWith('<div class="vdesc-p checkup-cycling-total"><span class="vdesc-n">'));
         assert.ok(body.indexOf("checkup-cycling-assessment") < body.indexOf("data-checkup-hours"));
-        assert.ok(body.indexOf("data-checkup-hours") < body.indexOf(normal));
         assert.doesNotMatch(diagnosis, /checkup-stop-box|checkup-cycling-chart/);
+      } else if (id === "health_dhw_loss") {
+        assert.ok(body.startsWith('<div class="checkup-dhw-detail" inert><div class="checkup-dhw-hero">'),
+          `${lang}/${id}: dedicated hero leads the lazily mounted timeline`);
+        assert.match(body, /data-checkup-dhw/);
+        assert.doesNotMatch(body, /data-dhw-window=/, `${lang}/${id}: collapsed rows build no chart`);
+        assert.ok(body.indexOf("checkup-dhw-value") < body.indexOf("checkup-dhw-assessment"));
+        assert.ok(body.indexOf("checkup-dhw-assessment") < body.indexOf("data-checkup-dhw"));
+        assert.match(body, /<details class="checkup-dhw-disclosure" data-dhw-disclosure="basis"><summary>/,
+          `${lang}/${id}: detailed evidence starts collapsed`);
+        assert.ok(body.includes(ui.text(lang, "check.dhw.limit")), `${lang}/${id}: primary claim limit stays visible`);
+        assert.doesNotMatch(body, /check\.dhw\./, `${lang}/${id}: complete dedicated copy`);
       } else {
         assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/${id}/${verdict}`);
         assert.ok(body.startsWith('<div class="vdesc-p"><span class="vdesc-n">'), `${lang}/${id}: value first`);
@@ -863,15 +1306,20 @@ for (const lang of locales) {
     assert.match(renderedContext.rendered.value(), /<span class="vdesc-n">Normal:<\/span>/);
   }
 }
-// Exercise the full production accordion, including the model interpretation that owns
-// the DHW rule and its limits. The compact measurement prefix must not duplicate it.
+// Exercise the full production accordion: the DHW rule stays reachable in collapsed
+// data details, and the independent energy illustration is explicitly a collapsed example.
 for (const lang of locales) {
   renderedContext.rendered.lang(lang);
   ui.setLang(lang);
   const diagnosis = renderedContext.rendered.model("health_dhw_loss", "DHW", ui.value(dhw),
     { bodyHtml: ui.detail(dhw) });
-  assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3,
-               `${lang} energy illustration stays inside the three-block explanation`);
+  assert.match(diagnosis, /data-dhw-disclosure="basis"><summary>/,
+    `${lang} rule and detailed evidence start collapsed`);
+  assert.match(diagnosis, /data-dhw-disclosure="energy"><summary>/,
+    `${lang} energy illustration has its own collapsed disclosure`);
+  const energyBody = diagnosis.slice(diagnosis.indexOf('data-dhw-disclosure="energy"'));
+  assert.match(energyBody, /200[\s\S]*COP[\s\S]*kWh|200[\s\S]*kWh[\s\S]*COP/,
+    `${lang} assumed volume, heat and electricity remain inside the example`);
   assert.match(diagnosis, /0[,.]8/, `${lang} expanded diagnosis retains its project threshold`);
   assert.match(diagnosis, /200/, `${lang} expanded diagnosis retains the example volume`);
   assert.match(diagnosis, /COP/, `${lang} expanded diagnosis retains its electricity assumption`);
@@ -909,9 +1357,16 @@ for (const hidden of ["health_defrost", "health_pressure", "health_retries", "re
   assert.ok(!cardHtml.includes(hidden), `Modbus card must hide ${hidden}`);
 
 context.S.status.health.checks = modbusChecks.map((c) =>
-  c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0 } : c);
+  c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0, hydronic: hydronicFlow.hydronic } : c);
 cardHtml = ui.card(true);
 assert.ok(!cardHtml.includes("health_flow"), "Altherma 4 Modbus mode must hide unavailable flow row");
+assert.doesNotMatch(ui.detail({ ...hydronicFlow, secondary_supply: secondarySupply }, false,
+                               { source: "modbus", source_fresh: true }),
+                    /Water spread:|Pump command:|Evidence dates:|Hourly buckets:|Supply temperature difference/);
+context.S.status.health.checks = modbusChecks.map((c) =>
+  c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0, hydronic: hydronicFlow.hydronic } : c);
+assert.ok(!ui.card(false).includes("health_flow"),
+          "offline Modbus card with unavailable flow must not become visible via X10A hydronic history");
 
 context.S.status.diagnostics = { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a", "modbus"] };
 context.S.status.health = { source: "x10a", status: "ok", persist: "no_record", source_fresh: true, checks: modbusChecks };
@@ -1023,6 +1478,64 @@ assert.equal(ui.ready({
   }
   ui.setLang("en");
   renderedContext.rendered.lang("en");
+}
+
+// Exercise the real browser fixture's cleanup scope without launching any browser on the host.
+{
+  assert.equal(cyclingPollStopped(null, false), true);
+  assert.equal(cyclingPollStopped(null, true), false, "an in-flight request with no timer is not stopped");
+  assert.equal(cyclingPollStopped(17, false), false);
+  assert.equal(cyclingPollStopped(17, true), false);
+  const supervisor = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-cycling-slot-"));
+  const lock = path.join(supervisor, "cycling-appearance.lock");
+  try {
+    let finishClose;
+    let firstClosed = false;
+    const closing = new Promise(resolve => { finishClose = resolve; });
+    const first = withChromiumAppearanceSlot(lock, () => {}, async () => {
+      await closing;
+      firstClosed = true;
+      return true;
+    });
+    const second = withChromiumAppearanceSlot(lock, () => {
+      assert.equal(firstClosed, true, "the next Chromium launch waits for the previous browser to exit");
+    }, () => true);
+    finishClose();
+    await Promise.all([first, second]);
+    assert.equal(fs.existsSync(lock), false, "successful close releases the slot");
+    const launchError = new Error("no browser handle after a failed start");
+    await assert.rejects(withChromiumAppearanceSlot(lock, () => { throw launchError; }, () => false),
+      error => error === launchError);
+    assert.ok(fs.existsSync(lock), "failed startup must keep the slot when cleanup is unconfirmed");
+    fs.rmdirSync(lock);
+    const closeError = new Error("browser still owns resources");
+    await assert.rejects(withChromiumAppearanceSlot(lock, () => {}, () => { throw closeError; }),
+      error => error === closeError);
+    assert.ok(fs.existsSync(lock), "failed close must keep the slot until supervisor cancellation");
+  } finally {
+    fs.rmSync(supervisor, { recursive: true, force: true });
+  }
+  const order = [];
+  assert.equal(await withCyclingCleanup(async () => 26,
+    async () => order.push("browser"), async () => order.push("parent-focus")), 26);
+  assert.deepEqual(order, ["browser", "parent-focus"]);
+  for (const phase of ["matrix assertion", "pause wait"]) {
+    const primary = new Error(phase), cleanup = new Error("browser close");
+    const attempted = [];
+    await assert.rejects(withCyclingCleanup(async () => { throw primary; },
+      async () => { attempted.push("browser"); throw cleanup; },
+      async () => attempted.push("parent-focus")), error => {
+        assert.ok(error instanceof AggregateError);
+        assert.deepEqual(error.errors, [primary, cleanup]);
+        return true;
+      });
+    assert.deepEqual(attempted, ["browser", "parent-focus"]);
+    await assert.rejects(withCyclingCleanup(async () => { throw primary; }, async () => {}),
+      error => error === primary, "a lone original error must retain its identity");
+  }
+  const cleanupOnly = new Error("parent focus");
+  await assert.rejects(withCyclingCleanup(async () => {}, async () => { throw cleanupOnly; }),
+    error => error === cleanupOnly, "a lone cleanup failure must not be hidden");
 }
 
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

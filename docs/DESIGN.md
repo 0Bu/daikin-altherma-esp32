@@ -239,16 +239,17 @@ The 3-way valve selects the animated hydraulic branch. Water flow has mode-aware
 pump-only circulation is neutral. Cooling/defrost reverse refrigerant motion. Active BUH uses the
 warning tint; active BSH turns the tank's perimeter dashes a fixed orange, distinct from the
 red/blue hydronic charge.
-Rotors stay centred on their hubs, rotate clockwise only when running, and carry no rotating
-flow-direction arrow. Direction belongs to pipe dashes.
+Rotors stay centred on their hubs and carry no rotating flow-direction arrow (direction belongs
+to pipe dashes): the outdoor fan turns when the compressor runs outside defrost, while the
+circulation pump rotor turns strictly on reported pump ON/OFF (`d.pumpOn === true`)
+independently of measured water flow, and water pipes animate solely from qualified flow
+(`waterMoving`). Raw X10A pump signals outside `[0, 100]` stay unknown (`null`, never clamped to
+`0 %`/`100 %`), and `0`/`100` (max/stop command) neither proves RPM, rotation, head nor flow.
 
 Quiet/Defrost pills remain grey while inactive/unknown and blue while active. E-heater stays grey
 or orange; its accessible name and inspector state ON/OFF/unknown. Native Altherma 4 holding 9
 reports Off/Automatic/Manual quiet selection, not activity: Quiet stays unknown without independent
-X10A activity evidence and has no native activity timeline. Left of optional ENV III and BOOST,
-configured/used heat-pump links show compact X10A and MODBUS header pills (blue and petrol while
-connected, grey while disconnected, omitted when unused) that pack flush right and open link-status
-inspectors. The permanent BOOST face says
+X10A activity evidence and has no native activity timeline. The permanent BOOST face says
 only BOOST: Recommended on is petrol, other/unknown states grey. Its four-state timeline retains
 Free running, Forced off, Recommended on and Forced on. Only Recommended on contributes to Boost
 time. HomeHub's live network request outranks physical X10A SG contacts for this subject; the
@@ -284,10 +285,13 @@ Explain what the quantity is, its bounded normal context, then current state or 
 cannot reappear in a headline, members or state sentence. A fallback pressure row must own headline,
 source line and history together. Only rerender changed content so polling does not destroy a text
 selection. The same quantity uses the same underlying description as the value table. Native Altherma 4
-flow/pressure have unverified conversion limits and must not show numeric agreement/difference.
-Source-qualified native help takes precedence over generic compact inspector copy in every locale,
-including a stand-in under an X10A row. Definition-metadata changes invalidate the comparison even
-when its numeric values do not change.
+flow/pressure and any Modbus Input 49 row marked `flow_scale_unverified` (`Probing`, `Fallback`, or
+`Altherma4` sweeps) have unverified conversion limits: unverified flow displays provisionally on
+the pill and unified 24-hour chart with its caveat without driving `waterMoving`, ΔT, thermal power,
+or numeric agreement/difference. Source-qualified native or scaling limits take precedence over
+generic compact inspector copy in every locale, including a stand-in or paired X10A row.
+Definition-metadata and `flow_scale_unverified` changes invalidate the comparison even when its
+numeric values do not change.
 
 **History**
 
@@ -399,6 +403,19 @@ by purpose, one short assessment of average heating-run duration, and the 24-hou
 observed start count available when classification inputs are unsupported. Distinguish unsupported
 inputs from temporarily insufficient readings. Label elapsed time as the observation window and
 reserve event timestamps for recorded events.
+
+The tank-cooling expander shows **Maximum recorded** in K/h when the aggregate has a rate.
+An eligible timeline draws a 24-hour chart. Position each bar by its endpoints and keep zero-rate
+bars visible. Fixed-size markers occupy separate pump and draw-like lanes. Selecting a bar shows
+the interval, rate, readable time and markers. **Data details** and **Calculation example** start
+collapsed when present.
+Preserve selection and disclosure state during same-scope polling. Select the newest retained
+window if the selected one expires. Clear the chart when an accepted diagnosis response changes
+scope or has no valid timeline.
+Show the unavailable state for missing detail and the historical notice for stale tank-cooling
+inputs. See the [API contract](API.md#dhw-cooling-timeline) for retention and scope and
+[tank-cooling guidance](DIAGNOSTICS.md#domestic-hot-water-tank-cooling) for interpretation.
+
 Observation-only/experimental results cannot become OK or manufacture a health certificate.
 `available`, `assessable` and `evaluated` count different facts; only completed bounded judgments
 belong in the evaluated headline.
@@ -415,9 +432,10 @@ all rule details are maintained in [DIAGNOSTICS.md](DIAGNOSTICS.md) and its evid
 A separate neutral **Refrigerant (heating)** row uses passive fresh-sweep observation.
 Its collection needs no 24-hour opt-in and contributes no badge/count/verdict. The whole diagnosis
 card is hidden when Plant diagnostics is off, and this X10A row is hidden when `Modbus` is the
-active display source. When `X10A` is displayed with opt-in, the row appears after signal coverage
-is evaluated this boot, may remain waiting/paused with limits, offers no action and is cleanly
-absent on older firmware. Copy says ordinary polling cannot command full load, prove
+active display source. When `X10A` is displayed with opt-in, the row uses the current HTTP status
+after signal coverage is evaluated this boot. A failed status fetch or an OTA snapshot hides it.
+A current status can report waiting or interrupted with limits, including loss of X10A. Older
+firmware omits the row. Copy says ordinary polling cannot command full load, prove
 settling/charge, establish a universal range or confirm mechanical EEV motion. EEV pulses describe
 a command, not measured valve position.
 
@@ -672,29 +690,48 @@ on one line and put the full observation in the disclosure. Inspector headings w
 and value labels keep their defined share. Split Settings actions own their padding and cannot
 overlap when stacked. Measure every shipped locale at 320 px.
 
-The rolling cycling disclosure uses a step for each directly observed start and one row of
-hourly blocks showing start counts and observed modes. Each block is selectable through the full
-plot height. The caption sits above the selection highlight. The selected hour replaces time
-labels with its range and lists the runs that started in it. Keep mixed-hour gaps visible alongside
-modes, including the gap between restored evidence and new readings. During a drag, preview the
-highlight and range while keeping the run list tied to the selection. Restore the selected
-highlight and range on release. If a readable diagnosis snapshot omits the trace, retain the
-chart while the boot ID, `history.epoch` and `cycling.hours_epoch` all match. Mark the time
-after the last sample as missing until a new trace arrives. An unreadable snapshot shows **No data**.
+The rolling cycling disclosure omits the separate `Normal:` footer and can append a `< 5 min` count
+to completed heating runs when timed short runs are present. Its timeline uses a step for each directly
+observed start and one row of hourly blocks showing start counts and observed modes. Both the timed
+chart and hourly fallback use `.34`-opacity full-plot-height vertical fills stacked bottom-to-top
+proportionally across active and unassigned/gap duration in the hour, with counts below. The timed chart keeps
+its opaque step line in front. Heating is orange, DHW blue. Unassigned runtime and missing readings
+share one gray Unknown category. Readable off-time contributes no color, so a fully observed
+off-only hour has no fill. The timed chart orders mixed categories chronologically using bottom-to-top linear stops (`linear-gradient(to top, ...)`), while the hourly fallback lacks intra-hour timestamps and stacks heating, DHW, then unknown proportionally in canonical order (omitting missing/unknown time on restored or legacy slots whose elapsed duration is unavailable unless observed time is zero). Gaps still break the step line. Each
+timed hour button's accessible name distinguishes missing readings from unassigned runtime.
+Each block is selectable through the full plot height. The caption sits above the selection
+highlight. Shift-clicking or dragging across any timed chart selects a contiguous multi-hour range.
+On timed charts with `run_contexts`, the latest contiguous episode of short heating runs (or the latest
+contextual hour when no episode is present) auto-selects on open unless overridden, and selection
+replaces time labels with the selected span and renders a flat period summary plus a quiet 3-column
+table (`Start`, `Duration`, `Why it stopped`) with borderless tap-to-expand start and stop telemetry
+prose keyed by poll-invariant boot-relative or wall-clock run start so live polls keep open rows
+expanded (marking stopped runs without retained RAM context as **No cause details**, truly
+unstopped gap runs as **Stop unknown**, and pre-reboot X10A runs with **Start and stop details are
+recorded from the last restart onward**). Charts without `run_contexts` keep that pre-reboot X10A
+note when all selected runs preceded the current boot, omit the period summary, and fall back to
+`Start`, `Stop`, `Duration`. Both run grouping and short-run counts bridge brief `<= 15 s`
+intra-boot sampling gaps while keeping `> 15 s` gaps and reboot boundaries severed. During a timed-chart drag, the highlight and range follow the pointer and
+commit the dragged range on release (hourly fallback previews the hovered hour readout on drag while preserving
+the pinned hour on release).
+If a readable diagnosis snapshot omits the trace, retain the chart while the diagnosis
+source, boot ID, `history.epoch` and `cycling.hours_epoch` all match. Mark the time after the
+last sample as missing until a new trace arrives. An unreadable snapshot shows **No data**.
 A status transport failure can leave the graph visible from the last update. Mark an open run's
 stop and duration unknown while its live evidence is stale. See the
 [status contract](API.md#history-and-24-hour-checks).
-Above each rolling block, show the number of retained timed starts. Leave it blank if there is
+Below each rolling block, show the number of retained timed starts (amber `.warn` on hours with
+at least two timed short heating runs `< 10 min`). Leave it blank if there is
 missing trace time and no timed start. Use the lower-bound prefix
 for positive totals and accessible readouts. Update the chart in its own slot and defer it while
 its card is hidden.
 
 When neither a fresh nor a usable cached trace exists, use the available hourly totals for the
 entire chart. Show **No history yet** if those totals are absent too. Leave leading padding and
-expired slots empty. Hatch missing elapsed time where duration is known. Restored and legacy
-slots show readable time with unknown elapsed duration. Label restored timestamps as saved time.
-Leave the unelapsed part of the open hour unfilled. The default readout uses one hourly snapshot
-and omits runtime without readable compressor seconds.
+expired slots empty. A just-opened hour
+with zero elapsed time has no fill. Restored and legacy slots keep unknown elapsed duration in
+their readouts. Label restored timestamps as saved time. The default readout uses one hourly
+snapshot and omits runtime without readable compressor seconds.
 
 Use logical keyboard order, visible focus, Enter/Space activation, Escape at the innermost layer,
 modal focus return and scroll lock. Background controls are unavailable while a dialog is open.

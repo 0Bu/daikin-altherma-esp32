@@ -420,8 +420,15 @@ assert.match(cReport, /source_fresh \? slot\.fault_now : FaultClass::Unknown/,
 assert.match(cReport, /logic::checkup_apply_freshness\(report, source_fresh, source_age_s, span_s\);/,
   "the pure freshness policy receives read-time source age and actual lifecycle span");
 assert.match(cReport,
-  /if \(source_fresh && !slot\.dhw_reset_requested\.load\(\)\) \{[^}]*report\.dhw_candidate_s = p\.candidate_observed_s;[^}]*report\.dhw_settle_remaining_s = p\.settle_remaining_s;/,
-  "candidate and settling progress require a fresh source, not just retained filter state");
+  /copy_dhw_trace_locked\(slot, dhw_trace, now_us, source_fresh\);.*const bool dhw_reset_pending = slot\.dhw_reset_requested\.load\(\);/,
+  "the report observes a reset that latched during the optional clock read");
+assert.equal([...cReport.matchAll(/slot\.dhw_reset_requested\.load\(\)/g)].length, 1,
+  "one reset decision keeps the DHW report internally consistent");
+assert.match(cReport, /dhw\.full_span = !dhw_reset_pending && logic::dhw_loss_scope_full\(/,
+  "a pending reset clears elapsed time from the previous DHW scope");
+assert.match(cReport,
+  /if \(source_fresh && !dhw_reset_pending\) \{[^}]*report\.dhw_candidate_s = p\.candidate_observed_s;[^}]*report\.dhw_settle_remaining_s = p\.settle_remaining_s;/,
+  "DHW progress requires a fresh source and the same admitted scope as the chart");
 assert.match(cReport,
   /logic::checkup_apply_freshness\(report, source_fresh, source_age_s, span_s\); return report; \}$/,
   "no later report population may reintroduce current state after the freshness gate");

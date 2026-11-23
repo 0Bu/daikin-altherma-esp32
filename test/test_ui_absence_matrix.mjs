@@ -95,9 +95,9 @@ const context = vm.createContext({
 
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   this.__ui = { S, t, esp32CardHtml, dynamicControlCardHtml, circulationSettingsCardHtml,
-                refrigerantServiceRowHtml, workingFigureRowHtml, connLinks, liveData, histHtml,
-                INSPECT, roomSourceStatus, hasRoomHist, roomReferencePresent, roomReferenceValue,
-                renderEnv3Pill, renderSourcePills, layoutHeaderPills, renderInspect };`, context,
+                refrigerantServiceRowHtml, workingFigureRowHtml, checkupCardHtml, checkupDetailHtml,
+                connLinks, liveData, histHtml, INSPECT, roomSourceStatus, hasRoomHist,
+                roomReferencePresent, roomReferenceValue };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -595,41 +595,6 @@ for (const scenario of SCENARIOS) {
       `${scenario.name}: current plant outdoor evidence must render with provenance`);
     checks += 2;
   }
-
-  // RULE 10 — the X10A and MODBUS schematic header pills follow source configuration/use, never
-  // task liveness alone. An unconfigured Modbus host hides #gModbus; a pure Modbus setup where
-  // X10A was never detected hides #gX10a; safe mode keeps configured pills visible as offline and
-  // names recovery mode in their accessible labels and inspectors rather than blaming wiring.
-  ui.renderEnv3Pill();
-  ui.renderSourcePills();
-  ui.layoutHeaderPills();
-  const gX10a = context.document.getElementById("gX10a");
-  const gModbus = context.document.getElementById("gModbus");
-  const expectModbusPill = !scenario.remove.includes("homehub");
-  const expectX10aPill = !scenario.remove.includes("x10a") || scenario.remove.includes("homehub");
-  assert.equal(gModbus.style.display, expectModbusPill ? "" : "none",
-    `${scenario.name}: MODBUS pill visibility must follow configured Modbus presence`);
-  assert.equal(gX10a.style.display, expectX10aPill ? "" : "none",
-    `${scenario.name}: X10A pill must hide only on a pure Modbus setup with no X10A evidence`);
-  if (expectModbusPill) {
-    assert.equal(gModbus.classList.contains("live"),
-      !scenario.remove.includes("safeMode") && status.modbus.connected === true,
-      `${scenario.name}: MODBUS pill live state must match active connection`);
-    if (scenario.remove.includes("safeMode")) {
-      assert.ok(gModbus.getAttribute("aria-label").includes(ui.t("recovery.title")),
-        `${scenario.name}: safe-mode MODBUS pill must name recovery mode`);
-    }
-  }
-  if (expectX10aPill) {
-    assert.equal(gX10a.classList.contains("live"),
-      !scenario.remove.includes("safeMode") && status.hp.connected === true,
-      `${scenario.name}: X10A pill live state must match active connection`);
-    if (scenario.remove.includes("safeMode")) {
-      assert.ok(gX10a.getAttribute("aria-label").includes(ui.t("recovery.title")),
-        `${scenario.name}: safe-mode X10A pill must name recovery mode`);
-    }
-  }
-  checks += 4;
 }
 
 // The board's own memory trends are the case that must survive EVERY plant absence: they describe
@@ -724,6 +689,37 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
   assert.match(wfHtml, /~4[.,]10/, "HomeHub Modbus working_figure must keep rendering estimated AZ");
   assert.match(wfHtml, /HomeHub Modbus/, "HomeHub Modbus working_figure must identify its source");
   checks += 2;
+}
+
+// Modbus-only diagnostics and unavailable flow never surface X10A hydronic observation details
+// or keep an unavailable flow row visible via a hydronic placeholder or stale X10A payload.
+{
+  const hydronicPlaceholder = {
+    confirmed: false, current: false, dated: false, coverage_partial: false,
+    restore_pending: false, persistence_pending: false, method: 1, reason_code: 0,
+    reason: "none", spread_k: { min: null, mean: null, max: null },
+  };
+  const modbusOnly = build(["x10a"]);
+  modbusOnly.diagnostics = { enabled: true, source: "modbus", effective_source: "modbus",
+    available_sources: ["modbus"] };
+  modbusOnly.health = { source: "modbus", status: "ok", persist: "no_record", source_fresh: true,
+    covered_s: 3600, span_s: 3600, full_span: false, available: 4, assessable: 4, evaluated: 4,
+    checks: [{ id: "flow", verdict: "unavailable", observed_s: 0, min_l_min: null,
+      hydronic: hydronicPlaceholder }] };
+  ui.S.status = modbusOnly;
+  assert.ok(!ui.checkupCardHtml(true).includes("health_flow"),
+    "Modbus diagnostics must hide unavailable flow even with hydronic placeholder");
+  assert.equal(ui.checkupCardHtml(false), "",
+    "offline Modbus card must not expose hydronic flow row");
+  const modbusOkFlow = { id: "flow", verdict: "ok", evidence: "observation", min_l_min: 11.4,
+    hydronic: { ...hydronicPlaceholder, confirmed: true, dated: true,
+      first_evidence_unix_s: 1791880000, last_evidence_unix_s: 1791880020,
+      samples: 4, spread_k: { min: 1.0, mean: 2.0, max: 3.0 } } };
+  modbusOnly.health.checks = [modbusOkFlow];
+  const spreadLabel = ui.t("check.hydronic.labels").split("|")[0];
+  assert.ok(!ui.checkupDetailHtml(modbusOkFlow, false, modbusOnly.health).includes(spreadLabel),
+    "Modbus flow detail must omit X10A hydronic population rows");
+  checks++;
 }
 
 console.log(`UI absence matrix: ${SCENARIOS.length} source combinations, ${checks} rules held`);

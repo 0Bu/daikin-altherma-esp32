@@ -318,7 +318,7 @@ INTEGER_DIGITS_SYMBOL = (
 INTEGER_TO_CHARS_SYMBOL = (
     "std::to_chars_result std::__detail::__to_chars_10<unsigned long long>(char*, char*, unsigned long long)")
 INTEGER_BUILDERS = {
-    "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)": 41,
+    "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&, unsigned int)": 41,
     "daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)": 21,
 }
 STATUS_HEALTH_NUMBER_SYMBOL = (
@@ -918,12 +918,20 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "checkup_freshness": ["checkup_summarize", "checkup_evidence_name"],
         "cycling_hours": ["checkup_cycling_hours_locked", "room_time_now"],
         "cycling_hours_builder": ["checkup_cycling_hours_locked", "checkup_cycling_hours_build"],
+        "cycling_hours_anchor": ["checkup_cycling_hours_locked", "checkup_cycling_anchor"],
         "cycling_trace": ["cycling_trace_snapshot", "cycling_trace_emit", "cycling_trace_push",
                           "room_time_now"],
         "defrost_start_fence": ["defrost_start_copy", "stop_stop_observation_suppressed"],
         "defrost_start_generation": ["defrost_start_copy", "defrost_poll_generation"],
         "checkup_fault_flags": ["fault_saved_flags", "fault_saved_window_flags"],
         "checkup_fault_flags_clock": ["fault_saved_flags", "room_time_now"],
+        # Optional DHW output is caller-owned heap storage. Snapshot expiry, both monotonic
+        # reads, the libc clock and final withdrawal loads are sequential siblings.
+        # The DHW wall projection is inlined into the measured copy frame.
+        "dhw_trace_expire": ["dhw_trace_copy", "dhw_trace_expire"],
+        "dhw_trace_clock": ["dhw_trace_copy", "room_time_now"],
+        "dhw_trace_monotonic": ["dhw_trace_copy", "dhw_trace_monotonic"],
+        "dhw_trace_guard": ["dhw_trace_copy", "stop_atomic_bool_load"],
     }
     report_paths = {
         f"httpd_{transport}_{name}": [*prefix, *report, *tail]
@@ -1022,6 +1030,10 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "httpd_direct_status_service_metric": ["http_send_status_json", "status_serializer",
                                                "status_service_metric", "status_tenths_value",
                                                "status_unsigned_number"],
+        "httpd_mcp_status_service_meta": ["mcp_post", "http_send_status_json", "status_serializer",
+                                          "status_service_meta", "status_unsigned_number"],
+        "httpd_direct_status_service_meta": ["http_send_status_json", "status_serializer",
+                                             "status_service_meta", "status_unsigned_number"],
         "httpd_mcp_curve_scalar_fields": ["mcp_post", "http_send_status_json", "status_serializer",
                                           "curve_status_json", "curve_json_bool", "curve_json_uint",
                                           "curve_json_quoted", "curve_json_source",
@@ -1120,10 +1132,16 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                              r"heap_caps_malloc\(sizeof\(Trace\), MALLOC_CAP_8BIT\)\s*: nullptr;\s*"
                              r"std::unique_ptr<Trace, decltype\(&std::free\)> trace\(\s*"
                              r"trace_storage \? new \(trace_storage\) Trace : nullptr, std::free\);\s*"
+                             r"using DhwTrace\s*=\s*logic::DhwLossTimeline;\s*"
+                             r"void\* dhw_storage\s*=\s*trace_reader.admitted\s*\?\s*"
+                             r"heap_caps_malloc\(sizeof\(DhwTrace\), MALLOC_CAP_8BIT\)\s*: nullptr;\s*"
+                             r"std::unique_ptr<DhwTrace, decltype\(&std::free\)> dhw_trace\(\s*"
+                             r"dhw_storage \? new \(dhw_storage\) DhwTrace : nullptr, std::free\);\s*"
                              r"logic::CheckupRestore\s+persist;\s*"
                              r"logic::DefrostStartReport\s+defrost_start;\s*"
                              r"const logic::CheckupReport hr\s*=\s*"
-                             r"checkup_report\(&hrs, trace\.get\(\), &persist, diag_effective,\s*&defrost_start\);",
+                             r"checkup_report\(&hrs, trace\.get\(\), &persist, diag_effective,\s*"
+                             r"&defrost_start, dhw_trace\.get\(\)\);",
                              status)
             or re.search(r"\bcheckup_cycling_hours(?:_locked)?\s*\(", status)
             or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
@@ -3281,6 +3299,7 @@ def self_test() -> None:
         'void daik::append_status_signed_tenths<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, int)': 32,
         'void daik::append_status_outdoor_context<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::logic::CheckupOutdoorReport const&)': 64,
         'void daik::append_status_service_metric<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, daik::logic::RefrigerantServiceMetricSnapshot const&)': 32,
+        'void daik::append_status_service_meta<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, daik::logic::RefrigerantServiceMetricSnapshot const&, daik::logic::RefrigerantServiceSource const&)': 32,
         'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, bool)\x231}::operator()(char const*, bool) const': 32,
         'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, unsigned long long)\x231}::operator()(char const*, unsigned long long) const': 32,
         'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, std::basic_string_view<char, std::char_traits<char> >)\x231}::operator()(char const*, std::basic_string_view<char, std::char_traits<char> >) const': 48,
@@ -3334,11 +3353,20 @@ def self_test() -> None:
         'daik::logic::fault_trace_decode_page(daik::logic::CheckupFaultTrace&, daik::logic::FaultTracePageInfo const&, unsigned char const*)': 112,
         'daik::checkup_fault_restore(daik::logic::CheckupFaultTrace const&, daik::logic::CyclingTraceIdentity const&, long long, unsigned long, daik::DiagnosticsSource)': 64,
         'daik::logic::checkup_fault_handoff_decode(daik::logic::CheckupFaultTrace&, daik::logic::FaultHandoffPayload const&)': 64,
+        '_ZN4daikL32append_cycling_run_contexts_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_mNS_17DiagnosticsSourceE$constprop$0': 64,
+        'daik::append_cycling_run_contexts_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, unsigned long, daik::DiagnosticsSource)::{lambda(char const*, short)\x231}::operator()(char const*, short) const': 32,
+        'daik::checkup_has_cycling_run_contexts(daik::DiagnosticsSource)': 48,
+        'daik::checkup_cycling_run_contexts(daik::logic::CheckupRunContextSnapshot&, unsigned long, daik::DiagnosticsSource)': 48,
+        'daik::logic::cycling_run_context_expire(daik::logic::CyclingRunContextTracker&, long long)': 32,
+        'daik::logic::cycling_run_context_snapshot(daik::logic::CheckupRunContextSnapshot&, daik::logic::CheckupRunContextTrace const&, unsigned long)': 160,
+        'daik::(anonymous namespace)::record_cycling_run_context_locked(daik::logic::StopContextSample const&, daik::CachedValue const*, unsigned int, daik::logic::CheckupSample const&, int, bool, long long, unsigned long)': 96,
+        'daik::logic::cycling_run_context_step(daik::logic::CyclingRunContextTracker&, daik::logic::CheckupRunContextTrace&, daik::logic::CyclingRunSample const&, long long, unsigned long)': 112,
+        'daik::resolve_rwt_locator(daik::logic::ProfileView const&)': 64,
         'daik::checkup_modbus_confirm_source(daik::ModbusProfile, unsigned long)': 48,
         'unsigned long daik::logic::checkup_modbus_model_fingerprint<daik::def::HomeHubReg>(daik::ModbusProfile, daik::def::HomeHubReg const*, int)': 96,
         'daik::logic::dhw_loss_adopt(daik::logic::DhwLossState&, daik::logic::DhwLossCarry const&, long long)': 128,
-        'daik::checkup_record_modbus(daik::CachedValue const*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool)': 192,
-        'daik::logic::checkup_modbus_coverage(daik::ModbusProfile)': 64,
+        'daik::checkup_record_modbus(daik::CachedValue const*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis)': 192,
+        'daik::logic::checkup_modbus_coverage(daik::ModbusProfile, daik::ModbusProfileBasis)': 64,
         'daik::(anonymous namespace)::commit_and_fold_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupSample const&, long long, unsigned long, bool)': 48,
         'daik::(anonymous namespace)::fold_checkup_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupSample const&, long long)': 48,
         'daik::logic::checkup_step(daik::logic::CheckupState&, daik::logic::CheckupBucket&, daik::logic::CheckupSample const&, long long, daik::logic::CheckupRing*, daik::logic::CheckupCyclingTrace*, daik::logic::OutdoorSource)': 112,
@@ -3361,7 +3389,7 @@ def self_test() -> None:
      'daik::publish_weather_state(bool)': 64,
      'daik::build_weather_mqtt_json[abi:cxx11](daik::WeatherMqttSnapshot const&, long long)': 64,
      'daik::publish_heartbeat()': 64,
-     'daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)': 64,
+     'daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&, unsigned int)': 64,
      'daik::publish_crash()': 64,
      'daik::publish_heating_curve_telemetry(daik::Config const&)': 64,
      '_ZN4daikL22evaluate_heating_curveERKNS_6ConfigERKNS_7HpStatsE$isra$0': 64,
@@ -3370,7 +3398,7 @@ def self_test() -> None:
      'daik::hp_query_detailed(unsigned char, daik::Protocol, unsigned char*, unsigned int, daik::HpQueryLogPolicy)': 64,
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
-     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*, daik::logic::CheckupRestore*, daik::DiagnosticsSource, daik::logic::DefrostStartReport*)': 64,
+     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*, daik::logic::CheckupRestore*, daik::DiagnosticsSource, daik::logic::DefrostStartReport*, daik::logic::DhwLossTimeline*)': 64,
      'daik::copy_defrost_start_locked(daik::logic::DefrostStartReport&, long long)': 80,
      'daik::hp_poll_generation()': 32,
      'daik::defrost_air_supported(daik::logic::ProfileView const&)': 64,
@@ -3416,7 +3444,7 @@ def self_test() -> None:
      'daik::history_flash_save()': 48,
      'daik::(anonymous namespace)::checkup_reboot_save()': 80,
      'daik::(anonymous namespace)::apply_reset_locked()': 112,
-     'daik::(anonymous namespace)::apply_dhw_reset_locked()': 112,
+     'daik::(anonymous namespace)::apply_dhw_reset_locked(daik::(anonymous namespace)::CheckupSlot&)': 32,
      'daik::set_wifi(httpd_req*)': 64,
      'daik::set_syslog(httpd_req*)': 64,
      'daik::set_ntp(httpd_req*)': 64,
@@ -3439,6 +3467,7 @@ def self_test() -> None:
      'daik::eth_fallback_task(void*)': 64,
      'daik::dns_task(void*)': 64,
      'daik::config_load()': 64,
+     '_ZN4daikL19log_blob_load_issueENS_17ConfigLoadVerdictERKSt6vectorIhSaIhEEPKcS7_ttS7_$constprop$0': 48,
      'daik::history_start()': 64,
      'daik::mb_autodiscover_initial()': 64,
      'daik::http_send_values_json(httpd_req*, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)': 64,
@@ -3889,8 +3918,10 @@ def self_test() -> None:
     # stop frames and the complete caller sums are checked against the real ELF, not these bytes.
     for key, rule in stop_stack.SYMBOLS.items():
         name = exact_symbol_name(rule["pattern"])
-        # These five newly outlined index helpers use their measured target ENTRY fixtures.
-        extra_frames[name] = rule["max_bytes"] if key.startswith("stop_index_") else 32
+        # The five index helpers and distinct DHW functions use their measured ENTRY fixtures.
+        # In particular, the real pure evaluator stays48; the new traced frame is separately64.
+        extra_frames[name] = (rule["max_bytes"] if key.startswith(("stop_index_", "dhw_trace_"))
+                              or key == "dhw_loss_step" else 32)
 
     # Exact final-ELF anchors for the shared verifier and asynchronous HTTP upload.
     extra_frames.update({
@@ -4330,7 +4361,9 @@ def self_test() -> None:
                          ("httpd_direct_quoted_field", "status_quoted_field"),
                          ("httpd_direct_quoted_field", "status_quoted_string"),
                          ("httpd_direct_quoted_field", "status_escaped_string"),
-                         ("httpd_direct_quoted_field", "status_utf8_sequence_length")):
+                         ("httpd_direct_quoted_field", "status_utf8_sequence_length"),
+                         ("httpd_direct_status_service_meta", "status_service_meta"),
+                         ("httpd_mcp_status_service_meta", "status_service_meta")):
         changed = json.loads(json.dumps(budgets))
         changed["paths"][name]["symbols"].remove(member)
         try:
@@ -4354,7 +4387,7 @@ def self_test() -> None:
                    "checkup_dhw_fold", "checkup_cycling_hours_build", "cycling_layout_fingerprint",
                    "status_bool_field", "status_uint_field", "status_int_field",
                    "status_quoted_field", "status_quoted_string", "status_escaped_string",
-                   "status_utf8_sequence_length"):
+                   "status_utf8_sequence_length", "status_service_meta"):
         rule = budgets["symbols"][member]
         pattern = re.compile(rule["pattern"])
         for grown in (False, True):
@@ -4379,7 +4412,14 @@ def self_test() -> None:
     diagnosis_controls += 1
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
-        ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist, diag_effective, &defrost_start)", "checkup_report(nullptr)"),
+        ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist, diag_effective,",
+         "other_report(&hrs, trace.get(), &persist, diag_effective,"),
+        ("main/http_status.cpp", "&defrost_start, dhw_trace.get())", "&defrost_start, nullptr)"),
+        ("main/http_status.cpp", "trace_reader.admitted ? heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT) : nullptr",
+         "heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT)"),
+        ("main/http_status.cpp", "using DhwTrace = logic::DhwLossTimeline;",
+         "logic::DhwLossTimeline dhw_stack{}; using DhwTrace = logic::DhwLossTimeline;"),
+        ("main/http_status.cpp", "void* dhw_storage =", "weather_values_reader_enter(); void* dhw_storage ="),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
         ("main/mqtt_ha.cpp", "publish_heartbeat();", "other_heartbeat();"),
         ("main/checkup.cpp", "p.layout_fp              = logic::checkup_layout_fingerprint();",

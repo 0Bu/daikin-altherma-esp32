@@ -8,6 +8,7 @@ import { startFixtureServer } from "../tools/browser/fixture_server.mjs";
 import { assertHistoryMotion, HISTORY_MOTION_MUTATIONS } from "./test_browser_history_motion.mjs";
 import { assertCyclingChart } from "./test_browser_cycling.mjs";
 import { assertFaultChart } from "./test_browser_fault.mjs";
+import { assertDhwTimeline } from "./test_browser_dhw.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pageFile = process.env.DAIKIN_BROWSER_PAGE;
@@ -1337,11 +1338,21 @@ async function assertPlantDiagnosis(page, context) {
       ],
     };
     S.status.refrigerant_service = {
-      state: 'limited', continuous_s: 75, samples: 4, blocker: null,
-      special_phases_known: false, limitations: ['pressure_sides_incomplete'],
+      kind: 'observation', mode: 'heating', state: 'limited', continuous_s: 15,
+      samples: 4, source_generation: 71, blocker: null,
+      special_phases_known: true, limitations: ['pressure_sides_incomplete'],
       metrics: { compressor_rps: { min: 20, mean: 27.5, max: 40 },
         discharge_c: { min: 46.5, mean: 60.5, max: 81.4 },
-        eev_command_pls: { min: 200, mean: 230.5, max: 250 } }
+        eev_command_pls: { min: 200, mean: 230.5, max: 250 },
+        high_pressure_bar: { min: 7.3, mean: 14.6, max: 21.9 },
+        low_pressure_bar: { min: 3.2, mean: 4.1, max: 5 } },
+      metric_meta: {
+        compressor_rps: { samples: 4, source: { kind: 'x10a', reg: 48, offset: 0, conv: 152 } },
+        discharge_c: { samples: 4, source: { kind: 'x10a', reg: 32, offset: 4, conv: 105 } },
+        eev_command_pls: { samples: 4, source: { kind: 'x10a', reg: 48, offset: 3, conv: 151 } },
+        high_pressure_bar: { samples: 2, source: { kind: 'x10a', reg: 98, offset: 15, conv: 105 } },
+        low_pressure_bar: { samples: 4, source: { kind: 'x10a', reg: 32, offset: 14, conv: 105 } }
+      }
     };
     S.status.health = {
       status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
@@ -1450,6 +1461,35 @@ async function assertPlantDiagnosis(page, context) {
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
       if (block.id === "model:health_cycling" || block.id === "model:health_pressure") continue;
+      if (block.id === "model:health_dhw_loss") {
+        const dhw = await page.evaluate(`(() => {
+          const body = document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').querySelector('.vdesc-body');
+          const detail = body.querySelector('.checkup-dhw-detail');
+          const basis = detail?.querySelector('[data-dhw-disclosure="basis"]');
+          return { wrapper: body.firstElementChild === detail, heroFirst: detail?.firstElementChild?.classList.contains('checkup-dhw-hero'),
+            value: detail?.querySelector('.checkup-dhw-value')?.firstChild?.textContent.trim(),
+            unit: detail?.querySelector('.checkup-dhw-unit')?.textContent,
+            assessment: detail?.querySelector('.checkup-dhw-assessment')?.textContent,
+            disclosures: Array.from(detail?.querySelectorAll('details[data-dhw-disclosure]') || [], node =>
+              ({key:node.dataset.dhwDisclosure,tag:node.tagName,open:node.open,named:!!node.querySelector('summary')?.textContent.trim()})),
+            normal: basis?.querySelector('.vdesc-n')?.textContent,
+            empty: detail?.querySelector('[data-checkup-dhw] .checkup-dhw-empty')?.textContent,
+            fabricated: detail?.querySelectorAll('.checkup-dhw-chart, [data-dhw-window], [data-dhw-lane]').length };
+        })()`);
+        assert.equal(block.count, 1, `${context}/${block.id}: one dedicated detail wrapper, not the generic three blocks`);
+        assert.equal(dhw.wrapper && dhw.heroFirst, true, `${context}/${block.id}: the measurement hero leads the detail`);
+        assert.equal(dhw.value, "1", `${context}/${block.id}: hero retains the aggregate sensor rate without timed records`);
+        assert.equal(dhw.unit, "K/h", `${context}/${block.id}: separate cooling-rate unit`);
+        assert.equal(dhw.assessment, await page.evaluate("t('check.dhw.measurement') + ' ' + t('check.dhw.hint')"),
+          `${context}/${block.id}: sensor observation and bounded project hint remain distinct`);
+        assert.deepEqual(dhw.disclosures, ["basis", "energy"].map(key => ({key,tag:"DETAILS",open:false,named:true})),
+          `${context}/${block.id}: supporting basis and energy are named native disclosures, initially collapsed`);
+        assert.equal(dhw.normal, normalLabel, `${context}/${block.id}: Normal context is retained inside the basis`);
+        assert.equal(dhw.empty, await page.evaluate("t('check.dhw.timeline_unavailable')"),
+          `${context}/${block.id}: aggregate-only firmware explicitly lacks timed evidence`);
+        assert.equal(dhw.fabricated, 0, `${context}/${block.id}: totals cannot fabricate chart bars or marker lanes`);
+        continue;
+      }
       if (block.id === "model:health_fault") {
         assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
         assert.ok(!block.text.some(text => text.includes(normalLabel)),
@@ -1460,6 +1500,104 @@ async function assertPlantDiagnosis(page, context) {
       assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
       assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
+    }
+    const refrigerantText = () => page.evaluate(`document.querySelector("[data-desc='service:refrigerant']")
+      .closest('.vitem').innerText`);
+    for (const [key, args] of [["samples", [2]], ["samples", [4]], ["meta_limit", []]]) {
+      const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
+        ...${JSON.stringify(args)})`);
+      assert.ok((await refrigerantText()).includes(expected),
+        `${context}: actual expanded service retains localized metadata ${key}/${args.join()}`);
+    }
+    assert.doesNotMatch(await refrigerantText(), /0x62|0x20|source_generation|"conv"/,
+      `${context}: raw source coordinates stay outside the owner-facing explanation`);
+    assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
+      `${context}: populated selected metrics do not add a generic source sentence`);
+    if (context.split("/")[1] === "en") {
+      const serviceRow = "[data-desc='service:refrigerant']";
+      await page.evaluate(`(() => {
+        const fetchLive = window.fetch;
+        const live = S.status;
+        const values = { values: S._values, modbus: S._modbus };
+        window.__servicePoll = { fetchLive, live, phase: "recording", requests: [],
+          valuesRequest: S.valuesRequest, statusRequest: S.statusRequest,
+          statusAcceptedRequest: S.statusAcceptedRequest, transportUnavailable: S.transportUnavailable,
+          transportBusy: S.transportBusy, values: S._values, modbus: S._modbus,
+          statusDue: _statusDue, pollFails: _pollFails, otaCached: S.otaCached };
+        const fixture = window.__servicePoll;
+        window.fetch = (url, options) => {
+          if (url === "/status") {
+            fixture.requests.push(url);
+            if (fixture.phase === "unreachable") return Promise.resolve(new Response(null, { status: 500 }));
+            const interrupted = fixture.phase === "interrupted";
+            return Promise.resolve(Response.json({ ...live, hp: { ...live.hp, connected: !interrupted },
+              refrigerant_service: interrupted
+                ? { kind: "observation", state: "interrupted", blocker: "poll_gap",
+                    continuous_s: 0, samples: 0 }
+                : { ...live.refrigerant_service, state: "observing" } }));
+          }
+          if (url === "/values") {
+            fixture.requests.push(url);
+            return Promise.resolve(Response.json(fixture.phase === "interrupted" ? { values: [] } : values));
+          }
+          return fetchLive(url, options);
+        };
+        return true;
+      })()`);
+      const poll = (phase) => page.evaluate(`(async () => {
+        window.__servicePoll.phase = ${JSON.stringify(phase)};
+        _statusDue = 0;
+        await pollTick();
+        return window.__servicePoll.requests.slice();
+      })()`);
+      try {
+        assert.deepEqual(await poll("recording"), ["/status", "/values"]);
+        assert.match(await refrigerantText(), /RECORDING.*4 readings/s);
+        const expanded = await page.evaluate(`(() => {
+          const row = document.querySelector(${JSON.stringify(serviceRow)});
+          row.focus();
+          S.clickHold = true;
+          return row === document.activeElement && row.getAttribute("aria-expanded") === "true";
+        })()`);
+        assert.equal(expanded, true);
+        assert.deepEqual(await poll("unreachable"), ["/status", "/values", "/status"]);
+        assert.equal(await page.evaluate(`(() => {
+          const row = document.querySelector(${JSON.stringify(serviceRow)});
+          return S.status.refrigerant_service.state === "observing" &&
+            S.transportUnavailable === "status" && row.closest(".vitem").hidden &&
+            document.activeElement?.dataset.card === "diagnosis";
+        })()`), true, `${context}: a failed status retires the expanded and focused recording immediately`);
+        await page.evaluate("S.clickHold = false; renderApp(); true");
+        assert.equal(await page.evaluate(`!!document.querySelector(${JSON.stringify(serviceRow)})`), false);
+        assert.deepEqual(await poll("interrupted"), ["/status", "/values", "/status", "/status", "/values"]);
+        assert.deepEqual(await page.evaluate(`(() => {
+          const row = document.querySelector(${JSON.stringify(serviceRow)});
+          return { value: row.querySelector(".vrow-val").innerText, open: row.getAttribute("aria-expanded") };
+        })()`), { value: "PAUSED", open: "false" },
+          `${context}: current HTTP status reports X10A interruption without reopening stale content`);
+        await clickDisclosure(page, serviceRow);
+        await page.waitFor("!S.clickHold");
+        assert.match(await refrigerantText(), /0 readings/);
+        assert.doesNotMatch(await refrigerantText(), /4 readings|27\.5/);
+        await page.evaluate("S.otaCached = true; renderApp(); true");
+        assert.equal(await page.evaluate(`!!document.querySelector(${JSON.stringify(serviceRow)})`), false,
+          `${context}: an OTA snapshot cannot show a current refrigerant row`);
+      } finally {
+        await page.evaluate(`(() => {
+          const saved = window.__servicePoll;
+          window.fetch = saved.fetchLive;
+          _statusDue = saved.statusDue; _pollFails = saved.pollFails;
+          Object.assign(S, { status: saved.live, _values: saved.values, _modbus: saved.modbus,
+            valuesRequest: saved.valuesRequest, statusRequest: saved.statusRequest,
+            statusAcceptedRequest: saved.statusAcceptedRequest, otaCached: saved.otaCached,
+            transportUnavailable: saved.transportUnavailable, transportBusy: saved.transportBusy,
+            clickHold: false });
+          S.descOpen.add("service:refrigerant");
+          delete window.__servicePoll;
+          renderApp();
+          return true;
+        })()`);
+      }
     }
     const pressureExpanded = await page.evaluate(`(() => {
       const row = document.querySelector("[data-desc='model:health_pressure']").closest(".vitem");
@@ -1502,8 +1640,8 @@ async function assertPlantDiagnosis(page, context) {
       24, `${context}: one cycling column for each hour`);
     const [neutral, heating] = await page.evaluate(`Array.from(document.querySelectorAll(
       ".checkup-chart-cols > button"), col => ({
-        parts: Array.from(col.querySelectorAll("s > i"), part => part.className),
-        color: getComputedStyle(col.querySelector("s > i")).backgroundColor,
+        parts: col.querySelector("s").dataset.modes.split(" ").filter(Boolean),
+        color: getComputedStyle(col.querySelector("s")).backgroundColor,
         label: col.getAttribute("aria-label")
       }))`);
     assert.deepEqual(neutral.parts, ["other"], `${context}: unassigned runtime has its own segment`);
@@ -1525,7 +1663,7 @@ async function assertPlantDiagnosis(page, context) {
     assert.deepEqual(cycling.order.slice(0, 2),
       ["vdesc-p checkup-cycling-total", "vdesc-p checkup-cycling-assessment"],
       `${context}: cycling starts with the value, then the current assessment`);
-    assert.equal(cycling.normal, normalLabel, `${context}: cycling shares the Normal block`);
+    assert.equal(cycling.normal, undefined, `${context}: cycling omits redundant Normal block`);
     assert.equal(cycling.oldStopBox, false, `${context}: cycling detail omits the technical stop table`);
     await captureNativeEvidence(page, `${context}/cycling-with-starts`,
       "[data-desc='model:health_cycling']", ".vitem");
@@ -1558,8 +1696,27 @@ async function assertPlantDiagnosis(page, context) {
     })()`);
     const dhwText = () => page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']")
       .closest('.vitem').innerText`);
+    const dhwEnergyText = () => page.evaluate(`document.querySelector(
+      '.checkup-dhw-detail [data-dhw-disclosure="energy"] .checkup-dhw-disclosure-body')?.innerText.trim() || ''`);
+    const expectedDhwEnergy = numbers => page.evaluate(`t('check.detail.dhw_energy',
+      ...${JSON.stringify(numbers)}.map((value,index) => value.toLocaleString(LANG,
+        {minimumFractionDigits:index ? 2 : 1,maximumFractionDigits:index ? 2 : 1})))`);
+    // The new layout deliberately hides long evidence and the energy example until their own
+    // native summaries are activated. Test their actions before inspecting visible content.
+    for (const name of ["basis", "energy"]) {
+      const disclosure = `.checkup-dhw-detail details[data-dhw-disclosure="${name}"]`;
+      await clickElement(page, disclosure + " > summary");
+      await page.waitFor(`document.querySelector(${JSON.stringify(disclosure)}).open === true`);
+    }
+    await page.waitFor("!S.clickHold && !S.scrub");
+    assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-supporting-details`);
+    const openedEnergy = await dhwEnergyText();
+    assert.equal(openedEnergy, await expectedDhwEnergy([1, 0.23, 0.08, 0.09]),
+      `${context}: opened energy example retains the one-hour 200 l and assumed-COP calculation`);
+    for (const assumption of ["200", "COP", "kWh"])
+      assert.ok(openedEnergy.includes(assumption), `${context}: energy assumptions retain ${assumption}`);
     assert.ok((await dhwText()).includes(discardedContext),
-      `${context}: a NOTE retains discarded reading-gap evidence`);
+      `${context}: opened basis retains discarded reading-gap evidence for the NOTE`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
       .closest('.card').querySelector('.section-badge')?.innerText || ''`),
       await page.evaluate("t('check.summary.notes', 4)"),
@@ -1588,6 +1745,10 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: marked rapid cooling shows its measured rate`);
     assert.ok((await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').innerText`))
       .includes('kWh'), `${context}: measured cooling has the energy illustration`);
+    assert.equal(await page.evaluate(`document.querySelector('.checkup-dhw-detail [data-dhw-disclosure="energy"]').open`), true,
+      `${context}: changing the measured scalar preserves the opened native energy disclosure`);
+    assert.equal(await dhwEnergyText(), await expectedDhwEnergy([6, 1.40, 0.47, 0.56]),
+      `${context}: the energy illustration updates the one-hour calculation, not a daily extrapolation`);
     assert.ok((await dhwText()).includes(discardedContext),
       `${context}: MEASURED retains discarded reading-gap evidence`);
     await captureNativeEvidence(page, `${context}/dhw-net-cooling`,
@@ -1608,9 +1769,57 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: a blocked day must not promise ongoing checking`);
     assert.ok(!(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').innerText`))
       .includes('kWh'), `${context}: no measured rate means no energy number`);
+    assert.equal(await page.evaluate(`document.querySelectorAll('.checkup-dhw-detail [data-dhw-disclosure="energy"]').length`), 0,
+      `${context}: a blocked day removes the numeric energy disclosure rather than merely collapsing it`);
     await captureNativeEvidence(page, `${context}/dhw-no-window`,
       "[data-desc='model:health_dhw_loss']", ".vitem");
     await captureNativeEvidence(page, `${context}/refrigerant`,
+      "[data-desc='service:refrigerant']", ".vitem");
+    // An optional input may contribute no readings while the other pressure side admits the
+    // window. Its selected source is retained, but zero accepted samples cannot create a range.
+    await page.evaluate(`(() => {
+      const service = S.status.refrigerant_service;
+      service.source_generation = 72;
+      service.metrics.high_pressure_bar = null;
+      service.metric_meta.high_pressure_bar.samples = 0;
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-zero`);
+    await assertAccessibility(page, `${context}/refrigerant-zero`, { nativeTree: true });
+    for (const [key, args] of [["samples", [0]], ["meta_limit", []]]) {
+      const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
+        ...${JSON.stringify(args)})`);
+      assert.ok((await refrigerantText()).includes(expected),
+        `${context}: zero-count service retains localized metadata ${key}`);
+    }
+    assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
+      `${context}: a selected zero-count input is not described as unselected`);
+    const unavailableInputCount = await page.evaluate(`(() => {
+      const text = document.querySelector("[data-desc='service:refrigerant']").closest('.vitem').innerText;
+      return text.split(t('sys.nodata')).length - 1;
+    })()`);
+    assert.ok(unavailableInputCount >= 1,
+      `${context}: the selected zero-count pressure input stays unavailable rather than displaying measured zero`);
+    await captureNativeEvidence(page, `${context}/refrigerant-zero`,
+      "[data-desc='service:refrigerant']", ".vitem");
+    // A different profile has a selected high side and no assigned low side. This is distinct
+    // from the selected-but-unread input above, without inventing a low-side measurement.
+    await page.evaluate(`(() => {
+      const service = S.status.refrigerant_service;
+      service.source_generation = 73;
+      service.metrics.high_pressure_bar = { min: 7.3, mean: 14.6, max: 21.9 };
+      service.metric_meta.high_pressure_bar = { samples: 4,
+        source: { kind: 'x10a', reg: 32, offset: 12, conv: 105 } };
+      service.metrics.low_pressure_bar = null;
+      service.metric_meta.low_pressure_bar = { samples: 0, source: null };
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-unselected`);
+    assert.ok((await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
+      `${context}: an unselected low side is explicitly distinguished from a selected unread input`);
+    await captureNativeEvidence(page, `${context}/refrigerant-unselected`,
       "[data-desc='service:refrigerant']", ".vitem");
     await page.evaluate(`(() => {
       const h = S.status.health;
@@ -1838,7 +2047,10 @@ async function assertWorkingFigure(page, context) {
   }
 }
 
-async function assertNativeAltherma4(page, context) {
+async function assertNativeAltherma4(page, context, locale = "en") {
+  const expectedFlow = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1, maximumFractionDigits: 1,
+  }).format(12.3);
   try {
     await page.evaluate(`(() => {
       window.__browserNativeAltherma4Original = { ...S };
@@ -2030,6 +2242,34 @@ async function assertNativeAltherma4(page, context) {
           `${context}/inspector-${target}-${connected ? "paired" : "replacement"}`, "inspect");
       }
     }
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`(() => {
+      S.status.hp.connected = false;
+      S.status.modbus = { ...S.status.modbus, host: "fallback.fixture.invalid", enabled: true,
+        connected: true, profile: "homehub", profile_basis: "fallback" };
+      S._values = [{ label: "Flow sensor", value: "2.5", unit: "L/min", reg: 0x61, concept: "flow" }];
+      S._modbus = [
+        { off: 49, label: "Flow rate", value: 12.3, unit: "L/min", concept: "flow",
+          flow_scale_unverified: true },
+        { off: 30, label: "Circulation pump running", value: 1, unit: "", binary: true,
+          concept: "pump_running" },
+      ];
+      S.insp = "flow";
+      S.inspSig = null;
+      S.inspHistSig = null;
+      renderApp();
+    })()`);
+    assert.deepEqual(await page.evaluate(`(() => ({
+      flowPill: document.getElementById("svFlow").textContent,
+      dtPill: document.getElementById("svDt").textContent,
+      pumpOn: document.getElementById("schem").classList.contains("pump-on"),
+      waterFlowOn: document.getElementById("fPhe").classList.contains("on"),
+      help: document.getElementById("inspBody").innerText.includes(t("mb.flow_scale_help")),
+      deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length,
+    }))()`), {
+      flowPill: expectedFlow, dtPill: "—", pumpOn: true, waterFlowOn: false, help: true, deltas: 0,
+    }, `${context}/unverified-modbus-flow: renders provisional pill + caveat without hydraulic motion or numeric delta`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/unverified-modbus-flow`);
   } finally {
     // The last real click holds per-poll rebuilds briefly. Restore only after that production lease
     // releases, so the next fixture cannot be rendered against stale native-card markup.
@@ -2931,6 +3171,13 @@ try {
     }
     assert.deepEqual(page.diagnostics, [], "status observations must emit no browser errors");
     console.log(`focused status rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
+  } else if (process.argv.includes("--dhw-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      await activateLocale(page, "en");
+      await assertDhwTimeline(page, server, `${viewport.name}/dhw`, { locales: viewport.name === "phone" });
+    }
+    assert.deepEqual(page.diagnostics, [], "DHW timeline states must emit no browser errors");
   } else if (process.argv.includes("--diagnosis-only")) {
     // A focused rendering pass for diagnosis-copy iterations. The default full matrix below and
     // the supervisor's independent mutation controls remain unchanged.
@@ -2938,6 +3185,7 @@ try {
       await page.viewport(viewport.width, viewport.height);
       await activateLocale(page, "en");
       await assertCyclingChart(page, server, `${viewport.name}/diagnosis/cycling`);
+      await assertDhwTimeline(page, server, `${viewport.name}/diagnosis/dhw`, { locales: viewport.name === "phone" });
       await assertFaultChart(page, `${viewport.name}/diagnosis/fault/en`, viewport.name);
       await activateLocale(page, "de");
       await assertFaultChart(page, `${viewport.name}/diagnosis/fault/de`, viewport.name);
@@ -2989,11 +3237,14 @@ try {
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
       await assertWorkingFigure(page, `${viewport.name}/${locale}/working-figure`);
+      if (!mutation && locale === "en") {
+        await assertDhwTimeline(page, server, `${viewport.name}/${locale}/dhw`, { locales: viewport.name === "phone" });
+      }
       if (!mutation && (locale === "en" || locale === "de")) {
         await assertFaultChart(page, `${viewport.name}/${locale}/fault`, viewport.name);
       }
       await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
-      await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
+      await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`, locale);
       nativeAltherma4Checks++;
       await assertHybridRoom(page, `${viewport.name}/${locale}/hybrid-room`, locale);
       hybridRoomChecks++;

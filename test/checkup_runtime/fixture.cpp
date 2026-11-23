@@ -18,6 +18,7 @@ unsigned                    circulation_samples = 0;
 void (*on_circulation)()                        = nullptr;
 void (*on_time)()                               = nullptr;
 int64_t unix_origin                             = 1700000000;
+bool    clock_synced                            = true;
 } // namespace adapter
 namespace daik {
 namespace detail {
@@ -29,15 +30,15 @@ void diag_printf(const char*, ...) {}
 bool history_checkup_flash_pending() { return adapter::journal_pending; }
 bool history_modbus_checkup_flash_pending() { return adapter::mb_journal_pending; }
 bool safe_mode_active() { return false; }
-bool time_synced() { return true; }
+bool time_synced() { return adapter::clock_synced; }
 void time_now(int64_t& s, int32_t& ms) {
     if (adapter::on_time) {
         const auto f     = adapter::on_time;
         adapter::on_time = nullptr;
         f();
     }
-    s  = adapter::unix_origin + sdk::now_us / 1000000;
-    ms = 0;
+    s  = adapter::clock_synced ? adapter::unix_origin + sdk::now_us / 1000000 : -1;
+    ms = adapter::clock_synced ? static_cast<int32_t>(sdk::now_us % 1000000 / 1000) : 0;
 }
 bool     hp_poll_generation_matches(uint32_t g) { return g == adapter::poll_generation; }
 uint32_t hp_poll_generation() { return adapter::poll_generation; }
@@ -968,6 +969,220 @@ CachedValue mb_row(uint8_t offset, const char* value) {
     v.value = value;
     return v;
 }
+void dhw_trace_case(const std::string& name) {
+    require(name == "dhw_trace_capture" || name == "dhw_trace_pause" ||
+                name == "dhw_trace_source_reset" || name == "dhw_trace_circulation_reset" ||
+                name == "dhw_trace_forget" || name == "dhw_trace_forget_before_start" ||
+                name == "dhw_trace_forget_during_snapshot" ||
+                name == "dhw_trace_reset_during_snapshot" || name == "dhw_trace_unavailable",
+            "unknown_case");
+    auto take = [](DiagnosticsSource source, DhwLossTimeline& out) {
+        return checkup_report(nullptr, nullptr, nullptr, source, nullptr, &out);
+    };
+    DhwLossTimeline x, m;
+    if (name == "dhw_trace_unavailable") {
+        x.epoch = 99;
+        x.count = 24;
+        take(DiagnosticsSource::X10a, x);
+        require(!x.epoch && !x.count, "dhw_trace_absent_mutex_clears_output");
+    }
+    if (name == "dhw_trace_forget_before_start") checkup_cycling_forget();
+    boot();
+    checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x11223344U);
+    const auto cov  = coverage();
+    auto       rows = heater("1", "0", "0");
+    rows.push_back(row(CHECKUP_LOC_PUMP, "0"));
+    rows.push_back(row(CHECKUP_LOC_VALVE, "0"));
+    rows.push_back(row(CHECKUP_LOC_R5T, "50.0"));
+    const std::vector<CachedValue> mb_rows{mb_row(30, "1"), mb_row(31, "0"), mb_row(32, "0"),
+                                           mb_row(37, "0"), mb_row(43, "48.0")};
+    auto                           mb_sample = [&](int64_t at_s) {
+        sdk::now_us = at_s * 1000000;
+        checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                                                        adapter::mb_target_generation, checkup_consent_epoch(), true);
+    };
+    for (int64_t sec = 1; sec <= 7201; sec += 10) {
+        sample(sec, rows, cov);
+        mb_sample(sec);
+    }
+    const auto before = take(DiagnosticsSource::X10a, x);
+    take(DiagnosticsSource::Modbus, m);
+    if (name == "dhw_trace_forget_before_start") {
+        require(!x.epoch && !m.epoch && !s_x10a.dhw_trace.begun && !s_modbus.dhw_trace.begun,
+                "dhw_trace_forget_before_start_suppresses_both_producers");
+        return;
+    }
+    require(x.epoch && m.epoch && x.count == 1 && m.count == 1,
+            "dhw_trace_both_real_source_windows");
+    require(x.windows[0].rate_tenths == 0 && !x.windows[0].pump_marker &&
+                m.windows[0].pump_marker && !x.windows[0].draw_marker,
+            "dhw_trace_context_is_source_specific");
+    require(before[CheckupCheck::DhwLoss].b == 1 && before[CheckupCheck::Heater].a > 6000,
+            "dhw_trace_does_not_change_aggregate_or_core");
+    const uint32_t xepoch = x.epoch, mepoch = m.epoch;
+    if (name == "dhw_trace_capture") {
+        require(x.live && x.observed && x.observed_end_s == 7201 && x.since_s == 1 &&
+                    x.windows[0].end_s - x.windows[0].start_s == 3600,
+                "dhw_trace_exact_window_and_collection_scope");
+        adapter::clock_synced = false;
+        take(DiagnosticsSource::X10a, x);
+        require(x.epoch == xepoch && x.count == 1 && !x.unix_s,
+                "dhw_trace_unsynced_clock_keeps_uptime_detail");
+        adapter::clock_synced = true;
+        for (int step : {86400, -86400}) {
+            adapter::unix_origin += step;
+            take(DiagnosticsSource::X10a, x);
+            require(x.count == 1 && x.unix_s == adapter::unix_origin + 7201,
+                    "dhw_trace_wall_steps_do_not_retime_or_expire_records");
+        }
+        sdk::now_us += 200000;
+        adapter::on_time = [] { sdk::now_us += 250000; };
+        take(DiagnosticsSource::X10a, x);
+        require(x.window_end_s == 7201 && x.unix_s == adapter::unix_origin + 7201,
+                "dhw_trace_agreeing_clock_bracket_keeps_wall_label");
+        adapter::on_time = [] { sdk::now_us += 5000000; };
+        take(DiagnosticsSource::X10a, x);
+        require(x.window_end_s == 7201 && x.count == 1 && !x.unix_s,
+                "dhw_trace_ambiguous_clock_bracket_keeps_relative_window");
+        sdk::before_take = [] { sdk::now_us += 20000000; };
+        take(DiagnosticsSource::X10a, x);
+        require(x.window_end_s == 7226 && !x.live && x.observed_end_s == 7201,
+                "dhw_trace_snapshot_clock_is_read_after_lock");
+        sdk::now_us = (static_cast<int64_t>(x.windows[0].end_s) + 86400) * 1000000;
+        take(DiagnosticsSource::X10a, x);
+        require(x.epoch == xepoch && !x.count && !x.live,
+                "dhw_trace_stopped_producer_expires_at_exact_cutoff");
+    } else if (name == "dhw_trace_pause") {
+        checkup_set_diagnostics(false, 23);
+        take(DiagnosticsSource::X10a, x);
+        require(!x.epoch && !x.count && s_x10a.dhw_trace.count == 1,
+                "dhw_trace_same_generation_pause_hides_without_erasing");
+        checkup_set_diagnostics(true, 23);
+        take(DiagnosticsSource::X10a, x);
+        require(x.epoch == xepoch && x.count == 1 && !x.live,
+                "dhw_trace_same_generation_resume_preserves_completed_only");
+        for (int64_t sec = 7211; sec <= 10811; sec += 10) sample(sec, rows, cov);
+        take(DiagnosticsSource::X10a, x);
+        require(x.count == 1, "dhw_trace_pause_does_not_bridge_unfinished_candidate");
+        checkup_set_diagnostics(true, 24);
+        take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch && !s_x10a.dhw_trace.count && !s_modbus.dhw_trace.count,
+                "dhw_trace_new_consent_generation_clears_both_sources");
+        sample(10821, rows, cov);
+        take(DiagnosticsSource::X10a, x);
+        require(x.epoch != xepoch && x.since_s == 10821 && !x.count,
+                "dhw_trace_new_generation_begins_its_own_epoch");
+    } else if (name == "dhw_trace_source_reset") {
+        checkup_modbus_reset();
+        take(DiagnosticsSource::Modbus, m);
+        take(DiagnosticsSource::X10a, x);
+        require(!m.epoch && x.epoch == xepoch && x.count == 1,
+                "dhw_trace_modbus_reset_preserves_x10a_completion");
+        checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x22334455U);
+        mb_sample(7211); // reset-consuming old/new boundary is deliberately discarded
+        take(DiagnosticsSource::Modbus, m);
+        require(!m.epoch, "dhw_trace_full_reset_discards_consuming_sample");
+        mb_sample(7221);
+        take(DiagnosticsSource::Modbus, m);
+        require(m.epoch && m.epoch != mepoch && !m.count && m.since_s == 7221,
+                "dhw_trace_source_reconfirmation_starts_fresh_detail");
+        checkup_reset();
+        take(DiagnosticsSource::X10a, x);
+        DhwLossTimeline independent;
+        take(DiagnosticsSource::Modbus, independent);
+        require(!x.epoch && independent.epoch == m.epoch && independent.since_s == m.since_s,
+                "dhw_trace_x10a_reset_preserves_modbus_epoch");
+    } else if (name == "dhw_trace_circulation_reset") {
+        checkup_dhw_reset();
+        const auto pending = take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch && pending[CheckupCheck::DhwLoss].b == 0 &&
+                    pending[CheckupCheck::Heater].a == before[CheckupCheck::Heater].a,
+                "dhw_trace_circulation_reset_hides_both_traces_only");
+        sample(7211, rows, cov);
+        mb_sample(7211);
+        take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch, "dhw_trace_dhw_reset_discards_consuming_sample");
+        sample(7221, rows, cov);
+        mb_sample(7221);
+        take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(x.epoch && m.epoch && x.epoch != xepoch && m.epoch != mepoch && !x.count &&
+                    !m.count && x.since_s == 7221 && m.since_s == 7221,
+                "dhw_trace_circulation_reset_restarts_independent_epochs");
+        // Fill a complete day after the first DHW-only reset, while the core clocks keep running.
+        constexpr int64_t full_scope_s = 7211 + CHECKUP_WINDOW_S + 30;
+        for (int64_t sec = 7231; sec <= full_scope_s; sec += 10) {
+            sample(sec, rows, cov);
+            mb_sample(sec);
+        }
+        const auto x_full = take(DiagnosticsSource::X10a, x);
+        const auto m_full = take(DiagnosticsSource::Modbus, m);
+        require(x_full.full_span && m_full.full_span && x.count && m.count &&
+                    x_full.dhw_candidate_s > 0 && m_full.dhw_candidate_s > 0,
+                "dhw_trace_fixture_has_full_prior_scope_and_active_candidates");
+        checkup_dhw_reset();
+        const auto x_pending = take(DiagnosticsSource::X10a, x);
+        const auto m_pending = take(DiagnosticsSource::Modbus, m);
+        for (const auto* report : {&x_pending, &m_pending}) {
+            const auto& dhw = (*report)[CheckupCheck::DhwLoss];
+            require(report->full_span && report->source_fresh && !report->dhw_blocked &&
+                        dhw.verdict == CheckupVerdict::Collecting && dhw.b == 0 &&
+                        !report->dhw_candidate_s && !report->dhw_settle_remaining_s,
+                    "dhw_pending_reset_collects_despite_full_old_scope");
+        }
+        require(!x.epoch && !m.epoch &&
+                    x_pending[CheckupCheck::Heater].a == x_full[CheckupCheck::Heater].a &&
+                    s_x10a.dhw_reset_requested.load() && s_modbus.dhw_reset_requested.load(),
+                "dhw_pending_reset_hides_detail_without_consuming_reset_or_retiring_core");
+        sample(full_scope_s + 10, rows, cov);
+        mb_sample(full_scope_s + 10);
+        const auto x_reset = take(DiagnosticsSource::X10a, x);
+        const auto m_reset = take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch && !x_reset.dhw_blocked && !m_reset.dhw_blocked &&
+                    x_reset[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting &&
+                    m_reset[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting,
+                "dhw_consumed_reset_starts_new_scope_despite_full_core");
+    } else if (name == "dhw_trace_forget_during_snapshot" ||
+               name == "dhw_trace_reset_during_snapshot") {
+        adapter::on_time  = name == "dhw_trace_forget_during_snapshot"
+                                ? +[] { checkup_cycling_forget(); }
+                                : +[] { checkup_dhw_reset(); };
+        const auto during = take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        if (name == "dhw_trace_reset_during_snapshot") {
+            require(during[CheckupCheck::DhwLoss].b == 0 &&
+                        during[CheckupCheck::DhwLoss].observed_s == 0 && !during.dhw_candidate_s &&
+                        !during.dhw_settle_remaining_s &&
+                        during[CheckupCheck::Heater].a == before[CheckupCheck::Heater].a,
+                    "dhw_reset_during_clock_read_retires_aggregate_and_progress");
+        }
+        require(!x.epoch && !m.epoch && !x.count && !m.count,
+                "dhw_trace_withdrawal_during_clock_read_clears_captured_output");
+    } else if (name == "dhw_trace_forget") {
+        checkup_cycling_forget();
+        const int64_t prior_end = s_x10a.dhw_trace.last_us;
+        sample(7211, rows, cov);
+        mb_sample(7211);
+        take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch && s_x10a.dhw_trace.last_us == prior_end &&
+                    s_modbus.dhw_trace.last_us == prior_end,
+                "dhw_trace_forget_immediately_suppresses_producer_and_report");
+    } else {
+        sdk::fail_take_once = true;
+        take(DiagnosticsSource::X10a, x);
+        require(!x.epoch && !x.count, "dhw_trace_lock_failure_clears_prior_output");
+        auto unsupported = cov;
+        unsupported.r5t  = false;
+        sample(7211, rows, unsupported);
+        take(DiagnosticsSource::X10a, x);
+        require(!x.epoch && !x.count, "dhw_trace_unsupported_profile_withholds_detail");
+    }
+}
+
 void modbus_dual_source() {
     boot();
     require(s_x10a.persist_magic == CHECKUP_PERSIST_MAGIC &&
@@ -1205,11 +1420,445 @@ void x10a_modbus_fault_trace_lifecycle() {
     checkup_fault_forget();
     require(!checkup_fault_timeline_snapshot(trace_snap), "fault_forget_withholds_timeline");
 }
+
+void modbus_flow_scale_gate() {
+    boot();
+    checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x22334455U);
+    const uint32_t epoch = checkup_consent_epoch();
+
+    const auto make_rows = [](bool unverified) {
+        auto flow                         = mb_row(49, "12.0");
+        flow.modbus_flow_scale_unverified = unverified;
+        return std::vector<CachedValue>{
+            mb_row(21, "0"),    mb_row(30, "1"),   mb_row(31, "1"),
+            mb_row(32, "0"),    mb_row(37, "0"),   mb_row(38, "1"),
+            mb_row(43, "48.0"), mb_row(44, "5.0"), flow,
+        };
+    };
+
+    // Fallback sweeps must never admit Input 49 into the 24-hour flow check even if row flags vary.
+    const auto fallback_rows = make_rows(true);
+    for (int t = 10; t <= 90; t += 10) {
+        sdk::now_us = static_cast<int64_t>(t) * 1000000LL;
+        checkup_record_modbus(fallback_rows.data(), fallback_rows.size(), ModbusProfile::HomeHub,
+                              adapter::mb_target_generation, epoch, true,
+                              ModbusProfileBasis::Fallback);
+    }
+    const auto fallback_rep = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    require(fallback_rep[CheckupCheck::Flow].verdict == CheckupVerdict::Unavailable,
+            "fallback_basis_withholds_flow_check");
+
+    // Even in Affirmative HomeHub, an individual unverified row 49 cannot populate flow_min.
+    const auto unverified_rows = make_rows(true);
+    for (int t = 100; t <= 180; t += 10) {
+        sdk::now_us = static_cast<int64_t>(t) * 1000000LL;
+        checkup_record_modbus(unverified_rows.data(), unverified_rows.size(),
+                              ModbusProfile::HomeHub, adapter::mb_target_generation, epoch, true,
+                              ModbusProfileBasis::Affirmative);
+    }
+    const auto unverified_rep =
+        checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    require(unverified_rep[CheckupCheck::Flow].verdict == CheckupVerdict::Collecting &&
+                unverified_rep[CheckupCheck::Flow].observed_s == 0 &&
+                unverified_rep[CheckupCheck::Flow].a < 0,
+            "unverified_row_49_never_enters_flow_min");
+
+    // Verified Affirmative HomeHub sweep with pump ON for >= 60s produces Ok and 12.0 L/min.
+    const auto verified_rows = make_rows(false);
+    for (int t = 190; t <= 270; t += 10) {
+        sdk::now_us = static_cast<int64_t>(t) * 1000000LL;
+        checkup_record_modbus(verified_rows.data(), verified_rows.size(), ModbusProfile::HomeHub,
+                              adapter::mb_target_generation, epoch, true,
+                              ModbusProfileBasis::Affirmative);
+    }
+    const auto verified_rep = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    require(verified_rep[CheckupCheck::Flow].verdict == CheckupVerdict::Ok &&
+                verified_rep[CheckupCheck::Flow].a == 120,
+            "verified_affirmative_homehub_admits_flow");
+}
+
+constexpr int64_t     HYDR_SECOND  = 1000000;
+constexpr const char* HYDR_PROFILE = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+
+std::vector<CachedValue> hydronic_rows() {
+    const auto  plan     = hydronic_input_plan(HYDR_PROFILE, def::lookup_view(HYDR_PROFILE));
+    const char* values[] = {"45", "35", "10", "59.55", "1", "12", "Heating", "0",
+                            "0",  "0",  "0",  "0",     "0", "0",  "0"};
+    std::vector<CachedValue> rows;
+    for (size_t i = 0; i < HYDRONIC_INPUTS; ++i) {
+        require(hydronic_input_supported(plan, static_cast<HydronicInput>(i)),
+                "hydronic_fixture_registered_inputs");
+        rows.push_back(row(plan.rows[i], values[i]));
+    }
+    // Independent hard-coordinate checks prevent a self-consistent resolver/fixture substitution.
+    require(rows.size() == 15 && rows[0].reg == 0x61 && rows[0].off == 2 && rows[0].conv == 105 &&
+                rows[1].reg == 0x61 && rows[1].off == 8 && rows[1].conv == 105 &&
+                rows[2].reg == 0x62 && rows[2].off == 9 && rows[2].conv == 105,
+            "hydronic_fixture_pre_buh_return_flow_identity");
+    return rows;
+}
+void hydronic_sample(int64_t now, const std::vector<CachedValue>& rows, const CheckupCoverage& cov,
+                     int64_t started, bool known = true, bool running = true,
+                     uint32_t generation = 7) {
+    sdk::now_us      = now;
+    const auto epoch = checkup_consent_epoch();
+    checkup_record(rows.data(), rows.size(), known, running, cov, generation, epoch, true, started);
+}
+void hydronic_settle(const std::vector<CachedValue>& rows, const CheckupCoverage& cov) {
+    for (int64_t t = 1; t <= 601; t += 15)
+        hydronic_sample(t * HYDR_SECOND, rows, cov, t * HYDR_SECOND);
+}
+void hydronic_case(const std::string& name) {
+    require(name == "hydronic_waiting" || name == "hydronic_population" || name == "hydronic_age" ||
+                name == "hydronic_expiry" || name == "hydronic_consent_lock" ||
+                name == "hydronic_source_lock" || name == "hydronic_shared_witness" ||
+                name == "hydronic_reader_generation" || name == "hydronic_shutdown" ||
+                name == "hydronic_pause_resume",
+            "unknown_case");
+    boot();
+    const auto cov  = coverage();
+    auto       rows = hydronic_rows();
+    if (name == "hydronic_waiting") {
+        const auto r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::MissingWitness && r.schema_fp != 0 &&
+                    r.source_generation == 7 && r.observation.confirmed,
+                "hydronic_capable_waits_for_first_witness");
+        require(r.observation.totals.samples == 0 && r.observation.totals.observed_us == 0,
+                "hydronic_waiting_has_no_fabricated_population");
+        return;
+    }
+    if (name == "hydronic_population") {
+        for (int64_t t = 1; t <= 586; t += 15)
+            hydronic_sample(t * HYDR_SECOND, rows, cov, t * HYDR_SECOND);
+        hydronic_sample(601 * HYDR_SECOND - 1, rows, cov, 601 * HYDR_SECOND - 1);
+        auto r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling && r.settling_remaining_s == 1 &&
+                    r.observation.totals.samples == 0,
+                "hydronic_not_before_600s");
+        require(r.observation.totals.observed_us == 600 * HYDR_SECOND - 1 &&
+                    r.observation.totals.candidate_us == 600 * HYDR_SECOND - 1 &&
+                    r.observation.totals.qualified_us == 0,
+                "hydronic_eligible_duration_is_actual_elapsed");
+        hydronic_sample(601 * HYDR_SECOND, rows, cov, 601 * HYDR_SECOND);
+        r                 = checkup_hydronic_report();
+        const auto& first = r.observation.totals;
+        require(r.current && r.reason == HydronicReason::None && r.settling_remaining_s == 0 &&
+                    first.samples == 1 && first.command_samples == 1 &&
+                    first.observed_us == 600 * HYDR_SECOND &&
+                    first.candidate_us == 600 * HYDR_SECOND && first.qualified_us == 0,
+                "hydronic_first_sample_exact_600s_no_retrobook");
+        require(first.spread.min_milli == 10000 && first.spread.max_milli == 10000 &&
+                    first.spread.sum_milli == 10000 && first.flow.sum_milli == 10000 &&
+                    first.command.sum_milli == 40450 &&
+                    first.first_accepted_unix_us == (adapter::unix_origin + 601) * HYDR_SECOND &&
+                    first.last_accepted_unix_us == first.first_accepted_unix_us,
+                "hydronic_actual_dated_values_and_fractional_command");
+        rows.erase(rows.begin() + static_cast<size_t>(HydronicInput::Command));
+        hydronic_sample(602 * HYDR_SECOND, rows, cov, 602 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.observation.totals.samples == 2 && r.observation.totals.command_samples == 1 &&
+                    r.observation.totals.qualified_us == HYDR_SECOND &&
+                    r.observation.totals.observed_us == 601 * HYDR_SECOND &&
+                    r.observation.totals.candidate_us == 601 * HYDR_SECOND &&
+                    (r.limitations & HydronicCommandUnavailable) &&
+                    r.observation.totals.spread.sum_milli == 20000,
+                "hydronic_optional_command_preserves_joint_thermal_population");
+        const auto core = checkup_report();
+        require(CHECKUP_CHECK_COUNT == 8 && core[CheckupCheck::Flow].a == 100 &&
+                    core[CheckupCheck::Flow].verdict == CheckupVerdict::Ok &&
+                    r.secondary.samples == 0 && !r.secondary.source.conv,
+                "hydronic_preserves_eight_checks_and_old_flow_minimum");
+        return;
+    }
+    if (name == "hydronic_age") {
+        hydronic_sample(16 * HYDR_SECOND, rows, cov, HYDR_SECOND);
+        require(checkup_hydronic_report().current, "hydronic_exact_15s_sweep_allowed");
+        hydronic_sample(31 * HYDR_SECOND, rows, cov, 16 * HYDR_SECOND);
+        auto r = checkup_hydronic_report();
+        require(r.observation.totals.candidate_us == 15 * HYDR_SECOND,
+                "hydronic_exact_15s_continuity_allowed");
+        hydronic_sample(46 * HYDR_SECOND + 1, rows, cov, 31 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::PollGap &&
+                    r.observation.totals.candidate_us == 15 * HYDR_SECOND,
+                "hydronic_15s_plus_microsecond_sweep_rejected");
+        sdk::now_us = 48 * HYDR_SECOND;
+        checkup_record(rows.data(), rows.size(), true, true, cov, 7, checkup_consent_epoch(), true);
+        require(!checkup_hydronic_report().current, "hydronic_legacy_omitted_start_cannot_qualify");
+        hydronic_sample(49 * HYDR_SECOND, rows, cov, 49 * HYDR_SECOND + 1);
+        require(!checkup_hydronic_report().current, "hydronic_future_start_rejected");
+        hydronic_sample(50 * HYDR_SECOND, {}, cov, 50 * HYDR_SECOND);
+        require(!checkup_hydronic_report().current, "hydronic_empty_sweep_cannot_qualify");
+        hydronic_sample(51 * HYDR_SECOND, rows, cov, 51 * HYDR_SECOND);
+        sdk::before_take = [] { sdk::now_us = 67 * HYDR_SECOND; };
+        hydronic_sample(61 * HYDR_SECOND, rows, cov, 51 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::PollGap &&
+                    r.observation.totals.candidate_us == 15 * HYDR_SECOND,
+                "hydronic_admission_clock_after_lock");
+        return;
+    }
+    if (name == "hydronic_shared_witness") {
+        hydronic_sample(HYDR_SECOND, rows, cov, HYDR_SECOND, false, true);
+        require(checkup_hydronic_report().reason == HydronicReason::MissingWitness &&
+                    checkup_hydronic_report().observation.totals.samples == 0,
+                "hydronic_unknown_shared_witness_blocks");
+        hydronic_sample(2 * HYDR_SECOND, rows, cov, 2 * HYDR_SECOND, true, false);
+        require(checkup_hydronic_report().reason == HydronicReason::MissingWitness,
+                "hydronic_positive_rps_shared_off_contradiction");
+        rows[static_cast<size_t>(HydronicInput::Rps)].value = "0";
+        hydronic_sample(3 * HYDR_SECOND, rows, cov, 3 * HYDR_SECOND, true, true);
+        require(checkup_hydronic_report().reason == HydronicReason::MissingWitness,
+                "hydronic_zero_rps_shared_on_contradiction");
+        hydronic_sample(4 * HYDR_SECOND, rows, cov, 4 * HYDR_SECOND, true, false);
+        hydronic_sample(5 * HYDR_SECOND, rows, cov, 5 * HYDR_SECOND, true, false);
+        auto r = checkup_hydronic_report();
+        require(r.reason == HydronicReason::CompressorOff &&
+                    r.observation.totals.observed_us == HYDR_SECOND &&
+                    r.observation.totals.candidate_us == 0,
+                "hydronic_consistent_off_is_observed_not_eligible");
+        rows[static_cast<size_t>(HydronicInput::Rps)].value = "12";
+        hydronic_sample(6 * HYDR_SECOND, rows, cov, 6 * HYDR_SECOND);
+        hydronic_sample(21 * HYDR_SECOND, rows, cov, 21 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.reason == HydronicReason::Settling && r.settling_remaining_s == 585 &&
+                    r.observation.totals.candidate_us == 15 * HYDR_SECOND &&
+                    r.observation.totals.observed_us == 17 * HYDR_SECOND,
+                "hydronic_consistent_running_starts_new_settling");
+        rows[static_cast<size_t>(HydronicInput::Rps)].held = true;
+        hydronic_sample(22 * HYDR_SECOND, rows, cov, 22 * HYDR_SECOND);
+        require(checkup_hydronic_report().reason == HydronicReason::MissingWitness &&
+                    checkup_hydronic_report().observation.totals.candidate_us == 15 * HYDR_SECOND,
+                "hydronic_held_rps_cannot_bridge_shared_witness");
+        return;
+    }
+    hydronic_settle(rows, cov);
+    hydronic_sample(602 * HYDR_SECOND, rows, cov, 602 * HYDR_SECOND);
+    const auto before = checkup_hydronic_report();
+    require(before.observation.totals.samples == 2 &&
+                before.observation.totals.qualified_us == HYDR_SECOND,
+            "hydronic_fixture_actual_qualified_population");
+    if (name == "hydronic_pause_resume") {
+        sdk::now_us = 603 * HYDR_SECOND;
+        checkup_set_diagnostics(false, 23);
+        hydronic_sample(604 * HYDR_SECOND, rows, cov, 604 * HYDR_SECOND);
+        auto r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::NoConsent && !r.observation.confirmed &&
+                    r.observation.totals.samples == 0,
+                "hydronic_pause_withholds_live_and_population_while_off");
+        sdk::now_us = 608 * HYDR_SECOND;
+        checkup_set_diagnostics(true, 23);
+        r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::PollGap && r.observation.confirmed &&
+                    r.observation.totals.samples == 2 &&
+                    r.observation.totals.observed_us == 601 * HYDR_SECOND &&
+                    r.observation.totals.qualified_us == HYDR_SECOND,
+                "hydronic_same_gen_resume_restores_24h_population");
+        hydronic_sample(610 * HYDR_SECOND, rows, cov, 610 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling &&
+                    r.settling_remaining_s == 600 && r.observation.totals.samples == 2 &&
+                    r.observation.totals.observed_us == 601 * HYDR_SECOND &&
+                    r.observation.totals.qualified_us == HYDR_SECOND,
+                "hydronic_pause_resume_resets_settling_and_never_bridges_pause");
+        hydronic_sample(625 * HYDR_SECOND, rows, cov, 625 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling &&
+                    r.settling_remaining_s == 585 &&
+                    r.observation.totals.observed_us == 616 * HYDR_SECOND &&
+                    r.observation.totals.samples == 2,
+                "hydronic_resume_restarts_settling_countdown");
+        return;
+    }
+    if (name == "hydronic_reader_generation") {
+        // HTTP advances the poll epoch before it can acquire the Checkup mutex for reset.
+        // Stop precisely there: no reset, detection callback or new producer has run.
+        ++adapter::poll_generation;
+        const auto r = checkup_hydronic_report();
+        require(!r.current && !r.observation.confirmed &&
+                    r.reason == HydronicReason::SourceChanged &&
+                    r.observation.totals.samples == 0 && r.observation.totals.observed_us == 0,
+                "hydronic_source_epoch_reader_withdraws_before_reset");
+        const auto retained = hydronic_observation_report();
+        require(retained.confirmed && retained.totals.samples == 2 &&
+                    retained.totals.qualified_us == HYDR_SECOND,
+                "hydronic_source_epoch_reader_does_not_mutate_store");
+        return;
+    }
+    if (name == "hydronic_consent_lock" || name == "hydronic_source_lock") {
+        if (name == "hydronic_consent_lock") {
+            consent_restore_generation = 23;
+            sdk::before_take           = consent_off_on;
+        } else {
+            sdk::before_take = [] {
+                ++adapter::poll_generation;
+                checkup_reset_on_detect(HYDR_PROFILE, 0x87654321);
+            };
+        }
+        hydronic_sample(603 * HYDR_SECOND, rows, cov, 603 * HYDR_SECOND);
+        auto r = checkup_hydronic_report();
+        require(!r.current && r.observation.totals.samples == 0 &&
+                    r.observation.totals.observed_us == 0 && r.observation.persistence_pending,
+                name == "hydronic_consent_lock" ? "hydronic_consent_discards_staged_sample"
+                                                : "hydronic_source_discards_staged_sample");
+        // Source replacement conservatively discards the reset-consuming new sweep as well.
+        if (name == "hydronic_source_lock")
+            hydronic_sample(604 * HYDR_SECOND, rows, cov, 604 * HYDR_SECOND, true, true, 8);
+        hydronic_sample(605 * HYDR_SECOND, rows, cov, 605 * HYDR_SECOND, true, true,
+                        adapter::poll_generation);
+        r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling &&
+                    r.settling_remaining_s == 600 && r.observation.totals.samples == 0 &&
+                    r.observation.totals.candidate_us == 0,
+                "hydronic_replacement_first_new_sweep_is_baseline");
+        return;
+    }
+    if (name == "hydronic_expiry") {
+        sdk::now_us      = 616 * HYDR_SECOND;
+        sdk::before_take = [] { sdk::now_us = 618 * HYDR_SECOND; };
+        checkup_hydronic_expire(616 * HYDR_SECOND);
+        auto r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::PollGap &&
+                    r.observation.totals.samples == 2 &&
+                    r.observation.totals.qualified_us == HYDR_SECOND,
+                "hydronic_reader_expiry_after_lock_retains_dated_population");
+        sdk::now_us = 619 * HYDR_SECOND;
+        checkup_hydronic_report();
+        hydronic_sample(620 * HYDR_SECOND, rows, cov, 617 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(!r.current && r.observation.totals.samples == 2 &&
+                    r.observation.totals.candidate_us == 601 * HYDR_SECOND,
+                "hydronic_expiry_fences_inflight");
+        sdk::now_us = 622 * HYDR_SECOND;
+        checkup_hydronic_report(); // this reader must not move the fence beyond fresh start 621
+        checkup_hydronic_expire(622 * HYDR_SECOND);
+        hydronic_sample(623 * HYDR_SECOND, rows, cov, 621 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling &&
+                    r.settling_remaining_s == 600 && r.observation.totals.samples == 2,
+                "hydronic_repeat_expiry_does_not_starve_fresh_sweep");
+        for (int64_t t = 638; t <= 1223; t += 15)
+            hydronic_sample(t * HYDR_SECOND, rows, cov, t * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.observation.totals.samples == 3 &&
+                    r.observation.totals.candidate_us == 1201 * HYDR_SECOND &&
+                    r.observation.totals.qualified_us == HYDR_SECOND,
+                "hydronic_after_expiry_settles_again_without_blind_credit");
+        return;
+    }
+    require(sdk::shutdown != nullptr, "hydronic_shutdown_hook_registered");
+    sdk::now_us = 604 * HYDR_SECOND;
+    sdk::shutdown();
+    auto r = checkup_hydronic_report();
+    require(!r.current && r.reason == HydronicReason::PollGap &&
+                r.observation.totals.samples == before.observation.totals.samples &&
+                r.observation.totals.observed_us == before.observation.totals.observed_us &&
+                r.observation.totals.qualified_us == before.observation.totals.qualified_us &&
+                r.observation.persistence_pending,
+            "hydronic_shutdown_seals_without_fabricated_duration");
+    hydronic_sample(605 * HYDR_SECOND, rows, cov, 605 * HYDR_SECOND);
+    require(!checkup_hydronic_report().current &&
+                checkup_hydronic_report().observation.totals.samples == 2,
+            "hydronic_sealed_producer_does_not_reopen_population");
+}
+
+void x10a_cycling_run_contexts() {
+    boot();
+    const auto cov      = coverage();
+    const auto ctx_rows = [](const char* rps, const char* lwt, const char* rwt, const char* tgt,
+                             const char* flow, const char* req = "1") {
+        return std::vector<CachedValue>{
+            row({0x30, 0, 152}, rps),
+            row({0x61, 2, 105}, lwt),
+            row({0x61, 8, 105}, rwt),
+            row({0x60, 9, 105}, tgt),
+            row(CHECKUP_LOC_FLOW, flow),
+            row({0x60, 2, 303}, req),
+            row(CHECKUP_LOC_DEFROST, "0"),
+            row(CHECKUP_LOC_VALVE, "0"),
+            row(CHECKUP_LOC_IU_MODE, "Heating"),
+        };
+    };
+
+    // Run 1: >= 600 s space heating -> sets typical flow = 18.0 L/min, stops on RequestWithdrawal.
+    sample(10, ctx_rows("0", "28.0", "26.0", "35.0", "0.0", "0"), cov, true, false);
+    sample(20, ctx_rows("25.0", "28.5", "26.5", "35.0", "18.0", "1"), cov, true, true);
+    for (int t = 30; t <= 630; t += 10) {
+        sample(t, ctx_rows("25.0", "32.0", "29.0", "35.0", "18.0", "1"), cov, true, true);
+    }
+    sample(640, ctx_rows("0", "34.0", "31.0", "35.0", "18.0", "0"), cov, true, false);
+
+    // Pause > 30 s with request already On, then short run stopping with LowRpsAboveTarget.
+    sample(650, ctx_rows("0", "32.5", "30.0", "35.0", "0.0", "0"), cov, true, false);
+    for (int t = 660; t <= 700; t += 10) {
+        sample(t, ctx_rows("0", "30.0", "28.0", "35.0", "0.0", "1"), cov, true, false);
+    }
+    sample(710, ctx_rows("24.0", "30.5", "28.5", "35.0", "16.5", "1"), cov, true, true);
+    for (int t = 720; t <= 760; t += 10) {
+        sample(t, ctx_rows("16.0", "37.5", "34.5", "35.0", "16.5", "1"), cov, true, true);
+    }
+    sample(770, ctx_rows("0", "38.2", "35.2", "35.0", "16.5", "1"), cov, true, false);
+
+    sdk::now_us = 780LL * 1000000LL;
+    CheckupRunContextSnapshot snap;
+    require(checkup_cycling_run_contexts(snap, 780, DiagnosticsSource::X10a),
+            "run_context_snapshot_present");
+    require(snap.count == 2 && snap.flow_typical_tenths == 180, "run_context_typical_flow");
+    require(snap.entries[0].start_kind == static_cast<uint8_t>(CyclingStartKind::RequestOn) &&
+                snap.entries[0].stop_kind ==
+                    static_cast<uint8_t>(CyclingStopKind::RequestWithdrawal) &&
+                snap.entries[0].stop_rwt_tenths == 310 && snap.entries[0].flow_tenths == 180,
+            "run_context_first_run");
+    require(snap.entries[1].start_kind == static_cast<uint8_t>(CyclingStartKind::CooldownRestart) &&
+                snap.entries[1].stop_kind ==
+                    static_cast<uint8_t>(CyclingStopKind::LowRpsAboveTarget) &&
+                snap.entries[1].stop_rwt_tenths == 352 && snap.entries[1].flow_tenths == 165,
+            "run_context_second_run");
+
+    checkup_set_diagnostics(false, 23);
+    require(!checkup_has_cycling_run_contexts(DiagnosticsSource::X10a),
+            "run_context_hidden_while_paused");
+    require(!checkup_cycling_run_contexts(snap, 780, DiagnosticsSource::X10a) && snap.count == 0,
+            "run_context_snapshot_blocked_while_paused");
+    checkup_set_diagnostics(true, 23);
+    sample(785, ctx_rows("0", "32.0", "29.5", "35.0", "0.0", "0"), cov, true, false);
+    sdk::now_us = 790LL * 1000000LL;
+    require(checkup_has_cycling_run_contexts(DiagnosticsSource::X10a),
+            "run_context_preserved_after_pause_resume");
+    require(checkup_cycling_run_contexts(snap, 790, DiagnosticsSource::X10a) && snap.count == 2 &&
+                snap.flow_typical_tenths == 180,
+            "run_context_entries_survive_pause_resume");
+
+    CheckupRunContextSnapshot mb_snap;
+    require(!checkup_cycling_run_contexts(mb_snap, 780, DiagnosticsSource::Modbus) &&
+                mb_snap.count == 0,
+            "modbus_run_context_isolated");
+
+    checkup_reset();
+    require(!checkup_cycling_run_contexts(snap, 780, DiagnosticsSource::X10a) && snap.count == 0,
+            "checkup_reset_clears_run_contexts");
+
+    checkup_reset_on_detect("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x12345678);
+    // First post-reset sample consumes the reset barrier and is conservatively discarded.
+    sample(800, ctx_rows("0", "28.0", "26.0", "35.0", "0.0", "0"), cov, true, false);
+    sample(810, ctx_rows("0", "28.0", "26.0", "35.0", "0.0", "1"), cov, true, false);
+    sample(820, ctx_rows("22.0", "29.0", "27.0", "35.0", "15.0", "1"), cov, true, true);
+    sample(830, ctx_rows("0", "32.0", "29.0", "35.0", "15.0", "0"), cov, true, false);
+    sdk::now_us = 840LL * 1000000LL;
+    require(checkup_cycling_run_contexts(snap, 840, DiagnosticsSource::X10a) && snap.count == 1,
+            "run_context_restarted_after_detect");
+
+    checkup_cycling_forget();
+    require(!checkup_cycling_run_contexts(snap, 840, DiagnosticsSource::X10a) && snap.count == 0,
+            "cycling_forget_withholds_run_contexts");
+}
 } // namespace
 int main(int argc, char** argv) {
     std::string name = argc == 2 ? argv[1] : "";
     try {
-        if (name.rfind("stop_", 0) == 0)
+        if (name.rfind("hydronic_", 0) == 0)
+            hydronic_case(name);
+        else if (name.rfind("stop_", 0) == 0)
             stop_context_case(name);
         else if (name.rfind("buh_", 0) == 0 || name == "heaters_both_on" ||
                  name == "legacy_text_unknown" || name == "single_declared_buh_step")
@@ -1218,6 +1867,8 @@ int main(int argc, char** argv) {
             independent_heaters();
         else if (name.rfind("fault_", 0) == 0)
             fault_case(name);
+        else if (name.rfind("dhw_trace_", 0) == 0)
+            dhw_trace_case(name);
         else if (name == "source_freshness")
             source_freshness();
         else if (name == "defrost_start_context")
@@ -1252,8 +1903,12 @@ int main(int argc, char** argv) {
             late_restore(name == "late_restore_clock_behind");
         else if (name == "modbus_dual_source")
             modbus_dual_source();
+        else if (name == "modbus_flow_scale_gate")
+            modbus_flow_scale_gate();
         else if (name == "x10a_modbus_fault_trace_lifecycle")
             x10a_modbus_fault_trace_lifecycle();
+        else if (name == "x10a_cycling_run_contexts")
+            x10a_cycling_run_contexts();
         else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0 ||
                  name.rfind("consent_caller_", 0) == 0)
             consent_staged_sample(name);

@@ -162,6 +162,31 @@ for (const [off, label, key] of [[49, "Flow rate", "flow_help"],
     assert.notEqual(en.descFor(label, {off, profile}).what, en.labels[`a4.${key}`],
       `${off}/${profile}: native interpretation limits cannot replace another source's explanation`);
 }
+for (const [name, ui] of [["en", en], ["de", de]]) {
+  const retainedX10a = { label: "Flow sensor", value: "2.5", unit: "l/min", reg: 0x61, concept: "flow" };
+  const unverified49 = { off: 49, label: "Flow rate", value: "12.3", unit: "L/min", concept: "flow",
+    flow_scale_unverified: true };
+  assert.equal(ui.descFor("Flow rate", unverified49).what, ui.labels["mb.flow_scale_help"],
+    `${name}: unverified non-altherma4 Input 49 gets mb.flow_scale_help`);
+
+  ui.state._values = [retainedX10a];
+  ui.state._modbus = [unverified49];
+  for (const x10aUp of [false, true]) {
+    ui.state.status.hp.connected = x10aUp;
+    const html = ui.vDescRow(retainedX10a);
+    assert.ok(html.includes(ui.labels["mb.flow_scale_help"]),
+      `${name}/x10aUp=${x10aUp}: mb.flow_scale_help remains visible even when X10A flow row exists`);
+    assert.ok(!html.includes("mb-delta"),
+      `${name}/x10aUp=${x10aUp}: unverified Input 49 suppresses numeric delta against X10A`);
+  }
+
+  ui.state.status.hp.connected = true;
+  ui.state._modbus = [{ off: 49, label: "Flow rate", value: "12.3", unit: "L/min", concept: "flow" }];
+  assert.match(ui.vDescRow(retainedX10a), /mb-delta/,
+    `${name}: verified EKRHH Input 49 restores numeric delta against X10A`);
+  ui.state._values = [];
+  ui.state._modbus = [];
+}
 assert.equal(en.displayValue({ value: "Recommended on" }), "Recommended on",
   "the derived X10A Smart-Grid row may still use its local canonical display text");
 

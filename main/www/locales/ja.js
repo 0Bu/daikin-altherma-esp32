@@ -1,13 +1,10 @@
-// translation-source: 6e972a2b4ae88155965a5f3be3d4db1e55237b0aaa203b0f7b4b2df64578e5c3
+// translation-source: 21658cb9aa5673bd6390bf55b45b1a1a9849fc5a5439233310598402221f0c32
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
-  /* sys.x10a_down */ "X10A オフライン",
-  /* sys.mb_carrying */ "運転モード不明 — Modbus値",
   /* sys.mb_only */ "X10A オフライン — Modbus値",
-  /* sys.mb_source */ "X10A オフライン · Modbus",
   /* mode.stop */ "停止",
   /* mode.heat */ "暖房",
   /* mode.cool */ "冷房",
@@ -64,7 +61,6 @@ I18N.ja = localeValues([
   /* bug.title */ "不具合を報告",
   /* bug.intro */ "問題を短く説明してください。ネットワーク名、アドレス、サーバー名を除去した状態、測定値、ログを機器が追加します。",
   /* bug.what */ "症状",
-  /* bug.what_ph */ "今朝からHome Assistantのタンク温度が12800 °Cと表示されます。",
   /* bug.need_text */ "まず症状を1～2文で入力してください。",
   /* bug.continue */ "報告を作成",
   /* bug.step2_title */ "報告内容を確認",
@@ -88,7 +84,6 @@ I18N.ja = localeValues([
   /* src.delta */ (d, u) => `差 ${d}${u ? " " + u : ""}`,
   /* src.disagree */ "両方の状態が不一致",
   /* conn.homehub */ "HomeHub",
-  /* conn.searching */ "検索中…",
   /* group.Modbus */ "Modbus",
   /* conn.title */ "接続",
   /* conn.offline */ "オフライン",
@@ -157,8 +152,6 @@ I18N.ja = localeValues([
   /* service.state.observing */ "記録中",
   /* service.state.limited */ "一部欠損",
   /* service.state.interrupted */ "一時停止",
-  /* service.row.window */ "これまでの記録",
-  /* service.row.reason */ "この状態の理由",
   /* service.reason.unsupported_profile */ "この機種では必要な測定値をすべて取得できません。",
   /* service.reason.compressor_not_running */ "圧縮機が運転していません。",
   /* service.reason.unsupported_or_unknown_mode */ "通常の室内暖房は未確認。",
@@ -189,6 +182,26 @@ I18N.ja = localeValues([
   /* check.status.experimental */ "試験的",
   /* check.status.unavailable */ "利用不可",
   /* check.status.no_window */ "測定窓なし",
+  /* check.dhw.maximum */ "記録した最大値",
+  /* check.dhw.measurement */ "タンクセンサー R5T における1時間の正味の温度低下。",
+  /* check.dhw.hint */ "ポンプ・取湯マーカーを記録しなかった時間窓が、本プロジェクトの参考しきい値に達しました。",
+  /* check.dhw.before_snapshot */ (d) => `スナップショットの ${d} 前`,
+  /* check.dhw.marker_yes */ "記録あり",
+  /* check.dhw.marker_no */ "記録なし",
+  /* check.dhw.pump */ "内部ポンプ",
+  /* check.dhw.draw */ "取湯に似た低下",
+  /* check.dhw.previous */ "前の完了した時間窓",
+  /* check.dhw.next */ "次の完了した時間窓",
+  /* check.dhw.timeline_unavailable */ "時刻付きの時間窓は利用できません。合計から履歴を推定しません。",
+  /* check.dhw.timeline_empty */ "この24時間表示には、完了した時刻付き時間窓がありません。",
+  /* check.dhw.chart_title */ "完了した時間窓ごとの温度低下",
+  /* check.dhw.timed_scope */ (n) => `再起動・リセット後の時刻付き時間窓：${n}、最大24 h。最大値と件数は、描画された時間窓だけでなく、保存済みの1時間ごとのデータに基づく場合もあります。`,
+  /* check.dhw.blank */ "空白は利用可能な完了済みの時刻付き時間窓がないことを示し、温度低下ゼロではありません。マーカーは存在を示し、継続時間ではありません。",
+  /* check.dhw.snapshot */ "取得時点",
+  /* check.dhw.stale */ "給湯タンクの温度低下を判定する現在の測定値が欠けているか古くなっています。完了した時間窓は過去の観測です。",
+  /* check.dhw.limit */ "R5T は成層タンクの1点を測り、タンクの熱量を測るものではありません。ポンプ・取湯に似たマーカーは、原因も実際の取湯も証明しません。",
+  /* check.dhw.basis */ "データの詳細",
+  /* check.dhw.energy */ "計算例 · エネルギー実測値ではありません",
   /* check.detail.dhw_energy */ (a, b, c, d) => `1時間の計算例：200 lの水が均一に${a} K/hで冷却→熱量${b} kWh。仮定のCOP 2.5–3（熱量÷電力量）で補熱に電力${c}–${d} kWh。エネルギー実測値ではありません。`,
   /* check.detail.dhw_context */ (a, b, c) => `時間窓：内部ポンプ${a}、取湯に似た低下${b}、印なしで≥0.8 K/hが${c}。重複し得ます。`,
   /* check.detail.value_label */ "値:",
@@ -242,6 +255,49 @@ I18N.ja = localeValues([
   /* check.cycling.no_timed_runs */ "この時間帯に起動時刻の記録はありません。",
   /* check.cycling.run_details_unavailable */ "この時間帯の個別運転の時刻データはありません。",
   /* check.cycling.saved_starts */ (s) => `このうち${s}は再起動前の時間別集計です。`,
+  /* check.cycling.short_runs */ (n) => `${n} < 5 分`,
+  /* check.cycling.col_stop */ "停止の理由",
+  /* check.cycling.stop_low_flow */ "往き水温上昇 · 低流量",
+  /* check.cycling.stop_low_rps */ "往き水温上昇 · 低回転",
+  /* check.cycling.stop_req_off */ "運転要求オフ",
+  /* check.cycling.stop_tgt_drop */ "目標水温低下",
+  /* check.cycling.stop_defrost */ "霜取りのため一時停止",
+  /* check.cycling.stop_defrost_done */ "霜取り完了",
+  /* check.cycling.stop_dhw */ "給湯へ切替",
+  /* check.cycling.stop_normal_dhw */ "給湯運転終了",
+  /* check.cycling.stop_normal */ "通常停止",
+  /* check.cycling.out_cond */ (v) => `（外気 ${v}）`,
+  /* check.cycling.find_low_flow */ (minFlow, typ) => `低流量短運転：数分で目標超（${minFlow}${typ}）。`,
+  /* check.cycling.find_low_rps */ (flow, cond) => `低回転短運転${cond}：起動後目標超（${flow}）。`,
+  /* check.cycling.find_control */ "制御停止：要求オフまたは目標低下。",
+  /* check.cycling.find_defrost_dhw */ (cond) => `霜取・給湯${cond}：暖房一時停止。`,
+  /* check.cycling.find_defrost */ (cond) => `霜取り${cond}：除霜のため暖房停止。`,
+  /* check.cycling.find_dhw */ "給湯：給湯のため暖房停止。",
+  /* check.cycling.find_steady */ (flow) => flow ? `安定暖房：最小 ${flow}。` : "安定暖房。",
+  /* check.cycling.pause_tag */ (d) => `、${d}停止後`,
+  /* check.cycling.cond_tag */ (lwt, tgt) => tgt ? `往き ${lwt}、目標 ${tgt}` : `往き ${lwt}`,
+  /* check.cycling.from_tag */ (prev) => ` ${prev} →`,
+  /* check.cycling.rwt_tag */ (rwt) => `戻り ${rwt}`,
+  /* check.cycling.typ_tag */ (typ) => `、通常 ${typ}`,
+  /* check.cycling.s_cool */ (at, pause, lwt, tgt) => `${at}${pause} 起動：往き ${lwt}、目標 ${tgt}、要求オン。`,
+  /* check.cycling.s_req */ (at, pause, cond) => `${at}${pause} 要求オンで起動${cond}。`,
+  /* check.cycling.s_tgt */ (at, pause, prev, tgt, cond) => `${at}${pause} 目標上昇${prev} ${tgt}${cond}。`,
+  /* check.cycling.s_defrost_after */ (at, pause, cond) => `${at}${pause} 霜取り終了で再開${cond}。`,
+  /* check.cycling.s_dhw_after */ (at, pause, cond) => `${at}${pause} 給湯終了で再開${cond}。`,
+  /* check.cycling.s_defrost */ (at, pause) => `${at}${pause} 霜取りのため起動。`,
+  /* check.cycling.s_dhw */ (at, pause, cond) => `${at}${pause} 給湯のため起動${cond}。`,
+  /* check.cycling.s_gen */ (at, pause, cond) => `${at}${pause} 起動${cond}。`,
+  /* check.cycling.e_low_flow */ (to, lwt, tgt, rwt, flow, typ) => `${to} 停止：往き ${lwt} が目標 ${tgt} 超過${rwt}、${flow}${typ}。`,
+  /* check.cycling.e_low_rps */ (to, lwt, tgt, rwt, flow, rps) => `${to} 停止：往き ${lwt} が目標 ${tgt} 超過${rwt}、${flow}・${rps}。`,
+  /* check.cycling.e_req */ (to, vals) => `${to} 停止：要求オフ${vals}。`,
+  /* check.cycling.e_tgt */ (to, prev, tgt, vals) => `${to} 停止：目標低下${prev} ${tgt}${vals}。`,
+  /* check.cycling.e_defrost_run */ (to, vals) => `霜取り終了 ${to}${vals}。`,
+  /* check.cycling.e_defrost_pause */ (to, vals) => `${to} 霜取りのため停止${vals}。`,
+  /* check.cycling.e_dhw */ (to, vals) => `${to} 停止：給湯へ切替${vals}。`,
+  /* check.cycling.e_norm */ (to, vals) => `終了 ${to}${vals}。`,
+  /* check.cycling.e_ongoing */ "最新測定時も運転中。",
+  /* check.cycling.cause_unavailable */ "詳細なし",
+  /* check.cycling.cause_since_boot */ "起動・停止の理由は前回の再起動以降のみ記録されます。",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m}分`,
@@ -285,7 +341,17 @@ I18N.ja = localeValues([
   /* service.metric.eev */ "膨張弁指令",
   /* service.metric.hp */ "高圧",
   /* service.metric.lp */ "低圧",
+  /* check.hydronic.labels */ "水温差|ポンプ指令|観測／候補／採用|証拠の日時|採用データの日時|現在|母集団|時間別区分|水温差の目標値",
+  /* check.hydronic.reasons */ "プロジェクト基準で採用|診断オフ|現在の情報源なし|無効な測定値|ポンプ停止|給湯経路|補助ヒーターの作動報告|立ち上がり残り時間|観測時計を利用不可|情報源変更|診断同意変更|カウンター上限に到達|今回の起動中は無効|採用条件は不明",
+  /* check.hydronic.limits */ "制御段階を観測不可|ポンプ指令を利用不可|復元待ち",
+  /* check.hydronic.counts */ (w, c) => `水側読取 ${w} · 指令読取 ${c}`,
+  /* check.hydronic.states */ "データ源未確認|日時あり|日時なし|24時間の一部のみ|保存待ち|カウンター上限到達：下限値",
+  /* check.hydronic.loss */ (n) => `保存時の欠損報告 ${n} 件`,
+  /* check.hydronic.secondary */ (d, s, n) => `往き水温差（ヒートポンプ − 混合回路）：${d} · ${s} · 測定${n}回。混合目的は不明、熱損失には追加測定が必要です。`,
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
+  /* service.metric.samples */ n => `採用した測定値 ${n} 件`,
+  /* service.metric.input_none */ "選択された入力なし",
+  /* service.metric.meta_limit */ "件数は採用した測定値で、時間の網羅率ではありません。選択された入力は現在の測定値を証明しません。",
   /* service.limit.special_phases_unavailable */ "制御段階",
   /* service.limit.temperature_context_incomplete */ "温度の参考情報",
   /* service.limit.pressure_sides_incomplete */ "圧力側",
@@ -785,7 +851,6 @@ I18N.ja = localeValues([
   /* wx.longitude */ "経度",
   /* wx.waiting */ "予報待ち",
   /* wx.fetching */ "Open-Meteo予報を取得中…",
-  /* wx.unavailable */ "使用不可",
   /* wx.error */ "Open-Meteo予報エラー",
   /* wx.detail.status */ "状態：",
   /* wx.status.fresh */ "最新",
@@ -869,7 +934,6 @@ I18N.ja = localeValues([
   /* board.btninv */ "アクティブLOW（ボタンで端子をGNDへ短絡）",
   /* board.hint */ "工場出荷時リセットは、ボタンを5秒間押し続けて行います。履歴ジャーナルの準備ができていない場合は、何も消去されません。Wi-Fi などの設定、記録された履歴、状態の継続時間、未加工のクラッシュダンプ、保存済みの MQTT クリーンアップ記録が消去されます。基板、LED、ボタンの設定は可能な限り保持されます。消去に失敗すると、一部のデータだけが消去される場合があります。すべての消去に成功した場合にのみ機器が再起動します。リセットが始まらない、または完了しない場合は /diag を確認してください。ボタンを接続していない場合は「なし」を選択してください。",
   /* card.hardware */ "ハードウェア",
-  /* card.hw_off */ "なし",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
   /* card.hw_btn */ (pin) => `GPIO${pin}`,
   /* card.hw_board_m5stack */ "M5Stack AtomS3 LiteはWS2812 RGB状態LEDを内蔵した小型ESP32-S3基板です。",
@@ -898,7 +962,6 @@ I18N.ja = localeValues([
   /* card.diagnostics */ "設備診断",
   /* card.diagnostics_help */ "24時間設備点検、暖房曲線診断、室温・天気予報・循環ポンプ電力などの追加ソースを有効にします。",
   /* diagnostics.off */ "OFF",
-  /* diagnostics.on */ "ON",
   /* diagnostics.saved_on */ "設備診断を有効化しました · 収集開始",
   /* diagnostics.saved_off */ "設備診断を無効化しました · 収集停止",
   /* probe.toggle */ "プロトコル診断",
@@ -1015,6 +1078,8 @@ I18N.ja = localeValues([
   /* lang.saved */ "言語を保存しました",
   /* check.detail.dhw_reason.blind_modbus */ "未読取：Modbus応答なしまたはポーリング一時停止",
   /* check.detail.source_stale_modbus */ "新鮮なModbus試料なし。現在状態不明。過去記録は保持。",
+  /* mb.flow_scale_help */ "未確認の /100 換算（判別中/フォールバック）。L/min を機器表示と比較してください。動画・ΔT・熱出力・24h診断から除外。",
+  /* hist.modbus_flow_unverified */ "未確認の Modbus /100 換算（判別中/フォールバック）。機器表示と比較してください。",
   /* wf.label */ "成績係数",
   /* wf.short.partial */ "暫定",
   /* wf.short.limited */ "限定",
@@ -1124,7 +1189,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
   ["PHE共通戻りのR4T。R1T−R4TはPHEのΔTで、放熱器のΔTではなく一律5 K基準も使えません。"], // 35
   ["共通水回路の流量。必要最小値は機種とモードで異なり、低流量は7Hの原因になり得ます。"], // 36
   ["閉水回路の圧力。許容範囲は機種依存で、≤1.0 barなら該当機種の説明書を確認します。"], // 37
-  ["循環ポンプ速度指令は逆目盛です。0＝全速、100＝停止。"], // 38
+  ["反転 X10A 指令：生値 0 = 最大、100 = 停止（[0, 100] → 100–0 %）。RPM を測らず回転・揚程・流量を証明しません。入/切と流量を別に確認。"], // 38
   ["水循環ポンプの状態。運転だけでは有効な熱移動を証明せず、実流量と照合します。"], // 39
   ["設定済み太陽熱回路のポンプ状態。ヒートポンプ側の水循環ポンプとは別です。"], // 40
   ["このプロファイルのポンプ速度。目盛と対象回路は機種依存で、実流量は別値です。"], // 41
@@ -1224,7 +1289,7 @@ MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
   ["測定に欠けがあると、一部の起動が数えられないことがあります。", "起動回数に一律の正常値はありません。データが十分な場合、この診断では完了した暖房運転の平均が10分以上なら十分とみなします。"], // health_cycling
   ["除霜", "対応除霜≥3回、圧縮機と除霜の状態が両方読める圧縮機運転時間の>15%。内部基準、Daikin限界ではありません。湿度とコイル全体の温度なし。"], // health_defrost
   ["密閉水回路の24時間水圧推移（X10A、5分最小値）。", "グラフ目安：1.0 bar超 正常、1.0 bar以下 低い、0.5 bar以下 危険（診断は連続60秒以上で判定）。許容充填圧・運転圧は対象機種の説明書とシステム水頭により異なり、数値のみで漏水や故障は特定できません。"], // health_pressure
-  ["ポンプ60秒後の流量", "限界は同機種・モード・条件が必要。設計値や不足の証明ではありません。"], // health_flow
+  ["内蔵ポンプの60秒連続運転後の最小流量。別途、600秒暖房立ち上がり後のサンプル重み付き水温差・流量・ポンプ指令統計。", "定格流量や部分負荷の証明ではない。共通水側熱交換器を対象。ポンプ指令は回転数や揚程ではない。600秒プロジェクト基準（15秒以下の欠測許容）は定常運転を示さず、目標比較や水理原因は判定しない。"], // health_flow
   ["BUH/BSHのON時間", "エネルギーや不要加熱の証明ではありません。"], // health_heater
   ["5つの試験的カウンタ", "比較可能な増加のみ。欠測・リセット除外。安定でも制限を否定せず原因を証明しません。"], // health_retries
   ["RAM 24時間：安定・低下後の回復は正常。低下が続けば漏れの可能性。対応する通電再起動でRAM曲線を残せます。5分刻みは短い停止を隠す場合あり。RAM不可なら、ログの時刻付き互換区間のみ時刻同期後にフラッシュ復元。未完了/直近未保存区間は欠ける場合あり。"], // free_heap
@@ -1362,13 +1427,7 @@ INSPECT_I18N.ja = inspectValues(
       : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `残熱水が室内へ循環。R1T ${degC(d.lwt)}、端末後センサーなし。能動冷房ではありません。` : `水は${activeSpaceKind(d) === "cool" ? "冷房" : activeSpaceKind(d) === "heat" ? "暖房" : "室内"}回路へ。R1T ${degC(d.lwt)}、端末後センサーなし。` : "ポンプと流量が室内回路の循環を確認していません。"], // heat
     ["室内空調運転", "室内暖房または冷房運転", "室内回路の通常運転状態です。サーモスタット要求ではなく、単独で圧縮機運転を確認しません。"], // spaceh
     ["室温", "室温", "基準ゾーンの温度です。設定温度とモードと合わせて見ます。"], // room
-    ["循環ポンプ", "循環ポンプ速度", "共通水回路と3WVで選んだ経路を循環させます。圧縮機停止中も余熱や保護で動き、速度だけでは流量を確認しません。", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `ポンプは停止報告ですが流量 ${fmt1(d.flow)} l/min。外部循環、余運転、矛盾または古い信号があり得るため両方を確認してください。`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `速度 ${fmt0(d.pump)} %、流量 ${fmt1(d.flow)} l/min。` : `速度 ${fmt0(d.pump)} %、流量測定なし。循環未確認です。`
-      : waterMoving(d) ? `有効なポンプ速度なし、流量 ${fmt1(d.flow)} l/min。`
-      : d.pumpOn === true ? d.flow != null ? `ポンプ 入、流量は ${fmt1(d.flow)} l/minのみ。循環未確認です。` : "ポンプ 入、流量測定なし。循環未確認です。"
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `ポンプ停止、センサー ${fmt1(d.flow)} l/min。循環を確認できません。` : "ポンプ停止、流量測定なし。"
-      : `信頼できるポンプ状態なし。${fmt1(d.flow)} l/minだけでは循環を確認できません。`], // pump
+    ["循環ポンプ", "循環ポンプ", "反転 X10A 信号（0 = 最大、100 = 停止、[0, 100] → 100–0 %）で、RPM・回転・揚程・流量は証明しません。入/切と流量を別に確認。", (d) => pumpNowText(d, [(n) => `ポンプ指令 ${n} %。`, "ポンプ状態は入です。", "ポンプは停止（切）を報告しています。", "ポンプの入/切状態は不明です。", (n) => `実測流量 ${n} l/min。`, "流量データはありません。", "停止報告と流量が矛盾しています（外部循環・余運転・古い信号の可能性）。", "循環は確認できません。"])], // pump
     [(d) => pelMeasured(d) ? "電力 · HomeHub" : "電力（推定）", "電力", (d) => pelMeasured(d) ? "HomeHubレジスタ51の電力です。資料では校正、測定点、全ヒーターを含むか確認できず、認証済み設備メーターではありません。" : "COP/EER用推定: CT各相の合計 × 仮定230 V。実電圧と力率は不明で、インバータ電流は圧縮機のみ、CT境界は配線次第です。", (d) => d.pelHeld ? "圧縮機停止中のインバータ電流は前回値です。電力と効率を示せません。"
       : d.pel == null ? "現在の電流測定がなく、COP/EERを算出できません。"
       : d.pelSrc === "MB" ? "HomeHubレジスタ51の値。正確な測定境界は未記載です。"
@@ -1384,8 +1443,6 @@ INSPECT_I18N.ja = inspectValues(
     ["水流量", "水流量", "共通水回路の流量です。必要最小値は機種とモードで異なります。"], // flow
     ["流量スイッチ", "流量スイッチ状態", "X10Aの2値状態です。l/minを測らず、機種の最小流量も確認しません。", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A 入。ポンプと ${fmt1(d.flow)} l/minを比較してください。` : `X10A 切。ポンプ運転中は ${fmt1(d.flow)} l/minと7H/C0異常を確認してください。`], // flow_switch
     ["水圧", "水圧", "閉じた水回路の圧力です。許容範囲は機種、高低差、膨張タンクで異なるため取扱説明書を参照してください。"], // wp
-    ["X10Aサービスポート", "X10Aデータソース", "有線・読み取り専用のX10A接続。測定値は青色で表示されます。"], // x10a
-    ["Modbus TCP", "Modbusデータソース", "独立した読み取り専用のModbus TCP接続（HomeHub/Altherma 4）。値はペトロール色です。"], // modbus
   ],
 );
 

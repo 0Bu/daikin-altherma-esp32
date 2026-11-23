@@ -15,69 +15,69 @@
 // the UI. The HomeHub's separate numeric sub-code is intentionally not folded into this lookup: it
 // narrows a main code but is not another main-code vocabulary.
 const DAIKIN_FAULT_CODES = Object.freeze([
-  { code: "7H", en: "Water flow problem", de: "Problem mit dem Wasserdurchfluss" },
-  { code: "80", en: "Return water temperature sensor fault", de: "Fehler am Rücklauftemperaturfühler" },
-  { code: "81", en: "Leaving water temperature sensor fault", de: "Fehler am Vorlauftemperaturfühler" },
-  { code: "89", en: "Heat exchanger frost protection activated", de: "Frostschutz des Wärmetauschers ausgelöst" },
-  { code: "8F", en: "Abnormal DHW outlet water temperature rise", de: "Ungewöhnlicher Temperaturanstieg am Warmwasseraustritt" },
-  { code: "8H", en: "Abnormal leaving water temperature rise", de: "Ungewöhnlicher Anstieg der Vorlauftemperatur" },
-  { code: "A1", en: "Zero-crossing detection failure", de: "Fehler der Nulldurchgangserkennung" },
-  { code: "A5", en: "High-pressure peak-cut / frost protection problem", de: "Problem mit Hochdruckbegrenzung oder Frostschutz" },
-  { code: "AA", en: "Backup heater overheated or not connected", de: "Zusatzheizer überhitzt oder nicht angeschlossen" },
-  { code: "AC", en: "Booster heater overheated", de: "Speicherheizstab überhitzt" },
-  { code: "AH", en: "Tank disinfection (anti-legionella) not completed", de: "Speicherdesinfektion zum Legionellenschutz nicht abgeschlossen" },
-  { code: "AJ", en: "DHW heat-up time exceeded", de: "Aufheizzeit für Warmwasser überschritten" },
-  { code: "C0", en: "Flow sensor fault", de: "Fehler am Volumenstromsensor" },
-  { code: "C4", en: "Heat exchanger temperature sensor fault", de: "Fehler am Temperaturfühler des Wärmetauschers" },
-  { code: "C5", en: "Heat exchanger sensor fault", de: "Fehler an einem Wärmetauscherfühler" },
-  { code: "CJ", en: "Room temperature sensor fault", de: "Fehler am Raumtemperaturfühler" },
-  { code: "E1", en: "Outdoor unit PCB defect", de: "Platine der Außeneinheit defekt" },
-  { code: "E2", en: "Leakage current detection fault", de: "Fehler der Fehlerstromerkennung" },
-  { code: "E3", en: "Outdoor unit high-pressure switch activated", de: "Hochdruckschalter der Außeneinheit ausgelöst" },
-  { code: "E4", en: "Suction pressure fault", de: "Fehler beim Kältemittel-Saugdruck" },
-  { code: "E5", en: "Outdoor unit inverter compressor motor overheat", de: "Inverter-Verdichtermotor der Außeneinheit überhitzt" },
-  { code: "E6", en: "Outdoor unit compressor startup failure", de: "Verdichter der Außeneinheit startet nicht" },
-  { code: "E7", en: "Outdoor unit fan motor fault", de: "Fehler am Lüftermotor der Außeneinheit" },
-  { code: "E8", en: "Outdoor unit input overvoltage", de: "Überspannung am Eingang der Außeneinheit" },
-  { code: "E9", en: "Electronic expansion valve fault", de: "Fehler am elektronischen Expansionsventil" },
-  { code: "EA", en: "Outdoor unit cooling/heating switchover problem", de: "Umschaltproblem zwischen Kühlen und Heizen an der Außeneinheit" },
-  { code: "EC", en: "Abnormal tank temperature rise", de: "Ungewöhnlicher Temperaturanstieg im Speicher" },
-  { code: "F3", en: "Outdoor unit discharge pipe temperature fault", de: "Temperaturfehler an der Heißgasleitung der Außeneinheit" },
-  { code: "F6", en: "Outdoor unit abnormally high pressure during cooling", de: "Ungewöhnlich hoher Druck der Außeneinheit beim Kühlen" },
-  { code: "FA", en: "Outdoor unit abnormally high pressure, high-pressure switch activated", de: "Ungewöhnlich hoher Druck der Außeneinheit; Hochdruckschalter ausgelöst" },
-  { code: "H0", en: "Outdoor unit voltage/current sensor fault", de: "Fehler am Spannungs- oder Stromsensor der Außeneinheit" },
-  { code: "H1", en: "External temperature sensor fault", de: "Fehler an einem externen Temperaturfühler" },
-  { code: "H3", en: "Outdoor unit high-pressure switch fault", de: "Fehler am Hochdruckschalter der Außeneinheit" },
-  { code: "H5", en: "Compressor overload protection fault", de: "Fehler am Überlastschutz des Verdichters" },
-  { code: "H6", en: "Outdoor unit position-detection sensor fault", de: "Fehler am Positionserkennungssensor der Außeneinheit" },
-  { code: "H8", en: "Outdoor unit compressor input (CT) system fault", de: "Fehler am CT-Strommesssystem des Außeneinheit-Verdichters" },
-  { code: "H9", en: "Outdoor unit outside air temperature sensor fault", de: "Fehler am Außentemperaturfühler der Außeneinheit" },
-  { code: "HC", en: "Tank temperature sensor fault", de: "Fehler am Speichertemperaturfühler" },
-  { code: "HJ", en: "Water pressure sensor fault", de: "Fehler am Wasserdrucksensor" },
-  { code: "J3", en: "Outdoor unit discharge pipe sensor fault", de: "Fehler am Heißgasleitungsfühler der Außeneinheit" },
-  { code: "J6", en: "Outdoor unit heat exchanger sensor fault", de: "Fehler am Wärmetauscherfühler der Außeneinheit" },
-  { code: "JA", en: "Outdoor unit high-pressure sensor fault", de: "Fehler am Hochdrucksensor der Außeneinheit" },
-  { code: "L1", en: "Inverter PCB fault", de: "Fehler an der Inverterplatine" },
-  { code: "L3", en: "Outdoor unit control box temperature rise fault", de: "Unzulässiger Temperaturanstieg im Schaltkasten der Außeneinheit" },
-  { code: "L4", en: "Outdoor unit inverter heat sink temperature rise fault", de: "Unzulässiger Temperaturanstieg am Inverter-Kühlkörper der Außeneinheit" },
-  { code: "L5", en: "Outdoor unit inverter overcurrent (DC) detected", de: "Gleichstrom-Überstrom am Inverter der Außeneinheit erkannt" },
-  { code: "L8", en: "Inverter PCB thermal protection tripped", de: "Thermoschutz der Inverterplatine ausgelöst" },
-  { code: "L9", en: "Compressor lock protection", de: "Blockierschutz des Verdichters ausgelöst" },
-  { code: "LC", en: "Outdoor unit communication system fault", de: "Fehler im Kommunikationssystem der Außeneinheit" },
-  { code: "P1", en: "Power supply phase imbalance / open phase", de: "Phasenunsymmetrie oder Phasenausfall der Stromversorgung" },
-  { code: "P3", en: "Abnormal DC detected", de: "Ungewöhnliche Gleichspannung erkannt" },
-  { code: "P4", en: "Outdoor unit heat sink temperature sensor fault", de: "Fehler am Kühlkörper-Temperaturfühler der Außeneinheit" },
-  { code: "PJ", en: "Capacity setting mismatch", de: "Leistungseinstellung passt nicht zur Anlage" },
-  { code: "U0", en: "Outdoor unit refrigerant shortage", de: "Kältemittelmangel an der Außeneinheit" },
-  { code: "U1", en: "Reverse phase / open phase malfunction", de: "Phasenfolgefehler oder Phasenausfall" },
-  { code: "U2", en: "Outdoor unit mains voltage fault", de: "Netzspannungsfehler der Außeneinheit" },
-  { code: "U3", en: "Underfloor heating screed-drying function not completed correctly", de: "Estrichtrocknungsprogramm der Fußbodenheizung nicht korrekt abgeschlossen" },
-  { code: "U4", en: "Indoor/outdoor unit communication problem", de: "Kommunikationsproblem zwischen Innen- und Außeneinheit" },
-  { code: "U5", en: "User interface communication problem", de: "Kommunikationsproblem mit der Bedieneinheit" },
-  { code: "U7", en: "Outdoor unit main CPU / inverter CPU transmission fault", de: "Übertragungsfehler zwischen Haupt-CPU und Inverter-CPU der Außeneinheit" },
-  { code: "U8", en: "External device (LAN adapter / room thermostat / USB) communication problem", de: "Kommunikationsproblem mit LAN-Adapter, Raumthermostat oder USB-Gerät" },
-  { code: "UA", en: "Indoor/outdoor unit combination or compatibility problem", de: "Innen- und Außeneinheit sind falsch kombiniert oder nicht kompatibel" },
-  { code: "UF", en: "Reversed piping or faulty communication wiring detected", de: "Vertauschte Rohrleitungen oder fehlerhafte Kommunikationsverdrahtung erkannt" },
+  { code: "7H", en: "Water flow problem" },
+  { code: "80", en: "Return water temperature sensor fault" },
+  { code: "81", en: "Leaving water temperature sensor fault" },
+  { code: "89", en: "Heat exchanger frost protection activated" },
+  { code: "8F", en: "Abnormal DHW outlet water temperature rise" },
+  { code: "8H", en: "Abnormal leaving water temperature rise" },
+  { code: "A1", en: "Zero-crossing detection failure" },
+  { code: "A5", en: "High-pressure peak-cut / frost protection problem" },
+  { code: "AA", en: "Backup heater overheated or not connected" },
+  { code: "AC", en: "Booster heater overheated" },
+  { code: "AH", en: "Tank disinfection (anti-legionella) not completed" },
+  { code: "AJ", en: "DHW heat-up time exceeded" },
+  { code: "C0", en: "Flow sensor fault" },
+  { code: "C4", en: "Heat exchanger temperature sensor fault" },
+  { code: "C5", en: "Heat exchanger sensor fault" },
+  { code: "CJ", en: "Room temperature sensor fault" },
+  { code: "E1", en: "Outdoor unit PCB defect" },
+  { code: "E2", en: "Leakage current detection fault" },
+  { code: "E3", en: "Outdoor unit high-pressure switch activated" },
+  { code: "E4", en: "Suction pressure fault" },
+  { code: "E5", en: "Outdoor unit inverter compressor motor overheat" },
+  { code: "E6", en: "Outdoor unit compressor startup failure" },
+  { code: "E7", en: "Outdoor unit fan motor fault" },
+  { code: "E8", en: "Outdoor unit input overvoltage" },
+  { code: "E9", en: "Electronic expansion valve fault" },
+  { code: "EA", en: "Outdoor unit cooling/heating switchover problem" },
+  { code: "EC", en: "Abnormal tank temperature rise" },
+  { code: "F3", en: "Outdoor unit discharge pipe temperature fault" },
+  { code: "F6", en: "Outdoor unit abnormally high pressure during cooling" },
+  { code: "FA", en: "Outdoor unit abnormally high pressure, high-pressure switch activated" },
+  { code: "H0", en: "Outdoor unit voltage/current sensor fault" },
+  { code: "H1", en: "External temperature sensor fault" },
+  { code: "H3", en: "Outdoor unit high-pressure switch fault" },
+  { code: "H5", en: "Compressor overload protection fault" },
+  { code: "H6", en: "Outdoor unit position-detection sensor fault" },
+  { code: "H8", en: "Outdoor unit compressor input (CT) system fault" },
+  { code: "H9", en: "Outdoor unit outside air temperature sensor fault" },
+  { code: "HC", en: "Tank temperature sensor fault" },
+  { code: "HJ", en: "Water pressure sensor fault" },
+  { code: "J3", en: "Outdoor unit discharge pipe sensor fault" },
+  { code: "J6", en: "Outdoor unit heat exchanger sensor fault" },
+  { code: "JA", en: "Outdoor unit high-pressure sensor fault" },
+  { code: "L1", en: "Inverter PCB fault" },
+  { code: "L3", en: "Outdoor unit control box temperature rise fault" },
+  { code: "L4", en: "Outdoor unit inverter heat sink temperature rise fault" },
+  { code: "L5", en: "Outdoor unit inverter overcurrent (DC) detected" },
+  { code: "L8", en: "Inverter PCB thermal protection tripped" },
+  { code: "L9", en: "Compressor lock protection" },
+  { code: "LC", en: "Outdoor unit communication system fault" },
+  { code: "P1", en: "Power supply phase imbalance / open phase" },
+  { code: "P3", en: "Abnormal DC detected" },
+  { code: "P4", en: "Outdoor unit heat sink temperature sensor fault" },
+  { code: "PJ", en: "Capacity setting mismatch" },
+  { code: "U0", en: "Outdoor unit refrigerant shortage" },
+  { code: "U1", en: "Reverse phase / open phase malfunction" },
+  { code: "U2", en: "Outdoor unit mains voltage fault" },
+  { code: "U3", en: "Underfloor heating screed-drying function not completed correctly" },
+  { code: "U4", en: "Indoor/outdoor unit communication problem" },
+  { code: "U5", en: "User interface communication problem" },
+  { code: "U7", en: "Outdoor unit main CPU / inverter CPU transmission fault" },
+  { code: "U8", en: "External device (LAN adapter / room thermostat / USB) communication problem" },
+  { code: "UA", en: "Indoor/outdoor unit combination or compatibility problem" },
+  { code: "UF", en: "Reversed piping or faulty communication wiring detected" },
 ]);
 
 const DESCRIPTIONS = [
@@ -277,10 +277,8 @@ const DESCRIPTIONS = [
     de: { what: "Wasserdruck im geschlossenen Hydraulikkreis.",
           normal: "Viele aktuelle Altherma-Handbücher verlangen am Pumpeneintritt mehr als 1 bar. Zulässiger Betriebs- und Fülldruck hängen jedoch von Modell, Anlagenhöhe und Ausdehnungsgefäß ab. Bei 1,0 bar oder weniger die Anleitung des genauen Geräts prüfen, statt einen allgemeinen Nachfüllwert anzunehmen." } },
   { re: /water pump signal/i,
-    what: "The speed command sent to the circulation pump. Note it is inverted — 0 means full speed, 100 means stopped (per the label).",
-    normal: "a low number (fast pump) while heating, cooling or making DHW; 100 (stopped) when idle.",
-    de: { what: "Der Drehzahlbefehl an die Umwälzpumpe ist umgekehrt skaliert: 0 bedeutet volle Drehzahl, 100 bedeutet Stillstand.",
-          normal: "eine niedrige Zahl und damit schnelle Pumpendrehzahl beim Heizen, Kühlen oder Warmwasserbereiten; 100 im Leerlauf." } },
+    what: "Inverted X10A pump command: raw 0 = max, 100 = stop (schematic maps [0, 100] to 100–0 %). Proves no RPM, rotation, head or flow; read ON/OFF and flow separately, even stopped.",
+    de: { what: "Invertierter X10A-Pumpenbefehl: roh 0 = Maximum, 100 = Stopp (Schema rechnet [0, 100] in 100–0 % um). Belegt weder RPM noch Rotation, Förderhöhe oder Durchfluss; An/Aus und Durchfluss getrennt lesen, auch im Stillstand." } },
   { exact: true, re: /^(?:water pump operation|circulation pump (?:operation|running))$/i,
     what: "Status of the hydronic circulation pump. It moves water through the branch selected by the hydraulic controls; pump operation alone does not prove useful heat transfer.",
     normal: "ON means the controller reports pump operation; OFF means it reports the pump stopped. It can run for heating, cooling, DHW, defrost, air purge, frost protection, a test run or pump overrun. Compare the state with measured flow; the compressor may legitimately be stopped.",
@@ -1034,6 +1032,9 @@ function descFor(label, row = null) {
       83: "a4.operation_help"})[row.off];
     if (key) return { what: t(key), sourceQualified: true };
   }
+  if (row?.off === 49 && row?.flow_scale_unverified === true) {
+    return { what: t("mb.flow_scale_help"), sourceQualified: true };
+  }
   const l = label || "";
   const source = row && row.off != null ? "modbus" : row ? "x10a" : "";
   for (const d of DESCRIPTIONS) {
@@ -1119,9 +1120,10 @@ const MB_DELTA_WHY = {
 // comparing two numbers wants to know whether they agree, and "1.7 K apart, and here is why" is a
 // different statement from two numbers left side by side to be squinted at.
 function mbDeltaHtml(row, mb) {
-  // A numeric difference would assume verified common units. Keep the native conversion limit
+  // A numeric difference would assume verified common units. Keep unverified scaling limits
   // visible beside the second source instead, even when X10A supplies the primary reading.
-  if (mb?.profile === "altherma4" && [49, 68, 79].includes(mb.off)) {
+  if ((mb?.profile === "altherma4" && [49, 68, 79].includes(mb.off)) ||
+      (mb?.off === 49 && mb?.flow_scale_unverified === true)) {
     const limit = descFor(mb.label, mb)?.what;
     if (limit) return descParaHtml(esc(limit));
   }
@@ -1149,11 +1151,9 @@ function mbDeltaHtml(row, mb) {
 // into "no fault" because the neighbouring diagnostic-state register is the authority for that.
 const FAULT_CODE_NONE = Object.freeze({
   en: "No fault code is currently being transmitted.",
-  de: "Aktuell wird kein Fehlercode übertragen.",
 });
 const FAULT_CODE_UNKNOWN = Object.freeze({
   en: "No short explanation is stored for this code.",
-  de: "Keine Kurzbeschreibung für diesen Code hinterlegt.",
 });
 function faultCodeMeaning(baseCode) {
   const code = String(baseCode == null ? "" : baseCode).trim().toUpperCase().split("-")[0];

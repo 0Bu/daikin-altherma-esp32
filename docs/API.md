@@ -248,9 +248,10 @@ blind time itself, so its verdict can be `accept` beside trend age refusals.
 `health` fields: `source`, `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
 `available`, `assessable`, `evaluated`, `status`, `checks`. `health.source` is the active display
 source (`"x10a"` or `"modbus"`, matching `diagnostics.effective_source`); X10A and HomeHub Modbus
-accumulate separate 24 h stores in parallel. Disabled diagnostics, a pending reset
-or an unreadable snapshot produce placeholder checks with no accumulated diagnosis or Cycling
-chart evidence. Use `persist` and `diagnostics.enabled` to interpret them.
+accumulate separate 24 h stores in parallel. Disabled diagnostics, a pending whole-source reset or
+an unreadable checkup snapshot yield placeholder checks and suppress cycling and tank-cooling
+charts. Fault history is captured separately. Use `persist` and `diagnostics.enabled` to interpret
+placeholder checks.
 `span_s` combines time since the active store's current diagnostics window first accepted a sampling callback
 with any carried restore duration, capped at 24 hours. A callback can start the clock without
 readable data. Restore estimates the earlier span from one nominal hour before the earliest
@@ -261,10 +262,13 @@ that source;
 empty pause/failure callbacks cannot renew it. `source_fresh` applies the 15-second observation-age
 bound at read time. A stale source
 withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
-The serializer captures `health.persist`, the judged window and Cycling hours together.
-In `"modbus"` mode, `defrost`, `pressure`, `retries`, and (on Altherma 4 Modbus) `flow` report
-`unavailable` (`checkup_modbus_coverage`), and `cycling.stop_context` emits the placeholder
-`confirmed:false` object; independently collected Stop context remains X10A-only.
+The serializer captures `health.persist`, the judged window, Cycling hours and the DHW chart
+snapshot under the same checkup lock.
+In `"modbus"` mode, `defrost`, `pressure`, `retries`, and (on Altherma 4, `Probing`, or `Fallback`
+sweeps where Input 49 scaling is unverified) `flow` report `unavailable` (`checkup_modbus_coverage`),
+and `cycling.stop_context`, `flow.hydronic` emit placeholder `confirmed:false` objects
+(`dated:false`, `reason_code:0`, null metrics) while `flow.secondary_supply` stays null; independently collected Stop and Hydronic
+observations remain X10A-only.
 `health.persist:"flash_pending"` means flash recovery has yet to establish whether compatible
 hours exist. It can wait for clock or source confirmation. A replay read error is logged and
 stops that attempt for the current boot.
@@ -280,11 +284,11 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | Id | Evidence fields |
 |---|---|
 | `fault` | `active`, optional `latest`, optional `timeline` |
-| `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
-| `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
+| `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked`, optional `timeline` |
+| `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, optional `timeline`, optional `run_contexts`, optional `flow_typical_l_min`, `stop_context` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
-| `flow` | `min_l_min` |
+| `flow` | `min_l_min`, independent `hydronic` observations and nullable `secondary_supply` |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
 | `retries` | `seen` |
 
@@ -296,6 +300,55 @@ with `unavailable`/`no_eligible_windows` means a full DHW evidence day without a
 even if no candidate could open. It does not establish signal coverage or a cause. The `reading`
 abort reason includes invalid temperatures and an unconfirmed closing endpoint after a 30-second
 grace. An unsupported profile also uses `unavailable`, with `blocked:false`.
+
+<a id="dhw-cooling-timeline"></a>
+**DHW cooling timeline.** Optional `dhw_loss.timeline` contains current-boot completed windows,
+not a reconstruction from hourly sums. It needs unredacted status, enabled diagnostics, a confirmed
+supported source, started collection and an admitted caller-owned snapshot allocation. It shares
+the cycling chart's values/TLS admission guard, but does not require a synchronized clock.
+
+| Timeline field | Contract |
+|---|---|
+| `epoch` | Nonzero uint32 collection/reset generation, scoped to this boot and source. |
+| `window_end_s` | uint32 uptime at the snapshot's right edge, in whole seconds. |
+| `since_s` | uint32 uptime when this collection lifecycle began; not continuous coverage or the first completed window. |
+| `observed_end_s` | uint32 uptime of the last sample with plausible R5T, valve, internal-pump and tank-heater inputs readable, or null before one exists; not the end of a completed window. |
+| `unix_s` | Optional synchronized Unix-seconds anchor **at `window_end_s`**. The two monotonic bounds around the clock read must map to the same wall second. |
+| `live` | Boolean freshness of complete DHW inputs and the source, checked against the 15-second limit before rounding timestamps. |
+| `windows` | Array of at most 24 completed windows, oldest first, with no overlaps. |
+
+Each `timeline.windows` entry has `start_s` and `end_s` (uint32 uptime seconds), `rate_k_h`
+(nonnegative net sensor cooling, serialized with one decimal), `observed_s` (readable seconds,
+excluding tolerated blind time), and boolean `pump_marker` and `draw_marker`. The pump marker is
+internal hydronic-pump presence, **not** the external circulation witness. The draw marker is a
+temperature-shape observation, **not** proven water use. Neither marker measures duration or cause.
+
+Actual endpoints are independently quantized to whole seconds. The evaluator accepts 3600–3630
+elapsed whole seconds; the quantized endpoint difference can therefore be 3600–3631 seconds.
+Rate and observed seconds retain the evaluator's original calculation. Retention uses completion
+ends in `(window_end_s - 86400, window_end_s]`,
+including on reads after polling stops; a retained start may precede the left edge. With `unix_s`,
+map uptime `s` to `unix_s - window_end_s + s`; otherwise use relative time, never invented dates.
+Wall-clock corrections change labels, not monotonic retention.
+
+`windows:[]` means eligible collection has begun but no accepted timed completion is retained.
+An absent timeline can mean unsupported, reset, disabled, redacted, allocation-denied or unreadable
+state; it is not zero cooling. Scope UI state to `boot_id`, `history.epoch`, `health.source` and
+`timeline.epoch`. Clear the previous chart when the timeline is absent or invalid, the diagnosis
+snapshot is unreadable, or any scope key changes; unlike cycling, omission cannot reuse a cache.
+Blank intervals mean no timed completed window, not zero cooling or a recorded exclusion cause.
+
+Exact completion-end retention and aggregate hourly expiry differ, so timed and aggregate counts
+can differ in either direction. Saved aggregate hours do not supply bars. A candidate carried
+across a reboot can still contribute aggregate evidence under existing rules, but never a timed
+bar: its original start is not exact in this boot. Source/profile, circulation-identity and consent
+generation resets clear the detail. While a circulation reset is pending, snapshots exclude the
+previous DHW scope's evidence and progress. Other checks continue reporting.
+Same-generation pause/resume preserves retained completed
+windows without bridging the pause. No timed windows survive a reboot. When both source slots
+observe the factory-forget latch, they stop recording timed samples for that boot, even if erasure
+fails. The snapshot checks the latch before returning timed detail. A response already holding
+that checked snapshot can finish sending it. See [method and claim limits](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss).
 
 Unestablished numeric evidence is null. `reason` is empty when no qualification applies; otherwise:
 `unsupported`, `day_incomplete`, `input_coverage`, `no_eligible_windows`, `class_unavailable`,
@@ -376,6 +429,24 @@ records within the 24-hour window if it fills. The opening state is unknown unti
 retained interval boundary unless the trace establishes a state at the left edge. The chart counts
 individual starts at or after its cutoff. The diagnosis total expires whole hourly slots and can
 include inferred and restored counts. The two totals can differ in either direction.
+
+When X10A diagnostics are active and the snapshot carries an unredacted `timeline`, `/status` may
+also include optional RAM-only per-run start/stop telemetry in `cycling.run_contexts` (up to 48
+entries on the `timeline` boot-aligned window `s` coordinate frame) and `cycling.flow_typical_l_min`
+(median settled flow rate in `L/min` across completed `>= 600 s` space-heating runs in RAM, emitted
+when `> 0`). Each `run_contexts[]` entry carries `at` (`s`), `mode` (`space`, `dhw`, `cooling`,
+`other`, `unknown`) and `start_kind` (`cooldown_restart`, `request_on`, `target_raised`,
+`after_defrost`, `after_dhw`, `defrost_start`, `dhw_start`, `unknown`), plus optional `stop` (`s`) and
+`stop_kind` (`low_rps_above_target`, `request_withdrawal`, `target_changed`, `defrost`,
+`dhw_transition`, `normal`, `unknown`) once stopped, optional endpoint/pre-start temperatures in `°C`
+(`start_lwt_c`, `start_target_c`, `start_target_prev_c`, `lwt_c`, `rwt_c`, `target_c`, `target_prev_c`,
+`outdoor_c`), settled average run flow in `L/min` (`flow_l_min`, `>= 0`, `>= 30 s` warm-up with
+full-run or stop-sample fallback on shorter runs), settled minimum compressor speed in `rps`
+(`min_rps`, `> 0`, `>= 30 s` warm-up with full-run fallback), and `low_rps_above_target:true` when
+active. `stop_kind: "target_changed"` records only target drops, whereas any target change withdraws
+the in-run `low_rps_above_target` flag. `run_contexts` and `flow_typical_l_min` are omitted when
+empty, on Modbus, in redacted reports, during active Weather TLS admission, on allocation failure, or
+after reset/forget; neither field alters completed-run verdicts or persisted journal schemas.
 
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed
@@ -465,19 +536,74 @@ Heater coverage is reported separately for each supported signal; an unread sign
 Complete rules, coverage and experimental boundaries are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md); owner wording is in [DIAGNOSTICS.md](DIAGNOSTICS.md).
 
+### Qualified water-circuit observations
+
+The independent `flow.hydronic` object preserves the existing `min_l_min` and verdict.
+`method: 1` identifies the current rules. `scope: "unit_water_heat_exchanger"` names the measured
+circuit. The ranges use `weighting: "sample"`.
+
+| Fields | Meaning |
+|---|---|
+| `confirmed`, `current`, `dated` | Bound source, recent completed sweep and usable UTC dating. |
+| `coverage_partial`, `restore_pending`, `persistence_pending` | Incomplete coverage, pending archive replay, and waiting revisions or reset markers. An open hour can still be RAM-only. |
+| `dropped`, `observed_hours` | Lower bounds for loss notices and represented hours; null without a confirmed source. |
+| `window_s`, `settling_s`, `max_gap_s` | Up to 86400 seconds with whole-hour expiry, 600 seconds of settling and 15 seconds maximum continuity gap. |
+| `reason`, `reason_code`, `settling_remaining_s` | Current qualification and its numeric code. Remaining time is null outside a current run-up. |
+| `source_generation`, `schema_fp` | Source epoch and resolved input schema; null without confirmed identity. |
+| `current_limitations_mask`, `population_limitations_mask`, `population_saturated` | Mask bits 1, 2 and 4 denote unobservable phases, unavailable pump command and saturated counters. A stale current mask is null. |
+| `observed_s`, `candidate_s`, `qualified_s` | Time from readable endpoint pairs, eligible time including run-up and qualified time. |
+| `samples`, `command_samples` | Accepted water and pump-command counts. Each mean uses its own denominator. |
+| `first_evidence_unix_s`, `last_evidence_unix_s`, `first_accepted_unix_s`, `last_accepted_unix_s` | Whole UTC seconds. Missing dates remain null. |
+| `spread_k`, `flow_l_min`, `pump_command_pct` | Ranges with nullable `min`, `mean` and `max`. |
+| `target_supported`, `target_delta_k` | `false` and `null` for the current profiles. |
+
+Durations and counts are null until evidence is dated and its source is confirmed. Once dated,
+a population can have zero qualified samples and null ranges. Modbus diagnostics leaves `flow.hydronic`
+unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`, null metrics) and
+`flow.secondary_supply` null. See the
+[flow evidence ledger](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow) for the admission rules.
+
+### Secondary supply-temperature comparison
+
+`flow.secondary_supply` is null until an uninterrupted heating run qualifies. The same completed
+X10A sweep must contain the two temperatures, an active pump for the mixed main zone and that
+zone's active external heating request. Both the water-circuit admission and 600 seconds of
+continuous secondary evidence are required. A missing or stale witness, source change, diagnostic
+pause or restart clears the run. The comparison is withheld whenever the start of the latest
+accepted sweep is more than 15 seconds old, and Modbus diagnostics always leaves it null. No shipped
+profile currently supplies the complete input set.
+
+When available, `delta_k` is the sample-weighted mean of the signed primary supply temperature
+before the electric backup heater (R1T) minus the mixed main-zone supply temperature (EKMIK).
+`duration_s` counts seconds between accepted endpoints and `samples` counts accepted pairs.
+`source` holds the secondary X10A locator (`reg`, `offset`, `conv`). `zone_context` is
+`"unknown"`. The comparison is live and RAM-only. It leaves the flow verdict and minimum
+independent. See the [flow evidence ledger](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow).
+
 ### Refrigerant observation
 
 `refrigerant_service` is omitted until this boot detects a profile and evaluates its signal coverage.
 It contains `kind:"observation"`, `state`, `continuous_s`, `samples`, `mode`, `blocker`,
-`special_phases_known`, `load_proven:false`, `eev_feedback:false`, `limitations` and `metrics`.
+`special_phases_known`, `load_proven:false`, `eev_feedback:false`, `limitations`, `metrics`,
+`source_generation` and `metric_meta`.
 States: `unsupported`, `waiting`, `observing`, `limited`, `interrupted`; modes: `unknown`, `heating`,
 `cooling`, `other`. Blockers include `unsupported_profile`, `compressor_not_running`,
 `unsupported_or_unknown_mode`, `dhw_path`, `defrost`, `unit_fault`, `special_controller_phase`,
 `missing_fresh_signal`, `poll_gap`, or null. Limitation ids are `special_phases_unavailable`,
 `temperature_context_incomplete`, `pressure_sides_incomplete`, `outdoor_context_incomplete`.
 Metrics `compressor_rps`, `discharge_c`, `eev_command_pls`, `high_pressure_bar`, `low_pressure_bar`
-are null or `{min,mean,max}` in their named units. This is neither a controlled service test nor
-proof of refrigerant charge or valve position.
+are null or `{min,mean,max}` in their named units; these existing metric objects are unchanged.
+`metric_meta` uses those same five keys, each with `{samples,source}`. `samples` counts accepted
+readings for that particular metric in the exposed window, capped at 4294967295; it can be lower
+than the overall window count when an optional pressure input is unreadable. Zero means no
+accepted reading, not a measured zero. `source` is null when no input is selected, otherwise
+`{kind:"x10a",reg,offset,conv}` describes the profile-selected input. Selection is independent of
+reading availability; it supplies neither a source timestamp nor proof of a current reading.
+`source_generation` identifies the boot-local poll scope and can be shared by multiple windows.
+Source changes and interruptions clear the exposed counts alongside the existing window. The
+[source table](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation) states the fixed pressure
+selection and withheld pairings. This is neither a controlled service test nor proof of refrigerant
+charge or valve position.
 
 ### Performance factor observation
 
@@ -531,9 +657,13 @@ Dwell metadata must match the copied cache revision, source identity and decoded
 is unknown rather than a duration borrowed from another reading.
 
 Modbus rows contain `label`, `value`, `unit`, `off`, with applicable `binary`, `enum`, `profile`, `concept`,
-`history`. Numeric, flag and enum `value` fields are JSON numbers or null; text values are strings or
+`history`, `flow_scale_unverified`. Numeric, flag and enum `value` fields are JSON numbers or null; text values are strings or
 null. `off` belongs to the selected catalog; native rows include `profile:"altherma4"` and do not
-borrow HomeHub enum meanings. Native quiet-policy selection proves no active quiet state/history.
+borrow HomeHub enum meanings. Offset 49 emits `"flow_scale_unverified":true` when `/100` scaling is
+not affirmatively verified for that snapshot (`Altherma4`, `Auto/Probing`, or `Fallback`); UI and
+checkups treat unverified Input 49 provisionally (pill and 24-hour chart caveat only; withheld from
+hydraulic animation, ΔT, thermal power, deltas, and checkup `flow`). Native quiet-policy selection
+proves no active quiet state/history.
 The full-cache limit is 614 seconds and individual reply-age limit seven seconds; these transport
 bounds cannot prove simultaneity. Native promotion first exposes only its pressure probe until a
 full sweep. History additionally requires matching space/offset/codec/scale/unit provenance.

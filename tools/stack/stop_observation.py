@@ -19,6 +19,9 @@ INLINED_INDEX_HELPERS = (
     'history_journal_reserve_sequence',
 )
 INLINED_SUPPRESSION_HELPERS = ('stop_context_unavailable_report',)
+DHW_TRACE_HELPERS = ('copy_dhw_trace_locked', 'dhw_loss_step_traced', 'dhw_loss_step',
+                     'apply_dhw_reset_locked', 'slot_start', 'slot_set_diagnostics',
+                     'checkup_cycling_end_unix_s', 'dhw_loss_wall_anchor_s', 'mb_record_poll_gap')
 INDEX_POST_VALIDATION_FENCE = (
     '    if (s_forgotten.load(std::memory_order_acquire)) return;\n'
     '    observation_index_add('
@@ -114,7 +117,8 @@ def validate_paths(budgets, error):
             'history_append_at' in path['symbols'] for path in budgets['paths'].values()):
         raise error('stop observation inlining: append_at cannot retain an invented outlined frame')
     monitored = {name for name, path in budgets['paths'].items()
-                 if name in PATHS or '_stop_' in name or set(path['symbols']) & set(SYMBOLS)}
+                 if name in PATHS or '_stop_' in name or '_dhw_trace_' in name
+                 or set(path['symbols']) & set(SYMBOLS)}
     if monitored != set(PATHS):
         raise error('stop observation paths: exact caller/branch inventory changed')
     for name, (owner, rule) in PATHS.items():
@@ -237,6 +241,86 @@ def validate_suppression(sources, error):
         raise error('stop observation suppression: producer/expiry/report/shutdown admission changed')
 
 
+def validate_dhw_trace_sources(sources, error):
+    """Bind optional detail to the locked HTTP snapshot, not a new automatic report buffer."""
+    checkup = sources['main/checkup.cpp']
+    compact = normalized(checkup)
+    report = normalized(body(checkup, 'checkup_report', error))
+    copy = normalized(body(checkup, 'copy_dhw_trace_locked', error))
+    if ('logic::DhwLossTracedhw_trace{};std::atomic<bool>dhw_trace_forgotten{false};'
+            'CheckupSlot(' not in compact):
+        raise error('stop observation DHW detail: appended slot storage/offset contract changed')
+    signature = ('static__attribute__((noinline))voidcopy_dhw_trace_locked('
+                 'CheckupSlot&slot,logic::DhwLossTimeline*dhw_trace,int64_tnow_us,boolsource_fresh)')
+    suffix = 'logic::checkup_apply_freshness(report,source_fresh,source_age_s,span_s);returnreport;'
+    if (compact.count(signature) != 1
+            or not report.startswith('if(dhw_trace)dhw_trace->clear();')
+            or not report.endswith(suffix)
+            or report.count('copy_dhw_trace_locked(') != 1):
+        raise error('stop observation DHW detail: noinline locked copy/early clear/terminal freshness changed')
+    pending = ('if(dhw_trace)copy_dhw_trace_locked(slot,dhw_trace,now_us,source_fresh);'
+               'constbooldhw_reset_pending=slot.dhw_reset_requested.load();'
+               'if(dhw_reset_pending&&dhw_trace)dhw_trace->clear();'
+               'logic::DhwLossWindowdhw=dhw_reset_pending?logic::DhwLossWindow{}:'
+               'logic::dhw_loss_aggregate(slot.P().dhw);'
+               'dhw.full_span=!dhw_reset_pending&&'
+               'logic::dhw_loss_scope_full(window.full_span,slot.dhw_scope_us,now_us);')
+    if (report.count(pending) != 1 or report.count('slot.dhw_reset_requested.load()') != 1
+            or report.find('if(source_fresh&&!dhw_reset_pending){') < report.find(pending)):
+        raise error('stop observation DHW detail: one post-clock pending reset must fence all DHW fields')
+    admission = ('if(dhw_trace&&slot.source_confirmed&&!slot.dhw_reset_requested.load()&&'
+                 '!slot.dhw_trace_forgotten.load(std::memory_order_acquire)&&slot.cov.r5t&&'
+                 'slot.cov.valve&&slot.cov.pump&&slot.cov.bsh&&'
+                 'slot.dhw_trace.snapshot(*dhw_trace,now_us,logic::CHECKUP_MAX_GAP_S)){')
+    clock = ('dhw_trace->live=dhw_trace->live&&source_fresh;int64_tunix_s=-1;int32_tms=0;'
+             'constint64_tbefore_us=esp_timer_get_time();time_now(unix_s,ms);'
+             'constint64_tafter_us=esp_timer_get_time();'
+             'dhw_trace->unix_s=logic::dhw_loss_wall_anchor_s('
+             'dhw_trace->window_end_s,before_us,after_us,unix_s,ms);')
+    withdrawn = ('if(dhw_trace&&slot.dhw_trace_forgotten.load(std::memory_order_acquire))'
+                 'dhw_trace->clear();')
+    if (not copy.startswith(admission) or clock not in copy or not copy.endswith(withdrawn)
+            or copy.count('time_now(') != 1 or copy.count('esp_timer_get_time(') != 2
+            or copy.count('slot.dhw_trace.snapshot(') != 1):
+        raise error('stop observation DHW detail: admission/sibling clocks/post-clock withdrawal changed')
+    logic = normalized(sources['main/logic/checkup.hpp'])
+    pure = ('[[gnu::noinline]]inlinevoiddhw_loss_step(DhwLossState&st,DhwLossBucket&b,'
+            'constCheckupSample&s,int64_tnow_us)')
+    traced = ('[[gnu::noinline]]inlinevoiddhw_loss_step_traced(DhwLossState&st,DhwLossBucket&b,'
+              'constCheckupSample&s,DhwLossTrace*trace,int64_tnow_us)')
+    impl = ('template<boolTimed>[[gnu::always_inline]]inlinevoiddhw_loss_step_impl('
+            'DhwLossState&st,DhwLossBucket&b,constCheckupSample&s,DhwLossTrace*trace,int64_tnow_us)')
+    pure_body = normalized(body(sources['main/logic/checkup.hpp'], 'dhw_loss_step', error))
+    traced_body = normalized(body(sources['main/logic/checkup.hpp'], 'dhw_loss_step_traced', error))
+    impl_body = normalized(body(sources['main/logic/checkup.hpp'], 'dhw_loss_step_impl', error))
+    if (logic.count(pure) != 1 or logic.count(traced) != 1 or logic.count(impl) != 1
+            or pure_body != 'dhw_loss_step_impl<false>(st,b,s,nullptr,now_us);'
+            or traced_body != ('if(!trace){dhw_loss_step(st,b,s,now_us);return;}'
+                               'dhw_loss_step_impl<true>(st,b,s,trace,now_us);')
+            or not impl_body.startswith('ifconstexpr(Timed)trace->observe(now_us,'
+                                        's.r5t_ok&&s.r5t_tenths>=0&&s.r5t_tenths<=900&&'
+                                        's.valve_known&&s.pump_known&&s.bsh_known);')
+            or impl_body.count('ifconstexpr(Timed)') != 2
+            or impl_body.count('ifconstexpr(Timed){if(!st.segment_carried_s)'
+                               'trace->record(st.segment_start_us,now_us,loss_tenths_k_h,observed_s,'
+                               'st.segment_pump_on,st.segment_draw_like);}') != 1):
+        raise error('stop observation DHW detail: shared forced-inline rule/real pure/null dispatch changed')
+    logic_code = masked(sources['main/logic/checkup.hpp'])
+    if (re.search(r'\bDhwLossTimeline\b', logic_code)
+            or len(re.findall(r'\bDhwLossTrace\b', logic_code)) != 2):
+        raise error('stop observation DHW detail: optional snapshot/ring entered shared report/header storage')
+    producer = normalized(body(checkup, 'commit_and_fold_locked', error))
+    call = ('if(!discard_dhw_sample){auto*constdhw_trace='
+            'slot.dhw_trace_forgotten.load(std::memory_order_acquire)?nullptr:&slot.dhw_trace;'
+            'logic::dhw_loss_step_traced(slot.dhw_state,slot.P().dhw.pending,s,dhw_trace,now);}')
+    if producer.count(call) != 2:
+        raise error('stop observation DHW detail: producer-local forgotten-gated trace calls changed')
+    if any(re.search(r'\b(?:logic::)?DhwLossTimeline\s+[A-Za-z_]\w*\s*(?:[;={]|\[)',
+                     masked(sources[path]))
+           for path in ('main/checkup.cpp', 'main/http_status.cpp')):
+        raise error('stop observation DHW detail: caller-owned output became a stack temporary')
+
+
 def validate_sources(budgets, sources, error):
     validate_paths(budgets, error)
     missing = (set(HEADERS) | set(BODIES)) - set(sources)
@@ -254,6 +338,7 @@ def validate_sources(budgets, sources, error):
     history = sources['main/history.cpp']
     store = sources['main/stop_observation_store.cpp']
     validate_suppression(sources, error)
+    validate_dhw_trace_sources(sources, error)
     if (not re.search(r'(?m)^ObservationHourlyPayload\s+s_flash_payload;', masked(store))
             or 'alignas(FlashJournalRecord)uint8_ts_flash_sector[logic::HISTORY_FLASH_ERASE_BYTES];'
             not in normalized(history)):
@@ -271,7 +356,9 @@ def validate_sources(budgets, sources, error):
     ready_publish = 'if(s_mtx)s_flash_forget_ready.store(true,std::memory_order_release);'
     if ('std::atomic<bool>s_flash_forget_ready{false};' not in normalized(history)
             or not history_forget.startswith('s_flash_forgotten.store(true);'
-                                             'stop_observation_forget();checkup_cycling_forget();'
+                                             'stop_observation_forget();'
+                                             'hydronic_observation_forget();'
+                                             'checkup_cycling_forget();'
                                              'bump_history_epoch();'
                                              'if(!s_flash_forget_ready.load(std::memory_order_acquire))returnfalse;')
             or 's_flash_scan_ok=flash_journal_scan();' not in flash_start
@@ -328,6 +415,20 @@ def validate_sources(budgets, sources, error):
 def validate_inlining(disassembly, error):
     exact = {re.sub(r'\\(.)', r'\1', rule['pattern'][1:-1]) for rule in SYMBOLS.values()}
     for name in re.findall(r'^\s*[0-9a-fA-F]+\s+<(.+)>:\s*$', disassembly, re.M):
+        if (re.search(r'\bdhw_loss_step_impl(?:<[^;]*>)?\(', name)
+                or re.match(r'^_Z.*18dhw_loss_step_impl', name)):
+            raise error('stop observation DHW detail: forced-inline domain template/clone outlined')
+        dhw = (re.match(r'^daik::logic::(?:DhwLossTrace|DhwLossTimeline)::', name)
+               or re.match(r'^_ZNK?4daik5logic(?:12DhwLossTrace|15DhwLossTimeline)', name)
+               or re.match(r'^daik::logic::dhw_loss_trace_', name)
+               or re.match(r'^_Z.*\d+dhw_loss_trace_', name)
+               or re.match(r'^_Z.*12persist_wipeERNS0_11CheckupSlotE', name)
+               or 'persist_wipe(daik::(anonymous namespace)::CheckupSlot&' in name
+               or any(re.search(r'\b' + helper + r'\(', name) or
+                      re.match(r'^_Z.*' + str(len(helper)) + helper, name)
+                      for helper in DHW_TRACE_HELPERS))
+        if dhw and name not in exact:
+            raise error('stop observation DHW detail: unmeasured outlined helper/clone needs frame/path review: ' + name)
         if ('flash_append_record_at(' in name or
                 re.match(r'^_Z.*22flash_append_record_at', name)):
             raise error('stop observation inlining: newly outlined append_at requires frame/path review')
@@ -375,6 +476,11 @@ def self_test(budgets, sources, error):
         altered = json.loads(json.dumps(budgets))
         del altered['symbols'][key]
         reject(altered)
+        if key.startswith('dhw_trace_') or key in ('dhw_loss_step', 'checkup_cycling_anchor'):
+            for field in ('pattern', 'max_bytes'):
+                altered = json.loads(json.dumps(budgets))
+                altered['symbols'][key][field] += '|unreviewed' if field == 'pattern' else 16
+                reject(altered)
     for name, (owner, _) in PATHS.items():
         for field in ('symbols', 'base_bytes', 'max_bytes', 'multipliers', 'owner'):
             altered = json.loads(json.dumps(budgets))
@@ -384,6 +490,14 @@ def self_test(budgets, sources, error):
             elif field == 'owner': altered['tasks'][owner]['paths'].remove(name)
             else: rule[field] += 16
             reject(altered)
+        if '_dhw_trace_' in name:
+            altered = json.loads(json.dumps(budgets))
+            del altered['paths'][name]
+            reject(altered)
+    altered = json.loads(json.dumps(budgets))
+    altered['paths']['poll_dhw_trace_unreviewed'] = {
+        'symbols': ['poll_task'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}
+    reject(altered)
     for path in HEADERS:
         altered = dict(sources)
         altered[path] += '\ninline void unreviewed_stack() { alloca(external_bytes); }\n'
@@ -463,6 +577,33 @@ def self_test(budgets, sources, error):
          'r.observation.restore_pending = true;'),
         ('main/new_task.cpp', '', 'void new_caller() { (void)stop_observation_suppressed(); }'),
     ]
+    mutations.extend([
+        ('main/checkup.cpp', 'static __attribute__((noinline)) void copy_dhw_trace_locked',
+         'static void copy_dhw_trace_locked'),
+        ('main/checkup.cpp', 'logic::DhwLossTrace dhw_trace{};',
+         'logic::DhwLossTrace dhw_trace[2]{};'),
+        ('main/logic/checkup.hpp', '[[gnu::always_inline]] inline void dhw_loss_step_impl',
+         'inline void dhw_loss_step_impl'),
+        ('main/logic/checkup.hpp', '[[gnu::noinline]] inline void dhw_loss_step(',
+         'inline void dhw_loss_step('),
+        ('main/logic/checkup.hpp', '[[gnu::noinline]] inline void dhw_loss_step_traced(',
+         'inline void dhw_loss_step_traced('),
+        ('main/logic/checkup.hpp', 'struct CheckupReport : CheckupCyclingEvidence {',
+         'struct CheckupReport : CheckupCyclingEvidence { logic::DhwLossTimeline detail;'),
+        ('main/logic/checkup.hpp', 'struct CheckupReport : CheckupCyclingEvidence {',
+         'struct CheckupReport : CheckupCyclingEvidence { logic::DhwLossTrace detail;'),
+        ('main/logic/dhw_loss_trace.hpp', 'DHW_LOSS_TRACE_CAPACITY = 24;',
+         'DHW_LOSS_TRACE_CAPACITY = 48;'),
+        ('main/new_dhw_callback.hpp', '',
+         'inline auto unreviewed_true = &daik::logic::dhw_loss_step_impl<true>;'),
+        ('main/new_dhw_callback.cpp', '',
+         'inline auto unreviewed_false = &daik::logic::dhw_loss_step_impl<false>;'),
+    ])
+    for name in ('checkup_report', 'copy_dhw_trace_locked', 'dhw_loss_step_traced',
+                 'dhw_loss_step_impl', 'dhw_loss_step', 'apply_dhw_reset_locked'):
+        for path in ('main/new_dhw_callback.cpp', 'main/logic/new_dhw_callback.hpp',
+                     'main/http_handlers.hpp'):
+            mutations.append((path, '', 'inline auto unreviewed_dhw_callback = &' + name + ';'))
     mutations.extend(('main/stop_observation_store.cpp', before, after)
                      for before, after in INDEX_FENCE_MUTATIONS)
     for path, before, after in mutations:
@@ -474,6 +615,76 @@ def self_test(budgets, sources, error):
         else:
             altered[path] = altered.get(path, '') + '\n' + after
         reject(changed_source=altered)
+    dhw_mutations = [
+        ('main/checkup.cpp', 'checkup_report', 'if (dhw_trace) dhw_trace->clear();', ''),
+        ('main/checkup.cpp', 'checkup_report',
+         'copy_dhw_trace_locked(slot, dhw_trace, now_us, source_fresh);', ''),
+        ('main/checkup.cpp', 'checkup_report',
+         'const bool dhw_reset_pending = slot.dhw_reset_requested.load();',
+         'const bool dhw_reset_pending = false;'),
+        ('main/checkup.cpp', 'checkup_report',
+         'if (dhw_reset_pending && dhw_trace) dhw_trace->clear();', ''),
+        ('main/checkup.cpp', 'checkup_report',
+         'dhw_reset_pending ? logic::DhwLossWindow{}', 'false ? logic::DhwLossWindow{}'),
+        ('main/checkup.cpp', 'checkup_report',
+         '!dhw_reset_pending &&', 'true &&'),
+        ('main/checkup.cpp', 'checkup_report',
+         'if (source_fresh && !dhw_reset_pending)', 'if (source_fresh)'),
+        ('main/checkup.cpp', 'checkup_report',
+         'logic::checkup_apply_freshness(report, source_fresh, source_age_s, span_s);',
+         'logic::checkup_apply_freshness(report, source_fresh, source_age_s, span_s); time_now(unix_s, ms);'),
+        ('main/checkup.cpp', 'checkup_report',
+         'if (dhw_trace) dhw_trace->clear();', 'logic::DhwLossTimeline temporary{};'),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'slot.source_confirmed', 'true'),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked',
+         '!slot.dhw_reset_requested.load()', 'true'),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked',
+         '!slot.dhw_trace_forgotten.load(std::memory_order_acquire)', 'true'),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked',
+         'slot.cov.valve && slot.cov.pump && slot.cov.bsh', 'true'),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked',
+         'dhw_trace->live && source_fresh', 'dhw_trace->live'),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'time_now(unix_s, ms);', ''),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'esp_timer_get_time()', 'now_us'),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'before_us, after_us', 'before_us, before_us'),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'logic::dhw_loss_wall_anchor_s(', 'other_anchor('),
+        ('main/checkup.cpp', 'copy_dhw_trace_locked',
+         'if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire))', 'if (dhw_trace)'),
+        ('main/hp_modbus.cpp', 'mb_task',
+         'mb_record_poll_gap(cycle_target_generation, cycle_consent_epoch);', ''),
+        ('main/checkup.cpp', 'commit_and_fold_locked',
+         'slot.dhw_trace_forgotten.load(std::memory_order_acquire)', 'false'),
+        ('main/logic/checkup.hpp', 'dhw_loss_step_impl', 'if (!st.segment_carried_s)', 'if (true)'),
+        ('main/logic/checkup.hpp', 'dhw_loss_step_impl', 'st.segment_draw_like);', 'false);'),
+        ('main/logic/checkup.hpp', 'dhw_loss_step_impl', 's.r5t_ok', 'true'),
+        ('main/logic/checkup.hpp', 'dhw_loss_step_impl', 'if constexpr (Timed)', 'if (trace)'),
+        ('main/logic/checkup.hpp', 'dhw_loss_step', '<false>', '<true>'),
+        ('main/logic/checkup.hpp', 'dhw_loss_step_traced', '<true>', '<false>'),
+        ('main/logic/checkup.hpp', 'dhw_loss_step_traced',
+         'dhw_loss_step(st, b, s, now_us);', ''),
+    ]
+    for path, name, before, after in dhw_mutations:
+        original = body(sources[path], name, error)
+        if before not in original:
+            raise AssertionError('missing DHW detail mutation anchor ' + name + ':' + before)
+        altered = dict(sources)
+        altered[path] = sources[path].replace(original, original.replace(before, after, 1), 1)
+        reject(changed_source=altered)
+    # Each new full body lease rejects a same-frame unmeasured allocation/branch, not just the
+    # convenient semantic anchors above. Existing leases and their mutation controls stay intact.
+    for path, names in (
+        ('main/hp_modbus.cpp', ('mb_record_poll_gap',)),
+        ('main/checkup.cpp', ('copy_dhw_trace_locked', 'commit_and_fold_locked', 'apply_dhw_reset_locked',
+                              'persist_wipe', 'slot_start', 'slot_set_diagnostics')),
+        ('main/logic/checkup.hpp', ('dhw_loss_step_impl', 'dhw_loss_step_traced',
+                                    'dhw_loss_step', 'checkup_cycling_end_unix_s')),
+        ('main/sntp_time.cpp', ('time_now',)),
+    ):
+        for name in names:
+            original = body(sources[path], name, error)
+            altered = dict(sources)
+            altered[path] = sources[path].replace(original, ' unreviewed_allocation(); ' + original, 1)
+            reject(changed_source=altered)
     for name in ('daik::(anonymous namespace)::flash_append_record_at(x)',
                  '_ZN4daik12_GLOBAL__N_1L22flash_append_record_atEclone$constprop$0'):
         try:
@@ -499,6 +710,37 @@ def self_test(budgets, sources, error):
             count += 1
         else:
             raise AssertionError('accepted unmeasured outlined journal/index/scan helper ' + name)
+    dhw_outlines = [
+        'daik::logic::DhwLossTrace::observe(long long, bool)',
+        'daik::logic::DhwLossTrace::record(long long, long long, int, unsigned long, bool, bool)',
+        'daik::logic::DhwLossTrace::snapshot(daik::logic::DhwLossTimeline&, long long, unsigned long)',
+        'daik::logic::DhwLossTimeline::clear()',
+        '_ZN4daik5logic12DhwLossTrace7observeExb',
+        '_ZN4daik5logic15DhwLossTimeline5clearEv',
+        'daik::logic::DhwLossTrace::expire(unsigned long) [clone .constprop.99]',
+        '_ZN4daik5logic12DhwLossTrace5resetEv$constprop$99',
+        'void daik::logic::dhw_loss_step_impl<true>(unreviewed)',
+        'void daik::logic::dhw_loss_step_impl<false>(unreviewed)',
+        'void daik::logic::dhw_loss_step_impl<true>(unreviewed) [clone .constprop.99]',
+        '_ZN4daik5logic18dhw_loss_step_implILb1EEEvEclone',
+        '_ZN4daik5logic18dhw_loss_step_implILb0EEEvEclone$isra$99',
+    ]
+    for helper in DHW_TRACE_HELPERS + ('dhw_loss_trace_record', 'dhw_loss_trace_observe'):
+        dhw_outlines.extend(('daik::logic::' + helper + '(unreviewed)',
+                             '_ZN4daik5logic' + str(len(helper)) + helper + 'Eclone$isra$99'))
+    for key, rule in SYMBOLS.items():
+        if key.startswith('dhw_trace_') or key in ('dhw_loss_step', 'checkup_cycling_anchor'):
+            exact = re.sub(r'\\(.)', r'\1', rule['pattern'][1:-1])
+            validate_inlining('100 <' + exact + '>:\n100: 004136 entry a1, 32\n', error)
+            if key != 'dhw_trace_monotonic':
+                dhw_outlines.append(exact + ' [clone .constprop.99]')
+    for name in dhw_outlines:
+        try:
+            validate_inlining('100 <' + name + '>:\n100: 004136 entry a1, 32\n', error)
+        except error:
+            count += 1
+        else:
+            raise AssertionError('accepted unmeasured DHW detail outline/clone ' + name)
     for instruction in ('call8 200 <hidden_allocation>', 'callx8 a8', 'j 200 <hidden_lock>'):
         try:
             validate_inlining('100 <daik::stop_observation_suppressed()>:\n'

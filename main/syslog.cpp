@@ -398,6 +398,7 @@ void syslog_init() {
                     // was supposed to preserve. Skip the cycle, keep the last state, delay so a
                     // starved task can't hot-spin. (The "syslog:" tag self-drops from forwarding;
                     // the line still reaches /diag + serial.)
+                    bool skipped = false;
                     try {
                         std::string syslog_host;
                         int         syslog_port = 0;
@@ -528,14 +529,16 @@ void syslog_init() {
                         }
                         failures.succeeded();
                     } catch (const std::exception& e) {
-                        close_syslog_sock(sock);
                         if (failures.first_failure())
                             diag_printf("syslog: task cycle skipped (%s)\n", e.what());
-                        vTaskDelay(pdMS_TO_TICKS(1000));
+                        skipped = true;
                     } catch (...) {
-                        close_syslog_sock(sock);
                         if (failures.first_failure())
-                            diag_printf("syslog: task cycle skipped (oom?)\n");
+                            diag_printf("syslog: task cycle skipped (%s)\n", "oom?");
+                        skipped = true;
+                    }
+                    if (skipped) {
+                        close_syslog_sock(sock);
                         vTaskDelay(pdMS_TO_TICKS(1000));
                     }
                 }

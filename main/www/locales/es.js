@@ -1,13 +1,10 @@
-// translation-source: 6e972a2b4ae88155965a5f3be3d4db1e55237b0aaa203b0f7b4b2df64578e5c3
+// translation-source: 21658cb9aa5673bd6390bf55b45b1a1a9849fc5a5439233310598402221f0c32
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
-  /* sys.x10a_down */ "X10A sin conexión",
-  /* sys.mb_carrying */ "Modo de funcionamiento desconocido — lecturas de Modbus",
   /* sys.mb_only */ "X10A sin conexión — lecturas de Modbus",
-  /* sys.mb_source */ "X10A sin conexión · Modbus",
   /* mode.stop */ "Parada",
   /* mode.heat */ "Calefacción",
   /* mode.cool */ "Refrigeración",
@@ -64,7 +61,6 @@ I18N.es = localeValues([
   /* bug.title */ "Informar de un error",
   /* bug.intro */ "Describe brevemente el problema. El dispositivo añadirá su estado, lecturas y registro tras eliminar nombres de red, direcciones y nombres de servidor.",
   /* bug.what */ "Qué ocurre",
-  /* bug.what_ph */ "Desde esta mañana, la temperatura del depósito muestra 12800 °C en Home Assistant.",
   /* bug.need_text */ "Describe primero qué ocurre; basta con una o dos frases.",
   /* bug.continue */ "Preparar el informe",
   /* bug.step2_title */ "Revisar el informe",
@@ -88,7 +84,6 @@ I18N.es = localeValues([
   /* src.delta */ (d, u) => `Diferencia ${d}${u ? " " + u : ""}`,
   /* src.disagree */ "Las dos fuentes discrepan sobre este estado",
   /* conn.homehub */ "HomeHub",
-  /* conn.searching */ "Buscando…",
   /* group.Modbus */ "Modbus",
   /* conn.title */ "Conexiones",
   /* conn.offline */ "Sin conexión",
@@ -157,8 +152,6 @@ I18N.es = localeValues([
   /* service.state.observing */ "REGISTRA",
   /* service.state.limited */ "PARCIAL",
   /* service.state.interrupted */ "EN PAUSA",
-  /* service.row.window */ "Registrado hasta ahora",
-  /* service.row.reason */ "¿Por qué este estado?",
   /* service.reason.unsupported_profile */ "Este modelo no proporciona todas las lecturas necesarias.",
   /* service.reason.compressor_not_running */ "El compresor no está funcionando.",
   /* service.reason.unsupported_or_unknown_mode */ "Calefacción ambiente normal no confirmada.",
@@ -189,6 +182,26 @@ I18N.es = localeValues([
   /* check.status.experimental */ "EN PRUEBA",
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "SIN INTERVALO",
+  /* check.dhw.maximum */ "Máximo registrado",
+  /* check.dhw.measurement */ "Enfriamiento neto durante una hora en el sensor R5T del depósito.",
+  /* check.dhw.hint */ "Una hora sin señales registradas de bomba o consumo alcanzó el umbral orientativo del proyecto.",
+  /* check.dhw.before_snapshot */ (d) => `${d} antes de la instantánea`,
+  /* check.dhw.marker_yes */ "registrada",
+  /* check.dhw.marker_no */ "no registrada",
+  /* check.dhw.pump */ "Bomba interna",
+  /* check.dhw.draw */ "Caída similar a consumo",
+  /* check.dhw.previous */ "Ventana completa anterior",
+  /* check.dhw.next */ "Ventana completa siguiente",
+  /* check.dhw.timeline_unavailable */ "No hay ventanas con tiempos disponibles. No se deduce un historial de los totales.",
+  /* check.dhw.timeline_empty */ "No hay ventanas completas con tiempos disponibles en esta vista de 24 h.",
+  /* check.dhw.chart_title */ "Enfriamiento por ventana completa",
+  /* check.dhw.timed_scope */ (n) => `Ventanas con tiempos desde reinicio/restablecimiento: ${n}, hasta 24 h. El máximo y los recuentos pueden basarse también en datos horarios guardados, no solo en las ventanas del gráfico.`,
+  /* check.dhw.blank */ "Vacío: ninguna ventana completa con tiempos disponible, no enfriamiento cero. Las marcas indican presencia, no duración.",
+  /* check.dhw.snapshot */ "Instantánea",
+  /* check.dhw.stale */ "Faltan datos actuales del enfriamiento del depósito de ACS o están desactualizados; las ventanas completadas siguen siendo observaciones históricas.",
+  /* check.dhw.limit */ "R5T mide un punto del depósito estratificado, no su energía. Las señales de bomba y caída similar a consumo no prueban la causa ni la extracción de agua.",
+  /* check.dhw.basis */ "Detalles de datos",
+  /* check.dhw.energy */ "Ejemplo de cálculo · no es energía medida",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Ejemplo de una hora: 200 l de agua enfriándose uniformemente a ${a} K/h → ${b} kWh de calor; reposición de ${c}–${d} kWh eléctricos con COP supuesto 2,5–3 (calor ÷ electricidad). No es energía medida.`,
   /* check.detail.dhw_context */ (a, b, c) => `Ventanas: bomba interna ${a}; caída similar a consumo ${b}; sin señales ≥0,8 K/h ${c}. Pueden coincidir.`,
   /* check.detail.value_label */ "Valor:",
@@ -242,6 +255,49 @@ I18N.es = localeValues([
   /* check.cycling.no_timed_runs */ "No se registró la hora de ningún arranque en este intervalo.",
   /* check.cycling.run_details_unavailable */ "No hay datos de los ciclos individuales para esta hora.",
   /* check.cycling.saved_starts */ (s) => `De ellos, ${s} proceden de registros horarios anteriores al reinicio.`,
+  /* check.cycling.short_runs */ (n) => `${n} < 5 min`,
+  /* check.cycling.col_stop */ "Por qué paró",
+  /* check.cycling.stop_low_flow */ "Impulsión sobre consigna · bajo caudal",
+  /* check.cycling.stop_low_rps */ "Impulsión sobre consigna · baja velocidad",
+  /* check.cycling.stop_req_off */ "Fin de demanda de compresor",
+  /* check.cycling.stop_tgt_drop */ "Consigna reducida",
+  /* check.cycling.stop_defrost */ "Pausa para desescarche",
+  /* check.cycling.stop_defrost_done */ "Desescarche finalizado",
+  /* check.cycling.stop_dhw */ "Cambio a ACS",
+  /* check.cycling.stop_normal_dhw */ "Fin de ciclo de ACS",
+  /* check.cycling.stop_normal */ "Parada normal",
+  /* check.cycling.out_cond */ (v) => ` (${v} exterior)`,
+  /* check.cycling.find_low_flow */ (minFlow, typ) => `Ciclos cortos, bajo caudal: sobre consigna en min (${minFlow}${typ}).`,
+  /* check.cycling.find_low_rps */ (flow, cond) => `Ciclos cortos, baja vel.${cond}: sobre consigna al inicio (${flow}).`,
+  /* check.cycling.find_control */ "Parado por control: demanda off o consigna baja.",
+  /* check.cycling.find_defrost_dhw */ (cond) => `Desescarche y ACS${cond}: pausa por desescarche y ACS.`,
+  /* check.cycling.find_defrost */ (cond) => `Desescarche${cond}: pausa por desescarche.`,
+  /* check.cycling.find_dhw */ "ACS: pausa por ACS.",
+  /* check.cycling.find_steady */ (flow) => flow ? `Calefacción estable: mín. ${flow}.` : "Calefacción estable.",
+  /* check.cycling.pause_tag */ (d) => ` tras pausa de ${d}`,
+  /* check.cycling.cond_tag */ (lwt, tgt) => tgt ? `impulsión ${lwt}, consigna ${tgt}` : `impulsión ${lwt}`,
+  /* check.cycling.from_tag */ (prev) => ` de ${prev}`,
+  /* check.cycling.rwt_tag */ (rwt) => `retorno ${rwt}`,
+  /* check.cycling.typ_tag */ (typ) => `, habitual ${typ}`,
+  /* check.cycling.s_cool */ (at, pause, lwt, tgt) => `Inicio ${at}${pause}: impulsión ${lwt}, consigna ${tgt}, demanda activa.`,
+  /* check.cycling.s_req */ (at, pause, cond) => `Inicio ${at}${pause}: demanda activa${cond}.`,
+  /* check.cycling.s_tgt */ (at, pause, prev, tgt, cond) => `Inicio ${at}${pause}: consigna subida${prev} a ${tgt}${cond}.`,
+  /* check.cycling.s_defrost_after */ (at, pause, cond) => `Reanudado ${at}${pause}, fin de desescarche${cond}.`,
+  /* check.cycling.s_dhw_after */ (at, pause, cond) => `Reanudado ${at}${pause}, fin de ACS${cond}.`,
+  /* check.cycling.s_defrost */ (at, pause) => `Inicio ${at}${pause} para desescarche.`,
+  /* check.cycling.s_dhw */ (at, pause, cond) => `Inicio ${at}${pause} para ACS${cond}.`,
+  /* check.cycling.s_gen */ (at, pause, cond) => `Inicio ${at}${pause}${cond}.`,
+  /* check.cycling.e_low_flow */ (to, lwt, tgt, rwt, flow, typ) => `Parada ${to}: impulsión ${lwt} sobre consigna ${tgt}${rwt} con ${flow}${typ}.`,
+  /* check.cycling.e_low_rps */ (to, lwt, tgt, rwt, flow, rps) => `Parada ${to}: impulsión ${lwt} sobre consigna ${tgt}${rwt} con ${flow} y ${rps}.`,
+  /* check.cycling.e_req */ (to, vals) => `Parada ${to}: demanda desactivada${vals}.`,
+  /* check.cycling.e_tgt */ (to, prev, tgt, vals) => `Parada ${to}: consigna bajada${prev} a ${tgt}${vals}.`,
+  /* check.cycling.e_defrost_run */ (to, vals) => `Fin de desescarche ${to}${vals}.`,
+  /* check.cycling.e_defrost_pause */ (to, vals) => `Parada ${to} para desescarche${vals}.`,
+  /* check.cycling.e_dhw */ (to, vals) => `Parada ${to}: cambio a ACS${vals}.`,
+  /* check.cycling.e_norm */ (to, vals) => `Fin ${to}${vals}.`,
+  /* check.cycling.e_ongoing */ "Activo en última lectura.",
+  /* check.cycling.cause_unavailable */ "Sin detalles",
+  /* check.cycling.cause_since_boot */ "Los motivos de arranque y parada se registran a partir del último reinicio.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} mín. ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -285,7 +341,17 @@ I18N.es = localeValues([
   /* service.metric.eev */ "Orden de válvula de expansión",
   /* service.metric.hp */ "Alta presión",
   /* service.metric.lp */ "Baja presión",
+  /* check.hydronic.labels */ "Salto térmico del agua|Orden de bomba|Observado / apto / cualificado|Fechas de evidencia|Fechas cualificadas|Actual|Población|Bloques horarios|Diferencia objetivo de temperatura del agua",
+  /* check.hydronic.reasons */ "Cualificado por el filtro del proyecto|Diagnóstico desactivado|Sin fuente actual|Lectura no válida|Bomba apagada|Circuito de ACS|Apoyo eléctrico indicado encendido|Arranque restante|Reloj de observación no disponible|Fuente cambiada|Permiso de diagnóstico cambiado|Límite del contador alcanzado|Desactivado durante este arranque|Cualificación desconocida",
+  /* check.hydronic.limits */ "Fases del controlador no observables|Orden de bomba no disponible|Restauración pendiente",
+  /* check.hydronic.counts */ (w, c) => `Lecturas de agua ${w} · lecturas de orden ${c}`,
+  /* check.hydronic.states */ "Fuente sin confirmar|Con fecha|Sin fecha|24 h incompletas|Almacenamiento pendiente|Contadores saturados: cotas inferiores",
+  /* check.hydronic.loss */ (n) => `Avisos de pérdida en el almacenamiento ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Diferencia de impulsión (bomba de calor menos circuito mezclado): ${d} · ${s} · lecturas: ${n}. Motivo de mezcla desconocido; pérdida de calor requiere más datos.`,
   /* service.metric.range */ (a, b, c, d) => `mín. ${a} · media ${b} · máx. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "lectura admitida" : "lecturas admitidas"}`,
+  /* service.metric.input_none */ "Ninguna entrada seleccionada",
+  /* service.metric.meta_limit */ "Los recuentos son lecturas admitidas, no cobertura temporal. Una entrada seleccionada no demuestra una lectura actual.",
   /* service.limit.special_phases_unavailable */ "Fases del control",
   /* service.limit.temperature_context_incomplete */ "Temperaturas de contexto",
   /* service.limit.pressure_sides_incomplete */ "Lado(s) de presión",
@@ -785,7 +851,6 @@ I18N.es = localeValues([
   /* wx.longitude */ "Longitud",
   /* wx.waiting */ "Esperando la previsión",
   /* wx.fetching */ "Obteniendo la previsión de Open-Meteo…",
-  /* wx.unavailable */ "No disponible",
   /* wx.error */ "Error de previsión de Open-Meteo",
   /* wx.detail.status */ "Estado:",
   /* wx.status.fresh */ "Actual",
@@ -869,7 +934,6 @@ I18N.es = localeValues([
   /* board.btninv */ "Activo en nivel bajo (el botón conecta el pin a GND)",
   /* board.hint */ "Para restablecer los valores de fábrica, mantén pulsado el botón 5 s. Si el registro del historial no está listo, el restablecimiento no borra nada. Borra los ajustes de Wi-Fi y los demás ajustes, el historial guardado, la duración de los estados, el volcado bruto de memoria tras un fallo y el registro guardado para la limpieza de MQTT. Si es posible, se conservan los ajustes de la placa, el LED y el botón. Si falla un borrado, puede que solo se borre una parte de los datos. El dispositivo solo se reinicia si se completan todos los borrados. Si el restablecimiento no se inicia o no termina, consulta /diag. Si no hay ningún botón conectado, elige «Ninguno».",
   /* card.hardware */ "Hardware",
-  /* card.hw_off */ "Ninguno",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
   /* card.hw_btn */ (pin) => `GPIO${pin}`,
   /* card.hw_board_m5stack */ "M5Stack AtomS3 Lite es una placa ESP32-S3 compacta con un LED de estado RGB WS2812 integrado.",
@@ -898,7 +962,6 @@ I18N.es = localeValues([
   /* card.diagnostics */ "Diagnóstico de la instalación",
   /* card.diagnostics_help */ "Activa la comprobación de la instalación de 24 horas, el diagnóstico de la curva de calefacción y fuentes adicionales como la temperatura ambiente, la previsión meteorológica y la potencia de la bomba de circulación.",
   /* diagnostics.off */ "Desactivado",
-  /* diagnostics.on */ "Activado",
   /* diagnostics.saved_on */ "Diagnóstico de la instalación activado — la recopilación comienza ahora",
   /* diagnostics.saved_off */ "Diagnóstico de la instalación desactivado — recopilación detenida",
   /* probe.toggle */ "Diagnóstico del protocolo",
@@ -1015,6 +1078,8 @@ I18N.es = localeValues([
   /* lang.saved */ "Idioma guardado",
   /* check.detail.dhw_reason.blind_modbus */ "faltan lecturas: Modbus sin respuesta o consultas en pausa",
   /* check.detail.source_stale_modbus */ "Sin lectura Modbus reciente; estado actual desconocido. Historial conservado.",
+  /* mb.flow_scale_help */ "Escala /100 sin verificar (sondeo/reserva); compare L/min con la pantalla. Excluido de animación, ΔT, potencia y 24 h.",
+  /* hist.modbus_flow_unverified */ "Escala Modbus /100 sin verificar (sondeo/reserva); compare con la unidad.",
   /* wf.label */ "Factor de rendimiento",
   /* wf.short.partial */ "prov.",
   /* wf.short.limited */ "lim.",
@@ -1179,13 +1244,7 @@ INSPECT_I18N.es = inspectValues(
       : "Bomba y caudal actuales no demuestran circulación por el ramal de climatización."], // heat
     ["Climatización activa", "Funcionamiento de climatización", "Señal de funcionamiento normal de calefacción/refrigeración de espacios. No es demanda de termostato ni demuestra por sí sola que el compresor esté activo."], // spaceh
     ["Temperatura ambiente", 0, "Temperatura y consigna de la zona de referencia; dependen de la ubicación del sensor."], // room
-    ["Bomba de circulación", "Velocidad de la bomba de circulación", "Mueve agua por el circuito común y el ramal elegido por la 3WV. Puede seguir funcionando con el compresor parado por postcirculación, protección o igualación; velocidad y caudal deben interpretarse juntos.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `La bomba interna indica parada, pero el sensor mide ${fmt1(d.flow)} l/min. Puede haber circulación externa, postcirculación o señales discrepantes; revisa ambas.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Velocidad ${fmt0(d.pump)} %; caudal medido ${fmt1(d.flow)} l/min.` : `Velocidad ${fmt0(d.pump)} %, pero falta el caudal; la circulación no está confirmada.`
-      : waterMoving(d) ? `El sensor mide ${fmt1(d.flow)} l/min aunque no hay una velocidad de bomba utilizable.`
-      : d.pumpOn === true ? d.flow != null ? `Bomba activa, pero solo ${fmt1(d.flow)} l/min; no se demuestra circulación.` : "Bomba activa, pero falta el caudal; la circulación no está confirmada."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Bomba parada; el sensor indica ${fmt1(d.flow)} l/min. Estas señales no demuestran circulación.` : "Bomba parada y sin medición de caudal."
-      : `No hay un estado fiable de la bomba; ${fmt1(d.flow)} l/min no basta para demostrar circulación.`], // pump
+    ["Bomba de circulación", "Bomba de circulación", "Señal X10A invertida (0 = máx, 100 = paro, [0, 100] → 100–0 %); no mide RPM ni prueba giro, altura ni caudal. Lee ON/OFF y caudal por separado, incluso parada.", (d) => pumpNowText(d, [(n) => `Orden de bomba ${n} %.`, "El estado de la bomba es ON.", "La bomba informa parada (OFF).", "Estado ON/OFF de la bomba desconocido.", (n) => `Caudal medido ${n} l/min.`, "Sin medición de caudal.", "El estado OFF informado contradice el caudal; es posible circulación externa, postcirculación o señales desactualizadas.", "La circulación no está confirmada."])], // pump
     [(d) => pelMeasured(d) ? "Consumo eléctrico · HomeHub" : "Consumo eléctrico estimado", "Consumo eléctrico", (d) => pelMeasured(d)
       ? "Valor de consumo comunicado por HomeHub entrada 51. La UI no lo calcula, pero la guía pública no demuestra calibración, punto de medida ni qué calentadores incluye; no es un contador certificado de toda la instalación."
       : "Estimación para COP/EER. Con CT suma todas las fases declaradas y usa corriente × 230 V supuestos; tensión y factor de potencia reales son desconocidos. La corriente del inversor cubre solo el compresor.", (d) => d.pelHeld ? "El compresor está parado; la corriente del inversor pertenece al último ciclo y no es actual, por lo que no puede indicarse consumo ni eficiencia."
@@ -1208,8 +1267,6 @@ INSPECT_I18N.es = inspectValues(
     ["Caudal", "Caudal de agua", "Caudal del circuito común. El mínimo depende del modelo; interprétalo con bomba y presión."], // flow
     ["Estado del flujostato", 0, "Entrada binaria X10A; no mide l/min ni confirma el caudal mínimo.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A activo; compáralo con bomba y ${fmt1(d.flow)} l/min.` : `X10A inactivo; con bomba activa, compara ${fmt1(d.flow)} l/min y fallos 7H/C0.`], // flow_switch
     ["Presión de agua", 0, "Presión del circuito hidráulico, no del refrigerante. El intervalo permitido depende del modelo y de la instalación; compárala con el manual exacto."], // wp
-    ["Puerto de servicio X10A", "Fuente de datos X10A", "Enlace cableado X10A de solo lectura; sus valores se muestran en azul."], // x10a
-    ["Modbus TCP", "Fuente de datos Modbus", "Enlace Modbus TCP independiente de solo lectura (HomeHub/Altherma 4); valores en petróleo."], // modbus
   ],
 );
 
@@ -1292,7 +1349,7 @@ DESCRIPTION_I18N.es = descriptionValues([
   ["Retorno R4T al PHE; evalúa el ΔT con caudal, compresor y modo, no con 5 K universales."], // 35
   ["Caudal del circuito común; el mínimo depende de modelo y modo, y un valor bajo puede causar 7H."], // 36
   ["Presión hidráulica: muchos manuales exigen >1 bar, pero a ≤1,0 bar consulta el manual del modelo exacto."], // 37
-  ["Orden de bomba invertida: 0 es velocidad máxima y 100 es parada."], // 38
+  ["Orden X10A invertida: 0 = máx, 100 = paro ([0, 100] → 100–0 %). No mide RPM ni prueba giro, altura ni caudal; lee ON/OFF y caudal por separado."], // 38
   ["Estado de bomba; no prueba calor útil y puede actuar sin compresor: compáralo con caudal."], // 39
   ["Estado de la bomba de un circuito solar térmico configurado."], // 40
   ["Velocidad indicada de la bomba nombrada por este perfil."], // 41
@@ -1392,7 +1449,7 @@ MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Si faltan mediciones, algunos arranques pueden quedar sin contar.", "No hay un número fijo de arranques normal. Con datos suficientes, esta comprobación considera adecuada una duración media de al menos 10 minutos en los ciclos de calefacción terminados."], // health_cycling
   ["Desescarche", "≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
   ["Presión de agua (24 h) en el circuito hidráulico cerrado (X10A, mínimos de 5 min).", "Guía de la curva: >1,0 bar normal, ≤1,0 bar baja, ≤0,5 bar crítica (diagnóstico desde 60 s continuos). La presión de llenado y trabajo admisible depende del manual exacto del equipo y la altura del sistema; la lectura por sí sola no prueba fugas ni avería."], // health_pressure
-  ["Caudal tras 60 s de bomba", "El límite exige mismo modelo/modo/condiciones; no nominal ni prueba de flujo insuficiente."], // health_flow
+  ["Caudal mínimo tras 60 s de marcha continua de la bomba interna; aparte: estadísticas ponderadas por muestra de salto térmico del agua, caudal y orden de bomba tras 600 s de arranque en calefacción.", "No es caudal nominal ni prueba de carga parcial. Cubre el intercambiador de agua común. La orden de bomba no mide velocidad ni altura disponible. Filtro del proyecto de 600 s (huecos ≤15 s), sin probar régimen estable, objetivo ni causa hidráulica."], // health_flow
   ["Tiempo ON de BUH/BSH", "no energía ni prueba de calor innecesario."], // health_heater
   ["5 contadores experimentales", "aumentos comparables; ignora huecos/reset. Estabilidad no excluye limitación ni prueba causa."], // health_retries
   ["RAM 24 h: estable o bajadas recuperadas; caída continua, posible fuga. Reinicio compatible alimentado: curva RAM posible; si no, solo 5 min fechados compatibles del registro flash tras ajustar hora; pasos de 5 min pueden ocultar pausas breves; abierto/últimos sin guardar pueden faltar."], // free_heap

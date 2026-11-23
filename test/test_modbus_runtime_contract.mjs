@@ -52,7 +52,7 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=35\b/);
+  assert.match(baseline.stdout, /PASS total=36\b/);
   console.log(baseline.stdout.trim());
 
   // A successfully compiled mutation must fail its particular behavioral oracle. A crash,
@@ -162,7 +162,7 @@ try {
       },
     ]),
     ...[{ member: "s_heating_mode_ms", local: "gates\\.heating_mode_ms" },
-      { member: "s_plant_outdoor_ms", local: "plant_outdoor_ms" }].map(({ member, local }) => ({
+      { member: "s_plant_outdoor_ms", local: "gates\\.plant_outdoor_ms" }].map(({ member, local }) => ({
       name: `completed-sweep-${member}`, scenario: "gate_age",
       before: new RegExp(`^ {8}${member}\\s*= final_current_session \\? ${local} : -1;`, "m"),
       after: `${member} = final_current_session ? cache_commit_ms : -1;`,
@@ -171,6 +171,16 @@ try {
       name: "discovery-attempt-budget", scenario: "discovery_budget",
       before: /const int\s+lookup_ms = remaining_ms > 2000 \? 2000 : static_cast<int>\(remaining_ms\);/,
       after: "const int lookup_ms = ((void)remaining_ms, 2000);",
+    },
+    {
+      name: "flow-scale-always-verified", scenario: "probe_0x00_and_flow_scale",
+      before: /fresh\[static_cast<size_t>\(gates\.flow_idx\)\]\.modbus_flow_scale_unverified =\s*flow_scale_unverified;/,
+      after: "fresh[static_cast<size_t>(gates.flow_idx)].modbus_flow_scale_unverified = ((void)flow_scale_unverified, false);",
+    },
+    {
+      name: "checkup-omits-resolved-basis", scenario: "probe_0x00_and_flow_scale",
+      before: "cycle_target_generation, consent_epoch, true, resolved_basis);",
+      after: "cycle_target_generation, consent_epoch, true);",
     },
   ];
   for (const mutation of mutations) {
@@ -182,7 +192,7 @@ try {
       `${mutation.name}: only its specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production Modbus runtime: 35 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
+  console.log(`production Modbus runtime: 36 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

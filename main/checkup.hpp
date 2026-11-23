@@ -21,12 +21,15 @@
 #include "logic/checkup_persist.hpp"
 #include "logic/config_model.hpp"
 #include "logic/cycling_persist.hpp"
+#include "logic/cycling_run_context.hpp"
 #include "logic/fault_persist.hpp"
 #include "logic/fault_trace.hpp"
 #include "logic/working_figure.hpp"
+#include "hydronic_observation_store.hpp"
 #include "stop_observation_store.hpp"
 
 #include <cstddef>
+#include <cstdint>
 
 namespace daik {
 
@@ -88,14 +91,20 @@ uint32_t checkup_consent_epoch();
 // `profile_confirmed` refers to the supplied capability metadata. Temporary allocation/TLS gaps
 // pass false to retain the current profile, while an unresolved profile explicitly supplies empty
 // metadata. Neither an empty sample nor that flag establishes a successful bus observation.
+// `sweep_started_us` is captured before the actual poll begins. Only the independent hydronic
+// population uses it to refuse inputs older than its 15 s allowance; unavailable timing (-1)
+// cannot qualify that population. Existing minimum-flow and other diagnosis contracts are
+// unchanged.
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
                     const logic::CheckupCoverage& coverage, uint32_t source_generation,
-                    uint32_t consent_epoch, bool profile_confirmed = true);
+                    uint32_t consent_epoch, bool profile_confirmed = true,
+                    int64_t sweep_started_us = -1);
 
 // Feed one confirmed HomeHub/Modbus full poll cycle into the independent Modbus checkup slot.
 void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
                            uint32_t source_generation, uint32_t consent_epoch,
-                           bool source_confirmed = true);
+                           bool               source_confirmed = true,
+                           ModbusProfileBasis basis            = ModbusProfileBasis::Affirmative);
 
 // Judge the previous boot's handoff integrity and retire completed RAM hours. app_main calls ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.
@@ -132,15 +141,16 @@ void checkup_dhw_reset();
 // True when the requested source has non-empty live or restored evidence in its slot.
 bool checkup_has_data(DiagnosticsSource source);
 
-// Copy the judged window, optional chart hours and trace, restore provenance, and the last
-// observed defrost start under one lock.
+// Copy the judged window, optional cycling/DHW detail, restore provenance, and the last
+// observed defrost start under one lock. DHW detail is current-boot runtime evidence only.
 // GET /status and MCP use this snapshot. Its POD storage does not allocate under the lock.
 // An unreadable snapshot has unknown provenance and carries no accumulated evidence.
-logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours   = nullptr,
-                                    logic::CheckupCyclingTrace* trace   = nullptr,
-                                    logic::CheckupRestore*      persist = nullptr,
-                                    DiagnosticsSource           source  = DiagnosticsSource::X10a,
-                                    logic::DefrostStartReport*  defrost = nullptr);
+logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours     = nullptr,
+                                    logic::CheckupCyclingTrace* trace     = nullptr,
+                                    logic::CheckupRestore*      persist   = nullptr,
+                                    DiagnosticsSource           source    = DiagnosticsSource::X10a,
+                                    logic::DefrostStartReport*  defrost   = nullptr,
+                                    logic::DhwLossTimeline*     dhw_trace = nullptr);
 
 // Evaluate the 24 h working figure and gas-cost comparison for the requested source under one lock,
 // using the caller's Config snapshot without allocating.
@@ -160,6 +170,34 @@ struct CheckupStopContextReport {
 
 // Independent, bounded observation population; never changes the completed-run verdict.
 CheckupStopContextReport checkup_stop_context_report();
+
+struct CheckupHydronicReport {
+    struct SecondarySupply {
+        int64_t               sum_milli   = 0;
+        uint64_t              duration_us = 0;
+        uint32_t              samples     = 0;
+        logic::CheckupLocator source{};
+    };
+    HydronicObservationReport observation;
+    SecondarySupply           secondary;
+    logic::HydronicReason     reason            = logic::HydronicReason::NoSource;
+    uint32_t                  source_generation = 0, schema_fp = 0;
+    uint32_t                  settling_remaining_s = 0;
+    uint8_t                   limitations          = 0;
+    bool                      current              = false;
+};
+
+// Current qualification and dated populations have independent clocks. Neither changes the
+// existing flow minimum or the eight-check verdict. History calls expiry before its flash lock.
+CheckupHydronicReport checkup_hydronic_report();
+void                  checkup_hydronic_expire(int64_t now_us);
+
+// Return true when volatile X10A cycling run contexts are populated for the current session.
+bool checkup_has_cycling_run_contexts(DiagnosticsSource source = DiagnosticsSource::X10a);
+
+// Copy recent RAM-only X10A cycling run start/stop contexts projected onto the timeline frame.
+bool checkup_cycling_run_contexts(logic::CheckupRunContextSnapshot& out, uint32_t boot_s,
+                                  DiagnosticsSource source = DiagnosticsSource::X10a);
 
 // Copy the next completed hourly pair after `after_bucket` into a journal payload. `now_unix_s`
 // supplies the wall-clock anchor; no record is produced before time is synced or before one hour

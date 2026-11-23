@@ -38,6 +38,10 @@ const S = {
   cyclingScope: null,
   cyclingPin: null,
   cyclingHover: null,
+  cyclingRange: null,
+  cyclingHoverRange: null,
+  cyclingUserTouched: false,
+  cyclingExpandedRun: null,
   faultCodes: new Set(),
   faultSnapKeys: null,
   faultHoverIdx: null,
@@ -119,6 +123,7 @@ function cancelHistoryGesture() {
   S.faultHoverIdx = null;
   if (S.trendPointer) scrubEnd(S.trendPointer.plot);
   if (S.cancelCyclingDrag) S.cancelCyclingDrag();
+  if (S.cancelDhwDrag) S.cancelDhwDrag();
 }
 
 function invalidateHistSources() {
@@ -495,6 +500,7 @@ function invalidateLiveReadings(reason, busy = false) {
   S._values = []; S._modbus = []; S.live = null;
   S.transportUnavailable = reason;
   S.transportBusy = busy;
+  if (reason === "status" && typeof markCheckupDhwStale === "function") markCheckupDhwStale();
   if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   renderApp();
 }
@@ -534,6 +540,9 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   S.status = s;
   S.statusRequestedAt = requestedAt;
   S.statusReceivedAt = receivedAt;
+  // A successful status read resolves the status outage while values are still unavailable.
+  if (S.transportUnavailable === "status") { S.transportUnavailable = "values"; S.transportBusy = false; }
+  if (typeof retireCheckupDhwTimeline === "function") retireCheckupDhwTimeline();
   if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   cyclingStatusAt = requestedAt;
   // A new frame can report a stop before the following /values request lets the chart repaint.
@@ -547,7 +556,6 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
     invalidateLiveReadings("values");
   } else if (wasX10aDown !== (s?.hp?.connected === false) &&
              typeof expireFallbackHistoryPins === "function") expireFallbackHistoryPins();
-  if (S.transportUnavailable === "status") { S.transportUnavailable = "values"; S.transportBusy = false; }
   const profile = s?.profile?.id || "";
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
     loadHpProbeCatalog(profile);
@@ -720,8 +728,7 @@ function plantState(d) {
 
 // A live HomeHub knows more than the fallback headline's DHW/space flags: input 31 witnesses the
 // compressor, input 30 the circulation pump, input 32 the tank heater, and input 49 the flow. Use
-// those facts for the same activity line and dot tone as X10A; the X10A and MODBUS header pills
-// already carry link and source status.
+// those facts for the same activity line and dot tone as X10A.
 function modbusStatusView(mode, live) {
   const p = plantState(live);
   if (!mode) return { mode: t("dyn.state_mode"), status: t(p.key), tone: "warn" };
@@ -730,7 +737,6 @@ function modbusStatusView(mode, live) {
 
 function sysSet(mode, status, tone) {
   setTxt("svMode", mode);
-  if (typeof fitSchematicModeHeadline === "function") fitSchematicModeHeadline(S._headerPillLeftX);
   setTxt("svStatus", status);
   $("svStatus").setAttribute("class", "sc-status" + (tone ? " " + tone : ""));
   $("svDot").setAttribute("fill", TONE_FILL[tone || ""]);

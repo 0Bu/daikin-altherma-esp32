@@ -1,13 +1,10 @@
-// translation-source: 6e972a2b4ae88155965a5f3be3d4db1e55237b0aaa203b0f7b4b2df64578e5c3
+// translation-source: 21658cb9aa5673bd6390bf55b45b1a1a9849fc5a5439233310598402221f0c32
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
-  /* sys.x10a_down */ "X10A frakoblet",
-  /* sys.mb_carrying */ "Ukjent driftsmodus — verdier fra Modbus",
   /* sys.mb_only */ "X10A frakoblet — verdier fra Modbus",
-  /* sys.mb_source */ "X10A frakoblet · Modbus",
   /* mode.stop */ "Stopp",
   /* mode.heat */ "Oppvarming",
   /* mode.cool */ "Kjøling",
@@ -64,7 +61,6 @@ I18N.nb = localeValues([
   /* bug.title */ "Rapporter feil",
   /* bug.intro */ "Beskriv problemet kort. Enheten legger ved status, målinger og logg. Nettverksnavn, adresser og servernavn fjernes først.",
   /* bug.what */ "Hva skjer?",
-  /* bug.what_ph */ "Tanktemperaturen har vist 12800 °C i Home Assistant siden i morges.",
   /* bug.need_text */ "Beskriv først hva som skjer — én eller to setninger er nok.",
   /* bug.continue */ "Opprett rapport",
   /* bug.step2_title */ "Kontroller rapporten",
@@ -88,7 +84,6 @@ I18N.nb = localeValues([
   /* src.delta */ (d, u) => `Avvik ${d}${u ? " " + u : ""}`,
   /* src.disagree */ "De to kildene er uenige om denne tilstanden",
   /* conn.homehub */ "HomeHub",
-  /* conn.searching */ "Søker…",
   /* group.Modbus */ "Modbus",
   /* conn.title */ "Tilkoblinger",
   /* conn.offline */ "Frakoblet",
@@ -157,8 +152,6 @@ I18N.nb = localeValues([
   /* service.state.observing */ "MÅLER",
   /* service.state.limited */ "DELVIS",
   /* service.state.interrupted */ "PAUSET",
-  /* service.row.window */ "Registrert hittil",
-  /* service.row.reason */ "Hvorfor denne statusen?",
   /* service.reason.unsupported_profile */ "Denne modellen gir ikke alle nødvendige målinger.",
   /* service.reason.compressor_not_running */ "Kompressoren går ikke.",
   /* service.reason.unsupported_or_unknown_mode */ "Vanlig romoppvarming er ikke bekreftet.",
@@ -189,6 +182,26 @@ I18N.nb = localeValues([
   /* check.status.experimental */ "TESTVIS",
   /* check.status.unavailable */ "N/A",
   /* check.status.no_window */ "INGEN MÅLEPERIODE",
+  /* check.dhw.maximum */ "Registrert maksimum",
+  /* check.dhw.measurement */ "Netto avkjøling over én time ved tankføler R5T.",
+  /* check.dhw.hint */ "En time uten registrerte pumpe-/tappemarkører nådde prosjektets veiledende terskel.",
+  /* check.dhw.before_snapshot */ (d) => `${d} før øyeblikksbildet`,
+  /* check.dhw.marker_yes */ "registrert",
+  /* check.dhw.marker_no */ "ikke registrert",
+  /* check.dhw.pump */ "Intern pumpe",
+  /* check.dhw.draw */ "Tappelignende fall",
+  /* check.dhw.previous */ "Forrige fullførte målevindu",
+  /* check.dhw.next */ "Neste fullførte målevindu",
+  /* check.dhw.timeline_unavailable */ "Målevinduer med tider er utilgjengelige. Historikk utledes ikke fra summene.",
+  /* check.dhw.timeline_empty */ "Ingen fullførte målevinduer med tider i denne 24-timersvisningen.",
+  /* check.dhw.chart_title */ "Avkjøling per fullført målevindu",
+  /* check.dhw.timed_scope */ (n) => `Målevinduer med tider siden omstart/nullstilling: ${n}, opptil 24 h. Maksimum og tellinger kan også bygge på lagrede timedata, ikke bare de viste målevinduene.`,
+  /* check.dhw.blank */ "Tomt: intet fullført målevindu med tider tilgjengelig, ikke null avkjøling. Markører viser forekomst, ikke varighet.",
+  /* check.dhw.snapshot */ "Øyeblikksbilde",
+  /* check.dhw.stale */ "Aktuelle måleverdier for tankavkjøling mangler eller er utdaterte; fullførte målevinduer er fortsatt historiske observasjoner.",
+  /* check.dhw.limit */ "R5T måler ett punkt i en sjiktet tank, ikke tankens energi. Pumpe- og tappelignende markører beviser verken årsak eller vannuttak.",
+  /* check.dhw.basis */ "Datagrunnlag",
+  /* check.dhw.energy */ "Regneeksempel · ikke målt energi",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Eksempel for én time: 200 l vann avkjølt jevnt med ${a} K/h → ${b} kWh varme; gjenoppvarming ${c}–${d} kWh strøm ved antatt COP 2,5–3 (varme ÷ strøm). Ikke målt energi.`,
   /* check.detail.dhw_context */ (a, b, c) => `Vinduer: intern pumpe ${a}; tappeliknende fall ${b}; umerket ≥0,8 K/h ${c}. Kan overlappe.`,
   /* check.detail.value_label */ "Måling:",
@@ -242,6 +255,49 @@ I18N.nb = localeValues([
   /* check.cycling.no_timed_runs */ "Ingen starttidspunkter er registrert i denne timen.",
   /* check.cycling.run_details_unavailable */ "Tidspunkter for de enkelte driftsperiodene mangler for denne timen.",
   /* check.cycling.saved_starts */ (s) => `Av disse kommer ${s} fra timetall før omstart.`,
+  /* check.cycling.short_runs */ (n) => `${n} < 5 min`,
+  /* check.cycling.col_stop */ "Hvorfor den stoppet",
+  /* check.cycling.stop_low_flow */ "Turvann over mål · lav vannmengde",
+  /* check.cycling.stop_low_rps */ "Turvann over mål · lavt turtall",
+  /* check.cycling.stop_req_off */ "Kompressorbehov avsluttet",
+  /* check.cycling.stop_tgt_drop */ "Måltemperatur senket",
+  /* check.cycling.stop_defrost */ "Pauset for avriming",
+  /* check.cycling.stop_defrost_done */ "Avriming fullført",
+  /* check.cycling.stop_dhw */ "Byttet til varmtvann",
+  /* check.cycling.stop_normal_dhw */ "Varmtvannssyklus avsluttet",
+  /* check.cycling.stop_normal */ "Normal stopp",
+  /* check.cycling.out_cond */ (v) => ` (${v} ute)`,
+  /* check.cycling.find_low_flow */ (minFlow, typ) => `Korte kjøringer, lav mengde: over mål på min (${minFlow}${typ}).`,
+  /* check.cycling.find_low_rps */ (flow, cond) => `Korte kjøringer, lavt turt.${cond}: over mål tidlig (${flow}).`,
+  /* check.cycling.find_control */ "Styringsstopp: behov av eller mål senket.",
+  /* check.cycling.find_defrost_dhw */ (cond) => `Avriming & VV${cond}: varme pauset for avriming og VV.`,
+  /* check.cycling.find_defrost */ (cond) => `Avriming${cond}: varme pauset for avriming.`,
+  /* check.cycling.find_dhw */ "Varmtvann: varme pauset for VV.",
+  /* check.cycling.find_steady */ (flow) => flow ? `Jevn varme: min. ${flow}.` : "Jevn varme.",
+  /* check.cycling.pause_tag */ (d) => ` etter ${d} pause`,
+  /* check.cycling.cond_tag */ (lwt, tgt) => tgt ? `turvann ${lwt}, mål ${tgt}` : `turvann ${lwt}`,
+  /* check.cycling.from_tag */ (prev) => ` fra ${prev}`,
+  /* check.cycling.rwt_tag */ (rwt) => `retur ${rwt}`,
+  /* check.cycling.typ_tag */ (typ) => `, vanligvis ${typ}`,
+  /* check.cycling.s_cool */ (at, pause, lwt, tgt) => `Start ${at}${pause}: turvann ${lwt}, mål ${tgt}, behov på.`,
+  /* check.cycling.s_req */ (at, pause, cond) => `Start ${at}${pause} med behov på${cond}.`,
+  /* check.cycling.s_tgt */ (at, pause, prev, tgt, cond) => `Start ${at}${pause}: mål økt${prev} til ${tgt}${cond}.`,
+  /* check.cycling.s_defrost_after */ (at, pause, cond) => `Fortsatt ${at}${pause}, avriming ferdig${cond}.`,
+  /* check.cycling.s_dhw_after */ (at, pause, cond) => `Fortsatt ${at}${pause}, varmtvann ferdig${cond}.`,
+  /* check.cycling.s_defrost */ (at, pause) => `Start ${at}${pause} for avriming.`,
+  /* check.cycling.s_dhw */ (at, pause, cond) => `Start ${at}${pause} for varmtvann${cond}.`,
+  /* check.cycling.s_gen */ (at, pause, cond) => `Start ${at}${pause}${cond}.`,
+  /* check.cycling.e_low_flow */ (to, lwt, tgt, rwt, flow, typ) => `Stopp ${to}: turvann ${lwt} over mål ${tgt}${rwt} ved ${flow}${typ}.`,
+  /* check.cycling.e_low_rps */ (to, lwt, tgt, rwt, flow, rps) => `Stopp ${to}: turvann ${lwt} over mål ${tgt}${rwt} ved ${flow} og ${rps}.`,
+  /* check.cycling.e_req */ (to, vals) => `Stopp ${to}: behov av${vals}.`,
+  /* check.cycling.e_tgt */ (to, prev, tgt, vals) => `Stopp ${to}: mål senket${prev} til ${tgt}${vals}.`,
+  /* check.cycling.e_defrost_run */ (to, vals) => `Avriming ferdig ${to}${vals}.`,
+  /* check.cycling.e_defrost_pause */ (to, vals) => `Stopp ${to} for avriming${vals}.`,
+  /* check.cycling.e_dhw */ (to, vals) => `Stopp ${to}: byttet til varmtvann${vals}.`,
+  /* check.cycling.e_norm */ (to, vals) => `Slutt ${to}${vals}.`,
+  /* check.cycling.e_ongoing */ "Aktiv ved siste avlesning.",
+  /* check.cycling.cause_unavailable */ "Ingen detaljer",
+  /* check.cycling.cause_since_boot */ "Årsaker til start og stopp registreres først fra siste omstart.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -285,7 +341,17 @@ I18N.nb = localeValues([
   /* service.metric.eev */ "Ekspansjonsventilkommando",
   /* service.metric.hp */ "Høytrykk",
   /* service.metric.lp */ "Lavtrykk",
+  /* check.hydronic.labels */ "Temperaturdifferanse vann|Pumpekommando|Observert / egnet / kvalifisert|Tidspunkter for datagrunnlag|Kvalifiserte tidspunkter|Nå|Populasjon|Timeblokker|Mål for vanntemperaturforskjell",
+  /* check.hydronic.reasons */ "Kvalifisert av prosjektfilter|Diagnostikk av|Ingen aktuell kilde|Ugyldig avlesning|Pumpe av|Varmtvannsbane|Tilleggsvarmer meldt på|Gjenstående oppstart|Observasjonsklokke utilgjengelig|Kilde endret|Diagnostikksamtykke endret|Tellergrense nådd|Deaktivert for denne oppstarten|Kvalifisering ukjent",
+  /* check.hydronic.limits */ "Regulatorfaser kan ikke observeres|Pumpekommando utilgjengelig|Venter på gjenoppretting",
+  /* check.hydronic.counts */ (w, c) => `Vannavlesninger ${w} · kommandoavlesninger ${c}`,
+  /* check.hydronic.states */ "Ubekreftet kilde|Datert|Udatert|Ufullstendige 24 t|Venter på lagring|Tellergrense nådd: nedre grenser",
+  /* check.hydronic.loss */ (n) => `Meldinger om lagringstap ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Turtemperaturforskjell (varmepumpe minus blandekrets): ${d} · ${s} · målinger: ${n}. Blandeformål ukjent; varmetap krever flere målinger.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · snitt ${b} · maks. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "inkludert måling" : "inkluderte målinger"}`,
+  /* service.metric.input_none */ "Ingen valgt inngang",
+  /* service.metric.meta_limit */ "Antall er inkluderte målinger, ikke tidsdekning. En valgt inngang beviser ikke en aktuell måling.",
   /* service.limit.special_phases_unavailable */ "Regulatorfaser",
   /* service.limit.temperature_context_incomplete */ "Temperaturkontekst",
   /* service.limit.pressure_sides_incomplete */ "Trykkside(r)",
@@ -785,7 +851,6 @@ I18N.nb = localeValues([
   /* wx.longitude */ "Lengdegrad",
   /* wx.waiting */ "Venter på prognose",
   /* wx.fetching */ "Henter Open-Meteo-prognose…",
-  /* wx.unavailable */ "Utilgjengelig",
   /* wx.error */ "Feil i Open-Meteo-prognosen",
   /* wx.detail.status */ "Status:",
   /* wx.status.fresh */ "Oppdatert",
@@ -869,7 +934,6 @@ I18N.nb = localeValues([
   /* board.btninv */ "Aktiv ved LOW — knappen trekker pinnen til GND",
   /* board.hint */ "Hold knappen inne i 5 sekunder for å tilbakestille til fabrikkinnstillingene. Hvis historikkjournalen ikke er klar, slettes ingenting. Tilbakestillingen sletter Wi-Fi og andre innstillinger, registrert historikk, tilstandsvarigheter, den rå krasjdumpen og den lagrede oppføringen for MQTT-opprydding. Innstillingene for kort, LED og knapp beholdes hvis mulig. Hvis en sletting mislykkes, kan deler av dataene allerede være slettet. Enheten starter på nytt bare hvis all sletting lykkes. Sjekk /diag hvis tilbakestillingen ikke starter eller fullføres. Velg «Ingen» hvis ingen knapp er koblet til.",
   /* card.hardware */ "Maskinvare",
-  /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
   /* card.hw_btn */ (pin) => `GPIO${pin}`,
   /* card.hw_board_m5stack */ "M5Stack AtomS3 Lite er et kompakt ESP32-S3-kort med innebygd WS2812 RGB-status-LED.",
@@ -898,7 +962,6 @@ I18N.nb = localeValues([
   /* card.diagnostics */ "Anleggsdiagnose",
   /* card.diagnostics_help */ "Aktiverer 24-timers anleggsdiagnose, varmekurvediagnose og tilleggskilder som romtemperatur, værprognose og effekt for sirkulasjonspumpe.",
   /* diagnostics.off */ "Av",
-  /* diagnostics.on */ "På",
   /* diagnostics.saved_on */ "Anleggsdiagnose aktivert — innsamling starter nå",
   /* diagnostics.saved_off */ "Anleggsdiagnose deaktivert — innsamling stoppet",
   /* probe.toggle */ "Protokolldiagnose",
@@ -1015,6 +1078,8 @@ I18N.nb = localeValues([
   /* lang.saved */ "Språk lagret",
   /* check.detail.dhw_reason.blind_modbus */ "avlesninger mangler: Modbus svarer ikke eller avspørring satt på pause",
   /* check.detail.source_stale_modbus */ "Ingen fersk Modbus-prøve; aktuell tilstand ukjent. Historikk beholdt.",
+  /* mb.flow_scale_help */ "Ubekreftet /100-skalering (sondering/reserve); sammenlign L/min med enheten. Utelatt fra bevegelse, ΔT, varmeeffekt og 24h-sjekk.",
+  /* hist.modbus_flow_unverified */ "Ubekreftet Modbus /100-skalering (venter/reserve); sammenlign med enheten.",
   /* wf.label */ "Ytelsesfaktor",
   /* wf.short.partial */ "forel.",
   /* wf.short.limited */ "begr.",
@@ -1178,13 +1243,7 @@ INSPECT_I18N.nb = inspectValues(
       : "Pumpe og vannmengde bekrefter ikke sirkulasjon i romgrenen."], // heat
     ["Romdrift aktiv", "Romoppvarming/-kjøling", "Signal for normal romdrift. Ikke termostatbehov og bekrefter ikke alene kompressor."], // spaceh
     ["Romtemperatur", 0, "Temperatur og mål for referansesonen; avhenger av sensorplassering."], // room
-    ["Sirkulasjonspumpe", "Hastighet på sirkulasjonspumpe", "Flytter vann i felleskretsen og grenen valgt av 3WV. Kan gå etter kompressorstopp for etterløp, vern eller utjevning; tolk hastighet og vannmengde sammen.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Intern pumpe melder stopp, men sensoren måler ${fmt1(d.flow)} l/min. Ekstern sirkulasjon, etterløp eller motstridende signaler er mulig.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Hastighet ${fmt0(d.pump)} %; målt ${fmt1(d.flow)} l/min.` : `Hastighet ${fmt0(d.pump)} %, men vannmengde mangler; sirkulasjon er ikke bekreftet.`
-      : waterMoving(d) ? `Sensoren måler ${fmt1(d.flow)} l/min uten brukbar pumpehastighet.`
-      : d.pumpOn === true ? d.flow != null ? `Pumpe aktiv, men bare ${fmt1(d.flow)} l/min; sirkulasjon er ikke bekreftet.` : "Pumpe aktiv, men vannmengde mangler; sirkulasjon er ikke bekreftet."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pumpe stoppet; sensoren viser ${fmt1(d.flow)} l/min. Signalene bekrefter ikke sirkulasjon.` : "Pumpe stoppet uten vannmengdemåling."
-      : `Ingen pålitelig pumpestatus; ${fmt1(d.flow)} l/min alene bekrefter ikke sirkulasjon.`], // pump
+    ["Sirkulasjonspumpe", "Sirkulasjonspumpe", "Invertert X10A-signal (0 = maks, 100 = stopp, [0, 100] → 100–0 %) beviser verken RPM, rotasjon, løftehøyde eller vannmengde; les PÅ/AV og vannmengde hver for seg.", (d) => pumpNowText(d, [(n) => `Pumpekommando ${n} %.`, "Pumpestatus er PÅ.", "Pumpen rapporterer stopp (AV).", "Pumpens PÅ/AV-status er ukjent.", (n) => `Målt vannmengde ${n} l/min.`, "Ingen vannmengdemåling.", "Rapportert AV strider mot vannmengden; ekstern sirkulasjon, etterløp eller utdatert signal er mulig.", "Sirkulasjon er ikke bekreftet."])], // pump
     [(d) => pelMeasured(d) ? "Strømforbruk · HomeHub" : "Anslått strømforbruk", "Strømforbruk", (d) => pelMeasured(d)
       ? "Forbruk fra HomeHub-inngang 51. UI beregner det ikke, men offentlig dokumentasjon beviser ikke kalibrering, målepunkt eller hvilke varmere som inngår; ikke en sertifisert anleggsmåler."
       : "Anslag for COP/EER. CT summerer oppgitte faser med antatt strøm × 230 V; virkelig spenning og effektfaktor er ukjent. Inverterstrøm dekker bare kompressoren.", (d) => d.pelHeld ? "Kompressoren står; inverterstrømmen er fra siste syklus, så forbruk/virkningsgrad kan ikke vises."
@@ -1207,8 +1266,6 @@ INSPECT_I18N.nb = inspectValues(
     ["Vannmengde", "Vannmengde", "Vannmengde i felleskretsen. Minstekravet avhenger av modell; tolk med pumpe og trykk."], // flow
     ["Strømningsbryter", 0, "Binær X10A-status; måler ikke l/min og bekrefter ikke minste vannmengde.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A aktiv; sammenlign med pumpe og ${fmt1(d.flow)} l/min.` : `X10A inaktiv; med aktiv pumpe, sammenlign ${fmt1(d.flow)} l/min og feil 7H/C0.`], // flow_switch
     ["Vanntrykk", 0, "Trykk i vannkretsen, ikke kjølemediet. Tillatt område avhenger av modell/anlegg; bruk riktig håndbok."], // wp
-    ["X10A-serviceport", "X10A-datakilde", "Kablet skrivebeskyttet X10A-forbindelse; verdier vises i blått."], // x10a
-    ["Modbus TCP", "Modbus-datakilde", "Uavhengig skrivebeskyttet Modbus TCP-forbindelse (HomeHub/Altherma 4); verdier i petrol."], // modbus
   ],
 );
 
@@ -1291,7 +1348,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["R4T-retur til PHE; vurder ΔT med vannmengde, kompressor og modus, ikke en universell 5 K-regel."], // 35
   ["Vannmengde i felleskretsen; minimum avhenger av modell/modus, og lav verdi kan utløse 7H."], // 36
   ["Hydraulikktrykk: mange håndbøker krever >1 bar; ved ≤1,0 bar, bruk håndboken for nøyaktig modell."], // 37
-  ["Invertert pumpekommando: 0 er maksimal hastighet, 100 er stopp."], // 38
+  ["Invertert X10A-kommando: 0 = maks, 100 = stopp ([0, 100] → 100–0 %). Måler ingen RPM og beviser ikke rotasjon, løftehøyde eller vannmengde; les PÅ/AV og mengde hver for seg."], // 38
   ["Pumpestatus; beviser ikke nyttig varme og kan være aktiv uten kompressor. Sammenlign vannmengde."], // 39
   ["Status for pumpen i en konfigurert solvarmekrets."], // 40
   ["Oppgitt hastighet for pumpen som profilen navngir."], // 41
@@ -1391,7 +1448,7 @@ MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Ved hull i målingene kan enkelte starter mangle i tellingen.", "Det finnes ikke et fast normalt antall starter. Med nok data regner denne kontrollen fullførte varmekjøringer med et snitt på minst 10 minutter som lange nok."], // health_cycling
   ["Avriming", "≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
   ["24-timers vanntrykkurve i lukket hydraulikkrets (X10A, 5-minutters minimumsverdier).", "Kurveveiledning: >1,0 bar normalt, ≤1,0 bar lavt, ≤0,5 bar kritisk (diagnose ved ≥60 s kontinuerlig). Tillatt fylle- og driftstrykk avhenger av nøyaktig modellmanual og anleggshøyde; verdien alene beviser verken lekkasje eller feil."], // health_pressure
-  ["Strømning etter 60 s pumpe", "Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow
+  ["Laveste strømning etter 60 s kontinuerlig drift av intern pumpe; separat: prøvevektet statistikk for temperaturdifferanse vann, strømning og pumpekommando etter 600 s oppvarmingsinnkjøring.", "Ikke nominell strømning eller bevis på dellast. Gjelder felles vannside-varmeveksler. Pumpekommando måler ikke turtall eller løftehøyde. 600 s prosjektfilter (hull ≤15 s) beviser ikke stabil drift; ingen målsammenligning eller hydraulisk årsak."], // health_flow
   ["BUH/BSH ON-tid", "ikke energi eller bevis på unødig varme."], // health_heater
   ["5 eksperimentelle tellere", "sammenlignbare økninger; hull/reset utelates. Stabilitet utelukker ikke begrensning eller beviser årsak."], // health_retries
   ["RAM 24 h: stabil, fall snur; varig fall: mulig lekkasje; kompatibel omstart med strøm: RAM-kurve mulig; ellers kun daterte kompatible 5 min fra flashjournal etter tidssynk. 5 min oppløsning kan skjule korte stopp; åpne/siste ulagrede kan mangle."], // free_heap

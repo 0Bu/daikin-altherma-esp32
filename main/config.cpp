@@ -176,6 +176,26 @@ __attribute__((noinline)) static void publish(Config&& c) {
     g_cfg              = std::move(c);
 }
 
+static void log_blob_load_issue(ConfigLoadVerdict verdict, const std::vector<uint8_t>& raw,
+                                const char* label, const char* magic, uint16_t min_ver,
+                                uint16_t max_ver, const char* fallback_note) {
+    if (verdict == ConfigLoadVerdict::Rejected) {
+        const char* reason =
+            stored_blob_reject_reason(raw.data(), raw.size(), magic, min_ver, max_ver);
+        const int version = stored_blob_version(raw.data(), raw.size(), magic);
+        if (min_ver != max_ver) {
+            diag_printf("config: %s rejected (%u B, v%d, reads v%u-v%u: %s) — %s\n", label,
+                        static_cast<unsigned>(raw.size()), version, static_cast<unsigned>(min_ver),
+                        static_cast<unsigned>(max_ver), reason, fallback_note);
+        } else {
+            diag_printf("config: %s rejected (%u B, v%d: %s) — %s\n", label,
+                        static_cast<unsigned>(raw.size()), version, reason, fallback_note);
+        }
+    } else if (verdict == ConfigLoadVerdict::ReadError) {
+        diag_printf("config: %s unreadable (NVS read error) — %s\n", label, fallback_note);
+    }
+}
+
 void config_load() {
     g_mtx = xSemaphoreCreateMutex();
     // FAIL STOP if the config mutex can't be created. config() is read + written concurrently by the
@@ -211,20 +231,8 @@ void config_load() {
         config_load_verdict(stored_entry_read(cfg_read), blob_loaded);
     s_cfg_blob_unreadable.store(!config_load_allows_automatic_writes(cfg_verdict),
                                 std::memory_order_release);
-    if (cfg_verdict == ConfigLoadVerdict::Rejected) {
-        // Running on the legacy/default settings; the stored blob is kept until an explicit save.
-        diag_printf("config: stored settings rejected (%u B, v%d, reads v%u-v%u: %s) — defaults in "
-                    "use, blob kept\n",
-                    static_cast<unsigned>(raw.size()),
-                    stored_blob_version(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT),
-                    static_cast<unsigned>(CONFIG_BLOB_VERSION_MIN),
-                    static_cast<unsigned>(CONFIG_BLOB_VERSION),
-                    stored_blob_reject_reason(raw.data(), raw.size(), CONFIG_BLOB_MAGIC_TEXT,
-                                              CONFIG_BLOB_VERSION_MIN, CONFIG_BLOB_VERSION));
-    } else if (cfg_verdict == ConfigLoadVerdict::ReadError) {
-        diag_printf("config: stored settings unreadable (NVS read error) — defaults in use, blob "
-                    "kept\n");
-    }
+    log_blob_load_issue(cfg_verdict, raw, "stored settings", CONFIG_BLOB_MAGIC_TEXT,
+                        CONFIG_BLOB_VERSION_MIN, CONFIG_BLOB_VERSION, "defaults in use, blob kept");
     if (blob_loaded) {
         c.wifi_ssid            = std::move(b.wifi_ssid);
         c.wifi_pass            = std::move(b.wifi_pass);
@@ -450,23 +458,9 @@ void config_load() {
     // below are the legacy/default pair rather than the ones the owner last saved. Nothing gates on
     // it: the cache has its own writers (detection, /set_hp) and holds no setting beyond the
     // wiring.
-    switch (config_load_verdict(stored_entry_read(link_read), link_blob_loaded)) {
-    case ConfigLoadVerdict::Rejected:
-        // The legacy/build-default pins stay until detection or /set_hp rewrites the entry.
-        diag_printf("config: stored X10A link rejected (%u B, v%d: %s) — default pins in use\n",
-                    static_cast<unsigned>(link_raw.size()),
-                    stored_blob_version(link_raw.data(), link_raw.size(), LINK_BLOB_MAGIC_TEXT),
-                    stored_blob_reject_reason(link_raw.data(), link_raw.size(),
-                                              LINK_BLOB_MAGIC_TEXT, LINK_BLOB_VERSION,
-                                              LINK_BLOB_VERSION));
-        break;
-    case ConfigLoadVerdict::ReadError:
-        diag_printf("config: stored X10A link unreadable (NVS read error) — default pins in use\n");
-        break;
-    case ConfigLoadVerdict::Absent:
-    case ConfigLoadVerdict::Loaded:
-        break;
-    }
+    log_blob_load_issue(config_load_verdict(stored_entry_read(link_read), link_blob_loaded),
+                        link_raw, "stored X10A link", LINK_BLOB_MAGIC_TEXT, LINK_BLOB_VERSION,
+                        LINK_BLOB_VERSION, "default pins in use");
     c.rx_pin = link_blob_loaded ? link_blob.rx_pin
                                 : nvs_get_i32("rx_pin", CONFIG_DAIKIN_RX_PIN);
     c.tx_pin = link_blob_loaded ? link_blob.tx_pin

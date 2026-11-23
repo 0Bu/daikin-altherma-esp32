@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 7aa5f0c7d20e8ce1fa979389220735ae3a259cef7652c01fb09069dc25cb4447 -->
+<!-- user-docs-contract: 335265e8c5809c8e5828027b6d062274c223bf76e14409bb8cd828d9a3474053 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -12,10 +12,11 @@ source is available, only that option and **Off** are shown). Switching between 
 room, forecast and circulation collection, and hides the Diagnostics name and card (Model becomes
 the default card when available). Re-enabling resumes into the preserved 24 h window without
 bridging the paused interval or carrying an unfinished run/candidate across pausing.
-In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, `flow` on Altherma 4
-Modbus, and passive **Refrigerant (heating)**) are unavailable and omitted from the card, while
-**Performance factor** switches to the independent HomeHub (`EKRHH`) Modbus window (or shows
-**Not supported** on native Altherma 4 Modbus).
+In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, `flow` on `Altherma4`,
+`Probing`, or `Fallback` sweeps, and passive **Refrigerant (heating)**) are unavailable and omitted
+from the card, while **Performance factor** switches to the independent affirmatively confirmed
+HomeHub (`EKRHH`) Modbus window (or shows **Not supported** on `Altherma4`, `Probing`, or `Fallback`
+sweeps).
 
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
 Open a row to see what was measured and what the result means. The observation window describes
@@ -32,7 +33,7 @@ the installation's health.
 | **NOTE** | A notable accepted observation or unit-reported warning; it does not identify a defect or cause. |
 | **WARNING** | A current unit-reported fault, or pressure confirmed continuously at or below the project's boundary during the window. |
 | **CHECKING** | A required day, signal coverage or eligible observation is missing. |
-| **NO WINDOW** | A full day of tank-cooling evidence produced no completed hour; the detail names the exclusions. |
+| **NO WINDOW** | The current tank-cooling window spans a full day without a completed hour. Recorded exclusions appear in the details when available. |
 | **MEASURED** | A measurement or event population without enough evidence for a good/bad assessment. |
 | **TENTATIVE** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
 | **N/A** | The active profile does not supply the required signals. |
@@ -88,32 +89,42 @@ fixed. No generic normal target is shown for faults.
 <!-- user-docs: health_dhw_loss -->
 ### Domestic-hot-water tank cooling
 
-**In plain language:** The board shows the largest net temperature drop at tank sensor R5T during
-completed one-hour windows, in **K/h** (one kelvin of cooling equals one degree Celsius). It also
-shows how many windows reached **0.8 K/h** and how many contained internal water-pump activity or
-a draw-like drop. Those counts cover all windows and may overlap; they do not describe the maximum
-window individually. Rapid continuous cooling remains visible even when it resembles water use;
-endpoint confirmation rejects isolated jumps larger than 0.2 K. Smaller excursions can still
-affect the rate and the project's note threshold. If the closing reading cannot be confirmed
-within 30 seconds after the hour, that candidate is discarded instead of becoming a longer average.
+**In plain language:** After at least one completed one-hour window, the board shows the largest
+net temperature drop at tank sensor R5T in **K/h** (one kelvin of cooling equals one degree
+Celsius). When timed detail is available, the expanded row plots windows completed in the last
+24 hours and after the most recent restart or reset. Tap a window for its time range, rate, readable
+time and markers.
+Separate lanes mark the presence of internal water-pump activity and a draw-like temperature
+pattern. The optional external hot-water circulation uses a separate witness.
 
-**Meaning:** **NOTE** needs at least one window at or above the project's 0.8 K/h threshold without
-either marker. Other completed windows are **MEASURED**, including marked high rates. Without a
-completed window the board shows **CHECKING**, progress or settling time. After a full day of DHW
-scope without a completed hour it says **NO WINDOW**, including when no candidate could open.
-That describes missing measurements, not a tank defect or complete signal coverage.
+Blank intervals mean no completed timed record is available, not zero cooling or a known reason.
+A completed zero-rate window still has a bar. The chart selects the newest retained window when an
+earlier selection expires. It uses relative times if a reliable clock reading is unavailable.
+Bars do not return after a restart, although saved hourly evidence can still inform the maximum
+and totals. Bar counts and hourly totals can differ because they expire differently. If diagnosis
+updates stop or the tank-cooling inputs become stale, the last bars can remain visible as historical.
+A fresh diagnosis update can restore the chart's live state while the current readings panel is
+unavailable. An update without timeline data removes earlier bars. **Data details** explains the
+measurement basis and what the markers count.
 
-**Energy example:** For an assumed uniformly cooling **200 l** tank, **1.2 K/h** corresponds to
-about **0.28 kWh of heat per hour**. Replacing that heat at an assumed COP (heat delivered per
-unit of electricity) of **2.5–3** would require **0.09–0.11 kWh of electricity**. The UI recalculates
-this example from the displayed maximum; it is neither your measured consumption nor a daily sum.
+**Meaning:** **NOTE** needs at least one window at or above the project's **0.8 K/h** threshold
+without either marker. Other completed windows are **MEASURED**, including marked high rates.
+Without a completed window the board shows **CHECKING**, progress or settling time. After the
+current tank-cooling observation window spans a full day without a completed hour, it says
+**NO WINDOW**, even if no candidate could open. That describes missing measurements, not a tank
+defect or complete signal coverage.
+
+**Energy example:** When a maximum is available, **Calculation example** assumes uniformly cooling **200 l** of
+water. At **1.2 K/h**, this means about **0.28 kWh of heat per hour**. Replacing it at an assumed COP
+(heat delivered per unit of electricity) of **2.5–3** would need **0.09–0.11 kWh of electricity**.
+The example follows the displayed maximum; it is not measured consumption or a daily sum.
 
 **Important limit:** One sensor in a stratified tank cannot measure whole-tank loss. Water use can
 remove useful heat; zero net cooling does not prove zero loss. Neither a missing draw marker nor
-a valve command proves an undisturbed tank, and optional external circulation overlap proves no
-cause. Charging, its 45-minute settle, a fresh filter's 45-minute hold, invalid temperatures and
-excessive missing readings exclude time; unread charge witnesses extend the wait. A compatible
-software restart preserves the remaining settling time, but unseen charging can still affect a window.
+a valve command proves an undisturbed tank, and circulation overlap proves no cause. Charging,
+settling, invalid temperatures and missing readings can exclude windows; blank chart time does not
+identify which occurred. A compatible software restart can preserve the settling timer, but unseen
+charging can still affect a later window.
 
 **Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 
@@ -121,8 +132,8 @@ software restart preserves the remaining settling time, but unseen charging can 
 ### Compressor cycling
 
 **In plain language:** The total counts observed starts. Separate rows show completed runs by
-purpose and the average length for heating and hot water when available. A change of purpose or
-missing readings can leave a run unclear.
+purpose, the average length for heating and hot water when available, and how many timed heating
+runs lasted under 5 minutes. A change of purpose or missing readings can leave a run unclear.
 
 There is no fixed normal number of starts. With enough data, the check considers completed heating
 runs averaging at least 10 minutes long enough. The average uses heating runs only.
@@ -134,24 +145,36 @@ time. When the total includes saved hourly counts from before a restart, the exp
 how many came from those hours.
 
 The caption counts the starts with a recorded time across the chart. Each block shows the count
-for its hour. The `≥` sign means at least that many starts. A blank marks an hour with unavailable
-data and no timed start. Colors mark the modes seen in the hour. Hatching marks hours with gaps,
-including older readings that have dropped off the chart. It does not measure how long a gap lasted.
-A readable diagnosis update without new chart data can keep the open chart and hatch the new gap.
+for its hour (highlighted when at least two timed heating runs under 10 minutes started there). The
+`≥` sign means at least that many starts. A blank count marks an hour with unavailable data and no
+timed start. Colors show Heating, Hot water and Unknown stacked proportionally from bottom to top by
+active or missing duration in that hour. Gray covers unassigned runtime and missing readings. An hour
+observed entirely at rest has no color. Breaks in the line mark missing readings.
+A readable update from the same source can retain the open chart and mark time after its last
+sample as Unknown.
 An unreadable diagnosis shows **No data** and hides the chart. If the status request itself fails,
 the chart can stay at the last successful update. The list then shows the stop and duration as
 unknown for any run that was still open.
 
-Tap anywhere in the graph above an hourly block, or tap the block itself, to select that hour.
-The list below the graph shows the observed start, stop and duration for runs that started in the
-selected hour, even if they stopped later. The times mark the first readings in the new state.
+Tap an hourly block, Shift-click, or drag across blocks to select an hour or contiguous multi-hour
+period. When per-run X10A context from the current boot is available, the latest short-cycling
+episode (or the latest recorded hour with start/stop details when no episode is present)
+auto-selects when opened and the list shows Start, Duration and why the run stopped alongside
+a one-sentence period summary; tapping a row expands its observed start and stop temperatures, target
+changes and flow rate. When per-run context is unavailable (for example before or right after a
+restart or on Modbus), the list falls back to Start, Stop and Duration, and notes on X10A runs from
+before the restart that start and stop details are recorded only from the last restart onward.
 If a recent reading still shows the run in progress, the list gives the elapsed time through
-that reading. If a gap or restart interrupts a run, its stop and total duration are unknown.
+that reading. A brief single-poll interruption within the same boot (up to 15 seconds) keeps the
+run continuous, whereas a longer gap or restart interrupts it and leaves its stop and total duration
+unknown.
 
 The chart can restore saved readings and run times after a restart, including a firmware update.
 The board adds new measurements as polling resumes and shows the downtime as a gap. When the
-timed chart is unavailable, the entire chart can show hourly totals. Tap a bar in that view to see
-its recorded time and runtime where available. A bar with zero starts has no number above it.
+timed chart is unavailable, the entire chart can show hourly totals with proportional mode bars. Tap
+a bar in that view to see its recorded time, runtime and coverage where available.
+A just-opened hour has no fill until time has elapsed. An hourly-total bar with zero starts
+has no count label.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 
@@ -205,13 +228,28 @@ within the 24-hour window.
 ### Lowest water flow
 
 **In plain language:** The board reports the lowest accepted flow after the internal pump has run
-continuously for at least sixty seconds.
+continuously for at least sixty seconds. Separately, readings taken after ten minutes of eligible
+heating summarize water-temperature spread, flow and commanded pump effort.
 
-**Meaning:** The result is **MEASURED**. It filters pump-off and initial run-up values; it does
-not establish part load or retain the operating mode of the minimum.
+**Meaning:** **MEASURED**. The two observations have separate coverage: minimum flow filters
+pump-off and initial run-up values without retaining the operating mode, while the heating
+statistics show when their readings were collected and how many qualified, remain visible during a
+link interruption, and keep water ranges available when optional pump command is missing. With fresh
+readings from a supported mixed heating circuit, the same row can show the average difference
+between the heat-pump supply and the mixed supply, how long they were compared and how many
+readings qualified. A negative difference means the measured mixed supply was warmer. The current
+shipped X10A profiles leave this comparison empty because each lacks at least one required reading.
+When operating solely over Modbus, `flow` stays unavailable on `Altherma4`, `Probing`, or `Fallback`
+sweeps until `/100` HomeHub Input 49 scaling is affirmatively confirmed, and X10A hydronic
+spread/flow/command ranges and secondary comparison remain unpopulated.
 
 **Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
-The minimum is not a design-flow measurement or a diagnosis of restricted flow.
+The minimum does not identify the operating mode or tell you the design flow. The spread concerns
+the heat exchanger's water circuit, the pump percentage reports the controller command, and these
+readings do not measure room emitters, pump speed, or available head. The ten-minute filter does
+not establish steady operation or diagnose a bypass or restriction, and the controller's target
+spread is unavailable. The optional comparison leaves the reason for mixing open, and estimating
+heat loss requires more measurements.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 
@@ -249,11 +287,12 @@ changes or their cause.
 <a id="refrigerant-service-observation"></a>
 ## Refrigerant (heating)
 
-This expandable row is technical context, **not a ninth health diagnosis**. It watches existing
-read-only X10A traffic automatically without Plant diagnostics opt-in or a service mode (the row is
-X10A-only and hidden when the card displays **Modbus**). Until this
-boot detects a profile and evaluates its signal coverage—including safe mode—the row/status object
-is absent. It does not affect `/status.health` or the eight-row summary.
+Enable **Plant diagnostics** (`X10A`) under **Settings → Firmware** and open **Diagnostics** to see
+this expandable row (the row is X10A-only and hidden when the card displays **Modbus**). The
+observation itself collects ordinary read-only X10A traffic independently of that setting and works
+without a service mode. The row and its API object need a detected profile with evaluated signal
+coverage in the current boot. The observation sits outside `/status.health` and leaves the eight-row
+summary unchanged.
 
 A window admits only fresh same-sweep values with a running space-heating compressor, non-DHW valve,
 no defrost, readable normal fault rows, no active profile-provided startup/restart/oil-return/pressure-
@@ -272,6 +311,12 @@ heating-specific. Optional missing comparison data remains an explicit limitatio
 Duration and min/mean/max describe **one uninterrupted window**. The permitted poll gap depends on
 profile pages and transport timeout; there is no universal three-second/twenty-minute service rule.
 Source-generation changes also reset continuity.
+
+Each range shows how many readings contributed. A pressure input that was unreadable during part
+of the window can have fewer readings than the total number of sweeps. These counts describe the
+sample population. The range stays unavailable when zero readings qualified. The X10A input shown
+in the API is the profile's selected source, which can be unreadable and needs independent
+physical validation.
 
 **Important limit:** It assigns no normal range, refrigerant-charge verdict, full-load state or
 settling claim. EEV pulses are a controller command, not proof of mechanical valve movement.

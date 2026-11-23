@@ -74,6 +74,7 @@
 #include "logic/ha_device.hpp"
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/heartbeat.hpp"
+#include "logic/hydronic_payload.hpp"
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
 #include "logic/mqtt_cleanup.hpp"
 #include "logic/mqtt_discovery_owner.hpp"
@@ -2105,11 +2106,19 @@ static __attribute__((noinline)) std::string build_heartbeat_payload() {
     f.cycling                     = checkup_cycling_evidence();
     f.modbus_cycling              = checkup_cycling_evidence(DiagnosticsSource::Modbus);
     f.stop_context                = stop_context_payload_fields(checkup_stop_context_report());
-    return build_heartbeat_json(f);
+    return build_heartbeat_json(f, HYDRONIC_FLAT_JSON_MAX_BYTES);
+}
+
+static __attribute__((noinline)) void append_heartbeat_hydronic(std::string& js) {
+    if (js.empty() || js.back() != '}') return;
+    js.pop_back(); // the base builder returns one complete object
+    append_hydronic_json(js, checkup_hydronic_report(), true);
+    js.push_back('}');
 }
 
 static __attribute__((noinline)) void publish_heartbeat() {
-    const std::string js = build_heartbeat_payload();
+    std::string js = build_heartbeat_payload();
+    append_heartbeat_hydronic(js);
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
 }
 
@@ -3473,8 +3482,12 @@ static void mqtt_task(void*) {
     MqttTransportResumeState transport_resume;
     TaskFailureEpisode       failures;
 
-    // Start one LWT-bearing transport immediately; X10A never owns its lifecycle.
-    if (!start_current_client()) {
+    // Start one LWT-bearing transport immediately unless OTA/Weather already claimed the network
+    // heap during startup; in that case mark the transport paused so mqtt_transport_resume_step()
+    // starts it cleanly after the competing TLS window releases.
+    if (mqtt_initial_start_deferred(transport_pause_requested(), competing_tls_active())) {
+        s_transport_paused.store(true, std::memory_order_release);
+    } else if (!start_current_client()) {
         transport_resume.wait_s = transport_resume.backoff_s;
     }
     for (;;) {
@@ -3915,7 +3928,8 @@ void mqtt_ha_start() {
         diag_printf("mqtt: circulation-source test semaphore alloc failed\n");
     if (!s_status.configured) return;
 
-    s_transport_pause_state.store(0, std::memory_order_release);
+    // Preserve any concurrent OTA/Weather lease in s_transport_pause_state (statically
+    // zero-initialized at boot): http_start() and weather_forecast_start() are already active.
     s_ref_ring_produced = 0;
     s_ref_ring_pos      = 0;
     s_ref_ring_consumed.store(0, std::memory_order_release);

@@ -153,10 +153,13 @@ struct EnergyCoverage {
 };
 
 // HomeHub (EKRHH) Modbus carries verified flow, PHE/post-BUH LWT, RWT, BSH, mode, valve and
-// electrical power. Altherma 4 remains unsupported until Input 49 flow scaling is verified.
-inline constexpr EnergyCoverage energy_modbus_coverage(ModbusProfile profile) noexcept {
+// electrical power when probe-confirmed affirmatively. Probing/Fallback and native Altherma 4 remain
+// unsupported until Input 49 flow scaling is verified.
+inline constexpr EnergyCoverage
+energy_modbus_coverage(ModbusProfile      profile,
+                       ModbusProfileBasis basis = ModbusProfileBasis::Affirmative) noexcept {
     EnergyCoverage c;
-    if (profile != ModbusProfile::HomeHub) return c;
+    if (profile != ModbusProfile::HomeHub || basis != ModbusProfileBasis::Affirmative) return c;
     c.is_modbus        = true;
     c.has_rps          = true;
     c.has_flow         = true;

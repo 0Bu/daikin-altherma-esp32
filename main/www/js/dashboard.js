@@ -139,14 +139,28 @@ function checkupSourceReadyFor(status = S.status) {
     ? status?.modbus?.connected === true
     : status?.hp?.connected === true) || hasRetainedHealth;
 }
+const refrigerantStatusUnavailable = () => S.otaCached || S.transportUnavailable === "status";
 function renderCards(hold = true) {
-  if (S.otaCached || S.transportUnavailable === "status") markCyclingStale();
+  retireCheckupDhwTimeline();
+  if (refrigerantStatusUnavailable()) {
+    markCyclingStale();
+    // A click or scrub may defer rebuilding the card. Hide its retired status immediately.
+    const item = $("valueGroups")?.querySelector?.('[data-desc="service:refrigerant"]')?.closest(".vitem");
+    if (item && !item.hidden) {
+      const focused = item.contains(document.activeElement);
+      item.hidden = true;
+      if (focused) $("cardNav")?.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+      S.descOpen.delete("service:refrigerant");
+      // If removal is held and the next frame is byte-identical, rebuild to remove hidden.
+      delete _html.valueGroups;
+    }
+  }
   // Freeze trend hosts during a scrub so structural updates cannot replace the captured plot.
   // Rows catch up when scrubEnd resumes rendering.
   if (S.scrub || (hold && S.clickHold)) return;
   // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows
-  // follow the active diagnostics source (X10A or Modbus); passive refrigerant observations keep
-  // their independent X10A collection.
+  // follow the active diagnostics source (X10A or Modbus). During X10A loss, independent dated
+  // water evidence and passive refrigerant observations keep only those X10A rows visible.
   const checkupSourceReady = checkupSourceReadyFor();
   const checkup = S.status?.diagnostics?.enabled === true
     ? checkupCardHtml(checkupSourceReady) : "";
@@ -157,9 +171,10 @@ function renderCards(hold = true) {
   // A source change can select a card whose charts were paused in this frame.
   if (S.dashboardCard !== card) renderCards(false);
   else {
-    for (const slot of selected?.querySelectorAll("[data-chart][inert], [data-checkup-hours][inert], [data-checkup-fault][inert]") || [])
+    for (const slot of selected?.querySelectorAll("[data-chart][inert], [data-checkup-hours][inert], [data-checkup-dhw][inert], [data-checkup-fault][inert]") || [])
       slot.inert = false;
     syncCheckupCyclingChart(selected);
+    syncCheckupDhwChart(selected);
   }
 }
 
@@ -220,7 +235,7 @@ function retireMountedHistory() {
   try {
     const settings = document.getElementById("settingsCards");
     const inspector = document.getElementById("inspHist");
-    const slots = [...host.querySelectorAll("[data-chart], [data-checkup-hours]"),
+    const slots = [...host.querySelectorAll("[data-chart], [data-checkup-hours], [data-checkup-dhw]"),
       ...(settings?.querySelectorAll("[data-chart]") || [])];
     if (inspector) slots.push(inspector);
     for (const plot of settings?.querySelectorAll("#diagnostics-circulation-detail .vhist") || [])
@@ -228,6 +243,7 @@ function retireMountedHistory() {
     for (const slot of slots) {
       slot.textContent = "";
       delete slot._checkupMarkup;
+      delete slot._dhwKey;
     }
   } finally { S.trendRebuilding = rebuilding; }
 }
@@ -242,7 +258,7 @@ function selectDashboardCard(key) {
   // geometry cannot select a sample from the newer cache before the next complete paint.
   if (_pollBusy) {
     const selected = syncDashboardCards();
-    for (const slot of selected?.querySelectorAll("[data-chart], [data-checkup-hours], [data-checkup-fault]") || [])
+    for (const slot of selected?.querySelectorAll("[data-chart], [data-checkup-hours], [data-checkup-dhw], [data-checkup-fault]") || [])
       slot.inert = true;
   } else renderCards(false);
 }
@@ -1514,19 +1530,60 @@ function checkupDuration(s) {
   return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
 }
 
+function checkupCyclingShortRunCount(c) {
+  const rec = c?.timeline?.records;
+  if (c?.timeline?.run_edges !== true || !Array.isArray(rec)) return 0;
+  const ctxByStart = new Map();
+  if (Array.isArray(c.run_contexts)) {
+    for (const rc of c.run_contexts) ctxByStart.set(rc.at, rc);
+  }
+  const bootStart = Number.isSafeInteger(c?.timeline?.boot_s) && Number.isSafeInteger(c?.timeline?.window_end_s)
+    ? c.timeline.window_end_s - c.timeline.boot_s
+    : null;
+  let shortN = 0, run = null, gapRun = null, gapAt = -1;
+  for (const r of rec) {
+    const at = r >>> 3, k = r & 7;
+    if (k === 5) {
+      gapRun = null;
+      run = { start: at, mode: ctxByStart.get(at)?.mode || null };
+    } else if (k === 6) {
+      gapRun = null;
+      if (run && run.mode === "space" && at >= run.start && at - run.start < 300) shortN++;
+      run = null;
+    } else if (k === 0) {
+      if (run) { gapRun = run; gapAt = at; run = null; }
+      else gapRun = null;
+    } else if (k === 1) {
+      gapRun = null;
+    } else {
+      if (!run && gapRun && !(bootStart !== null && gapAt <= bootStart && at >= bootStart) && at - gapAt <= 15) {
+        run = gapRun;
+      }
+      gapRun = null;
+      if (run && !ctxByStart.has(run.start)) {
+        if (k === 3) run.mode = "space";
+        else if (k === 2 || k === 4) run.mode = "other";
+      }
+    }
+  }
+  return shortN;
+}
+
 function checkupCyclingDetailHtml(c, report) {
   const starts = checkupMetricValue(c);
   const count = n => Number.isInteger(n) && n >= 0;
+  const shortHeat = checkupCyclingShortRunCount(c);
   const runs = [
-    ["mode.heat", c.space_runs, c.space_mean_run_s],
-    ["mode.dhw", c.dhw_runs, c.dhw_mean_run_s],
-    ["mode.cool", c.cooling_runs > 0 ? c.cooling_runs : null],
-    ["check.cycling.unclear", c.censored_runs > 0 ? c.censored_runs : null],
+    ["mode.heat", c.space_runs, c.space_mean_run_s, shortHeat],
+    ["mode.dhw", c.dhw_runs, c.dhw_mean_run_s, 0],
+    ["mode.cool", c.cooling_runs > 0 ? c.cooling_runs : null, null, 0],
+    ["check.cycling.unclear", c.censored_runs > 0 ? c.censored_runs : null, null, 0],
   ];
   const rows = c.verdict === "unavailable" ? "" : runs.filter(([, n]) => count(n))
-    .map(([label, n, mean]) => {
-      const value = t("check.cycling.runs", n) + (n > 0 && Number.isFinite(mean) && mean >= 0
+    .map(([label, n, mean, shortN]) => {
+      let value = t("check.cycling.runs", n) + (n > 0 && Number.isFinite(mean) && mean >= 0
         ? ` · ${t("check.cycling.mean", checkupDuration(mean))}` : "");
+      if (shortN > 0) value += ` · ${t("check.cycling.short_runs", shortN)}`;
       return `<div class="inspect-row"><span>${esc(t(label))}</span><span>${esc(value)}</span></div>`;
     }).join("");
   let assessment = "waiting";
@@ -1538,7 +1595,7 @@ function checkupCyclingDetailHtml(c, report) {
   else if (c.reason === "heating_runs_insufficient" && starts) assessment = "few";
 
   const description = MODEL_DESCRIPTIONS.health_cycling;
-  const [what, normal] = modelDescriptionCopy("health_cycling") || [description.what, description.normal];
+  const [what] = modelDescriptionCopy("health_cycling") || [description.what];
   const saved = Array.isArray(c.hours) ? c.hours.reduce((sum, h) => sum +
     (h?.restored && !h.expired && count(h.starts) ? h.starts : 0), 0) : 0;
   const detail = [t(`check.cycling.${assessment}`)];
@@ -1553,8 +1610,7 @@ function checkupCyclingDetailHtml(c, report) {
     `<div class="vdesc-p checkup-cycling-assessment">${esc(detail.join(" "))}</div>` +
     (rows ? `<div class="vdesc-p">${esc(t("check.cycling.completed"))}</div>` +
       `<div class="inspect-rows checkup-cycling-grid">${rows}</div>` : "") +
-    `<div data-checkup-hours></div>` +
-    descNoteHtml(t("normal.label"), normal);
+    `<div data-checkup-hours></div>`;
 }
 
 function syncCheckupCyclingChart(card) {
@@ -1570,6 +1626,9 @@ function renderCheckupCyclingChart(slot, open = true) {
   if (slot._checkupMarkup !== html) {
     replaceHistoryHtml(slot, html);
     slot._checkupMarkup = html;
+  } else if (typeof paintCyclingChart === "function") {
+    const chart = slot.querySelector("[data-cycling]");
+    if (chart) paintCyclingChart(chart);
   }
   const trace = check?.timeline;
   // Both device timestamps are rounded down. Use the upper bound on the sample age.
@@ -1615,9 +1674,296 @@ function checkupCyclingRunsHtml(runs, wall) {
   return `<table class="checkup-run-table"><thead><tr>${heads.join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
+// These are visual categories filled bottom-to-top proportionally across active + unknown segments
+// within an hour. Readable off-time adds no colour.
+const CHECKUP_CYCLING_MODES = [
+  ["space", "mode.heat", "--flow-hot"],
+  ["dhw", "mode.dhw", "--brand"],
+  ["other", "check.fault_unknown", "--muted"],
+];
+const _cyclingModels = new Map();
+let cyclingModelRev = 0;
+
+function checkupCyclingFillHtml(segments) {
+  const merged = [];
+  for (const s of segments || []) {
+    if (!s || !(s.dur > 0)) continue;
+    const prev = merged.at(-1);
+    if (prev && prev.cat === s.cat) prev.dur += s.dur;
+    else merged.push({ cat: s.cat, dur: s.dur });
+  }
+  const total = merged.reduce((sum, s) => sum + s.dur, 0);
+  if (total <= 0) return `<s class="checkup-chart-fill" aria-hidden="true" data-modes=""></s>`;
+  const colorMap = Object.fromEntries(CHECKUP_CYCLING_MODES.map(([m, , c]) => [m, `var(${c})`]));
+  const present = CHECKUP_CYCLING_MODES.filter(([m]) => merged.some(s => s.cat === m));
+  const modesAttr = present.map(([m]) => m).join(" ");
+  if (present.length === 1) {
+    return `<s class="checkup-chart-fill" aria-hidden="true" data-modes="${modesAttr}" style="--cycling-a:${colorMap[present[0][0]]}"></s>`;
+  }
+  let acc = 0;
+  const stops = [];
+  for (const seg of merged) {
+    const p0 = (acc / total * 100).toFixed(2);
+    acc += seg.dur;
+    const p1 = (acc / total * 100).toFixed(2);
+    const col = colorMap[seg.cat] || colorMap.other;
+    stops.push(`${col} ${p0}%`, `${col} ${p1}%`);
+  }
+  return `<s class="checkup-chart-fill segmented" aria-hidden="true" data-modes="${modesAttr}" style="--cycling-fill:linear-gradient(to top, ${stops.join(", ")})"></s>`;
+}
+function checkupCyclingLegendHtml() {
+  return CHECKUP_CYCLING_MODES.map(([mode, label]) =>
+    `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`).join("");
+}
+
+function cyclingRichText(fn, ...items) {
+  const tokens = items.map((item, idx) => `\u0003${idx}\u0004`);
+  let out = esc(fn(...tokens));
+  items.forEach((item, idx) => {
+    const ph = `\u0003${idx}\u0004`;
+    const repl = item && typeof item === "object" && "raw" in item
+      ? item.raw : `<strong>${esc(item == null ? "" : String(item))}</strong>`;
+    out = out.replaceAll(ph, repl);
+  });
+  return out;
+}
+
+function cyclingIsLowFlow(ctx, flowTypical) {
+  return Number.isFinite(ctx?.flow_l_min) && Number.isFinite(flowTypical) &&
+    flowTypical > 0 && ctx.flow_l_min <= flowTypical * 0.65;
+}
+
+const CYCLING_STOP_KEYS = {
+  request_withdrawal: "stop_req_off",
+  target_changed: "stop_tgt_drop",
+  dhw_transition: "stop_dhw",
+};
+function cyclingStopSummaryText(r, flowTypical) {
+  const ctx = r.ctx;
+  const mode = ctx?.mode || r.mode || "space";
+  if (!ctx) return null;
+  if (!ctx.stop_kind) return null;
+  if (ctx.stop_kind === "low_rps_above_target") {
+    return t(cyclingIsLowFlow(ctx, flowTypical) ? "check.cycling.stop_low_flow" : "check.cycling.stop_low_rps");
+  }
+  if (ctx.stop_kind === "defrost") return t(mode === "other" ? "check.cycling.stop_defrost_done" : "check.cycling.stop_defrost");
+  if (ctx.stop_kind === "normal") return t(mode === "dhw" ? "check.cycling.stop_normal_dhw" : "check.cycling.stop_normal");
+  const k = CYCLING_STOP_KEYS[ctx.stop_kind];
+  return t(k ? `check.cycling.${k}` : "check.cycling.run_stop_unknown");
+}
+
+function collectPeriodRuns(model, from, to) {
+  const runs = [];
+  for (let i = from; i <= to; ++i) {
+    for (const r of model.hours[i].runs) {
+      runs.push({ ...r, ctx: model.runContextByStart.get(r.start) || null });
+    }
+  }
+  return runs.sort((a, b) => a.start - b.start);
+}
+
+function cyclingPeriodFindingHtml(model, from, to) {
+  const runs = collectPeriodRuns(model, from, to);
+  const startsTotal = model.hours.slice(from, to + 1).reduce((s, h) => s + h.starts.length, 0);
+  if (!runs.length && startsTotal === 0) return esc(t("check.cycling.no_timed_runs"));
+  if (!runs.length) return esc(t("check.cycling.run_details_unavailable"));
+  if (runs.every(r => !r.ctx)) {
+    const preBoot = model.source === "x10a" && model.bootStart != null && runs.some(r => r.start < model.bootStart);
+    return esc(t(preBoot ? "check.cycling.cause_since_boot" : "check.cycling.cause_unavailable"));
+  }
+
+  const heating = runs.filter(r => (r.ctx?.mode || r.mode) === "space");
+  const completedHeat = heating.filter(r => r.stop != null);
+  const shortHeat = completedHeat.filter(r => (r.stop - r.start) < 600).length;
+  const isCycling = model.hours.slice(from, to + 1).some(h => h.isCycling) || shortHeat >= 2;
+
+  let lowRps = 0, reqOff = 0, tgtDrop = 0, defrost = 0, dhwTrans = 0;
+  for (const r of runs) {
+    const sk = r.ctx?.stop_kind;
+    if (sk === "low_rps_above_target") ++lowRps;
+    else if (sk === "request_withdrawal") ++reqOff;
+    else if (sk === "target_changed") ++tgtDrop;
+    else if (sk === "defrost" || r.ctx?.start_kind === "defrost_start") ++defrost;
+    else if (sk === "dhw_transition") ++dhwTrans;
+  }
+
+  const outVals = runs.map(r => r.ctx?.outdoor_c).filter(Number.isFinite);
+  const outdoorMean = outVals.length
+    ? outVals.reduce((a, b) => a + b, 0) / outVals.length
+    : (Number.isFinite(model.outdoorMean) ? model.outdoorMean : null);
+  const outCond = outdoorMean != null ? t("check.cycling.out_cond", `${histFmt1(outdoorMean)} °C`) : "";
+
+  const flowVals = completedHeat.map(r => r.ctx?.flow_l_min).filter(v => Number.isFinite(v) && v > 0);
+  const minFlow = flowVals.length ? Math.min(...flowVals) : null;
+  const meanFlow = flowVals.length ? flowVals.reduce((a, b) => a + b, 0) / flowVals.length : null;
+  const typ = model.flowTypical;
+  const lowFlow = minFlow != null && typ != null && typ > 0 && minFlow <= typ * 0.65;
+
+  const fmtFind = (key, ...args) => {
+    const raw = String(t(key, ...args));
+    const colon = raw.search(/[:：]/);
+    if (colon > 0 && colon < 72) {
+      return `<span class="vdesc-n">${esc(raw.slice(0, colon + 1))}</span>${esc(raw.slice(colon + 1))}`;
+    }
+    return esc(raw);
+  };
+
+  if (isCycling && lowRps >= 2 && lowFlow) {
+    const typTag = typ != null ? t("check.cycling.typ_tag", `~${histFmt1(typ)} L/min`) : "";
+    return fmtFind("check.cycling.find_low_flow", `${histFmt1(minFlow)} L/min`, typTag);
+  }
+  if (isCycling && lowRps >= 2) {
+    const flowStr = meanFlow != null ? `${histFmt1(meanFlow)} L/min` : t("check.fault_unknown");
+    return fmtFind("check.cycling.find_low_rps", flowStr, outCond);
+  }
+  if (isCycling && reqOff + tgtDrop >= 2) return fmtFind("check.cycling.find_control");
+  if (defrost > 0 && dhwTrans > 0) return fmtFind("check.cycling.find_defrost_dhw", outCond);
+  if (defrost > 0) return fmtFind("check.cycling.find_defrost", outCond);
+  if (dhwTrans > 0) return fmtFind("check.cycling.find_dhw");
+  const meanHeatS = completedHeat.length
+    ? completedHeat.reduce((s, r) => s + (r.stop - r.start), 0) / completedHeat.length : 0;
+  if (completedHeat.length > 0 && meanHeatS >= 600) {
+    return fmtFind("check.cycling.find_steady", minFlow != null ? `${histFmt1(minFlow)} L/min` : "");
+  }
+  return esc(t("check.starts", startsTotal));
+}
+
+function cyclingRunExplainHtml(r, fromExact, toExact, priorPauseS, flowTypical) {
+  const ctx = r.ctx;
+  const rich = (k, ...a) => cyclingRichText(I18N[LANG]?.[`check.cycling.${k}`] || I18N.en[`check.cycling.${k}`], ...a);
+  const f1 = (v, u) => Number.isFinite(v) ? `${histFmt1(v)} ${u}` : null;
+  const pauseStr = priorPauseS != null && priorPauseS >= 0 && priorPauseS <= 7200
+    ? t("check.cycling.pause_tag", priorPauseS < 1800 ? checkupCyclingDuration(priorPauseS) : checkupDuration(priorPauseS))
+    : "";
+  const lwt = f1(ctx.lwt_c, "°C"), tgt = f1(ctx.target_c, "°C"), rwt = f1(ctx.rwt_c, "°C");
+  const flow = f1(ctx.flow_l_min, "L/min");
+  const typ = Number.isFinite(flowTypical) && flowTypical > 0 ? `${histFmt1(flowTypical)} L/min` : null;
+  const sep = LANG === "ja" ? "、" : LANG === "zh" ? "，" : ", ";
+  const startLwt = f1(ctx.start_lwt_c, "°C");
+  const startTgt = f1(ctx.start_target_c, "°C") || tgt || null;
+  const startPrev = f1(ctx.start_target_prev_c, "°C");
+  const startCond = startLwt ? t("check.cycling.cond_tag", startLwt, startTgt || "") : "";
+  const startLwtOnly = startLwt ? t("check.cycling.cond_tag", startLwt, "") : "";
+  const pauseItem = { raw: esc(pauseStr) };
+  const startCondItem = { raw: startCond ? esc(` · ${startCond}`) : "" };
+  const fromPrevItem = { raw: startPrev ? esc(t("check.cycling.from_tag", startPrev)) : "" };
+  const startOpt = { raw: startLwtOnly ? esc(` · ${startLwtOnly}`) : "" };
+
+  let startHtml;
+  switch (ctx.start_kind) {
+    case "cooldown_restart": startHtml = rich("s_cool", fromExact, pauseItem, startLwt || "—", startTgt || "—"); break;
+    case "request_on": startHtml = rich("s_req", fromExact, pauseItem, startCondItem); break;
+    case "target_raised": startHtml = rich("s_tgt", fromExact, pauseItem, fromPrevItem, startTgt || "—", startOpt); break;
+    case "after_defrost": startHtml = rich("s_defrost_after", fromExact, pauseItem, startCondItem); break;
+    case "after_dhw": startHtml = rich("s_dhw_after", fromExact, pauseItem, startCondItem); break;
+    case "defrost_start": startHtml = rich("s_defrost", fromExact, pauseItem); break;
+    case "dhw_start": startHtml = rich("s_dhw", fromExact, pauseItem, startOpt); break;
+    default: startHtml = rich("s_gen", fromExact, pauseItem, startCondItem); break;
+  }
+
+  if (!ctx.stop_kind) {
+    if (r.latest == null) return `${startHtml} ${esc(t("check.cycling.run_stop_unknown"))}`;
+    return `${startHtml} <span class="checkup-run-live">${esc(t("check.cycling.e_ongoing"))}</span>` +
+      `<span class="checkup-run-stale">${esc(t("check.cycling.run_stop_unknown"))}</span>`;
+  }
+
+  const stopTemp = lwt
+    ? t("check.cycling.cond_tag", lwt, ctx.stop_kind === "target_changed" ? "" : (tgt || ""))
+    : null;
+  const metricParts = [stopTemp, rwt && t("check.cycling.rwt_tag", rwt), flow].filter(Boolean);
+  const valsItem = { raw: metricParts.length ? esc(` · ${metricParts.join(sep)}`) : "" };
+  const rwtItem = { raw: rwt ? esc(`${sep}${t("check.cycling.rwt_tag", rwt)}`) : "" };
+  const typItem = { raw: typ ? esc(t("check.cycling.typ_tag", `~${typ}`)) : "" };
+  const prevItem = { raw: Number.isFinite(ctx.target_prev_c) ? esc(t("check.cycling.from_tag", `${histFmt1(ctx.target_prev_c)} °C`)) : "" };
+
+  let stopHtml;
+  switch (ctx.stop_kind) {
+    case "low_rps_above_target":
+      stopHtml = cyclingIsLowFlow(ctx, flowTypical)
+        ? rich("e_low_flow", toExact, lwt || "—", tgt || "—", rwtItem, flow || "—", typItem)
+        : rich("e_low_rps", toExact, lwt || "—", tgt || "—", rwtItem, flow || "—", Number.isFinite(ctx.min_rps) && ctx.min_rps > 0 ? `${histFmt1(ctx.min_rps)} rps` : "—");
+      break;
+    case "request_withdrawal": stopHtml = rich("e_req", toExact, valsItem); break;
+    case "target_changed": stopHtml = rich("e_tgt", toExact, prevItem, tgt || "—", valsItem); break;
+    case "defrost": stopHtml = rich(ctx.mode === "other" ? "e_defrost_run" : "e_defrost_pause", toExact, valsItem); break;
+    case "dhw_transition": stopHtml = rich("e_dhw", toExact, valsItem); break;
+    default: stopHtml = rich("e_norm", toExact, valsItem); break;
+  }
+  return `${startHtml} ${stopHtml}`;
+}
+
+function cyclingPeriodDetailsHtml(model, from, to) {
+  const runs = collectPeriodRuns(model, from, to);
+
+  if (!model.hasContext) {
+    if (runs.length) {
+      const note = model.source === "x10a" && model.bootStart != null && runs.every(r => r.start < model.bootStart)
+        ? `<p class="vdesc-p checkup-period-finding">${esc(t("check.cycling.cause_since_boot"))}</p>` : "";
+      return note + checkupCyclingRunsHtml(runs, model.wall);
+    }
+    const anyObserved = model.runEdges && model.hours.slice(from, to + 1).some(h => h.observed);
+    return esc(t(anyObserved ? "check.cycling.no_timed_runs" : "check.cycling.run_details_unavailable"));
+  }
+
+  const findingHtml = `<p class="vdesc-p checkup-period-finding">${cyclingPeriodFindingHtml(model, from, to)}</p>`;
+  if (!runs.length) {
+    const anyObserved = model.runEdges && model.hours.slice(from, to + 1).some(h => h.observed);
+    const startsTotal = model.hours.slice(from, to + 1).reduce((s, h) => s + h.starts.length, 0);
+    const emptyMsg = t(startsTotal > 0 || !anyObserved ? "check.cycling.run_details_unavailable" : "check.cycling.no_timed_runs");
+    return `${findingHtml}<div class="vdesc-p">${esc(emptyMsg)}</div>`;
+  }
+
+  const clockOptions = { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" };
+  const fullClock = new Intl.DateTimeFormat(LANG, clockOptions);
+  const shortClock = new Intl.DateTimeFormat(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const modeLabel = m => t({ space: "mode.heat", dhw: "mode.dhw" }[m] || "check.fault_unknown");
+  const ongoing = (live, stale) => `<span class="checkup-run-live">${live}</span><span class="checkup-run-stale">${stale}</span>`;
+  const unknownStop = esc(t("check.cycling.run_stop_unknown"));
+
+  const rowsHtml = runs.map((r) => {
+    const ctx = r.ctx;
+    const rawMode = ctx?.mode || r.mode || "space";
+    const dotMode = rawMode === "space" || rawMode === "dhw" ? rawMode : "other";
+    const fromD = new Date(model.wall(r.start));
+    const toD = r.stop != null ? new Date(model.wall(r.stop)) : null;
+    const durHtml = r.stop != null
+      ? esc(checkupCyclingDuration(r.stop - r.start))
+      : (r.latest == null ? "—" : ongoing(esc(checkupCyclingDuration(r.latest - r.start)), "—"));
+    const stopTxt = ctx ? cyclingStopSummaryText(r, model.flowTypical) : null;
+    const stopCellHtml = r.stop != null
+      ? esc(stopTxt || t("check.cycling.cause_unavailable"))
+      : (r.latest == null ? unknownStop : ongoing(esc(t("check.cycling.run_ongoing")), unknownStop));
+    const rowKey = r.key ?? `s:${r.start}`;
+    const isOpen = !!ctx && S.cyclingExpandedRun === rowKey;
+    let subHtml = "";
+    if (ctx) {
+      const prev = model.prevRunByStart.get(r.start);
+      const priorPauseS = prev && prev.stop != null && r.start > prev.stop ? r.start - prev.stop : null;
+      const fromExact = fullClock.format(fromD);
+      const toExact = toD ? fullClock.format(toD) : "?";
+      const explain = cyclingRunExplainHtml(r, fromExact, toExact, priorPauseS, model.flowTypical);
+      subHtml = `<tr class="checkup-run-sub" data-run-sub="${esc(rowKey)}"${isOpen ? "" : " hidden"}><td colspan="3">` +
+        `<p class="checkup-run-explain">${explain}</p></td></tr>`;
+    }
+    return `<tr class="checkup-run-row"${ctx ? ` data-run-row="${esc(rowKey)}" tabindex="0" aria-expanded="${isOpen}"` : ""}>` +
+      `<td><span class="checkup-run-start"><i class="mode-dot ${dotMode}" aria-hidden="true" title="${esc(modeLabel(dotMode))}"></i>` +
+      `<time datetime="${fromD.toISOString()}">${esc(shortClock.format(fromD))}</time></span></td>` +
+      `<td>${durHtml}</td>` +
+      `<td><div class="checkup-stop-cell"><span class="checkup-stop-text">${stopCellHtml}</span>` +
+      (ctx ? `<span class="checkup-run-chev" aria-hidden="true">›</span>` : "") +
+      `</div></td></tr>${subHtml}`;
+  }).join("");
+
+  return `${findingHtml}<table class="checkup-run-table has-cause"><thead><tr>` +
+    `<th scope="col">${esc(t("check.cycling.run_start"))}</th>` +
+    `<th scope="col">${esc(t("check.cycling.run_duration"))}</th>` +
+    `<th scope="col">${esc(t("check.cycling.col_stop"))}</th>` +
+    `</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+}
+
 // Geometry uses seconds in the trace's frame and labels use its wall-clock anchor.
 // A dated frame can include older boots, with a gap record standing between observations.
-function checkupCyclingTimelineHtml(trace, scope) {
+function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
   const end = trace?.window_end_s, observedEnd = trace?.observed_end_s, unix = trace?.unix_s;
   const records = trace?.records, boot = trace?.boot_s;
   if (![end, observedEnd, unix].every(Number.isSafeInteger) || end > 0x1fffffff || end < observedEnd ||
@@ -1626,11 +1972,21 @@ function checkupCyclingTimelineHtml(trace, scope) {
         observedEnd > 86400 || typeof trace.live !== "boolean")) ||
       !Array.isArray(records) || !records.length || records.length > 192) return "";
   const start = end - 86400;
-  const hours = Array.from({ length: 24 }, () => ({ starts: [], runs: [], modes: new Set(), gap: false, observed: false }));
+  const bootStart = boot !== undefined ? end - boot : null;
+  const runKey = at => {
+    if (boot !== undefined) {
+      return at >= end - boot ? `b:${at + boot - end}` : `u:${unix + at - end}`;
+    }
+    return `s:${at}`;
+  };
+  const hours = Array.from({ length: 24 }, (_, idx) => ({
+    starts: [], runs: [], modes: new Set(), segments: [], gap: false, observed: false,
+    fromSec: start + 3600 * idx, toSec: start + 3600 * (idx + 1), isCycling: false,
+  }));
   const readable = [];
   const modes = ["", "", "other", "space", "dhw"];
   const runEdges = trace.run_edges === true;
-  let run;
+  let run, gapRun, gapAt = -1;
   let cursor = start, kind = 0, prior = -1;
   const cover = (from, until, state) => {
     if (until <= from) return;
@@ -1639,12 +1995,22 @@ function checkupCyclingTimelineHtml(trace, scope) {
       if (previous?.[1] === from) previous[1] = until;
       else readable.push([from, until]);
     }
-    const first = Math.floor((from - start) / 3600);
-    const last = Math.ceil((until - start) / 3600);
+    const cat = state === 3 ? "space" : state === 4 ? "dhw" : (state === 0 || state === 2) ? "other" : null;
+    const first = Math.max(0, Math.floor((from - start) / 3600));
+    const last = Math.min(24, Math.ceil((until - start) / 3600));
     for (let i = first; i < last; ++i) {
       if (state === 0) hours[i].gap = true;
       else hours[i].observed = true;
       if (modes[state]) hours[i].modes.add(modes[state]);
+      const segFrom = Math.max(from, start + 3600 * i);
+      const segUntil = Math.min(until, start + 3600 * (i + 1));
+      const dur = segUntil - segFrom;
+      if (cat && dur > 0) {
+        const segs = hours[i].segments;
+        const prev = segs.at(-1);
+        if (prev && prev.cat === cat) prev.dur += dur;
+        else segs.push({ cat, dur });
+      }
     }
   };
   for (const record of records) {
@@ -1653,23 +2019,36 @@ function checkupCyclingTimelineHtml(trace, scope) {
     if (at < prior || at > observedEnd || next > 6) return "";
     prior = at;
     if (next === 5) {
+      gapRun = undefined;
       if (at >= start) {
         const hour = hours[Math.min(23, Math.floor((at - start) / 3600))];
         hour.starts.push(at);
         if (runEdges) {
-          run = { start: at };
+          run = { start: at, key: runKey(at) };
           hour.runs.push(run);
         }
       }
       continue;
     }
     if (next === 6) {
+      gapRun = undefined;
       if (run) run.stop = at;
       run = undefined;
       continue;
     }
-    // A later stop cannot establish that the same run continued through a gap.
-    if (next === 0) run = undefined;
+    // A later stop cannot establish that the same run continued through a gap, except brief <=15s intra-boot poll blips.
+    if (next === 0) {
+      if (run) { gapRun = run; gapAt = at; run = undefined; }
+      else gapRun = undefined;
+    } else if (next === 1) {
+      gapRun = undefined;
+    } else {
+      if (!run && gapRun && !(bootStart !== null && gapAt <= bootStart && at >= bootStart) && at - gapAt <= 15) {
+        run = gapRun;
+      }
+      gapRun = undefined;
+      if (run && !run.mode) run.mode = modes[next];
+    }
     if (at > cursor) cover(cursor, at, kind);
     cursor = Math.max(at, start);
     kind = next;
@@ -1678,6 +2057,46 @@ function checkupCyclingTimelineHtml(trace, scope) {
   cover(cursor, last, kind);
   cover(last, end, 0);
   if (run && trace.live !== false && end - observedEnd <= 15) run.latest = observedEnd;
+
+  const runContextByStart = new Map();
+  const hasContext = Array.isArray(checkObj?.run_contexts) && checkObj.run_contexts.length > 0;
+  if (hasContext) {
+    for (const rc of checkObj.run_contexts) runContextByStart.set(rc.at, rc);
+  }
+  let latestContextHour = null;
+  for (let i = 0; i < 24; ++i) {
+    const h = hours[i];
+    let shortHeating = 0;
+    for (const r of h.runs) {
+      const ctx = runContextByStart.get(r.start);
+      if (ctx) {
+        latestContextHour = i;
+        if (Number.isSafeInteger(ctx.stop) && ctx.stop >= r.start && r.stop == null) {
+          r.stop = ctx.stop;
+          delete r.latest;
+        }
+      }
+      const mode = ctx?.mode || r.mode;
+      if (mode === "space" && r.stop != null && (r.stop - r.start) < 600) ++shortHeating;
+    }
+    h.isCycling = shortHeating >= 2;
+  }
+  const episodes = [];
+  let openEp = null;
+  for (let i = 0; i < 24; ++i) {
+    if (hours[i].isCycling) {
+      if (!openEp) openEp = { from: i, to: i };
+      else openEp.to = i;
+    } else if (openEp) {
+      episodes.push(openEp);
+      openEp = null;
+    }
+  }
+  if (openEp) episodes.push(openEp);
+  const allRuns = hours.flatMap(h => h.runs).sort((a, b) => a.start - b.start);
+  const prevRunByStart = new Map();
+  for (let i = 1; i < allRuns.length; ++i) prevRunByStart.set(allRuns[i].start, allRuns[i - 1]);
+
   const count = hours.reduce((n, h) => n + h.starts.length, 0);
   const x = sec => ((sec - start) / 86400 * 2400).toFixed(2);
   const y = n => (96 - n * 90 / Math.max(count, 1)).toFixed(2);
@@ -1705,39 +2124,45 @@ function checkupCyclingTimelineHtml(trace, scope) {
     path += `M ${x(events[n])} ${y(n)} V ${y(n + 1)} `;
     ++n;
   }
-  let cols = "", details = "";
-  hours.forEach(({ starts, runs, modes, gap, observed }, i) => {
+
+  _cyclingModels.clear();
+  _cyclingModels.set(scope, {
+    hours, wall, clock, offsetStamp, episodes, latestContextHour, bootStart, source,
+    runContextByStart, prevRunByStart, hasContext,
+    runEdges, rev: ++cyclingModelRev,
+    flowTypical: Number.isFinite(checkObj?.flow_typical_l_min) ? checkObj.flow_typical_l_min : null,
+    outdoorMean: Number.isFinite(checkObj?.outdoor_mean_c) ? checkObj.outdoor_mean_c : null,
+  });
+
+  let cols = "";
+  hours.forEach(({ starts, modes, segments, gap, observed, isCycling }, i) => {
     const from = start + 3600 * i, to = from + 3600;
     const offsetChange = new Date(wall(from)).getTimezoneOffset() !== new Date(wall(to)).getTimezoneOffset();
     const span = offsetChange ? `${offsetStamp.format(wall(from))}–${offsetStamp.format(wall(to))}`
       : `${clock(from)}–${clock(to)}`;
     const countLabel = !gap || starts.length
       ? checkupCyclingCountPrefix(starts.length) + t("check.starts", starts.length) : "";
-    const labels = [...modes].map(mode => t({ space: "mode.heat", dhw: "mode.dhw", other: "check.hour.other" }[mode]));
-    if (gap) labels.push(t("sys.nodata"));
+    const labels = CHECKUP_CYCLING_MODES.filter(([mode]) => modes.has(mode))
+      .map(([mode, label]) => t(mode === "other" ? "check.cycling.unclear" : label));
+    if (gap) labels.push(t(observed || starts.length ? "check.hour.gap" : "sys.nodata"));
     const value = starts.length || !gap ? starts.length : "";
     cols += `<button type="button" class="checkup-chart-col" data-bucket="${i}" data-span="${esc(span)}"` +
       (offsetChange ? " data-offset-change" : "") +
       (runEdges && observed ? " data-run-observed" : "") +
       ` tabindex="${i === 23 ? 0 : -1}" aria-pressed="false" aria-label="${esc([date.format(wall(from)), span, countLabel, ...labels].filter(Boolean).join(" · "))}">` +
-      `<b>${value}</b><s${gap && modes.size ? ' class="mixed-gap"' : ""}>${gap ? '<i class="gap"></i>' : ""}` +
-      [...modes].map(mode => `<i class="${mode}"></i>`).join("") + "</s></button>";
-    if (runs.length) details += `<template data-hour-runs="${i}">${checkupCyclingRunsHtml(runs, wall)}</template>`;
+      `<b${isCycling ? ' class="warn"' : ""}>${value}</b>${checkupCyclingFillHtml(segments)}</button>`;
   });
   const axis = [0, 6, 12, 18, 24].map(i => `<span>${esc(clock(start + i * 3600))}</span>`).join("");
-  const legend = [["space", "mode.heat"], ["dhw", "mode.dhw"], ["other", "check.hour.other"], ["gap", "sys.nodata"]]
-    .filter(([mode]) => hours.some(h => mode === "gap" ? h.gap : h.modes.has(mode)))
-    .map(([mode, label]) => `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`)
-    .join("");
+  const legend = checkupCyclingLegendHtml();
   const total = readable.length || count
     ? t("check.cycling.timed_starts", checkupCyclingCountPrefix(count) + t("check.starts", count))
     : t("sys.nodata");
   return `<div class="vhist checkup-cycling-chart checkup-cycling-timeline" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
-    ` data-cycling="${esc(scope)}"><div class="checkup-chart-total mono num">${esc(total)}</div>` +
+    ` data-cycling="${esc(scope)}"${hasContext ? ' data-has-context="true"' : ""}><div class="checkup-chart-total mono num">${esc(total)}</div>` +
     `<div class="checkup-chart-graph"><svg class="checkup-chart-plot" viewBox="0 0 2400 100" preserveAspectRatio="none" aria-hidden="true"><path d="${path}"/></svg>` +
     `<div class="checkup-chart-cols">${cols}</div></div><div class="vhist-axis checkup-chart-axis">` +
     `<div class="checkup-chart-ticks">${axis}</div><span class="checkup-chart-span" aria-live="polite" hidden></span></div>` +
-    `<div class="checkup-chart-legend">${legend}</div><div class="checkup-run-details" hidden></div>${details}</div>`;
+    `<div class="checkup-chart-legend">${legend}</div><div class="checkup-run-details" hidden></div></div>`;
 }
 
 function checkupCyclingChartHtml(c) {
@@ -1752,14 +2177,31 @@ function checkupCyclingChartHtml(c) {
     const elapsed = Math.max(0, uptime - (previous.boot_s ?? previous.window_end_s));
     // A temporarily omitted snapshot carries no new readings. Move both anchors so
     // the chart advances but the wall time of each retained record stays the same.
-    trace = { ...previous, window_end_s: previous.window_end_s + elapsed, unix_s: previous.unix_s + elapsed };
+    trace = {
+      ...previous,
+      ...(previous.boot_s !== undefined ? { boot_s: previous.boot_s + elapsed } : {}),
+      window_end_s: previous.window_end_s + elapsed,
+      unix_s: previous.unix_s + elapsed,
+    };
   }
   if (trace) {
-    const key = JSON.stringify([LANG, scope, trace]);
+    const cachedCtx = trace !== c?.timeline;
+    const mergedCheck = c ? {
+      ...c,
+      run_contexts: c.run_contexts ?? (cachedCtx ? cyclingTrace?.run_contexts : undefined),
+      flow_typical_l_min: c.flow_typical_l_min ?? (cachedCtx ? cyclingTrace?.flow_typical_l_min : undefined),
+    } : c;
+    const key = JSON.stringify([LANG, scope, trace, mergedCheck?.run_contexts, mergedCheck?.flow_typical_l_min]);
     if (cyclingMarkup[0] === key) return cyclingMarkup[1];
-    const timeline = checkupCyclingTimelineHtml(trace, scope);
+    const timeline = checkupCyclingTimelineHtml(trace, scope, mergedCheck, source);
     if (timeline) {
-      if (trace === c.timeline) cyclingTrace = { scope, trace };
+      if (trace === c.timeline) {
+        cyclingTrace = {
+          scope, trace,
+          run_contexts: c.run_contexts,
+          flow_typical_l_min: c.flow_typical_l_min,
+        };
+      }
       cyclingMarkup = [key, timeline];
       return timeline;
     }
@@ -1774,12 +2216,11 @@ function checkupCyclingChartHtml(c) {
   const key = JSON.stringify([LANG, hourlyScope, hrs]);
   if (cyclingMarkup[0] === key) return cyclingMarkup[1];
   const pad = 24 - hrs.length;
-  let sumS = 0, sumR = 0, cols = "", hasObservation = false, hasGap = false;
+  let sumS = 0, sumR = 0, cols = "", hasObservation = false;
   const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric", hour: "2-digit",
     minute: "2-digit", timeZoneName: "shortOffset" });
   const duration = checkupCyclingDuration;
   const startsText = n => checkupCyclingCountPrefix(n) + t("check.starts", n);
-  const percent = s => (s / 36).toFixed(3) + "%";
   for (let i = 0; i < 24; i++) {
     const h = hrs[i - pad];
     if (!h || h.expired === true) {
@@ -1806,33 +2247,33 @@ function checkupCyclingChartHtml(c) {
         possible = h.elapsed_s;
     }
     const missing = possible == null ? 0 : possible - observed;
-    hasGap ||= missing > 0;
     const valid = identified && [h.space_s, h.dhw_s].every(v => Number.isInteger(v) && v >= 0) &&
       h.space_s + h.dhw_s <= r;
     const space = valid ? h.space_s : 0, dhw = valid ? h.dhw_s : 0;
+    const otherActive = r - space - dhw;
     const modes = [[space, "space", "mode.heat"], [dhw, "dhw", "mode.dhw"],
-      [r - space - dhw, "other", "check.hour.other"]].filter(([seconds]) => seconds > 0);
+      [otherActive, "other", "check.fault_unknown"]].filter(([seconds]) => seconds > 0);
     const tip = [when, observed || s ? startsText(s) : t("sys.nodata")];
     if (observed) tip.push(duration(r));
     for (const [seconds, , label] of modes) tip.push(`${t(label)} ${duration(seconds)}`);
     tip.push(t("check.hour.coverage", duration(observed), possible == null ? "" : duration(possible)));
-    const gap = missing ? `<i class="gap" style="top:${percent(3600 - possible)};height:${percent(missing)}"></i>` : "";
+    const segments = [];
+    if (space > 0) segments.push({ cat: "space", dur: space });
+    if (dhw > 0) segments.push({ cat: "dhw", dur: dhw });
+    const otherTotal = otherActive + (missing > 0 ? missing : (possible == null && !observed ? 1 : 0));
+    if (otherTotal > 0) segments.push({ cat: "other", dur: otherTotal });
     cols += `<button type="button" class="checkup-chart-col"` +
       ` data-bucket="${identified ? h.bucket : i}" tabindex="${n ? -1 : 0}" aria-pressed="false"` +
-      ` aria-label="${esc(tip.join(" · "))}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b><s>` +
-      modes.map(([seconds, mode]) => `<i class="${mode}" style="height:${percent(seconds)}"></i>`).join("") +
-      gap + `</s></button>`;
+      ` aria-label="${esc(tip.join(" · "))}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b>` +
+      `${checkupCyclingFillHtml(segments)}</button>`;
   }
   let meta = hasObservation || sumS ? startsText(sumS) : t("sys.nodata");
   if (hasObservation) meta += ` · ${checkupDuration(sumR)}`;
-  const gapKey = hasGap ? `<span class="checkup-chart-key checkup-gap-key"><i class="gap" aria-hidden="true"></i>${esc(t("check.hour.gap"))}</span>` : "";
-  const legend = [["space", "mode.heat"], ["dhw", "mode.dhw"], ["other", "check.hour.other"]]
-    .map(([mode, label]) => `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`)
-    .join("");
+  const legend = checkupCyclingLegendHtml();
   const html = `<div class="vhist checkup-cycling-chart" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
     ` data-cycling="${esc(hourlyScope)}" data-tip="${esc(meta)}">` +
     `<div class="checkup-chart-cols">${cols}</div>` +
-    `<div class="vhist-axis"><span>${esc(t("check.hour.earlier", 23))}</span>${gapKey}<span>${esc(t("check.hour.latest"))}</span></div>` +
+    `<div class="vhist-axis"><span>${esc(t("check.hour.earlier", 23))}</span><span>${esc(t("check.hour.latest"))}</span></div>` +
     `<div class="checkup-chart-legend">${legend}</div>` +
     `<div class="vhist-range mono num">${esc(meta)}</div><div class="checkup-run-details" hidden></div></div>`;
   cyclingMarkup = [key, html];
@@ -2109,6 +2550,82 @@ function syncCheckupFaultPanel(panel) {
   }
 }
 
+// H1 is an independent dated population, not a new verdict or a replacement for min_l_min.
+function checkupHydronicKnown(h) {
+  return h?.method === 1 && h.confirmed === true && h.dated === true &&
+    typeof h.first_evidence_unix_s === "number" && Number.isFinite(h.first_evidence_unix_s) &&
+    h.first_evidence_unix_s >= 0 && typeof h.last_evidence_unix_s === "number" &&
+    Number.isFinite(h.last_evidence_unix_s) && h.last_evidence_unix_s >= h.first_evidence_unix_s &&
+    h.last_evidence_unix_s <= 8640000000000;
+}
+
+function checkupHydronicHtml(c, isModbus = false) {
+  const h = !isModbus && c.id === "flow" ? c.hydronic : null;
+  if (!h || typeof h !== "object") return ["", ""];
+  const labels = t("check.hydronic.labels").split("|");
+  const reasons = t("check.hydronic.reasons").split("|");
+  const limits = t("check.hydronic.limits").split("|");
+  const state = t("check.hydronic.states").split("|");
+  const nd = t("sys.nodata");
+  const row = (l, v) => `${l}: ${v}`;
+  const html = r => "<br>" + r.map(esc).join("<br>");
+  if (h.method !== 1) return ["", html([row(labels[5], reasons[13])])];
+  const known = checkupHydronicKnown(h);
+  const num = n => typeof n === "number" && Number.isFinite(n);
+  const cnt = n => num(n) && Number.isSafeInteger(n) && n >= 0;
+  const fmt = (n, p = 3) => n.toLocaleString(LANG, { maximumFractionDigits: p });
+  const pre = h.population_saturated === true ? "≥" : "";
+  const val = n => known && cnt(n) ? pre + fmt(n) : nd;
+  const dur = n => known && num(n) && n >= 0 ? pre + t("hist.duration_sec", fmt(n, 6)) : nd;
+  const rng = (r, n, u) => known && cnt(n) && n > 0 && r && [r.min, r.mean, r.max].every(num)
+    ? t("service.metric.range", fmt(r.min), fmt(r.mean), fmt(r.max), u) : nd;
+  const dt = n => known && num(n) && n >= 0 && Number.isFinite(n * 1000) && n <= 8640000000000
+    ? new Date(n * 1000).toLocaleString(LANG, { dateStyle: "short", timeStyle: "short", timeZone: "UTC" }) + " UTC" : nd;
+  const meas = [
+    row(labels[0], rng(h.spread_k, h.samples, "K")),
+    row(t("schem.flow_rate"), rng(h.flow_l_min, h.samples, "l/min")),
+    row(labels[1], rng(h.pump_command_pct, h.command_samples, "%")),
+    t("check.hydronic.counts", val(h.samples), val(h.command_samples)),
+    row(labels[2], [h.observed_s, h.candidate_s, h.qualified_s].map(dur).join(" / ")),
+    row(labels[3], `${dt(h.first_evidence_unix_s)} – ${dt(h.last_evidence_unix_s)}`),
+    row(labels[4], `${dt(h.first_accepted_unix_s)} – ${dt(h.last_accepted_unix_s)}`),
+    row(labels[7], val(h.observed_hours)),
+    row(labels[8], nd),
+  ];
+  const sr = k => t(`service.reason.${k}`);
+  const code = Number.isInteger(h.reason_code) && h.reason_code >= 0 && h.reason_code <= 19 ? h.reason_code : -1;
+  const reason = [reasons[0], sr("unsupported_profile"), reasons[1], reasons[2],
+    sr("missing_fresh_signal"), reasons[3], reasons[4],
+    sr("compressor_not_running"), sr("unsupported_or_unknown_mode"),
+    reasons[5], sr("defrost"), reasons[6],
+    sr("special_controller_phase"), reasons[7], sr("poll_gap"),
+    reasons[8], reasons[9], reasons[10], reasons[11], reasons[12]][code];
+  // A retained pump/valve/run-up reason is not a fresh current state after a source gap.
+  const fresh = h.current === true && h.confirmed === true;
+  const sec = c.secondary_supply;
+  if (fresh && sec?.zone_context === "unknown" && num(sec.delta_k) &&
+      num(sec.duration_s) && sec.duration_s >= 0 && cnt(sec.samples) && sec.samples > 0) {
+    meas.push(t("check.hydronic.secondary", (sec.delta_k > 0 ? "+" : "") + fmt(sec.delta_k) + " K",
+      t("hist.duration_sec", fmt(sec.duration_s, 6)), fmt(sec.samples)));
+  }
+  const cur = fresh || [1, 2, 3, 14, 15, 16, 17, 18, 19].includes(code) ? reason || reasons[13] : reasons[13];
+  const settle = fresh && code === 13 && num(h.settling_remaining_s) &&
+    h.settling_remaining_s > 0 && h.settling_remaining_s <= 600
+    ? ` ${t("hist.duration_sec", fmt(h.settling_remaining_s))}` : "";
+  const flags = m => cnt(m) && m <= 7
+    ? [limits[0], limits[1], state[5]].filter((_, i) => m & (1 << i)).join(" · ") : nd;
+  const pop = [known ? state[1] : h.dated === false ? state[2] : nd];
+  if (h.confirmed === false) pop.push(state[0]);
+  if (h.coverage_partial === true) pop.push(state[3]);
+  if (h.restore_pending === true) pop.push(limits[2]);
+  if (h.persistence_pending === true) pop.push(state[4]);
+  if (h.population_saturated === true && !(known && cnt(h.population_limitations_mask) && h.population_limitations_mask <= 7 && (h.population_limitations_mask & 4))) pop.push(state[5]);
+  if (known) pop.push(flags(h.population_limitations_mask));
+  if (cnt(h.dropped)) pop.push(t("check.hydronic.loss", `≥${fmt(h.dropped)}`));
+  return [html(meas), html([row(labels[5], [cur + settle, fresh ? flags(h.current_limitations_mask) : nd].filter(Boolean).join(" · ")),
+    row(labels[6], pop.filter(Boolean).join(" · "))])];
+}
+
 function checkupStatusKey(c) {
   const verdict = typeof c === "string" ? c : c?.verdict;
   // Older firmware reported this completed, unsuccessful day as collecting. Keep its
@@ -2143,6 +2660,316 @@ function checkupDhwEnergy(c) {
     fmt(c.max_k_h, 1), fmt(heat, 2), fmt(heat / 3, 2), fmt(heat / 2.5, 2));
 }
 
+// Timed DHW windows are separate from the persisted diagnosis totals. No scalar, journal
+// bucket or previous snapshot can reconstruct a missing current-boot timeline.
+function checkupDhwTimeline(c) {
+  const trace = c?.timeline;
+  const uint = n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff;
+  if (!trace || !uint(trace.epoch) || !trace.epoch || !uint(trace.window_end_s) ||
+      !uint(trace.since_s) || trace.since_s > trace.window_end_s ||
+      !(trace.observed_end_s === null || (uint(trace.observed_end_s) &&
+        trace.observed_end_s >= trace.since_s && trace.observed_end_s <= trace.window_end_s)) ||
+      (trace.unix_s != null && (!uint(trace.unix_s) || !trace.unix_s)) ||
+      typeof trace.live !== "boolean" || (trace.live && trace.observed_end_s === null) ||
+      !Array.isArray(trace.windows) || trace.windows.length > 24)
+    return null;
+  let end = trace.since_s;
+  for (const w of trace.windows) {
+    if (!w || !uint(w.start_s) || !uint(w.end_s) || w.start_s < end ||
+        w.end_s - w.start_s < 3600 || w.end_s - w.start_s > 3631 ||
+        w.end_s <= trace.window_end_s - 86400 || w.end_s > trace.window_end_s ||
+        !Number.isFinite(w.rate_k_h) || w.rate_k_h < 0 ||
+        !uint(w.observed_s) || w.observed_s > w.end_s - w.start_s ||
+        typeof w.pump_marker !== "boolean" || typeof w.draw_marker !== "boolean") return null;
+    end = w.end_s;
+  }
+  return trace;
+}
+function checkupDhwScope(trace, report = S.status?.health) {
+  return JSON.stringify([S.status?.boot_id, S.status?.history?.epoch,
+    report?.source || "x10a", trace?.epoch ?? null]);
+}
+let dhwSelection = { scope: "", end: null }, dhwExpiry;
+function markCheckupDhwStale(stale = true) {
+  if (dhwExpiry != null) clearTimeout(dhwExpiry);
+  dhwExpiry = undefined;
+  const host = globalThis.document?.getElementById?.("valueGroups"), state = String(stale);
+  if (host?.getAttribute?.("data-dhw-stale") !== state) host?.setAttribute?.("data-dhw-stale", state);
+}
+function checkupDhwFreshAge(trace, report, check) {
+  if (report?.source_fresh === false || check?.reason === "source_stale" ||
+      S.otaCached || S.transportUnavailable === "status") return Infinity;
+  // DHW comes entirely from /status. An omitted or rejected timeline leaves freshness unknown.
+  if (!trace) return NaN;
+  if (!trace.live) return Infinity;
+  // The device times are whole seconds. Include their uncertainty and the request age.
+  return historyClock() - S.statusRequestedAt + 1000 * (trace.window_end_s - trace.observed_end_s + 1);
+}
+function syncCheckupDhwFreshness(trace, report, check) {
+  const age = checkupDhwFreshAge(trace, report, check);
+  markCheckupDhwStale(age >= 15000);
+  if (age >= 0 && age < 15000)
+    dhwExpiry = setTimeout(markCheckupDhwStale, 15000 - age);
+}
+// Called at status adoption as well as rendering: a held click/gesture cannot leave the
+// previous source or reset epoch's evidence interactive while its replacement is pending.
+function retireCheckupDhwTimeline() {
+  const slot = globalThis.document?.getElementById?.("valueGroups")?.querySelector?.("[data-checkup-dhw]");
+  if (!slot) return;
+  const report = S.status?.health, check = report?.checks?.find(c => c.id === "dhw_loss");
+  const trace = checkupDhwTimeline(check), scope = checkupDhwScope(trace, report);
+  syncCheckupDhwFreshness(trace, report, check);
+  if (slot.dataset.dhwScope !== scope) {
+    if (S.cancelDhwDrag) S.cancelDhwDrag();
+    const focused = slot.contains?.(globalThis.document?.activeElement);
+    slot.textContent = "";
+    delete slot._dhwKey;
+    slot.dataset.dhwScope = scope;
+    dhwSelection = { scope, end: null };
+    if (focused) slot.closest(".vitem")?.querySelector('[data-desc="model:health_dhw_loss"]')
+      ?.focus({ preventScroll: true });
+  }
+}
+function syncCheckupDhwChart(card) {
+  if (S.stage !== "dashboard" || S.scrub || card?.dataset.dashboardCard !== "diagnosis" ||
+      !S.descOpen.has("model:health_dhw_loss")) return;
+  const slot = card.querySelector(".vitem.open [data-checkup-dhw]");
+  if (slot) renderCheckupDhwChart(slot);
+}
+function renderCheckupDhwChart(slot, open = true) {
+  const panel = slot.closest(".checkup-dhw-detail");
+  if (panel) panel.inert = !open;
+  if (!open) {
+    if (S.cancelDhwDrag) S.cancelDhwDrag();
+    slot.textContent = "";
+    delete slot._dhwKey;
+    return;
+  }
+  const report = S.status?.health || {};
+  const c = report.checks?.find(c => c.id === "dhw_loss");
+  const trace = checkupDhwTimeline(c), scope = checkupDhwScope(trace, report);
+  if (dhwSelection.scope !== scope) dhwSelection = { scope, end: null };
+  slot.dataset.dhwScope = scope;
+  // Frame/freshness scalars are patched on connected nodes. Only actual record, locale or
+  // lifecycle changes construct a chart; ordinary polling never detaches its bars or controls.
+  const key = JSON.stringify([LANG, scope, trace?.windows ?? null]);
+  if (slot._dhwKey !== key) {
+    replaceHistoryHtml(slot, checkupDhwChartHtml(trace, scope));
+    slot._dhwKey = key;
+  }
+  const chart = slot.querySelector("[data-dhw-timeline]");
+  if (chart) {
+    chart._dhwTrace = trace;
+    updateCheckupDhwGeometry(chart, trace);
+    paintCheckupDhwChart(chart);
+    wireCheckupDhwChart(chart);
+  }
+  const item = slot.closest(".vitem");
+  if (item && !item._dhwDisclosures) {
+    item._dhwDisclosures = true;
+    item.addEventListener("toggle", e => {
+      const key = e.target.dataset?.dhwDisclosure;
+      if (!key) return;
+      const id = `dhw:${key}`;
+      if (e.target.open) S.descOpen.add(id); else S.descOpen.delete(id);
+      delete _html.valueGroups;
+    }, true);
+  }
+  syncCheckupDhwFreshness(trace, report, c);
+}
+function checkupDhwWindowTime(trace, w) {
+  if (!trace.unix_s) {
+    const before = s => t("check.dhw.before_snapshot", checkupCyclingDuration(trace.window_end_s - s));
+    return `${before(w.start_s)} – ${before(w.end_s)}`;
+  }
+  const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "shortOffset" });
+  const at = s => stamp.format(new Date((trace.unix_s + s - trace.window_end_s) * 1000));
+  return `${at(w.start_s)} – ${at(w.end_s)}`;
+}
+function checkupDhwMarkerText(w) {
+  const marker = present => t(`check.dhw.marker_${present ? "yes" : "no"}`);
+  return `${t("check.dhw.pump")}: ${marker(w.pump_marker)} · ${t("check.dhw.draw")}: ${marker(w.draw_marker)}`;
+}
+function checkupDhwChartHtml(trace, scope) {
+  if (!trace) return `<div class="vdesc-p checkup-dhw-empty">${esc(t("check.dhw.timeline_unavailable"))}</div>`;
+  const scale = Math.max(1, ...trace.windows.map(w => w.rate_k_h));
+  const bars = trace.windows.map(w =>
+    `<button type="button" class="checkup-dhw-window${w.rate_k_h === 0 ? " is-zero" : ""}"` +
+    ` data-dhw-window="${w.end_s}" data-start-s="${w.start_s}" data-end-s="${w.end_s}"` +
+    ` data-rate="${w.rate_k_h}" tabindex="-1" aria-pressed="false">` +
+    `<span class="checkup-dhw-bar" aria-hidden="true" style="height:${w.rate_k_h / scale * 100}%"></span></button>`).join("");
+  const lane = name => `<div class="checkup-dhw-lane" data-dhw-lane="${name}" aria-hidden="true">` +
+    trace.windows.filter(w => w[`${name}_marker`]).map(w =>
+      `<span data-dhw-marker="${w.end_s}" class="checkup-dhw-marker ${name}"></span>`).join("") + `</div>`;
+  const readout = trace.windows.length ?
+    `<div class="checkup-dhw-window-details">` +
+    `<button type="button" data-dhw-action="previous" aria-label="${esc(t("check.dhw.previous"))}">‹</button>` +
+    `<div class="checkup-dhw-readout" aria-live="off" aria-atomic="true">` +
+    `<div class="vdesc-n num" data-dhw-readout="rate"></div><div data-dhw-readout="time"></div>` +
+    `<div data-dhw-readout="coverage"></div><div data-dhw-readout="markers"></div></div>` +
+    `<button type="button" data-dhw-action="next" aria-label="${esc(t("check.dhw.next"))}">›</button></div>` :
+    `<div class="vdesc-p checkup-dhw-empty">${esc(t("check.dhw.timeline_empty"))}</div>`;
+  return `<div class="vhist checkup-dhw-chart" data-dhw-timeline="${esc(scope)}" role="group"` +
+    ` aria-label="${esc(t("hist.aria", t("check.dhw_loss")))}">` +
+    `<div class="vhist-head"><span class="vhist-t">${esc(t("check.dhw.chart_title"))}</span><span>K/h</span></div>` +
+    `<div class="checkup-dhw-grid"><div class="checkup-dhw-y" aria-hidden="true"><span>${esc(checkupFmt1(scale))}</span><span>0</span></div>` +
+    `<div class="checkup-dhw-plot"><span class="checkup-dhw-before" aria-hidden="true"></span>` +
+    `<span class="checkup-dhw-unread" aria-hidden="true"></span>${bars}</div>` +
+    `<div></div><div class="vhist-axis checkup-dhw-axis" aria-hidden="true">` +
+    `<span data-dhw-axis="0"></span><span data-dhw-axis="12"></span><span data-dhw-axis="24"></span></div>` +
+    `<span class="checkup-dhw-lane-label">${esc(t("check.dhw.pump"))}</span>${lane("pump")}` +
+    `<span class="checkup-dhw-lane-label">${esc(t("check.dhw.draw"))}</span>${lane("draw")}</div>` +
+    `<div class="checkup-dhw-caption">${esc(t("check.dhw.timed_scope", trace.windows.length))}</div>` +
+    `<div class="checkup-dhw-caption">${esc(t("check.dhw.blank"))}</div>` + readout + `</div>`;
+}
+function checkupDhwText(node, value) {
+  if (!node || node.textContent === value) return;
+  if (node.childNodes?.length === 1 && node.firstChild?.nodeType === 3)
+    node.firstChild.nodeValue = value;
+  else node.textContent = value;
+}
+function updateCheckupDhwGeometry(chart, trace) {
+  chart.dataset.dhwClock = trace.unix_s ? "wall" : "relative";
+  const start = trace.window_end_s - 86400;
+  const pct = s => Math.max(0, Math.min(100, (s - start) * 100 / 86400));
+  for (const w of trace.windows) {
+    const button = chart.querySelector(`[data-dhw-window="${w.end_s}"]`);
+    button.style.left = `${pct(w.start_s)}%`;
+    button.style.width = `${pct(w.end_s) - pct(w.start_s)}%`;
+    const label = `${checkupDhwWindowTime(trace, w)} · ${checkupFmt1(w.rate_k_h)} K/h · ${checkupDhwMarkerText(w)}`;
+    if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
+    for (const marker of chart.querySelectorAll(`[data-dhw-marker="${w.end_s}"]`))
+      marker.style.left = `${(pct(w.start_s) + pct(w.end_s)) / 2}%`;
+  }
+  chart.querySelector(".checkup-dhw-before").style.width = `${pct(trace.since_s)}%`;
+  const last = trace.observed_end_s ?? trace.since_s;
+  const unread = chart.querySelector(".checkup-dhw-unread");
+  unread.style.left = `${pct(last)}%`;
+  unread.style.width = `${100 - pct(last)}%`;
+  const clock = trace.unix_s && new Intl.DateTimeFormat(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  for (const h of [0, 12, 24]) checkupDhwText(chart.querySelector(`[data-dhw-axis="${h}"]`), clock
+    ? clock.format(new Date((trace.unix_s - (24 - h) * 3600) * 1000))
+    : h === 24 ? t("check.dhw.snapshot") : `−${24 - h} h`);
+}
+function paintCheckupDhwChart(chart, end = dhwSelection.end, announce = false) {
+  // Announce deliberate window exploration, never every scalar poll's relative-time update.
+  chart.querySelector(".checkup-dhw-readout")?.setAttribute("aria-live", announce ? "polite" : "off");
+  const trace = chart._dhwTrace;
+  if (!trace) return;
+  const windows = trace.windows;
+  const chosen = windows.find(w => String(w.end_s) === String(end)) || windows.at(-1);
+  dhwSelection = { scope: chart.dataset.dhwTimeline, end: chosen?.end_s ?? null };
+  for (const button of chart.querySelectorAll("[data-dhw-window]")) {
+    const selected = button.dataset.dhwWindow === String(chosen?.end_s);
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+  if (!chosen) return;
+  const text = (key, value) => checkupDhwText(chart.querySelector(`[data-dhw-readout="${key}"]`), value);
+  text("rate", `${checkupFmt1(chosen.rate_k_h)} K/h`);
+  text("time", checkupDhwWindowTime(trace, chosen));
+  text("coverage", t("check.hour.coverage", checkupCyclingDuration(chosen.observed_s),
+    checkupCyclingDuration(chosen.end_s - chosen.start_s)));
+  text("markers", checkupDhwMarkerText(chosen));
+  const index = windows.indexOf(chosen);
+  chart.querySelector('[data-dhw-action="previous"]').disabled = index === 0;
+  chart.querySelector('[data-dhw-action="next"]').disabled = index === windows.length - 1;
+}
+function wireCheckupDhwChart(chart) {
+  if (chart._dhwWired) return;
+  chart._dhwWired = true;
+  const buttons = () => [...chart.querySelectorAll("[data-dhw-window]")];
+  const select = (button, focus = false) => {
+    if (!button || chart.closest("[hidden], [inert]")) return;
+    paintCheckupDhwChart(chart, button.dataset.dhwWindow, true);
+    if (focus) button.focus({ preventScroll: true });
+  };
+  chart.addEventListener("click", e => {
+    const action = e.target.closest("[data-dhw-action]");
+    if (action) {
+      const list = buttons(), index = list.findIndex(b => b.getAttribute("aria-pressed") === "true");
+      select(list[index + (action.dataset.dhwAction === "previous" ? -1 : 1)]);
+    } else select(e.target.closest("[data-dhw-window]"));
+  });
+  chart.addEventListener("keydown", e => {
+    if (!e.target.matches("[data-dhw-window]")) return;
+    const list = buttons(), i = list.indexOf(e.target);
+    const index = { ArrowLeft: i - 1, ArrowRight: i + 1, Home: 0, End: list.length - 1,
+      Escape: list.length - 1 }[e.key];
+    if (!Number.isInteger(index)) return; // Enter/Space retain the native button action.
+    e.preventDefault();
+    e.stopPropagation();
+    select(list[Math.max(0, Math.min(list.length - 1, index))], true);
+  });
+  chart.addEventListener("focusin", e => select(e.target.closest("[data-dhw-window]")));
+  let drag, watchdog;
+  const finish = e => {
+    if (!drag || (e?.pointerId != null && e.pointerId !== drag.id)) return;
+    const id = drag.id;
+    drag = null;
+    clearTimeout(watchdog);
+    for (const event of ["pointerup", "pointercancel"]) document.removeEventListener(event, finish);
+    if (S.scrub === "checkup-dhw") S.scrub = null;
+    try { chart.releasePointerCapture(id); } catch {}
+  };
+  S.cancelDhwDrag = finish;
+  chart.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || S.scrub || !e.target.closest("[data-dhw-window]")) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    S.scrub = "checkup-dhw";
+    for (const event of ["pointerup", "pointercancel"]) document.addEventListener(event, finish);
+    watchdog = setTimeout(finish, SCRUB_MAX_MS);
+  });
+  chart.addEventListener("pointermove", e => {
+    if (!drag || drag.id !== e.pointerId) return;
+    const dx = Math.abs(e.clientX - drag.x), dy = Math.abs(e.clientY - drag.y);
+    if (!drag.moved && dy > dx && dy > 6) return finish(); // Leave vertical touch scrolling native.
+    if (!drag.moved && dx <= 6) return;
+    drag.moved = true;
+    S.scrub = "checkup-dhw";
+    e.preventDefault();
+    try { chart.setPointerCapture(e.pointerId); } catch {}
+    const plot = chart.querySelector(".checkup-dhw-plot").getBoundingClientRect();
+    const at = chart._dhwTrace.window_end_s - 86400 + (e.clientX - plot.left) * 86400 / plot.width;
+    const w = chart._dhwTrace.windows.find(w => w.start_s <= at && at <= w.end_s);
+    // A blank interval is not a zero window and cannot select neighbouring evidence.
+    if (w) select(chart.querySelector(`[data-dhw-window="${w.end_s}"]`));
+  });
+  for (const event of ["pointerup", "pointercancel", "lostpointercapture", "pointerleave"])
+    chart.addEventListener(event, finish);
+}
+function checkupDhwDetailHtml(c, fullSpan, report) {
+  const hasRate = checkupDhwHasRate(c), scope = checkupDhwScope(checkupDhwTimeline(c), report);
+  const count = Number.isInteger(c.windows) && c.windows >= 0 ? c.windows.toLocaleString(LANG) : "—";
+  let assessment = hasRate ? t("check.dhw.measurement")
+    : c.blocked ? t("check.detail.dhw_blocked", 0, "", "")
+    : c.verdict === "unavailable" ? t("check.detail.unavailable")
+    : Number(c.settle_remaining_s) > 0
+      ? t("check.detail.dhw_settling", count, "", checkupDuration(c.settle_remaining_s))
+    : Number(c.candidate_s) > 0
+      ? t("check.detail.dhw_candidate", count, "", checkupDuration(c.candidate_s), checkupDuration(3600))
+      : t("check.detail.dhw_waiting", count, "");
+  if (hasRate && c.evidence === "heuristic" && ["info", "warn"].includes(c.verdict))
+    assessment += ` ${t("check.dhw.hint")}`;
+  const value = hasRate ? `${esc(checkupFmt1(c.max_k_h))}<span class="checkup-dhw-unit">K/h</span>`
+    : esc(checkupStatusText(c));
+  const energy = checkupDhwEnergy(c);
+  const disclosure = (key, label, body) => `<details class="checkup-dhw-disclosure" data-dhw-disclosure="${key}"` +
+    `${S.descOpen.has(`dhw:${key}`) ? " open" : ""}><summary>${esc(t(label))}${chevIcon}</summary>` +
+    `<div class="checkup-dhw-disclosure-body">${body}</div></details>`;
+  return `<div class="checkup-dhw-detail"${S.descOpen.has("model:health_dhw_loss") ? "" : " inert"}><div class="checkup-dhw-hero">` +
+    (hasRate ? `<div class="checkup-dhw-heading">${esc(t("check.dhw.maximum"))}</div>` : "") +
+    `<div class="checkup-dhw-value num${hasRate ? " has-rate" : ""}">${value}</div>` +
+    `<div class="vdesc-p checkup-dhw-assessment">${esc(assessment)}</div></div>` +
+    `<div class="vdesc-p checkup-dhw-stale">${esc(t("check.dhw.stale"))}</div>` +
+    `<div data-checkup-dhw data-dhw-scope="${esc(scope)}"></div>` +
+    `<div class="vdesc-p checkup-dhw-limit">${esc(t("check.dhw.limit"))}</div>` +
+    disclosure("basis", "check.dhw.basis", checkupGenericDetailHtml(c, fullSpan, report)) +
+    (energy ? disclosure("energy", "check.dhw.energy", descParaHtml(esc(energy))) : "") + `</div>`;
+}
+
 // Fault copy follows the unit’s reported class. A remembered message does not establish
 // its cause, resolution or current severity when the source is unreadable.
 function checkupDetailKey(c, statusKey) {
@@ -2174,6 +3001,10 @@ const checkupFmt1 = (n) => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
 function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   if (c.id === "fault") return checkupFaultDetailHtml(c, report);
   if (c.id === "cycling") return checkupCyclingDetailHtml(c, report);
+  if (c.id === "dhw_loss") return checkupDhwDetailHtml(c, fullSpan, report);
+  return checkupGenericDetailHtml(c, fullSpan, report);
+}
+function checkupGenericDetailHtml(c, fullSpan, report) {
   const isModbus = report?.source === "modbus";
   const statusKey = checkupStatusKey(c);
   const metric = checkupMetricValue(c);
@@ -2227,7 +3058,9 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
         : t("check.detail.collecting_unknown");
     }
   } else if (!detail) {
-    detail = t(checkupDetailKey(c, statusKey));
+    const hydronicEvidence = !isModbus && c.id === "flow" && checkupHydronicKnown(c.hydronic);
+    detail = t(statusKey === "unavailable" && hydronicEvidence
+      ? "check.detail.observation" : checkupDetailKey(c, statusKey));
   }
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
@@ -2236,7 +3069,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     no_paired_runtime: "no_paired_runtime",
   }[c.reason];
   if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
-  if (compactMetric && parts.length) detail += ` ${parts.join(" · ")}.`;
+  if (compactMetric && c.id !== "dhw_loss" && parts.length) detail += ` ${parts.join(" · ")}.`;
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
     detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c, isModbus),
                 checkupDuration(c.best_aborted_s));
@@ -2284,13 +3117,17 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     detail += ` ${t("check.detail.dhw_context",
       c.pump_windows.toLocaleString(LANG), c.draw_windows.toLocaleString(LANG),
       c.quiet_high_windows.toLocaleString(LANG))}`;
-  if (c.id === "dhw_loss") {
-    const energy = checkupDhwEnergy(c);
-    if (energy) detail += ` ${energy}`;
-  }
+  // DHW's value and short interpretation lead its panel; the longer evidence remains in
+  // the collapsed basis. Its separately collapsed energy example is never part of the chart.
+  if (c.id === "dhw_loss")
+    return (time.length ? descParaHtml(esc(time.join(" · "))) : "") +
+      (metric ? descParaHtml(esc(metric)) : "") + descParaHtml(esc(detail)) +
+      descNoteHtml(t("normal.label"), normal);
+  const [hydronicMeasurements, hydronicContext] = checkupHydronicHtml(c, isModbus);
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
-           (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
-         descParaHtml(esc(detail)) +
+           (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}` +
+           hydronicMeasurements) +
+         descParaHtml(esc(detail) + hydronicContext) +
          descNoteHtml(t("normal.label"), normal);
 }
 
@@ -2461,7 +3298,7 @@ function checkupPressureHistoryHtml(id, unit, label) {
 
 const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "pressure", "retries"]);
 function checkupCardHtml(includeHealth = true) {
-  const h = includeHealth ? S.status?.health : null;
+  const h = S.status?.health;
   const source = h?.source || S.status?.diagnostics?.effective_source || "x10a";
   const isModbus = source === "modbus";
   const avail = S.status?.diagnostics?.available_sources;
@@ -2470,10 +3307,13 @@ function checkupCardHtml(includeHealth = true) {
                   : dualAvail ? `${t("card.checkup")} · X10A`
                   : t("card.checkup");
   let healthRows = "";
-  const unreadable = h?.persist === "unknown";
+  const unreadable = includeHealth && h?.persist === "unknown";
   const visibleChecks = Array.isArray(h?.checks)
-    ? h.checks.filter((c) => !isModbus ||
-        (!MODBUS_HIDDEN_CHECKS.has(c.id) && !(c.id === "flow" && c.verdict === "unavailable")))
+    ? h.checks.filter((c) => {
+        if (isModbus && (MODBUS_HIDDEN_CHECKS.has(c.id) || (c.id === "flow" && c.verdict === "unavailable")))
+          return false;
+        return includeHealth || (!isModbus && c.id === "flow" && checkupHydronicKnown(c.hydronic));
+      })
     : [];
   if (unreadable) healthRows = `<span class="empty">${esc(t("sys.nodata"))}</span>`;
   if (!unreadable && visibleChecks.length) {
@@ -2498,7 +3338,7 @@ function checkupCardHtml(includeHealth = true) {
   // renderCards() gates the whole card on the diagnostics opt-in, including this observation.
   const rows = healthRows + (isModbus ? "" : refrigerantServiceRowHtml()) + workingFigureRowHtml();
   if (!rows) return "";                               // older firmware — no card rather than an empty one
-  if (unreadable || !healthRows)
+  if (unreadable || !healthRows || !includeHealth)
     return vcard(cardTitle, rows, "", "", "diagnosis", t("nav.diagnosis"));
   // Findings are counts of serialized verdicts, not a health score or a second threshold rule.
   const warnings = visibleChecks.filter(c => c.verdict === "warn").length;
@@ -2517,6 +3357,7 @@ function checkupCardHtml(includeHealth = true) {
 // threshold decision.  It is rendered as the same expandable status/description row used by the
 // eight diagnoses, inside their card. Older firmware omits the object and gets no placeholder row.
 function refrigerantServiceRowHtml() {
+  if (refrigerantStatusUnavailable()) return "";
   const service = S.status?.refrigerant_service;
   if (!service || typeof service !== "object" || Array.isArray(service)) return "";
 
@@ -2542,15 +3383,28 @@ function refrigerantServiceRowHtml() {
     ["eev_command_pls", "eev", "pls"], ["high_pressure_bar", "hp", "bar"],
     ["low_pressure_bar", "lp", "bar"],
   ];
+  let hasMetricMeta = false;
   for (const [key, inspectorKey, unit] of metricKeys) {
     const metric = service.metrics?.[key];
-    if (!metric || ![metric.min, metric.mean, metric.max].every(n => typeof n === "number" && Number.isFinite(n)))
-      continue;
+    const readable = metric && [metric.min, metric.mean, metric.max].every(Number.isFinite);
+    const meta = service.metric_meta?.[key];
+    const counted = meta && Number.isInteger(meta.samples) && meta.samples >= 0 && meta.samples <= 0xffffffff;
+    // With no qualifying window, the existing blocker already explains the absence. Within an
+    // observed window, a zero-count optional input remains visible beside the populated ranges.
+    if (!readable && (!counted || !Number.isInteger(samples) || samples <= 0)) continue;
     const number = n => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
     const label = t(`service.metric.${inspectorKey}`);
-    detail.push(`${label}: ${t("service.metric.range", number(metric.min),
-                              number(metric.mean), number(metric.max), unit)}`);
+    let text = `${label}: ${readable ? t("service.metric.range", number(metric.min),
+                              number(metric.mean), number(metric.max), unit) : t("sys.nodata")}`;
+    if (counted) {
+      hasMetricMeta = true;
+      text += ` · ${t("service.metric.samples", meta.samples)}`;
+      // Only the unselected state is named; a selected input with zero readings stays "no data".
+      if (meta.source === null) text += ` · ${t("service.metric.input_none")}`;
+    }
+    detail.push(text);
   }
+  if (hasMetricMeta) detail.push(t("service.metric.meta_limit"));
   const limitations = Array.isArray(service.limitations) ? service.limitations : [];
   const knownLimitations = ["special_phases_unavailable", "temperature_context_incomplete",
                            "pressure_sides_incomplete", "outdoor_context_incomplete"];
@@ -2569,7 +3423,9 @@ function refrigerantServiceRowHtml() {
   const body = descParaHtml(`<span class="vdesc-n">${esc(status)}</span>` +
                  (time.length ? ` · ${esc(time.join(" · "))}` : "") +
                  ` — ${esc(t(helpKey || "service.title"))}`) +
-               descParaHtml(esc(detail.length ? detail.join(" · ") : t("sys.nodata"))) +
+               descParaHtml(detail.length
+                 ? hasMetricMeta ? detail.map(esc).join("<br>") : esc(detail.join(" · "))
+                 : esc(t("sys.nodata"))) +
                descNoteHtml(t("normal.label"), t("service.common"));
   return descAccordion("service:refrigerant", t("service.title"), esc(status),
                        `checkup-val${tones[state] ? ` ${tones[state]}` : ""}`, body);

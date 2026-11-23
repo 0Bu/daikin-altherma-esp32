@@ -84,6 +84,22 @@ function hasHist(id) {
 // `ins` = every series to fetch. `ready(has)` = may this figure be offered at all on this profile
 // (feature_gate.hpp's DISABLE-NEVER-DEGRADE: no honest inputs, no curve — never a substitute one).
 // `fn(s)` = one sample from one bucket's values, null for a gap.
+// X10A "Water pump signal" is an inverted percentage command on [0, 100]: 0 = max command,
+// 100 = stop command. Out-of-range or non-finite values are rejected instead of clamped to 0 % or
+// 100 %, and fractional precision is preserved for callers.
+function pumpCommandPercent(signal) {
+  return typeof signal === "number" && Number.isFinite(signal) && signal >= 0 && signal <= 100
+    ? 100 - signal : null;
+}
+
+function modbusFlowScaleUnverified() {
+  const row49 = (S._modbus || []).find((m) => m && m.off === 49);
+  if (row49) return row49.flow_scale_unverified === true || row49.profile === "altherma4";
+  const mb = S.status?.modbus || {};
+  return mb.profile === "altherma4" || mb.profile === "auto" ||
+    mb.profile_basis === "probing" || mb.profile_basis === "fallback";
+}
+
 const DERIVED = {
   // Both BUH stages are event-folded by the firmware before they get here: an ON observed anywhere
   // in the open five-minute bucket survives a later OFF. Combine those aligned, structurally
@@ -96,13 +112,12 @@ const DERIVED = {
       : s.buh_step2 > 0 ? 2 : s.buh_step1 > 0 ? 1 : 0,
   },
   // The X10A row is an inverted control signal: 0 = maximum and 100 = stop. The schematic instead
-  // shows the intuitive speed percentage, so its chart must transform every sample by the exact same
-  // clamped expression as liveData(). Drawing the raw row would make an idle pump look maximal.
+  // shows the intuitive command percentage, so its chart transforms every valid sample via the
+  // same helper as liveData(). Out-of-range values remain gaps rather than being clamped.
   pump_speed: {
     unit: "%", ins: ["pump_signal"],
     ready: (h) => h.pump_signal,
-    fn: (s) => s.pump_signal == null ? null
-      : Math.min(100, Math.max(0, 100 - s.pump_signal)),
+    fn: (s) => pumpCommandPercent(s.pump_signal),
   },
   dt: {
     unit: "K", ins: ["leaving_water", "return_water"],
@@ -124,7 +139,7 @@ const DERIVED = {
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps,
     fn: (s) => pthCalc(s, s.comp_rps != null && s.comp_rps > 5),
     mbIns: ["flow", "leaving_water", "return_water", "compressor_state"],
-    mbReady: (h) => h.flow && h.leaving_water && h.return_water && h.compressor_state,
+    mbReady: (h) => h.flow && h.leaving_water && h.return_water && h.compressor_state && !modbusFlowScaleUnverified(),
     mbFn: (s) => pthCalc(s, s.compressor_state != null && s.compressor_state > 0),
   },
 };
@@ -545,6 +560,7 @@ async function ensureDerived(id, source = "x10a") {
   const epoch = syncHistSources();
   const D = DERIVED[id];
   const isMb = source === "modbus";
+  if (isMb && !hasModbusHist(id)) return;
   const key = histCacheKey(id, source);
   if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
   if (histAwaiting(key, epoch)) return;
@@ -1433,8 +1449,39 @@ function histUnavailableHtml(view) {
     : "";
 }
 
+function modbusFlowUnverified(view) {
+  return !!view && view.id === "flow" &&
+    histVisibleSeries(view).some((s) => s.source === "modbus") &&
+    modbusFlowScaleUnverified();
+}
+
 // Draw each registered source on its own raster. Null samples break the line instead of inventing
 // a measurement across a timeout or a reading the source refused.
+function histRuns(pts, n, X, Y, cls, r, splitZones = false) {
+  let line = "", area = "", dots = "", run = [];
+  const flush = () => {
+    if (!run.length) return;
+    if (run.length === 1) {
+      const z = splitZones ? pressureZoneClass(pts[run[0]]) : "";
+      dots += `<circle class="vhist-pt${cls}${z}" cx="${X(run[0]).toFixed(1)}" cy="${Y(pts[run[0]]).toFixed(1)}" r="${r}"/>`;
+    } else if (splitZones) {
+      for (const seg of pressureSplitRun(run, pts, X, Y)) {
+        const d = seg.pts.map(([px, py], k) => `${k ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join("");
+        line += `<path class="vhist-line${cls}${seg.zone}" d="${d}" vector-effect="non-scaling-stroke"/>`;
+        area += `<path class="vhist-area${cls}${seg.zone}" d="${d}L${seg.pts.at(-1)[0].toFixed(1)} ${HIST_H}L${seg.pts[0][0].toFixed(1)} ${HIST_H}Z"/>`;
+      }
+    } else {
+      const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
+      line += `<path class="vhist-line${cls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
+      area += `<path class="vhist-area${cls}" d="${d}L${X(run.at(-1)).toFixed(1)} ${HIST_H}L${X(run[0]).toFixed(1)} ${HIST_H}Z"/>`;
+    }
+    run = [];
+  };
+  for (let i = 0; i < n; i++) if (pts[i] == null) flush(); else run.push(i);
+  flush();
+  return [line, area, dots];
+}
+
 function histHtml(id, unit, name, source = "", identifySource = false) {
   const offeredX = (!source || source === "x10a") && hasHist(id);
   const offeredM = (!source || source === "modbus") && hasModbusHist(id);
@@ -1470,31 +1517,8 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   let line = "", area = "", dots = "";
   for (const s of histVisibleSeries(view)) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
-    const sourceCls = histSourceClass(s.source);
-    const splitZones = isPressure && s.source === "x10a";
-    let run = [];
-    const flush = () => {
-      if (!run.length) return;
-      if (run.length === 1) {
-        const zoneCls = splitZones ? pressureZoneClass(pts[run[0]]) : "";
-        dots += `<circle class="vhist-pt${sourceCls}${zoneCls}" cx="${X(run[0]).toFixed(1)}" cy="${Y(pts[run[0]]).toFixed(1)}" r="1.6"/>`;
-      } else if (splitZones) {
-        for (const seg of pressureSplitRun(run, pts, X, Y)) {
-          const d = seg.pts.map(([px, py], k) => `${k ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join("");
-          line += `<path class="vhist-line${sourceCls}${seg.zone}" d="${d}" vector-effect="non-scaling-stroke"/>`;
-          area += `<path class="vhist-area${sourceCls}${seg.zone}" d="${d}L${seg.pts[seg.pts.length - 1][0].toFixed(1)} ${HIST_H}L${seg.pts[0][0].toFixed(1)} ${HIST_H}Z"/>`;
-        }
-      } else {
-        const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
-        line += `<path class="vhist-line${sourceCls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
-        area += `<path class="vhist-area${sourceCls}" d="${d}L${X(run[run.length - 1]).toFixed(1)} ${HIST_H}L${X(run[0]).toFixed(1)} ${HIST_H}Z"/>`;
-      }
-      run = [];
-    };
-    for (let i = 0; i < n; i++) {
-      if (pts[i] == null) flush(); else run.push(i);
-    }
-    flush();
+    const [l, a, d] = histRuns(pts, n, X, Y, histSourceClass(s.source), 1.6, isPressure && s.source === "x10a");
+    line += l; area += a; dots += d;
   }
   // The "now" marker is an HTML element, not an SVG circle: the SVG is stretched non-uniformly, so
   // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
@@ -1609,7 +1633,8 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
       `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
     `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
-      `<span>${esc(histAxisEnd(view))}</span></div>` + histUnavailableHtml(view),
+      `<span>${esc(histAxisEnd(view))}</span></div>` + histUnavailableHtml(view) +
+      (modbusFlowUnverified(view) ? `<div class="vhist-note">${esc(t("hist.modbus_flow_unverified"))}</div>` : ""),
     view.series.length > 1 ? "vhist-multi" : ""
   );
 }
@@ -1661,25 +1686,8 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
     const Y = scaleY(s);
     const X = sampleX;
     const cls = env3SeriesClass(s.source);
-    let run = [];
-    const flush = () => {
-      if (!run.length) return;
-      if (run.length === 1) {
-        dots += `<circle class="vhist-pt ${cls}" cx="${X(run[0]).toFixed(1)}" ` +
-          `cy="${Y(pts[run[0]]).toFixed(1)}" r="1.8"/>`;
-      } else {
-        const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
-        const first = run[0], last = run.at(-1);
-        areas += `<path class="vhist-area ${cls}" d="${d}L${X(last).toFixed(1)} ${HIST_H}` +
-          `L${X(first).toFixed(1)} ${HIST_H}Z"/>`;
-        lines += `<path class="vhist-line ${cls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
-      }
-      run = [];
-    };
-    for (let i = 0; i < n; i++) {
-      if (pts[i] == null) flush(); else run.push(i);
-    }
-    flush();
+    const [l, a, d] = histRuns(pts, n, X, Y, " " + cls, 1.8);
+    lines += l; areas += a; dots += d;
     if (histRetained(s.raw)) {
       const last = lastSample(s.v);
       nowDots += histRetainedMarker(s, X(last) / HIST_W, " " + cls, (Y(pts[last]) / HIST_H) * 100);
@@ -2298,6 +2306,43 @@ function historyRowOwner(node, host) {
     ?.querySelector("[data-desc]")?.dataset.desc;
 }
 
+// A DHW aggregate can expire independently of its timed windows. Keep the chart AND its
+// painting ancestors connected when hero/energy, verdict badges or sibling rows change shape.
+function preserveCheckupDhwIsland(host, fresh, slot, nextSlot, compatible, attrs) {
+  if (!slot || !nextSlot || !slot.dataset.dhwScope ||
+      slot.dataset.dhwScope !== nextSlot.dataset.dhwScope) return false;
+  const path = (node, root) => {
+    const result = [];
+    for (; node && node !== root; node = node.parentNode) result.unshift(node);
+    return node === root ? result : null;
+  };
+  const oldPath = path(slot, host), newPath = path(nextSlot, fresh);
+  if (!oldPath || !newPath || oldPath.length !== newPath.length ||
+      oldPath.some((node, i) => node.nodeName !== newPath[i].nodeName)) return false;
+  for (let i = 0; i < oldPath.length; i++) {
+    const a = oldPath[i], b = newPath[i];
+    for (const attr of attrs(a)) if (!b.hasAttribute(attr.name)) a.removeAttribute(attr.name);
+    for (const attr of attrs(b)) if (a.getAttribute(attr.name) !== attr.value)
+      a.setAttribute(attr.name, attr.value);
+  }
+  oldPath.unshift(host); newPath.unshift(fresh);
+  for (let i = 0; i < oldPath.length - 1; i++) {
+    const a = oldPath[i], b = newPath[i], keep = oldPath[i + 1], nextKeep = newPath[i + 1];
+    let cursor = a.firstChild;
+    for (const node of [...b.childNodes]) {
+      if (node === nextKeep) {
+        while (cursor !== keep) { const old = cursor; cursor = old.nextSibling; old.remove(); }
+        cursor = keep.nextSibling;
+      } else if (cursor && cursor !== keep && compatible(cursor, node)) cursor = cursor.nextSibling;
+      else if (cursor && cursor !== keep) {
+        const old = cursor; cursor = old.nextSibling; old.replaceWith(node);
+      } else a.insertBefore(node, cursor);
+    }
+    while (cursor) { const old = cursor; cursor = old.nextSibling; old.remove(); }
+  }
+  return true;
+}
+
 // Structural poll updates may replace card containers or an inspector's history. Preserve the
 // active control in either path so keyboard users can continue exploring the same series.
 function replaceHistoryHtml(host, html) {
@@ -2309,6 +2354,7 @@ function replaceHistoryHtml(host, html) {
     ? "model:health_cycling" : owner(node), node.outerHTML]);
   const focusedOwner = owner(active);
   const cycling = active?.closest?.("[data-cycling]");
+  const dhw = active?.closest?.("[data-dhw-timeline]");
   const focused = host.contains?.(active);
   const diagnosisCard = host.getAttribute?.("data-dashboard-card") === "diagnosis";
   // Also reconcile plain read-only rows. Other hosts without charts keep full writes:
@@ -2346,6 +2392,9 @@ function replaceHistoryHtml(host, html) {
           nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value))) return false;
       // The live cycling chart owns its slot and updates independently of value rows.
       if (a.getAttribute("data-checkup-hours") !== null) return true;
+      // DHW patches its frame and readout on connected nodes. The scope attribute above
+      // must still agree before the slot can outlive a source/boot/reset change.
+      if (a.getAttribute("data-checkup-dhw") !== null) return true;
       const before = text.length;
       if (a.childNodes.length === b.childNodes.length &&
           [...a.childNodes].every((node, index) => same(node, b.childNodes[index]))) return true;
@@ -2377,6 +2426,8 @@ function replaceHistoryHtml(host, html) {
       }
       const slot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-hours]");
       if (slot) template.content.querySelector("[data-checkup-hours]")?.replaceWith(slot);
+      const dhwSlot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-dhw]");
+      const nextDhwSlot = dhwSlot && template.content.querySelector("[data-checkup-dhw]");
       if (host.id === "valueGroups" || host.id === "settingsCards") {
         // A paused slot has no generated markup. Keep its previous chart only for the same
         // disclosure and series in the same card.
@@ -2392,8 +2443,26 @@ function replaceHistoryHtml(host, html) {
           next.replaceWith(old);
         }
       }
-      host.replaceChildren(template.content);
+      text.length = scopedUpdates.length = 0;
+      const compatible = (a, b) => {
+        const before = text.length, updates = scopedUpdates.length;
+        if (same(a, b)) return true;
+        text.length = before; scopedUpdates.length = updates;
+        return false;
+      };
+      if (preserveCheckupDhwIsland(host, template.content, dhwSlot, nextDhwSlot, compatible, attrs)) {
+        for (const [node, value] of text) node.nodeValue = value;
+        for (const [a, b] of scopedUpdates) replaceHistoryHtml(a, b.innerHTML);
+      } else {
+        if (dhwSlot && nextDhwSlot && dhwSlot.dataset.dhwScope === nextDhwSlot.dataset.dhwScope)
+          nextDhwSlot.replaceWith(dhwSlot);
+        host.replaceChildren(template.content);
+      }
     } finally { S.trendRebuilding = rebuilding; }
+  }
+  if (host.hasAttribute?.("data-checkup-hours") && typeof paintCyclingChart === "function") {
+    const chart = host.querySelector("[data-cycling]");
+    if (chart) paintCyclingChart(chart);
   }
   if (focused && active.isConnected) active.focus({ preventScroll: true });
   else if (focused && (hist || histSeries))
@@ -2402,18 +2471,27 @@ function replaceHistoryHtml(host, html) {
         ? node.dataset.hist === hist && (node.dataset.source || "") === source
         : node.dataset.histId === histId && node.dataset.histSeries === histSeries))
       ?.focus({ preventScroll: true });
+  else if (focused && dhw) {
+    const chart = host.querySelector("[data-dhw-timeline]");
+    const sameScope = chart && chart.dataset.dhwTimeline === dhw.dataset.dhwTimeline;
+    const next = sameScope && (active.dataset.dhwAction
+      ? chart.querySelector(`[data-dhw-action="${active.dataset.dhwAction}"]`)
+      : chart.querySelector(`[data-dhw-window="${active.dataset.dhwWindow}"]`));
+    (next || (sameScope && chart.querySelector("[data-dhw-window][tabindex='0']")) ||
+      [...host.querySelectorAll("[data-desc]")].find(button => button.dataset.desc === focusedOwner) ||
+      host.closest?.(".vitem")?.querySelector("[data-desc]"))?.focus({ preventScroll: true });
+  }
   else if (focused && (cycling || active?.dataset?.desc)) {
     const chart = cycling && host.querySelector("[data-cycling]");
     const sameScope = chart && chart.dataset.cycling === cycling.dataset.cycling;
-    const next = sameScope && (chart.querySelector(`[data-bucket="${active.dataset.bucket}"]`) ||
-      chart.querySelector("[tabindex='0']"));
+    const next = sameScope && (
+      (active.dataset.runRow && chart.querySelector(`tr[data-run-row="${active.dataset.runRow}"]`)) ||
+      (active.dataset.bucket != null && chart.querySelector(`[data-bucket="${active.dataset.bucket}"]`)) ||
+      chart.querySelector("[tabindex='0']")
+    );
     (next || [...host.querySelectorAll("[data-desc]")].find(button => button.dataset.desc === focusedOwner) ||
       host.closest?.(".vitem")?.querySelector("[data-desc]"))
       ?.focus({ preventScroll: true });
-  }
-  if (host.hasAttribute?.("data-checkup-hours") && typeof paintCyclingChart === "function") {
-    const chart = host.querySelector("[data-cycling]");
-    if (chart) paintCyclingChart(chart);
   }
 }
 
@@ -2675,10 +2753,11 @@ function vDescRow(v, paused) {
   // current row while the pill above it, the inspector, the chart and MQTT all refuse it.
   const notCurrent = x10aDown() || rowNotMeasuring(v);
   const src = fb || v;
-  // A native stand-in needs its own interpretation limits, rather than the unavailable X10A
-  // instrument's explanation. Baseline HomeHub and ordinary X10A copy retain their established path.
-  const nativeFallback = fb?.profile === "altherma4";
-  const d = descFor(nativeFallback ? fb.label : label, nativeFallback ? fb : v);
+  // An unverified stand-in (Altherma 4 or probing/fallback flow) needs its own scaling
+  // caveat rather than the unavailable X10A instrument's explanation. Baseline EKRHH retains
+  // its established path.
+  const sourceFallback = fb?.profile === "altherma4" || (fb?.off === 49 && fb?.flow_scale_unverified === true);
+  const d = descFor(sourceFallback ? fb.label : label, sourceFallback ? fb : v);
   if (fb) cls = (cls ? cls + " " : "") + "src-val-mb";
   const unit = displayUnit(src);
   const val = (notCurrent && !fb)
@@ -2759,8 +2838,8 @@ const MODEL_DESCRIPTIONS = {
     what: "24-hour water-pressure curve in the sealed hydronic circuit (X10A, 5-minute minimums).",
     normal: "Chart guide: >1.0 bar normal, ≤1.0 bar low, ≤0.5 bar critical (diagnosis flags ≥60 continuous seconds). Permitted filling and operating pressure depends on the exact unit manual and system height; the reading alone does not identify leaks, air or vessel faults." },
   health_flow: {
-    what: "Lowest flow after 60 continuously observed seconds of internal pump operation.",
-    normal: "No universal normal value. Not nominal flow or proof of part load. Manual limits need the same model, mode and conditions; the value alone cannot establish insufficient flow." },
+    what: "Lowest flow after 60 seconds of continuous internal pump operation. Separate water spread, flow and pump command statistics use samples after the 600-second heating run-up.",
+    normal: "Not nominal flow or proof of part load. These readings cover the unit’s common water-side heat exchanger. Pump command does not measure speed or available head. The project filter allows gaps of up to 15 seconds. Its results establish neither steady operation nor a hydraulic cause." },
   health_heater: {
     what: "Observed ON time of the circuit heater (BUH) and tank heater (BSH).",
     normal: "There is no fixed normal runtime; it depends on heating and hot-water demand. Runtime is not energy consumption and cannot establish unnecessary heating." },
@@ -2825,7 +2904,8 @@ function toggleDesc(btn) {
   const trend = btn.dataset.trend || "";
   const open = !item.classList.contains("open");
   if (!open && ((S.trendPointer && item.contains(S.trendPointer.plot)) ||
-      (key === "model:health_cycling" && S.scrub === "checkup-cycling"))) cancelHistoryGesture();
+      (key === "model:health_cycling" && S.scrub === "checkup-cycling") ||
+      (key === "model:health_dhw_loss" && S.scrub === "checkup-dhw"))) cancelHistoryGesture();
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);
@@ -2842,6 +2922,11 @@ function toggleDesc(btn) {
   // let the saved closed markup suppress the next render and retain its hidden history SVG.
   const owner = btn.closest("#valueGroups, #settingsCards");
   if (owner) delete _html[owner.id];
+  if (key === "model:health_dhw_loss") {
+    const slot = item.querySelector("[data-checkup-dhw]");
+    if (slot && (!open || (S.stage === "dashboard" && !item.closest("[hidden]"))))
+      renderCheckupDhwChart(slot, open);
+  }
   if (key === "model:health_cycling") {
     const slot = item.querySelector("[data-checkup-hours]");
     if (slot && (!open || (S.stage === "dashboard" && !item.closest("[hidden]"))))

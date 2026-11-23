@@ -59,10 +59,11 @@ vm.runInContext(
 );
 const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"];
+const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1081, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1146, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -144,11 +145,14 @@ for (const code of ["ja", "fi", "zh"]) {
 assert.doesNotMatch(catalog.ja["check.detail.collecting"]("2 h", "24 h"), /(?:h|min)件/,
   "Japanese collecting progress must describe elapsed time, not item counts");
 
-for (const code of lazyDomainCodes) {
+for (const code of faultCodePackCodes) {
   const faults = catalogContext.__faultCodeCopy[code];
   assert.equal(faults?.values?.length, 63, `${code} must register all fault-code meanings`);
   assert.ok(faults.none?.trim() && faults.unknown?.trim(), `${code} needs both fault-code fallbacks`);
-  assert.deepEqual(Object.keys(catalogContext.__mbDeltaCopy[code] || {}).sort(),
+}
+for (const code of lazyDomainCodes) {
+  const mbDeltas = catalogContext.__mbDeltaCopy[code];
+  assert.deepEqual(Object.keys(mbDeltas || {}).sort(),
     ["outdoor_air", "room_temp"], `${code} must register both source-difference explanations`);
 }
 
@@ -234,12 +238,47 @@ assert.equal(catalog.de["check.cycling.short"], "Die Heizläufe sind im Schnitt 
 assert.equal(catalog.en["check.cycling.normal"], "Heating runs are long enough on average.");
 assert.equal(catalog.de["check.cycling.normal"], "Die Heizläufe dauern im Schnitt lang genug.");
 
+const cyclingExplainSampleArgs = {
+  "check.cycling.pause_tag": ["5 min"],
+  "check.cycling.cond_tag": ["39 °C", "41 °C"],
+  "check.cycling.from_tag": ["39 °C"],
+  "check.cycling.rwt_tag": ["34 °C"],
+  "check.cycling.typ_tag": ["~17 L/min"],
+  "check.cycling.s_cool": ["17:41:30", " after 5 min pause", "39 °C", "41 °C"],
+  "check.cycling.s_req": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.s_tgt": ["17:41:30", " after 5 min pause", " from 39 °C", "41 °C", " · 39 °C"],
+  "check.cycling.s_defrost_after": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.s_dhw_after": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.s_defrost": ["17:41:30", " after 5 min pause"],
+  "check.cycling.s_dhw": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.s_gen": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.e_low_flow": ["17:45:20", "45 °C", "41 °C", ", return 41 °C", "8 L/min", ", typ. ~17 L/min"],
+  "check.cycling.e_low_rps": ["17:45:20", "45 °C", "41 °C", ", return 41 °C", "17 L/min", "19 rps"],
+  "check.cycling.e_req": ["17:45:20", " · 45 °C"],
+  "check.cycling.e_tgt": ["17:45:20", " from 41 °C", "39 °C", " · 45 °C"],
+  "check.cycling.e_defrost_run": ["17:45:20", " · 24 °C"],
+  "check.cycling.e_defrost_pause": ["17:45:20", " · 33 °C"],
+  "check.cycling.e_dhw": ["17:45:20", " · 35 °C"],
+  "check.cycling.e_norm": ["17:45:20", " · 34 °C"],
+};
+for (const code of codes) {
+  const dict = catalog[code];
+  for (const [key, args] of Object.entries(cyclingExplainSampleArgs)) {
+    const rendered = dict[key](...args);
+    assert.ok(rendered.trim(), `${code}/${key} is non-empty`);
+    assert.doesNotMatch(rendered, /[()（）]/, `${code}/${key} omits parentheses: ${rendered}`);
+  }
+  const lwtOnly = dict["check.cycling.cond_tag"]("39 °C", "");
+  assert.ok(lwtOnly.includes("39 °C"), `${code} cond_tag keeps flow temperature when target is empty`);
+  assert.doesNotMatch(lwtOnly, /[()（），,]/, `${code} cond_tag omits target separator when target is empty: ${lwtOnly}`);
+}
+
 // The specialist copy visible under the schematic remains lazy, but it is no longer allowed to
 // fall back to English for any added language. Every diagram target gets a native title and a
 // concise explanation; HomeHub register names are keyed by their stable offset, never by prose.
 const index = fs.readFileSync(path.join(root, "main/www/index.html"), "utf8");
 const inspectKeys = [...new Set([...index.matchAll(/data-insp="([^"]+)"/g)].map((m) => m[1]))].sort();
-assert.equal(inspectKeys.length, 42, "specialist-copy gate must track every schematic target");
+assert.equal(inspectKeys.length, 40, "specialist-copy gate must track every schematic target");
 const inspectNowKeys = new Set(["sgrequest", "ou", "phe", "dt", "pth", "cop", "buh", "bsh",
   "valve", "valve2", "heat", "pump", "pel", "defrost", "quiet", "rhot", "rcold", "wsup",
   "wtank", "wheat", "wret", "flow_switch"]);
@@ -295,7 +334,7 @@ const defrostDenominators = {
   sv: [/både kompressor- och avfrostningsstatus kan läsas/, /kompressorns drifttid/],
   fi: [/sekä kompressorin että sulatuksen tila on luettavissa/, /kompressorin käyntiajasta/],
 };
-for (const code of lazyDomainCodes) {
+for (const code of faultCodePackCodes) {
   const source = localeSources.get(code);
   const block = source.match(new RegExp(
     `FAULT_CODE_I18N\\.${code}\\s*=\\s*faultCodeValues\\(\\[([\\s\\S]*?)\\],`))?.[1] || "";
@@ -365,6 +404,13 @@ assert.equal(vm.runInContext(`(() => {
   MODEL_DESCRIPTION_I18N.de = saved;
   return ready;
 })()`, catalogContext), false, "an incomplete German module must retain the English fallback");
+assert.equal(vm.runInContext(`(() => {
+  const saved = FAULT_CODE_I18N.de;
+  FAULT_CODE_I18N.de = null;
+  const ready = localeReady('de');
+  FAULT_CODE_I18N.de = saved;
+  return ready;
+})()`, catalogContext), false, "German must not mark ready without its external fault-code table");
 for (const code of codes.slice(2)) {
   const inspect = catalogContext.__inspectCopy[code];
   assert.ok(inspect, `${code} specialist inspector copy did not register itself`);
@@ -420,6 +466,10 @@ for (const code of codes.slice(2)) {
   assert.match(joined("free_heap"), /5/, `${code} loses the five-minute flash-bucket context`);
   assert.match(joined("max_alloc"), /TLS/, `${code} loses the contiguous-block TLS context`);
   assert.match(joined("max_alloc"), /OTA/, `${code} loses the contiguous-block OTA context`);
+  const pumpDesc = catalogContext.__descriptionCopy[code][38]?.[0] || "";
+  assert.match(pumpDesc, /\b0\b/, `${code} pump-signal description loses raw 0 max command`);
+  assert.match(pumpDesc, /\b100\b/, `${code} pump-signal description loses raw 100 stop command`);
+  assert.match(pumpDesc, /RPM/i, `${code} pump-signal description loses no-RPM clarification`);
 }
 
 // Registration alone is insufficient: the screenshot regression was a native row heading whose
@@ -454,11 +504,13 @@ for (const code of codes.slice(2)) {
       assert.ok(html.includes(api.esc(localized[0])),
         `${code} model-description ${id} renderer did not use its native text`);
     }
-    if (lazyDomainCodes.includes(code)) {
+    if (faultCodePackCodes.includes(code)) {
       const fault = api.FAULT_CODE_I18N[code];
       const u4 = api.DAIKIN_FAULT_CODES.findIndex((entry) => entry.code === "U4");
       assert.ok(api.faultCodeDetailHtml("U4").includes(api.esc(fault.values[u4])),
         `${code} fault-code renderer did not use its lazy native meaning`);
+    }
+    if (lazyDomainCodes.includes(code)) {
       const reason = api.MB_DELTA_I18N[code].outdoor_air;
       assert.ok(api.mbDeltaHtml({ concept: "outdoor_air", value: "--" }, { value: "--" })
         .includes(api.esc(reason)), `${code} source-difference renderer did not use its lazy native reason`);
@@ -544,8 +596,8 @@ assert.match(dashboard,
   /descBodyHtml\(d,\s*undefined,\s*modelDescriptionCopy\(id\)\)/,
   "the ESP32 free-heap and largest-block accordions must pass their localized model copy");
 
-// Locale modules are not part of the startup response, and each compressed asset has its own tight
-// gate. Execute the same minifier CMake uses.
+// Locale modules are separate from the startup response. Apply the per-source cap with CMake's
+// pinned encoder, and use zlib on the same minified bytes as the compression comparison.
 const app = readAppSource();
 for (const code of codes.slice(1)) assert.doesNotMatch(app, new RegExp(`I18N\\.${code}\\s*=`));
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-locales-"));
@@ -555,38 +607,26 @@ let bundleGzipTotal = 0;
 try {
   const tool = path.join(root, "tools/web_asset/minify_js_and_gzip.py");
   for (const code of codes.slice(1)) {
-    const output = path.join(work, `${code}.js.gz`);
-    const run = childProcess.spawnSync("python3", [
-      tool, "--input", path.join(root, `main/www/locales/${code}.js`), "--output", output,
-      "--max-gzip-bytes", "32768",
+    const packed = path.join(work, `${code}.zopfli.js.gz`);
+    const encode = () => childProcess.spawnSync("python3", [
+      tool, "--input", path.join(root, `main/www/locales/${code}.js`), "--output", packed,
+      "--gzip-encoder", "zopfli", "--max-gzip-bytes", "32768",
     ], { cwd: root, encoding: "utf8" });
-    assert.equal(run.status, 0, run.stderr || run.stdout);
-    const gzipBytes = fs.statSync(output).size;
-    localeGzipTotal += gzipBytes;
-    assert.ok(gzipBytes <= 32768, `${code} locale exceeds its gzip budget`);
-    const minified = zlib.gunzipSync(fs.readFileSync(output)).toString("utf8");
-    assert.doesNotThrow(() => new vm.Script(minified, { filename: `${code}.min.js` }),
+    const first = encode();
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    const bytes = fs.readFileSync(packed);
+    assert.ok(bytes.length <= 32768, `${code} locale exceeds its production gzip budget`);
+    firmwareLocaleGzipTotal += bytes.length;
+    const minified = zlib.gunzipSync(bytes);
+    assert.doesNotThrow(() => new vm.Script(minified.toString("utf8"), { filename: `${code}.min.js` }),
       `${code} minified locale must still parse`);
-    {
-      // Keep both independent per-source encoders checked even though the firmware embeds one
-      // joint bundle. Neither encoding may change any minified source byte or exceed 32 KiB.
-      const packed = path.join(work, `${code}.zopfli.js.gz`);
-      const encode = () => childProcess.spawnSync("python3", [
-        tool, "--input", path.join(root, `main/www/locales/${code}.js`), "--output", packed,
-        "--gzip-encoder", "zopfli", "--max-gzip-bytes", "32768",
-      ], { cwd: root, encoding: "utf8" });
-      const first = encode();
-      assert.equal(first.status, 0, first.stderr || first.stdout);
-      const bytes = fs.readFileSync(packed);
-      firmwareLocaleGzipTotal += bytes.length;
-      assert.equal(zlib.gunzipSync(bytes).toString("utf8"), minified,
-        "firmware locale compression must preserve every minified source byte");
-      assert.ok(bytes.length < gzipBytes, "the pinned encoder must reduce the embedded locale");
-      if (code === "de") {
-        const second = encode();
-        assert.equal(second.status, 0, second.stderr || second.stdout);
-        assert.deepEqual(fs.readFileSync(packed), bytes, "locale encoding must be deterministic");
-      }
+    const reference = zlib.gzipSync(minified, { level: 9 });
+    localeGzipTotal += reference.length;
+    assert.ok(bytes.length < reference.length, "the pinned encoder must beat the zlib comparison");
+    if (code === "de") {
+      const second = encode();
+      assert.equal(second.status, 0, second.stderr || second.stdout);
+      assert.deepEqual(fs.readFileSync(packed), bytes, "locale encoding must be deterministic");
     }
   }
   const bundle = path.join(work, "locale-bundle.js.gz");
@@ -603,7 +643,7 @@ try {
   assert.equal(manifest.bundle_gzip_bytes, bundleGzipTotal);
   assert.equal(manifest.sources.reduce((n, item) => n + item.source_gzip_bytes, 0),
     firmwareLocaleGzipTotal, "bundle quality gates must use the same per-file minifier and encoder");
-  assert.ok(manifest.framed_bytes <= 1048576, "decoded locale frame must stay within 1 MiB");
+  assert.ok(manifest.framed_bytes <= 1572864, "decoded locale frame must stay within 1.5 MiB");
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }

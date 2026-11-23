@@ -4,6 +4,7 @@
 // touch a converter / CRC / the config model / a discovery payload — the riskiest, silently-wrong
 // parts.
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -53,7 +54,11 @@
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
+#include "logic/cycling_run_context.hpp"
 #include "logic/defrost_start.hpp"
+#include "logic/hydronic_hourly.hpp"
+#include "logic/hydronic_input.hpp"
+#include "logic/hydronic_payload.hpp"
 #include "logic/stop_context_input.hpp"
 #include "logic/observation_hourly.hpp"
 #include "checkup_population_fixture.hpp"
@@ -179,7 +184,8 @@ void  operator delete[](void* p, size_t) noexcept { std::free(p); }
 using namespace daik;
 
 static void test_value_def_layout() {
-    CHECK(sizeof(ValueDef) == 8 + sizeof(const char*));
+    CHECK(offsetof(ValueDef, label) == alignof(const char*));
+    CHECK(sizeof(ValueDef) == alignof(const char*) + sizeof(const char*));
     const ValueDef empty;
     CHECK(empty.reg == 0 && empty.offset == 0 && empty.conv == 0 && empty.size == 0 &&
           empty.type == 0 && !empty.no_publish && empty.label == nullptr);
@@ -191,6 +197,14 @@ static void test_value_def_layout() {
     CHECK(detect_only.reg == row.reg && detect_only.offset == row.offset &&
           detect_only.conv == row.conv && detect_only.size == row.size &&
           detect_only.type == row.type && detect_only.no_publish && detect_only.label == label);
+    constexpr ValueDef edge{255, 63, 1023, 7, -8, "edge", true};
+    CHECK(edge.reg == 255 && edge.offset == 63 && edge.conv == 1023 && edge.size == 7 &&
+          edge.type == -8 && edge.no_publish);
+    const int invalid[][5] = {
+        {-1, 0, 0, 0, 0},   {256, 0, 0, 0, 0}, {0, -1, 0, 0, 0}, {0, 64, 0, 0, 0}, {0, 0, -1, 0, 0},
+        {0, 0, 1024, 0, 0}, {0, 0, 0, -1, 0},  {0, 0, 0, 8, 0},  {0, 0, 0, 0, -9}, {0, 0, 0, 0, 8}};
+    for (const auto& v : invalid)
+        CHECK(!ValueDef::representable(rt(v[0]), rt(v[1]), rt(v[2]), rt(v[3]), rt(v[4])));
 }
 
 static void test_http_cache() {
@@ -5605,6 +5619,9 @@ static void test_heartbeat() {
           "\"modbus_cycling_classified_runtime_s\":null,"
           "\"modbus_cycling_censored_runtime_s\":null,"
           "\"modbus_cycling_runtime_saturated\":null}");
+    const std::string j_reserved = build_heartbeat_json(f, daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
+    CHECK(j_reserved == j);
+    CHECK(j_reserved.capacity() >= j.size() + daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
     HeartbeatFields      cycling_fields;
     logic::CheckupWindow cycling_window;
     cycling_fields.cycling = checkup_cycling_evidence(cycling_window, true);
@@ -9137,13 +9154,29 @@ static void test_modbus_profile() {
     CHECK(dec.is_definitive);
     CHECK(dec.is_affirmative);
 
-    // Negative failure detail on Exception confirms HomeHub
+    // Negative failure detail (synthetic transport/internal sentinel) still confirms HomeHub
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, -1, 79, 0);
     CHECK(dec.next_profile == ModbusProfile::HomeHub);
     CHECK(dec.link_ok);
     CHECK(!dec.count_failure);
     CHECK(dec.is_definitive);
     CHECK(dec.is_affirmative);
+
+    // Wire Modbus exception 0x00 (failure_detail == 0) must stay non-affirmative through retry
+    // exhaustion so it falls back cleanly rather than posing as affirmatively confirmed HomeHub.
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x00, 79, 0, 0);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x00, 79, 0, 3);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(!dec.is_affirmative);
 
     // Invalid raw value (0 bar) with 3 retries falls back to HomeHub
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, 0, 3);
@@ -9226,8 +9259,25 @@ static void test_modbus_profile() {
         CHECK(tracker.affirmative_profile == ModbusProfile::HomeHub);
         CHECK(tracker.on_socket_open("192.0.2.51", 502, 2) == ModbusProfile::HomeHub);
 
+        // Wire exception 0x00 stays Probing across retries, then falls back without becoming
+        // affirmative (regression guard against `failure_detail <= 0`).
+        CHECK(tracker.on_socket_open("192.0.2.52", 502, 1) == ModbusProfile::Auto);
+        for (int attempt = 1; attempt <= 2; ++attempt) {
+            d = tracker.evaluate_probe(MbFailureType::Exception, 0x00, 79, 0, 100);
+            CHECK(!d.is_definitive && !d.is_affirmative);
+            CHECK(d.next_profile == ModbusProfile::Auto);
+            CHECK(tracker.profile_basis == ModbusProfileBasis::Probing);
+            CHECK(tracker.consecutive_failures == attempt);
+        }
+        d = tracker.evaluate_probe(MbFailureType::Exception, 0x00, 79, 0, 100);
+        CHECK(d.is_definitive && !d.is_affirmative);
+        CHECK(d.next_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.active_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.affirmative_profile == ModbusProfile::Auto);
+        CHECK(tracker.profile_basis == ModbusProfileBasis::Fallback);
+
         // Port change resets target
-        CHECK(tracker.on_socket_open("192.0.2.51", 503, 2) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.52", 503, 1) == ModbusProfile::Auto);
 
         // Affirmative MB_UNSUPPORTED on tracker
         d = tracker.evaluate_probe(MbFailureType::None, 0, 79, MB_UNSUPPORTED);
@@ -9248,7 +9298,7 @@ static void test_modbus_profile() {
         CHECK(d.is_affirmative);
         CHECK(tracker.active_profile == ModbusProfile::Altherma4);
 
-        // Exception with failure_detail <= 0 confirms HomeHub
+        // Synthetic negative failure_detail (< 0) confirms HomeHub (wire 0x00 stays Fallback)
         CHECK(tracker.on_socket_open("192.0.2.54", 502, 1) == ModbusProfile::Auto);
         d = tracker.evaluate_probe(MbFailureType::Exception, -1, 79, 0);
         CHECK(d.is_definitive);
@@ -10180,9 +10230,16 @@ static void test_hp_probe() {
     bool        unimpl = false;
     CHECK(probe_decode_one(two, 2, 0, 2, 105, single, unimpl) && !unimpl);
     CHECK(single.conv == 105 && single.value == 26.6 && single.alias_count == 0);
+    const uint8_t payload[] = {0x2A, 0x0A, 0x01, 0x77};
+    CHECK(probe_decode_one(payload, sizeof(payload), 1, 2, 105, single, unimpl) && !unimpl &&
+          single.conv == 105 && single.ok && single.value == 26.6);
+    const int shifted_rows = probe_sweep(payload, sizeof(payload), 1, 2, d, PROBE_MAX_DECODES);
+    const ProbeDecode* shifted_temperature = probe_find(d, shifted_rows, 105);
+    CHECK(shifted_temperature && shifted_temperature->ok && shifted_temperature->value == 26.6);
     // An id the catalog documents but this firmware has not ported reports UNIMPLEMENTED — a real
     // answer for a contributor holding a converter id from the reference tables.
     CHECK(!probe_decode_one(two, 2, 0, 2, 462, single, unimpl) && unimpl);
+    CHECK(!probe_decode_one(two, 2, 0, 2, 1024, single, unimpl) && unimpl);
     CHECK(!probe_decode_one(two, 2, 1, 2, 105, single, unimpl) && !unimpl);
     CHECK(!probe_decode_one(nullptr, 2, 0, 2, 105, single, unimpl));
     // A converter that runs and refuses is a successful decode with ok=false, not a failure.
@@ -16595,6 +16652,269 @@ static logic::DhwLossState dhw_past_hold() {
     return st;
 }
 
+static void test_dhw_loss_trace() {
+    using namespace logic;
+    constexpr int64_t us = 1000000;
+    CHECK(sizeof(DhwLossTraceWindow) == 16);
+    CHECK(sizeof(DhwLossTrace) <= 416 && sizeof(DhwLossTimeline) <= 416);
+    CHECK(DHW_LOSS_WINDOW_S * DHW_LOSS_TRACE_CAPACITY == DHW_LOSS_TRACE_WINDOW_S);
+    // No additional persisted layout enlargement was added for the runtime-only DHW trace.
+    CHECK(sizeof(DhwLossBucket) == 20 && sizeof(CheckupJournalPayload) == 160);
+
+    constexpr int64_t frame_us = 100 * us;
+    constexpr int64_t unix_s   = 1'700'000'100;
+    CHECK(dhw_loss_wall_anchor_s(100, frame_us + 200000, frame_us + 450000, unix_s, 600) == unix_s);
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us + 5 * us, unix_s + 5, 0));
+    // Even when monotonic reads agree, the time source's millisecond can straddle a second.
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us + 100500, frame_us + 100500, unix_s, 100));
+    CHECK(dhw_loss_wall_anchor_s(100, frame_us, frame_us, UINT32_MAX, 999) == UINT32_MAX);
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us - 1, frame_us, unix_s, 0));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us + 1, frame_us, unix_s, 0));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us, -1, 0));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us, int64_t{UINT32_MAX} + 1, 0));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us, unix_s, -1));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us, unix_s, 1000));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us + us, frame_us + us, 1, 0));
+
+    DhwLossTrace trace;
+    // Compact fixture notation below uses end+duration; production admission receives real
+    // endpoints.
+    auto record = [&trace](int64_t end_us, uint32_t duration_s, int rate, uint32_t observed,
+                           bool pump, bool draw) {
+        return trace.record(end_us - static_cast<int64_t>(duration_s) * 1000000, end_us, rate,
+                            observed, pump, draw);
+    };
+    DhwLossTimeline out;
+    out.epoch = 99;
+    out.count = 24;
+    CHECK(!trace.snapshot(out, 0, CHECKUP_MAX_GAP_S));
+    CHECK(out.epoch == 0 && out.count == 0 && !out.observed && !out.live);
+    CHECK(!record(3600 * us, 3600, 45, 3600, true, true));
+    trace.observe(-1, true);
+    trace.observe((int64_t{UINT32_MAX} + 1) * us, true);
+    CHECK(!trace.begun);
+    trace.observe(100 * us, false);
+    CHECK(trace.snapshot(out, 100 * us, CHECKUP_MAX_GAP_S));
+    CHECK(out.epoch == 1 && out.since_s == 100 && out.count == 0 && !out.observed);
+    CHECK(!trace.snapshot(out, -1, CHECKUP_MAX_GAP_S));
+    CHECK(!trace.snapshot(out, (int64_t{UINT32_MAX} + 1) * us, CHECKUP_MAX_GAP_S));
+    CHECK(!trace.snapshot(out, 99 * us, CHECKUP_MAX_GAP_S));
+    trace.observe(101 * us, true);
+    CHECK(trace.snapshot(out, 116 * us, CHECKUP_MAX_GAP_S) && out.live);
+    CHECK(out.observed && out.observed_end_s == 101);
+    CHECK(trace.snapshot(out, 117 * us, CHECKUP_MAX_GAP_S) && !out.live);
+
+    constexpr int64_t fractional_read_us = 118 * us + us / 4;
+    constexpr int64_t fresh_deadline_us  = fractional_read_us + CHECKUP_MAX_GAP_S * us;
+    trace.observe(fractional_read_us, true);
+    CHECK(!trace.snapshot(out, fractional_read_us - 1, CHECKUP_MAX_GAP_S));
+    CHECK(!out.epoch && !out.live);
+    trace.observe(fresh_deadline_us - us, false); // A more recent incomplete sweep earns no time.
+    CHECK(trace.snapshot(out, fresh_deadline_us, CHECKUP_MAX_GAP_S) && out.live);
+    CHECK(trace.snapshot(out, fresh_deadline_us + 1, CHECKUP_MAX_GAP_S) && !out.live);
+    CHECK(out.observed && out.observed_end_s == 118 && out.window_end_s == 133);
+
+    trace.observe(50 * us, false); // monotonic rollback retires, never re-dates, old evidence
+    CHECK(trace.epoch == 2 && trace.count == 0 && trace.since_s == 50 && !trace.observed);
+    trace.epoch = UINT32_MAX;
+    trace.reset();
+    CHECK(trace.epoch == 1 && !trace.begun && trace.count == 0);
+
+    trace.observe(0, true);
+    trace.observe(3600 * us, true);
+    CHECK(!record(-1, 3600, 45, 3600, false, false));
+    CHECK(!record((int64_t{UINT32_MAX} + 1) * us, 3600, 45, 3600, false, false));
+    CHECK(!record(3600 * us, 3599, 45, 3599, false, false));
+    CHECK(!record(3600 * us, UINT16_MAX + 1u, 45, 3600, false, false));
+    CHECK(!record(3600 * us, 3600, -1, 3600, false, false));
+    CHECK(!record(3600 * us, 3600, 901, 3600, false, false));
+    CHECK(!record(3600 * us, 3600, 45, 3601, false, false));
+    CHECK(!record(3599 * us, 3600, 45, 3600, false, false));
+    CHECK(!record(3601 * us, 3600, 45, 3600, false, false));
+    CHECK(record(3600 * us, 3600, 0, 3590, false, false)); // zero is measured, not absent
+    CHECK(!record(3600 * us, 3600, 45, 3600, true, true)); // duplicate/overlap
+    CHECK(trace.snapshot(out, 3600 * us, CHECKUP_MAX_GAP_S));
+    CHECK(out.count == 1 && out.windows[0].start_s == 0 && out.windows[0].end_s == 3600);
+    CHECK(out.windows[0].rate_tenths == 0 && out.windows[0].observed_s == 3590);
+    CHECK(!out.windows[0].pump_marker && !out.windows[0].draw_marker);
+    trace.reset();
+    trace.observe(100 * us, true);
+    trace.observe(3600 * us, true);
+    CHECK(!record(3600 * us, 3600, 45, 3600, false, false)); // before this epoch
+    CHECK(!trace.record(2 * us, us, 45, 0, false, false));   // reversed endpoints
+    trace.observe((UINT16_MAX + 1LL) * us, true);
+    CHECK(!trace.record(0, (UINT16_MAX + 1LL) * us, 45, 3600, false, false));
+
+    // Real subsecond endpoints must stay adjacent after independent whole-second quantization.
+    trace.reset();
+    trace.observe(1900000, true);
+    trace.observe(3602100001LL, true);
+    CHECK(!trace.record(1900000, 3602100000LL, 45, 3600, true, false));
+    trace.reset();
+    trace.observe(1900000, true);
+    trace.observe(3602100000LL, true);
+    CHECK(trace.record(1900000, 3602100000LL, 45, 3600, true, false));
+    trace.observe(7202200000LL, true);
+    CHECK(trace.record(3602100000LL, 7202200000LL, 44, 3600, false, true));
+    CHECK(trace.snapshot(out, 7202200000LL, CHECKUP_MAX_GAP_S));
+    CHECK(out.windows[0].start_s == 1 && out.windows[0].end_s == 3602);
+    CHECK(out.windows[1].start_s == out.windows[0].end_s && out.windows[1].end_s == 7202);
+    CHECK(out.windows[0].observed_s == 3600 && out.windows[0].rate_tenths == 45);
+    const uint32_t epoch_before_rollback = trace.epoch;
+    trace.observe(7202199999LL, false);
+    CHECK(trace.epoch != epoch_before_rollback && !trace.count && !trace.observed);
+    trace.reset();
+    trace.observe(1900000, true);
+    trace.observe(3632800000LL, true);
+    CHECK(trace.record(1900000, 3632800000LL, 44, 3630, false, false));
+    CHECK(trace.snapshot(out, 3632800000LL, CHECKUP_MAX_GAP_S));
+    CHECK(out.windows[0].end_s - out.windows[0].start_s == 3631); // evaluator duration is 3630
+
+    // More than a day of adjacent completions wraps without overwriting an unexpired window.
+    trace.reset();
+    trace.observe(0, true);
+    for (uint32_t hour = 1; hour <= 48; ++hour) {
+        trace.observe(hour * 3600LL * us, true);
+        CHECK(record(hour * 3600LL * us, 3600, static_cast<int>(hour), 3600, hour % 2 == 0,
+                     hour % 3 == 0));
+        CHECK(trace.count == std::min<uint32_t>(hour, 24));
+    }
+    CHECK(trace.snapshot(out, 48 * 3600LL * us, CHECKUP_MAX_GAP_S));
+    CHECK(out.count == 24 && out.windows[0].end_s == 25 * 3600);
+    CHECK(out.windows[23].end_s == 48 * 3600 && out.windows[23].rate_tenths == 48);
+    CHECK(out.windows[23].pump_marker && out.windows[23].draw_marker);
+    // An exact cutoff is excluded; stopped producers age on reads, not just the next poll.
+    CHECK(trace.snapshot(out, (49 * 3600LL - 1) * us, CHECKUP_MAX_GAP_S) && out.count == 24);
+    CHECK(trace.snapshot(out, 49 * 3600LL * us, CHECKUP_MAX_GAP_S) && out.count == 23);
+    CHECK(trace.snapshot(out, 72 * 3600LL * us, CHECKUP_MAX_GAP_S) && out.count == 0);
+    CHECK(!out.live && out.observed_end_s == 48 * 3600);
+    // Capacity rejection is defensive for inconsistent/fuzzed state; a real >=1h stream cannot hit
+    // it.
+    trace.reset();
+    trace.observe(0, true);
+    trace.observe(3600 * us, true);
+    trace.count             = 24;
+    trace.windows[23].end_s = 0; // corrupt-count fixture reaches the capacity guard, not overlap
+    CHECK(!record(3600 * us, 3600, 45, 3600, false, false));
+    trace.reset();
+
+    auto readable = [] {
+        CheckupSample s;
+        s.r5t_ok = s.valve_known = s.pump_known = s.bsh_known = true;
+        s.r5t_tenths                                          = 500;
+        return s;
+    };
+    // Null optional detail dispatches to the real aggregate-only evaluator, not an early no-op.
+    {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        dhw_loss_step_traced(st, b, readable(), nullptr, 0);
+        dhw_loss_step_traced(st, b, readable(), nullptr, us);
+        CHECK(st.last_us == us && st.segment_start_us == us && b.windows == 0);
+    }
+    for (unsigned missing = 0; missing < 4; ++missing) {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        if (missing == 0) sample.r5t_tenths = -1;
+        if (missing == 1) sample.valve_known = false;
+        if (missing == 2) sample.pump_known = false;
+        if (missing == 3) sample.bsh_known = false;
+        dhw_loss_step_traced(st, b, sample, &exact, 0);
+        CHECK(exact.snapshot(out, 0, CHECKUP_MAX_GAP_S) && !out.observed && !out.live);
+        CHECK(exact.count == 0);
+    }
+    // Capture exactly where acceptance occurs, before context/start are reset for the next hour.
+    {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        for (int sec = 0; sec <= 7201; ++sec) {
+            sample.r5t_tenths = 500 - std::min(3600, std::max(0, sec - 1)) * 45 / 3600;
+            sample.pump_on    = sec == 100;
+            dhw_loss_step_traced(st, b, sample, &exact, sec * us);
+        }
+        CHECK(b.windows == 2 && exact.count == 2);
+        CHECK(b.max_loss_tenths_k_h == 45 && b.pump_windows == 1 && b.draw_windows == 1);
+        CHECK(exact.snapshot(out, 7201 * us, CHECKUP_MAX_GAP_S));
+        const auto& first = out.windows[0];
+        CHECK(first.start_s == 1 && first.end_s == 3601 && first.rate_tenths == 45);
+        CHECK(first.observed_s == 3600 && first.pump_marker && first.draw_marker);
+        const auto& second = out.windows[1];
+        CHECK(second.start_s == first.end_s && second.end_s == 7201);
+        CHECK(second.rate_tenths == 0 && !second.pump_marker && !second.draw_marker);
+    }
+    // Endpoint grace is the existing evaluator's actual interval, not a forced 60-minute bar.
+    for (bool late : {false, true}) {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        const int     finish = late ? 3632 : 3631;
+        for (int sec = 0; sec <= finish; ++sec) {
+            sample.r5t_tenths = 500 - std::min(3600, std::max(0, sec - 1)) * 12 / 3600;
+            sample.r5t_ok     = sec < 3601 || sec >= (late ? 3631 : 3630);
+            dhw_loss_step_traced(st, b, sample, &exact, sec * us);
+        }
+        CHECK(exact.count == (late ? 0 : 1));
+        CHECK(b.windows == exact.count);
+        if (!late) {
+            CHECK(exact.snapshot(out, finish * us, CHECKUP_MAX_GAP_S));
+            CHECK(out.windows[0].end_s - out.windows[0].start_s == 3630);
+            CHECK(out.windows[0].observed_s == b.observed_s);
+            CHECK(out.windows[0].rate_tenths == b.max_loss_tenths_k_h);
+        } else {
+            CHECK(b.aborts == 1 && (b.abort_reasons & DHW_ABORT_READING));
+        }
+    }
+    {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        dhw_loss_step_traced(st, b, sample, &exact, 0);
+        dhw_loss_step_traced(st, b, sample, &exact, us);
+        sample.valve_dhw = true;
+        dhw_loss_step_traced(st, b, sample, &exact, 2 * us);
+        CHECK(b.aborts == 1 && exact.count == 0);
+        sample.valve_dhw  = false;
+        sample.r5t_tenths = 901;
+        dhw_loss_step_traced(st, b, sample, &exact, 3 * us);
+        CHECK(exact.count == 0);
+    }
+    {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        for (int sec = 0; sec <= 500; ++sec) {
+            sample.r5t_ok = sec < 2;
+            dhw_loss_step_traced(st, b, sample, &exact, sec * us);
+        }
+        CHECK(b.aborts == 1 && (b.abort_reasons & DHW_ABORT_BLIND));
+        CHECK(exact.count == 0);
+    }
+    {
+        auto          prior = dhw_past_hold();
+        DhwLossBucket b;
+        auto          sample = readable();
+        for (int sec = 0; sec <= 1801; ++sec) dhw_loss_step(prior, b, sample, sec * us);
+        const auto   carry = dhw_loss_checkpoint(prior, 1801 * us);
+        DhwLossState adopted;
+        dhw_loss_adopt(adopted, carry, 100 * us);
+        CHECK(adopted.segment_carried_s > 0);
+        DhwLossTrace exact;
+        for (int sec = 100; sec <= 5400; ++sec)
+            dhw_loss_step_traced(adopted, b, sample, &exact, sec * us);
+        CHECK(b.windows == 2 && exact.count == 1); // carried hour has no fabricated same-boot start
+        CHECK(exact.snapshot(out, 5400 * us, CHECKUP_MAX_GAP_S));
+        CHECK(out.windows[0].start_s >= 100 &&
+              out.windows[0].end_s - out.windows[0].start_s == 3600);
+    }
+}
+
 // ── The rolling X10A operating observation (logic/checkup.hpp, issue legacy-208)
 // ───────────────────── Three things are worth testing here and one of them is worth most of the
 // file:
@@ -17613,8 +17933,22 @@ static void test_defrost_start_context() {
               .state == InstrumentState::Withheld);
 }
 
-static void test_checkup() {
+static void test_checkup(bool with_trace) {
     using namespace logic;
+    // The unchanged physics matrix below must exercise both compiled forms of the one rule.
+    // Detail may independently expire/backclock across fixtures; it must never affect aggregates.
+    // Static test-only context is visible inside the existing noncapturing fixture lambdas too.
+    static DhwLossTrace physics_trace;
+    static bool         traced = false;
+    traced                     = with_trace;
+    physics_trace.reset();
+    static const auto dhw_loss_step = [](DhwLossState& st, DhwLossBucket& bucket,
+                                         const CheckupSample& sample, int64_t now_us) {
+        if (traced)
+            logic::dhw_loss_step_traced(st, bucket, sample, &physics_trace, now_us);
+        else
+            logic::dhw_loss_step(st, bucket, sample, now_us);
+    };
 
     // --- the locator, and the collision it exists for ------------------------------------------
     {
@@ -19068,6 +19402,43 @@ static void test_checkup() {
         CHECK(r.buf[0].starts == 0 && (r.buf[0].flags & CHECKUP_F_FAULT) == 0);
     }
 
+    {
+        // A backwards clock is not continuous off-pump evidence in either compiled evaluator.
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        CheckupSample s;
+        s.r5t_ok = s.valve_known = s.pump_known = s.bsh_known = true;
+        s.r5t_tenths                                          = 500;
+        s.circulation_configured = s.circulation_known = true;
+        dhw_loss_step(st, b, s, 10'000'000);
+        dhw_loss_step(st, b, s, 11'000'000);
+        CHECK(st.segment_start_us == 11'000'000 && st.circulation_off_run_s == 1);
+        dhw_loss_step(st, b, s, 10'000'000);
+        CHECK(st.last_us == 10'000'000 && st.circulation_off_run_s == 0 && b.windows == 0 &&
+              b.observed_s == 0);
+    }
+    {
+        // A configured but unread external pump grants neither off/on nor known evidence seconds.
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        CheckupSample s;
+        s.r5t_ok = s.valve_known = s.pump_known = s.bsh_known = true;
+        s.r5t_tenths                                          = 500;
+        s.circulation_configured = s.circulation_known = true;
+        for (int sec = 0; sec <= 2; ++sec) dhw_loss_step(st, b, s, int64_t{sec} * 1'000'000);
+        CHECK(st.circulation_off_run_s == 2 && st.segment_circulation_known_s == 1);
+        s.circulation_known = false;
+        s.circulation_on =
+            true; // an unread stale value is not a current witness in either direction
+        dhw_loss_step(st, b, s, 3'000'000);
+        CHECK(st.circulation_off_run_s == 0 && st.segment_circulation_known_s == 1 &&
+              st.segment_circulation_on_s == 0 && st.segment_blind_s == 0);
+        // A numerically invalid tank reading on a continuous sample ends, never completes, it.
+        s.r5t_tenths = -1;
+        dhw_loss_step(st, b, s, 4'000'000);
+        CHECK(st.segment_start_us < 0 && b.aborts == 1 &&
+              (b.abort_reasons & DHW_ABORT_READING) != 0 && b.windows == 0 && b.observed_s == 0);
+    }
     {
         // DHW cooling is built from clean, non-overlapping one-hour R5T windows. With actual Shelly
         // power known OFF continuously, a 1.0 K/h decline becomes attributable only after the
@@ -22862,6 +23233,80 @@ static void test_refrigerant_service() {
           one_sensor.high_pressure.max_tenths == 200 &&
           one_sensor.high_pressure.mean_tenths() == 200);
 
+    // Published per-input counts must describe the actual accumulated population: the missing
+    // high-pressure page above contributes no zero and does not borrow the other transducer.
+    const auto partial_population = refrigerant_service_snapshot(one_sensor, 304000000, c);
+    CHECK(partial_population.samples == 4 && partial_population.high_pressure.samples == 3);
+    CHECK(partial_population.low_pressure.samples == 4 && partial_population.rps.samples == 4);
+    CHECK(partial_population.discharge.samples == 4 && partial_population.eev_command.samples == 4);
+    CHECK(partial_population.high_pressure.mean_tenths == 200);
+    CHECK(partial_population.source_generation == 11);
+    CHECK(partial_population.sources.rps.selected && partial_population.sources.rps.reg == 0x30 &&
+          partial_population.sources.rps.off == 0 && partial_population.sources.rps.conv == 152);
+    CHECK(partial_population.sources.discharge.selected &&
+          partial_population.sources.discharge.reg == 0x20 &&
+          partial_population.sources.discharge.off == 4 &&
+          partial_population.sources.discharge.conv == 105);
+    CHECK(partial_population.sources.eev_command.selected &&
+          partial_population.sources.eev_command.reg == 0x30 &&
+          partial_population.sources.eev_command.off == 3 &&
+          partial_population.sources.eev_command.conv == 151);
+    CHECK(partial_population.sources.high_pressure.selected &&
+          partial_population.sources.high_pressure.reg == 0x62 &&
+          partial_population.sources.high_pressure.off == 15 &&
+          partial_population.sources.high_pressure.conv == 105);
+    CHECK(partial_population.sources.low_pressure.selected &&
+          partial_population.sources.low_pressure.reg == 0x20 &&
+          partial_population.sources.low_pressure.off == 14 &&
+          partial_population.sources.low_pressure.conv == 105);
+
+    RefrigerantServiceTracker no_high_reading, zero_eev_command;
+    refrigerant_service_record(no_high_reading, c, lost_page, 400000000, 13, service_gap_us);
+    const auto absent_population = refrigerant_service_snapshot(no_high_reading, 401000000, c);
+    CHECK(!absent_population.high_pressure.available &&
+          absent_population.high_pressure.samples == 0);
+    CHECK(absent_population.sources.high_pressure.selected &&
+          absent_population.low_pressure.samples == 1);
+    auto measured_zero       = hydronic;
+    measured_zero.eev_tenths = 0;
+    refrigerant_service_record(zero_eev_command, c, measured_zero, 400000000, 13, service_gap_us);
+    const auto zero_population = refrigerant_service_snapshot(zero_eev_command, 401000000, c);
+    CHECK(zero_population.eev_command.available && zero_population.eev_command.samples == 1 &&
+          zero_population.eev_command.min_tenths == 0 &&
+          zero_population.eev_command.mean_tenths == 0 &&
+          zero_population.eev_command.max_tenths == 0);
+
+    const auto expired_population = refrigerant_service_snapshot(one_sensor, 309000001, c);
+    CHECK(expired_population.samples == 0 && expired_population.high_pressure.samples == 0 &&
+          expired_population.low_pressure.samples == 0 &&
+          !expired_population.high_pressure.available);
+    CHECK(expired_population.sources.high_pressure.selected &&
+          expired_population.source_generation == 11);
+    CHECK(one_sensor.high_pressure.samples == 3); // a read-only stale view does not alter retention
+
+    auto changed_coverage               = c;
+    changed_coverage.hydronic_pressure  = false;
+    auto changed_sensor                 = hydronic;
+    changed_sensor.high_pressure_tenths = 99;
+    refrigerant_service_record(one_sensor, changed_coverage, changed_sensor, 305000000, 12,
+                               service_gap_us);
+    const auto changed_population =
+        refrigerant_service_snapshot(one_sensor, 306000000, changed_coverage);
+    CHECK(changed_population.source_generation == 12 && changed_population.samples == 1 &&
+          changed_population.high_pressure.samples == 1 &&
+          changed_population.high_pressure.mean_tenths == 99);
+    CHECK(changed_population.sources.high_pressure.selected &&
+          changed_population.sources.high_pressure.reg == 0x20 &&
+          changed_population.sources.high_pressure.off == 12);
+    RefrigerantServiceCoverage unassigned_pressure;
+    refrigerant_service_cover_row(unassigned_pressure, 0x20, 14, 105, "Low Pressure", true);
+    const auto unassigned_sources = refrigerant_service_sources(unassigned_pressure);
+    CHECK(!unassigned_sources.high_pressure.selected && !unassigned_sources.low_pressure.selected);
+    const auto no_sources = refrigerant_service_sources({});
+    CHECK(!no_sources.rps.selected && !no_sources.discharge.selected &&
+          !no_sources.eev_command.selected && !no_sources.high_pressure.selected &&
+          !no_sources.low_pressure.selected);
+
     RefrigerantServiceSample unknown_valve = s;
     unknown_valve.valve_known              = false;
     CHECK(!refrigerant_service_decide(c, unknown_valve).eligible);
@@ -23253,6 +23698,8 @@ static void test_instrument_registry() {
         {Instrument::PowerLimit2, 2, 0},
         {Instrument::PowerLimit3, 2, 0},
         {Instrument::PowerLimit4, 2, 0},
+        {Instrument::MainZonePump, 0, 0},
+        {Instrument::MainZoneRoomHeatingInput, 2, 0},
     };
     // Every label at every locator coordinate and converter, whether the locator accepts it, and
     // in how many detectable profiles it occurs. A new spelling, a moved row or a changed count
@@ -23348,6 +23795,7 @@ static void test_instrument_registry() {
         {"power_limit_2", 0x62, 7, "Pwr consumption limit 2", true, 2},
         {"power_limit_3", 0x62, 7, "Pwr consumption limit 3", true, 2},
         {"power_limit_4", 0x62, 7, "Pwr consumption limit 4", true, 2},
+        {"main_zone_room_heating_input", 0x62, 7, "Main RT Heating", true, 2},
     };
     constexpr size_t kSpellings          = sizeof(kSpelling) / sizeof(kSpelling[0]);
     int              spelled[kSpellings] = {0};
@@ -24538,6 +24986,14 @@ static void test_checkup_persist() {
     CHECK(hh_cov.rps && hh_cov.valve && hh_cov.mode && hh_cov.bsh && hh_cov.pump && hh_cov.r5t &&
           hh_cov.fault && hh_cov.fault_rows == 1 && hh_cov.flow && !hh_cov.defrost && !hh_cov.buh &&
           !hh_cov.pressure && !hh_cov.retries);
+    const CheckupCoverage hh_fallback_cov =
+        checkup_modbus_coverage(rt(ModbusProfile::HomeHub), ModbusProfileBasis::Fallback);
+    CHECK(hh_fallback_cov.rps && hh_fallback_cov.valve && hh_fallback_cov.mode &&
+          hh_fallback_cov.bsh && hh_fallback_cov.pump && hh_fallback_cov.r5t &&
+          hh_fallback_cov.fault && !hh_fallback_cov.flow);
+    const CheckupCoverage hh_probing_cov =
+        checkup_modbus_coverage(rt(ModbusProfile::HomeHub), ModbusProfileBasis::Probing);
+    CHECK(!hh_probing_cov.rps && !hh_probing_cov.fault && !hh_probing_cov.flow);
     const CheckupCoverage a4_cov = checkup_modbus_coverage(rt(ModbusProfile::Altherma4));
     CHECK(a4_cov.rps && a4_cov.valve && a4_cov.mode && a4_cov.bsh && a4_cov.pump && a4_cov.r5t &&
           a4_cov.fault && a4_cov.fault_rows == 1 && !a4_cov.flow && !a4_cov.defrost &&
@@ -25939,7 +26395,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 16128);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 13536);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -29214,6 +29670,11 @@ static void test_mqtt_publish_gate() {
     // queue it in the outbox that the stop then deletes.
     CHECK(!mqtt_pause_withdraws_online(yes, yes, no));
     CHECK(!mqtt_pause_withdraws_online(no, no, no));
+
+    CHECK(!mqtt_initial_start_deferred(no, no));
+    CHECK(mqtt_initial_start_deferred(yes, no));
+    CHECK(mqtt_initial_start_deferred(no, yes));
+    CHECK(mqtt_initial_start_deferred(yes, yes));
 }
 
 static void test_http_deadline() {
@@ -34022,9 +34483,1610 @@ static void test_working_figure() {
         working_figure_step(clamp_acc, cov, clamp_in);
         CHECK(clamp_acc.pending.heat_ws == INT32_MIN);
     }
+
+    // #339 alignment: Modbus working figure requires Affirmative HomeHub basis
+    CHECK(energy_modbus_coverage(ModbusProfile::HomeHub).supported());
+    CHECK(energy_modbus_coverage(ModbusProfile::HomeHub, ModbusProfileBasis::Affirmative).supported());
+    CHECK(!energy_modbus_coverage(ModbusProfile::HomeHub, ModbusProfileBasis::Probing).supported());
+    CHECK(!energy_modbus_coverage(ModbusProfile::HomeHub, ModbusProfileBasis::Fallback).supported());
+    CHECK(!energy_modbus_coverage(ModbusProfile::Altherma4, ModbusProfileBasis::Affirmative).supported());
+}
+
+namespace hydronic_host_tests {
+using namespace daik::logic;
+constexpr int64_t SECOND = 1000000;
+
+static HydronicSample sample() {
+    HydronicSample s;
+    s.supported = s.command_supported = true;
+    s.leaving_known = s.return_known = s.flow_known = s.rps_known = true;
+    s.leaving_c                                                   = 45;
+    s.return_c                                                    = 35;
+    s.flow_l_min                                                  = 10;
+    s.rps                                                         = 12;
+    s.pump                                                        = HydronicBit::On;
+    s.valve_dhw = s.defrost = s.buh1 = s.buh2 = HydronicBit::Off;
+    s.mode                                    = HydronicMode::Heating;
+    s.phase_supported                         = HYDRONIC_ALL_PHASES;
+    for (auto& phase : s.phase) phase = HydronicBit::Off;
+    s.command_known  = true;
+    s.command_signal = 59.55;
+    return s;
+}
+static HydronicDelta record(HydronicTracker& t, const HydronicSample& s, int64_t now) {
+    return hydronic_record(t, s, now, 0, 1, 1, true);
+}
+static void settle(HydronicTracker& t, const HydronicSample& s, int64_t start = 0) {
+    for (int64_t offset = 0; offset <= HYDRONIC_SETTLE_US; offset += 15 * SECOND)
+        record(t, s, start + offset);
+}
+
+static void test_population_and_boundaries() {
+    auto            s = sample();
+    HydronicTracker t;
+    for (int64_t now = 0; now <= 585 * SECOND; now += 15 * SECOND) {
+        const auto d = record(t, s, now);
+        CHECK(!d.accepted && d.reason == HydronicReason::Settling);
+    }
+    CHECK(!record(t, s, 600 * SECOND - 1).accepted);
+    auto d = record(t, s, 600 * SECOND);
+    CHECK(d.accepted && d.command_accepted && d.reason == HydronicReason::None);
+    CHECK(d.candidate_us == 1 && d.qualified_us == 0);
+    CHECK(d.spread_milli == 10000 && d.flow_milli == 10000 && d.command_milli == 40450);
+    CHECK(t.counters.samples == 1 && t.counters.command_samples == 1);
+    CHECK(t.counters.observed_us == 600 * SECOND && t.counters.candidate_us == 600 * SECOND);
+    CHECK(t.counters.qualified_us == 0 && t.counters.first_accepted_us == 600 * SECOND);
+    // Ten kelvin and small/negative spreads have identical descriptive eligibility. There is no
+    // controller delta-T target (an LWT setpoint is not one), 9 K alarm, or 900 s pattern rule.
+    s.leaving_c      = 36.8;
+    s.flow_l_min     = 20;
+    s.command_signal = 37.5;
+    d                = record(t, s, 601 * SECOND);
+    CHECK(d.accepted && d.spread_milli == 1800 && d.command_milli == 62500);
+    CHECK(d.qualified_us == SECOND && d.from_us == 600 * SECOND && d.to_us == 601 * SECOND);
+    CHECK(t.counters.samples == 2 && t.counters.command_samples == 2);
+    CHECK(approx(t.counters.spread.mean(t.counters.samples), 5.9));
+    CHECK(approx(t.counters.flow.mean(t.counters.samples), 15));
+    CHECK(approx(t.counters.command.mean(t.counters.command_samples), 51.475));
+    CHECK(t.counters.spread.min_milli == 1800 && t.counters.spread.max_milli == 10000);
+    CHECK(t.counters.first_accepted_us == 600 * SECOND &&
+          t.counters.last_accepted_us == 601 * SECOND);
+    s.leaving_c     = 34.5;
+    s.command_known = false;
+    d               = record(t, s, 616 * SECOND); // exactly 15 s is continuous
+    CHECK(d.accepted && !d.command_accepted && d.spread_milli == -500);
+    CHECK(d.qualified_us == 15 * SECOND && t.counters.samples == 3);
+    CHECK(t.counters.command_samples == 2 && (d.limitations & HydronicCommandUnavailable));
+    d = record(t, s, 631 * SECOND + 1); // one microsecond too far: no duration or sample
+    CHECK(!d.accepted && d.reason == HydronicReason::PollGap);
+    CHECK(d.observed_us == 0 && d.candidate_us == 0 && d.qualified_us == 0);
+    CHECK(t.eligible_since_us == 631 * SECOND + 1 && t.counters.samples == 3);
+    CHECK(t.counters.qualified_us == 16 * SECOND);
+    CHECK(approx(HydronicRange{}.mean(0), 0));
+}
+
+static void test_witnesses_and_ranges() {
+    const auto good = sample();
+    CHECK(hydronic_decide(good).eligible);
+    for (int k = 0; k < 18; ++k) {
+        auto s = good;
+        switch (k) {
+        case 0:
+            s.leaving_known = false;
+            break;
+        case 1:
+            s.return_known = false;
+            break;
+        case 2:
+            s.flow_known = false;
+            break;
+        case 3:
+            s.rps_known = false;
+            break;
+        case 4:
+            s.pump = HydronicBit::Unknown;
+            break;
+        case 5:
+            s.valve_dhw = HydronicBit::Unknown;
+            break;
+        case 6:
+            s.defrost = HydronicBit::Unknown;
+            break;
+        case 7:
+            s.buh1 = HydronicBit::Unknown;
+            break;
+        case 8:
+            s.buh2 = HydronicBit::Unknown;
+            break;
+        case 9:
+            s.mode = HydronicMode::Unknown;
+            break;
+        case 10:
+            s.pump = HydronicBit::Off;
+            break;
+        case 11:
+            s.rps = 0;
+            break;
+        case 12:
+            s.mode = HydronicMode::Cooling;
+            break;
+        case 13:
+            s.mode = HydronicMode::Other;
+            break;
+        case 14:
+            s.valve_dhw = HydronicBit::On;
+            break;
+        case 15:
+            s.defrost = HydronicBit::On;
+            break;
+        case 16:
+            s.buh1 = HydronicBit::On;
+            break;
+        case 17:
+            s.buh2 = HydronicBit::On;
+            break;
+        }
+        const auto d = hydronic_decide(s);
+        CHECK(!d.eligible);
+        CHECK(d.observed == (k >= 10));
+        HydronicTracker t;
+        settle(t, good);
+        CHECK(t.counters.samples == 1);
+        CHECK(!record(t, s, 601 * SECOND).accepted && t.eligible_since_us == -1);
+        CHECK(!record(t, good, 602 * SECOND).accepted && t.eligible_since_us == 602 * SECOND);
+        CHECK(t.counters.samples == 1 && t.counters.qualified_us == 0);
+    }
+    for (const double value :
+         {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+          -3276.8, 3276.7, TEMP_MIN_C - 0.01, TEMP_MAX_C + 0.01}) {
+        auto s      = good;
+        s.leaving_c = value;
+        CHECK(!hydronic_decide(s).observed && !hydronic_decide(s).eligible);
+        s          = good;
+        s.return_c = value;
+        CHECK(!hydronic_decide(s).eligible);
+    }
+    for (const double value : {TEMP_MIN_C, TEMP_MAX_C}) {
+        auto s      = good;
+        s.leaving_c = s.return_c = value;
+        CHECK(hydronic_decide(s).eligible && hydronic_decide(s).spread_milli == 0);
+    }
+    for (const double value :
+         {-0.01, HYDRONIC_FLOW_MAX_L_MIN + 0.01, std::numeric_limits<double>::quiet_NaN(),
+          std::numeric_limits<double>::infinity()}) {
+        auto s       = good;
+        s.flow_l_min = value;
+        CHECK(!hydronic_decide(s).observed && !hydronic_decide(s).eligible);
+    }
+    // Zero flow during active circulating Heating stays observed+InvalidReading, whereas
+    // standby pump-off with zero flow stays PumpOff (7bb71dd6 semantics).
+    auto s       = good;
+    s.flow_l_min = 0;
+    CHECK(hydronic_decide(s).observed && !hydronic_decide(s).eligible &&
+          hydronic_decide(s).reason == HydronicReason::InvalidReading);
+    s.pump = HydronicBit::Off;
+    CHECK(hydronic_decide(s).observed && !hydronic_decide(s).eligible &&
+          hydronic_decide(s).reason == HydronicReason::PumpOff);
+    s            = good;
+    s.flow_l_min = HYDRONIC_FLOW_MAX_L_MIN;
+    CHECK(hydronic_decide(s).eligible);
+    for (const double value : {-1.0, 65536.0, std::numeric_limits<double>::infinity()}) {
+        s     = good;
+        s.rps = value;
+        CHECK(!hydronic_decide(s).eligible);
+    }
+    for (const double value : {-0.01, 100.01, std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::infinity()}) {
+        s                = good;
+        s.command_signal = value;
+        const auto d     = hydronic_decide(s);
+        CHECK(d.eligible && !d.command_valid && (d.limitations & HydronicCommandUnavailable));
+    }
+    for (const double value : {0.0, 100.0, 37.5}) {
+        s                = good;
+        s.command_signal = value;
+        const auto d     = hydronic_decide(s);
+        CHECK(d.command_valid && d.command_milli == hydronic_milli(100 - value));
+    }
+    for (unsigned k = 0; k < 4; ++k) {
+        s          = good;
+        s.phase[k] = HydronicBit::On;
+        CHECK(hydronic_decide(s).reason == HydronicReason::SpecialPhase);
+        s.phase[k] = HydronicBit::Unknown;
+        CHECK(hydronic_decide(s).reason == HydronicReason::MissingWitness);
+        s.phase_supported &= ~(1u << k);
+        const auto d = hydronic_decide(s);
+        CHECK(d.eligible && (d.limitations & HydronicUnobservablePhase));
+        HydronicTracker t;
+        settle(t, s);
+        CHECK(t.counters.samples == 1 && (t.counters.limitations & HydronicUnobservablePhase));
+        s          = good;
+        s.phase[k] = HydronicBit::Unknown;
+        CHECK(!record(t, s, 601 * SECOND).accepted && t.eligible_since_us == -1);
+    }
+    s                 = good;
+    s.phase_ambiguous = true;
+    CHECK(hydronic_decide(s).reason == HydronicReason::Unsupported);
+    s           = good;
+    s.supported = false;
+    CHECK(!hydronic_decide(s).eligible);
+}
+
+static void test_barriers_and_saturation() {
+    const auto      s = sample();
+    HydronicTracker t;
+    settle(t, s);
+    auto d = hydronic_record(t, s, 601 * SECOND, 0, 2, 1, true);
+    CHECK(d.identity_changed && !d.accepted && d.reason == HydronicReason::SourceChanged);
+    CHECK(t.counters.samples == 0 && t.eligible_since_us == 601 * SECOND);
+    d = hydronic_record(t, s, 602 * SECOND, 0, 2, 2, true);
+    CHECK(d.identity_changed && d.reason == HydronicReason::ConsentChanged && !d.accepted);
+    d = hydronic_record(t, s, 603 * SECOND, 0, 2, 2, false);
+    CHECK(d.identity_changed && d.reason == HydronicReason::NoConsent && t.last_us == -1);
+    CHECK(hydronic_record(t, s, 604 * SECOND, 0, 0, 2, true).reason == HydronicReason::NoSource);
+    t.reset();
+    settle(t, s);
+    CHECK(record(t, s, 600 * SECOND).reason == HydronicReason::Clock); // repeated clock
+    CHECK(t.last_us == -1 && t.eligible_since_us == -1 && t.counters.samples == 0);
+    CHECK(!record(t, s, 601 * SECOND).accepted);
+    CHECK(record(t, s, -1).reason == HydronicReason::Clock);
+    CHECK(hydronic_record(t, s, 602 * SECOND, -1, 1, 1, true).reason == HydronicReason::Clock);
+    CHECK(hydronic_record(t, s, 0, 1, 1, 1, true).reason == HydronicReason::Clock);
+    CHECK(hydronic_record(t, s, 602 * SECOND, 15 * SECOND + 1, 1, 1, true).reason ==
+          HydronicReason::PollGap);
+    t.reset();
+    settle(t, s);
+    CHECK(hydronic_record(t, s, 615 * SECOND, 15 * SECOND, 1, 1, true).accepted);
+    hydronic_poll_gap(t);
+    CHECK(t.reason == HydronicReason::PollGap && t.eligible_since_us == -1);
+    CHECK(!record(t, s, 616 * SECOND).accepted && t.counters.samples == 2);
+    // Same-generation pause/resume continuity reset discards active settle/last_us without clearing
+    // samples.
+    t.reset_continuity();
+    CHECK(t.counters.samples == 2 && t.last_us == -1 && t.eligible_since_us == -1);
+    t.reset();
+    CHECK(t.counters.samples == 0 && !t.bound);
+    settle(t, s);
+    t.counters.samples = UINT32_MAX;
+    const auto old_sum = t.counters.spread.sum_milli;
+    d                  = record(t, s, 601 * SECOND);
+    CHECK(!d.accepted && d.reason == HydronicReason::Overflow && t.counters.saturated);
+    CHECK(t.counters.spread.sum_milli == old_sum && t.counters.samples == UINT32_MAX);
+    t.reset();
+    settle(t, s);
+    t.counters.command_samples = UINT32_MAX;
+    d                          = record(t, s, 601 * SECOND);
+    CHECK(d.accepted && !d.command_accepted && t.counters.command_samples == UINT32_MAX);
+    CHECK(t.counters.samples == 2 && (d.limitations & HydronicCounterSaturated));
+    t.counters.observed_us  = UINT64_MAX;
+    t.counters.candidate_us = UINT64_MAX - 1;
+    t.counters.qualified_us = UINT64_MAX;
+    d                       = record(t, s, 602 * SECOND);
+    CHECK(t.counters.observed_us == UINT64_MAX && t.counters.candidate_us == UINT64_MAX);
+    CHECK(t.counters.qualified_us == UINT64_MAX && t.counters.saturated);
+    CHECK(d.qualified_us == SECOND); // honest step delta remains usable by the hourly owner
+    t.reset();
+    auto off = s;
+    off.pump = HydronicBit::Off;
+    record(t, off, 0);
+    d = record(t, off, SECOND);
+    CHECK(d.observed_us == SECOND && d.candidate_us == 0 && d.qualified_us == 0);
+    off.pump = HydronicBit::Unknown;
+    CHECK(record(t, off, 2 * SECOND).observed_us == 0);
+    CHECK(record(t, s, 3 * SECOND).observed_us == 0); // no interpolation through unknown
+    CHECK(record(t, s, 4 * SECOND).candidate_us == SECOND);
+    t.reset();
+    settle(t, s, 1000 * SECOND);
+    CHECK(t.counters.first_accepted_us == 1600 * SECOND);
+    CHECK(record(t, s, 0).reason == HydronicReason::Clock);
+    settle(t, s, SECOND);
+    CHECK(t.counters.samples == 1 && t.counters.first_accepted_us == 601 * SECOND &&
+          t.counters.last_accepted_us == 601 * SECOND); // replacement clock has its own lifespan
+}
+
+static void test_clock_epoch_after_interruptions() {
+    const auto s = sample();
+    for (unsigned interruption = 0; interruption < 4; ++interruption) {
+        HydronicTracker t;
+        settle(t, s, 1000 * SECOND);
+        CHECK(t.counters.samples == 1 && t.last_completion_us == 1600 * SECOND);
+        if (interruption == 0) {
+            hydronic_poll_gap(t);
+            CHECK(t.last_completion_us == 1600 * SECOND);
+        } else {
+            const int64_t duration = interruption == 1   ? -1
+                                     : interruption == 2 ? HYDRONIC_MAX_GAP_US + 1
+                                                         : 1601 * SECOND + 1;
+            const auto    d        = hydronic_record(t, s, 1601 * SECOND, duration, 1, 1, true);
+            CHECK(!d.accepted && d.observed_us == 0 && d.candidate_us == 0 && d.qualified_us == 0);
+            CHECK(d.reason ==
+                  (interruption == 2 ? HydronicReason::PollGap : HydronicReason::Clock));
+            CHECK(t.last_completion_us == 1601 * SECOND);
+        }
+        CHECK(t.last_us == -1 && t.eligible_since_us == -1);
+        CHECK(t.counters.samples == 1 && t.counters.first_accepted_us == 1600 * SECOND &&
+              t.counters.last_accepted_us == 1600 * SECOND); // ordinary interruption retains data
+        const auto d = record(t, s, SECOND); // replacement clock hidden behind the interruption
+        CHECK(d.reason == HydronicReason::Clock && !d.accepted && !d.command_accepted);
+        CHECK(d.from_us == -1 && d.observed_us == 0 && d.candidate_us == 0 && d.qualified_us == 0);
+        CHECK(t.counters.samples == 0 && t.counters.command_samples == 0 &&
+              t.counters.first_accepted_us == -1 && t.counters.last_accepted_us == -1);
+        CHECK(t.last_completion_us == SECOND && t.last_us == -1);
+        settle(t, s, 2 * SECOND);
+        CHECK(t.counters.samples == 1 && t.counters.first_accepted_us == 602 * SECOND &&
+              t.counters.last_accepted_us == 602 * SECOND);
+        CHECK(t.counters.candidate_us == 600 * SECOND && t.counters.qualified_us == 0);
+        CHECK(record(t, s, 603 * SECOND).accepted);
+        CHECK(t.counters.samples == 2 && t.counters.last_accepted_us == 603 * SECOND &&
+              t.counters.first_accepted_us <= t.counters.last_accepted_us);
+        t.reset_continuity();
+        CHECK(t.last_completion_us == 603 * SECOND);
+        CHECK(record(t, s, 603 * SECOND).reason == HydronicReason::Clock); // repeated after reset
+        CHECK(t.counters.samples == 0);
+        t.reset();
+        CHECK(t.last_completion_us == -1);
+    }
+    HydronicTracker t;
+    settle(t, s, 1000 * SECOND);
+    auto d = hydronic_record(t, s, 0, 0, 2, 1, true);
+    CHECK(d.reason == HydronicReason::SourceChanged && t.last_completion_us == 0);
+    d = hydronic_record(t, s, 0, 0, 2, 2, true);
+    CHECK(d.reason == HydronicReason::ConsentChanged && t.last_completion_us == 0);
+}
+
+struct Row {
+    uint8_t     reg = 0, off = 0;
+    uint16_t    conv = 0;
+    bool        held = false, held_unknown = false;
+    std::string value;
+};
+static void test_inputs() {
+    const char* id   = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    const auto  view = daik::def::lookup_view(id);
+    const auto  plan = hydronic_input_plan(id, view);
+    CHECK(plan.schema_fp != 0);
+    Row            rows[HYDRONIC_INPUTS + 1];
+    const char*    values[] = {"45", "35", "10", "59.55", "1", "12", "Heating", "0",
+                               "0",  "0",  "0",  "0",     "0", "0",  "0"};
+    daik::ValueDef defs[HYDRONIC_INPUTS];
+    for (size_t k = 0; k < HYDRONIC_INPUTS; ++k) {
+        CHECK(hydronic_input_supported(plan, static_cast<HydronicInput>(k)));
+        const auto& key = plan.rows[k];
+        rows[k]    = {key.reg, key.off, static_cast<uint16_t>(key.conv), false, false, values[k]};
+        bool found = false;
+        for (size_t j = 0; j < view.count(); ++j) {
+            const auto def = adjudicated(view, j);
+            if (checkup_row_matches(key, def.reg, def.offset, def.conv)) {
+                defs[k] = def;
+                found   = true;
+            }
+        }
+        CHECK(found);
+    }
+    const auto collect = [&] { return hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, true); };
+    CHECK(hydronic_decide(collect()).eligible);
+    CHECK(hydronic_decide(collect()).command_milli == 40450);
+    // The collector consumes the already-derived compressor witness. Current numeric RPS
+    // validates it, rather than supplying a second independent answer to compressor state.
+    for (const bool running : {false, true}) {
+        const auto unknown = hydronic_collect(plan, rows, HYDRONIC_INPUTS, false, running);
+        CHECK(!unknown.rps_known &&
+              hydronic_decide(unknown).reason == HydronicReason::MissingWitness);
+    }
+    auto compressor = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, false);
+    CHECK(!compressor.rps_known &&
+          hydronic_decide(compressor).reason == HydronicReason::MissingWitness);
+    for (const std::string& bad : {std::string("0"), std::string("-1"), std::string("65536"),
+                                   std::string("NaN"), std::string("inf"), std::string("12junk")}) {
+        rows[5].value = bad;
+        compressor    = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, true);
+        CHECK(!compressor.rps_known &&
+              hydronic_decide(compressor).reason == HydronicReason::MissingWitness);
+        if (bad == "0") {
+            compressor = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, false);
+            CHECK(compressor.rps_known &&
+                  hydronic_decide(compressor).reason == HydronicReason::CompressorOff);
+        }
+    }
+    rows[5].value = "12";
+    rows[5].held  = true;
+    compressor    = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, true);
+    CHECK(!compressor.rps_known &&
+          hydronic_decide(compressor).reason == HydronicReason::MissingWitness);
+    rows[5].held         = false;
+    rows[5].held_unknown = true;
+    compressor           = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, true);
+    CHECK(!compressor.rps_known &&
+          hydronic_decide(compressor).reason == HydronicReason::MissingWitness);
+    rows[5].held_unknown = false;
+    CHECK(plan.rows[0].reg == 0x61 && plan.rows[0].off == 2 && plan.rows[0].conv == 105);
+    CHECK(plan.rows[1].reg == 0x61 && plan.rows[1].off == 8 && plan.rows[1].conv == 105);
+    CHECK(plan.rows[2].reg == 0x62 && plan.rows[2].off == 9 && plan.rows[2].conv == 105);
+    CHECK(plan.rows[3].reg == 0x62 && plan.rows[3].off == 12 && plan.rows[3].conv == 152);
+    CHECK(!hydronic_input_supported(plan, HydronicInput::Count));
+    CHECK(!hydronic_collect(plan, static_cast<const Row*>(nullptr), 0, true, true).leaving_known);
+    CHECK(hydronic_input_row(plan, HydronicInput::Flow, rows, 2) == nullptr);
+    for (size_t k = 0; k < HYDRONIC_INPUTS; ++k) {
+        const auto input = static_cast<HydronicInput>(k);
+        rows[k].held     = true;
+        CHECK(hydronic_input_row(plan, input, rows, HYDRONIC_INPUTS) == nullptr);
+        rows[k].held         = false;
+        rows[k].held_unknown = true;
+        CHECK(hydronic_input_row(plan, input, rows, HYDRONIC_INPUTS) == nullptr);
+        rows[k].held_unknown  = false;
+        rows[HYDRONIC_INPUTS] = rows[k];
+        CHECK(hydronic_input_row(plan, input, rows, HYDRONIC_INPUTS + 1) == nullptr);
+    }
+    for (const size_t k : {size_t(0), size_t(1), size_t(2), size_t(3), size_t(5)}) {
+        const auto original = rows[k].value;
+        for (const std::string& invalid :
+             {std::string(""), std::string("?"), std::string("NaN"), std::string("inf"),
+              std::string(" 12"), std::string("12 "), std::string("12junk"),
+              std::string("12\0x", 4)}) {
+            rows[k].value = invalid;
+            const auto d  = hydronic_decide(collect());
+            CHECK(d.eligible == (k == 3)); // optional command cannot erase thermometry
+            if (k == 3) CHECK(!d.command_valid);
+        }
+        rows[k].value = original;
+    }
+    for (const size_t k : {size_t(4), size_t(7), size_t(8), size_t(9), size_t(10), size_t(11),
+                           size_t(12), size_t(13), size_t(14)}) {
+        const auto original = rows[k].value;
+        for (const std::string& invalid :
+             {std::string("0.0"), std::string("1.0"), std::string("ON"), std::string("2"),
+              std::string("0\0x", 3)}) {
+            rows[k].value = invalid;
+            CHECK(!hydronic_decide(collect()).eligible);
+        }
+        rows[k].value = original;
+    }
+    for (const std::string& mode :
+         {std::string("Cooling"), std::string("DHW"), std::string("Heating + DHW"),
+          std::string("Cooling + DHW"), std::string("Stop"), std::string("Auto"),
+          std::string("Heating\0x", 9)}) {
+        rows[6].value = mode;
+        CHECK(!hydronic_decide(collect()).eligible);
+    }
+    rows[6].value = "Heating";
+    CHECK(hydronic_input_plan(nullptr, view).schema_fp == 0);
+    CHECK(hydronic_input_plan("", view).schema_fp == 0);
+    CHECK(hydronic_input_plan("auto", view).schema_fp == 0);
+    CHECK(hydronic_input_plan("wrong", view).schema_fp == 0);
+    CHECK(hydronic_input_plan(id, {}).schema_fp == 0);
+    ProfileView minimal;
+    minimal.profile_id = id;
+    minimal.base       = defs;
+    minimal.base_count = HYDRONIC_INPUTS;
+    const auto full    = hydronic_input_plan(id, minimal);
+    CHECK(hydronic_decide(hydronic_collect(full, rows, HYDRONIC_INPUTS, true, true)).eligible);
+    std::reverse(std::begin(defs), std::end(defs));
+    CHECK(hydronic_input_plan(id, minimal).schema_fp == full.schema_fp);
+    std::reverse(std::begin(defs), std::end(defs));
+    for (size_t k = 0; k < HYDRONIC_INPUTS; ++k) {
+        defs[k].no_publish  = true;
+        const auto withheld = hydronic_input_plan(id, minimal);
+        const auto d =
+            hydronic_decide(hydronic_collect(withheld, rows, HYDRONIC_INPUTS, true, true));
+        CHECK(!hydronic_input_supported(withheld, static_cast<HydronicInput>(k)));
+        CHECK(d.eligible == (k == 3 || k >= 11));
+        if (k >= 11) CHECK(d.limitations & HydronicUnobservablePhase);
+        defs[k].no_publish = false;
+    }
+    // A structurally absent phase is limited, an offered phase lost this sweep is blocking.
+    minimal.base_count      = 11;
+    const auto absent_phase = hydronic_input_plan(id, minimal);
+    auto       d            = hydronic_decide(hydronic_collect(absent_phase, rows, 11, true, true));
+    CHECK(d.eligible && (d.limitations & HydronicUnobservablePhase));
+    CHECK(!hydronic_decide(hydronic_collect(full, rows, 11, true, true)).eligible);
+    minimal.base_count       = HYDRONIC_INPUTS;
+    daik::ValueDef duplicate = defs[0];
+    minimal.extra            = &duplicate;
+    minimal.extra_count      = 1;
+    CHECK(hydronic_input_plan(id, minimal).states[0] == InstrumentState::Ambiguous);
+    duplicate                  = defs[11];
+    const auto ambiguous_phase = hydronic_input_plan(id, minimal);
+    CHECK(ambiguous_phase.states[11] == InstrumentState::Ambiguous);
+    CHECK(!hydronic_decide(hydronic_collect(ambiguous_phase, rows, HYDRONIC_INPUTS, true, true))
+               .eligible);
+    duplicate = {0x10, 1, 152, 1, -1, "overlapping byte"};
+    CHECK(hydronic_phase_resolve(minimal, 306).state == InstrumentState::Ambiguous);
+    minimal.extra       = nullptr;
+    minimal.extra_count = 0;
+    defs[0].label       = "arbitrary localized label";
+    CHECK(hydronic_input_supported(hydronic_input_plan(id, minimal), HydronicInput::Leaving));
+    defs[0].offset = 4; // post-BUH is never a pre-BUH fallback, regardless of its label
+    CHECK(!hydronic_input_supported(hydronic_input_plan(id, minimal), HydronicInput::Leaving));
+    CHECK(hydronic_input_row(HydronicInputPlan{}, HydronicInput::Flow, rows, HYDRONIC_INPUTS) ==
+          nullptr);
+    for (unsigned malformed = 0; malformed < 3; ++malformed) {
+        ProfileView v;
+        v.profile_id = id;
+        if (malformed == 0) v.base_count = 1;
+        if (malformed == 1) v.extra_count = 1;
+        if (malformed == 2) v.extra2_count = 1;
+        CHECK(hydronic_input_plan(id, v).schema_fp == 0);
+    }
+    unsigned supported_profiles = 0;
+    for (const auto& profile : daik::def::profiles) {
+        const auto v = daik::def::lookup_view(profile.id);
+        const auto p = hydronic_input_plan(profile.id, v);
+        CHECK(!p.secondary_supply.conv && !p.secondary_pump.conv &&
+              !p.secondary_heating_input.conv);
+        for (size_t k = 0; k < 11; ++k)
+            CHECK(p.states[k] == instrument_resolve(v, HYDRONIC_INSTRUMENTS[k]).state);
+        if (hydronic_input_supported(p, HydronicInput::Leaving) &&
+            hydronic_input_supported(p, HydronicInput::Return) &&
+            hydronic_input_supported(p, HydronicInput::Flow))
+            ++supported_profiles;
+    }
+    CHECK(supported_profiles > 20); // genuinely cross-profile, never a single-label fixture
+}
+
+static void test_secondary_supply_inputs() {
+    constexpr const char* id     = "altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o";
+    constexpr const char* alias  = "altherma_erra_e_elv12_elb12_elvz12_ef_ej_series_8_12kw";
+    daik::ValueDef        defs[] = {
+        {0x65, 4, 105, 2, -1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"},
+        {0x64, 9, 301, 1, -1, "Main pump"},
+        {0x62, 7, 304, 1, -1, "Main RT Heating"},
+        {0x61, 2, 105, 2, -1, "Leaving water temp. before BUH (R1T)"},
+    };
+    ProfileView v;
+    v.profile_id    = id;
+    v.base          = defs;
+    v.base_count    = std::size(defs);
+    const auto plan = hydronic_input_plan(id, v);
+    CHECK(checkup_row_matches(plan.secondary_supply, 0x65, 4, 105));
+    CHECK(checkup_row_matches(plan.secondary_pump, 0x64, 9, 301));
+    CHECK(checkup_row_matches(plan.secondary_heating_input, 0x62, 7, 304));
+
+    Row        rows[]  = {{0x65, 4, 105, false, false, "47.5"},
+                          {0x64, 9, 301, false, false, "1"},
+                          {0x62, 7, 304, false, false, "1"},
+                          {0x61, 2, 105, false, false, "45"},
+                          {}};
+    const auto collect = [&] { return hydronic_collect(plan, rows, std::size(rows), true, true); };
+    auto       witness = collect();
+    CHECK(witness.secondary_known && witness.secondary_c == 47.5);
+    CHECK(witness.leaving_known && witness.leaving_c == 45);
+    for (auto& row : rows) {
+        if (!row.conv) break;
+        row.held  = true;
+        auto held = collect();
+        CHECK(row.reg == 0x61 ? !held.leaving_known : !held.secondary_known);
+        row.held         = false;
+        row.held_unknown = true;
+        auto unknown     = collect();
+        CHECK(row.reg == 0x61 ? !unknown.leaving_known : !unknown.secondary_known);
+        row.held_unknown = false;
+        rows[4]          = row;
+        auto duplicate   = collect();
+        CHECK(row.reg == 0x61 ? !duplicate.leaving_known : !duplicate.secondary_known);
+        rows[4] = {};
+    }
+    for (const unsigned i : {1u, 2u}) {
+        rows[i].value = "0";
+        CHECK(!collect().secondary_known);
+        rows[i].value = "";
+        CHECK(!collect().secondary_known);
+        rows[i].value = "1";
+    }
+    for (unsigned i = 0; i < 3; ++i) {
+        auto original      = defs[i];
+        defs[i].no_publish = true;
+        CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+        defs[i]       = original;
+        v.extra       = &defs[i];
+        v.extra_count = 1;
+        CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+        v.extra       = nullptr;
+        v.extra_count = 0;
+    }
+    auto supply    = defs[0];
+    defs[0].offset = 0; // No generic mixed sensor at another coordinate.
+    CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+    defs[0] = {0x64, 10, 118, 2, 1, "Mixed water temp."}; // detect-only 0x64/10 never qualifies
+    CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+    defs[0]       = supply;
+    defs[0].label = "Other temperature sensor";
+    CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+    defs[0]      = supply;
+    v.profile_id = alias;
+    CHECK(!hydronic_input_plan(alias, v).secondary_supply.conv);
+    HydronicInputPlan no_id_plan = plan;
+    fill_secondary_supply_plan(no_id_plan, ProfileView{});
+    CHECK(hydronic_fresh_row(CheckupLocator{}, rows, std::size(rows)) == nullptr);
+    v.profile_id = "auto";
+    CHECK(!hydronic_input_plan("auto", v).schema_fp);
+    Row        plus_rows[] = {{0x65, 4, 105, false, false, "+47.5"},
+                              {0x64, 9, 301, false, false, "1"},
+                              {0x62, 7, 304, false, false, "1"}};
+    const auto plus        = hydronic_collect(plan, plus_rows, std::size(plus_rows), false, false);
+    CHECK(plus.secondary_known && plus.secondary_c == 47.5);
+    plus_rows[0].value = "47.5x";
+    CHECK(!hydronic_collect(plan, plus_rows, std::size(plus_rows), false, false).secondary_known);
+    for (const auto& loc : INSTRUMENT_LOCATORS) {
+        if (loc.id == Instrument::MixedWaterEkmik)
+            CHECK(loc.reg == 0x65 && loc.conv == 105 && (loc.off == 0 || loc.off == 4));
+    }
+}
+
+static void test_secondary_supply_continuity() {
+    auto            s = sample();
+    HydronicTracker t;
+    settle(t, s); // A settled primary side does not settle the secondary circuit.
+    CHECK(t.secondary.samples == 0);
+    s.secondary_known = true;
+    s.secondary_c     = 47.5;
+    for (int64_t now = 601; now <= 1186; now += 15) {
+        CHECK(record(t, s, now * SECOND).accepted);
+        CHECK(t.secondary.samples == 0);
+    }
+    CHECK(record(t, s, 1201 * SECOND - 1).accepted && t.secondary.samples == 0);
+    CHECK(record(t, s, 1201 * SECOND).accepted);
+    CHECK(t.secondary.samples == 1 && t.secondary.sum_milli == -2500);
+    CHECK(t.secondary.duration_us == 0);
+
+    s.secondary_c = 44.25;
+    CHECK(hydronic_record(t, s, 1202 * SECOND, 14 * SECOND, 1, 1, true).accepted);
+    CHECK(t.secondary.samples == 2 && t.secondary.sum_milli == -1750);
+    CHECK(t.secondary.duration_us == SECOND);
+    CHECK(t.secondary.current(1203 * SECOND));
+    CHECK(!t.secondary.current(1203 * SECOND + 1));
+    CHECK(!t.secondary.current(1188 * SECOND - 1));
+    CHECK(!(SecondarySupplyComparison{-1, -1, -1, 0, 0, 1}.current(0)));
+    const auto populated = t;
+
+    {
+        auto saturated_cmp              = populated;
+        saturated_cmp.secondary.samples = UINT32_MAX;
+        CHECK(record(saturated_cmp, s, 1203 * SECOND).accepted);
+        CHECK(saturated_cmp.secondary.samples == UINT32_MAX);
+    }
+
+    // Direct regression control: unknown or non-finite leaving_c must never default to 0 and
+    // fabricate a signed spread.
+    {
+        auto direct_cmp          = populated.secondary;
+        auto no_leaving          = s;
+        no_leaving.leaving_known = false;
+        no_leaving.leaving_c     = 0;
+        hydronic_record_secondary(direct_cmp, no_leaving, true, true, 1203 * SECOND, 0);
+        CHECK(direct_cmp.samples == 0 && direct_cmp.since_us < 0 && direct_cmp.sum_milli == 0);
+
+        direct_cmp            = populated.secondary;
+        auto bad_leaving      = s;
+        bad_leaving.leaving_c = std::numeric_limits<double>::quiet_NaN();
+        hydronic_record_secondary(direct_cmp, bad_leaving, true, true, 1203 * SECOND, 0);
+        CHECK(direct_cmp.samples == 0 && direct_cmp.since_us < 0 && direct_cmp.sum_milli == 0);
+    }
+
+    s.secondary_known = false;
+    CHECK(record(t, s, 1203 * SECOND).accepted);
+    CHECK(t.secondary.samples == 0 && t.secondary.since_us < 0);
+    s.secondary_known = true;
+    CHECK(record(t, s, 1204 * SECOND).accepted && t.secondary.samples == 0);
+    s.secondary_c = 5000;
+    CHECK(record(t, s, 1205 * SECOND).accepted && t.secondary.since_us < 0);
+    s.secondary_c = 47.5;
+
+    t         = populated;
+    s.defrost = HydronicBit::On;
+    CHECK(!record(t, s, 1203 * SECOND).accepted && t.secondary.samples == 0);
+    s.defrost = HydronicBit::Off;
+    t         = populated;
+    hydronic_poll_gap(t);
+    CHECK(t.secondary.samples == 0);
+    t = populated;
+    CHECK(!record(t, s, 1203 * SECOND + HYDRONIC_MAX_GAP_US).accepted);
+    CHECK(t.secondary.samples == 0);
+    t = populated;
+    CHECK(!hydronic_record(t, s, 1203 * SECOND, 0, 2, 1, true).accepted);
+    CHECK(t.secondary.samples == 0);
+    t = populated;
+    CHECK(!hydronic_record(t, s, 1203 * SECOND, 0, 1, 2, false).accepted);
+    CHECK(t.secondary.samples == 0 && t.secondary.since_us < 0);
+    t = populated;
+    CHECK(record(t, s, 1201 * SECOND).reason == HydronicReason::Clock);
+    CHECK(!t.secondary.current(1202 * SECOND));
+}
+
+static void test_hourly_wire_and_population() {
+    constexpr int64_t     bucket = 1000;
+    HydronicHourlyPayload p;
+    p.identity               = {0x04030201, 2, 3, 23};
+    p.first_unix_us          = bucket * OBSERVATION_HOUR_US;
+    p.last_unix_us           = p.first_unix_us + SECOND;
+    p.first_accepted_unix_us = p.last_accepted_unix_us = p.last_unix_us;
+    p.observed_us = p.candidate_us = SECOND;
+    p.duration_edges               = HYDRONIC_DUR_FIRST;
+    p.samples = p.command_samples = 1;
+    p.spread                      = {10000, 10000, 10000};
+    p.flow                        = {10000, 10000, 10000};
+    p.command                     = {40450, 40450, 40450};
+    CHECK(hydronic_hourly_valid(p, bucket));
+    CHECK(HYDRONIC_PAYLOAD_BYTES == 124 && HYDRONIC_WORDS == 62);
+    CHECK(HYDRONIC_PAYLOAD_BYTES <= HISTORY_JOURNAL_PAYLOAD_BYTES);
+    CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 5); // logical sources do not become physical source bytes
+    CHECK(hydronic_fingerprint() != observation_fingerprint());
+    CHECK(hydronic_fingerprint() != checkup_journal_fingerprint());
+
+    std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES + 1> bytes;
+    bytes.fill(0xa5);
+    hydronic_encode(p, bytes.data());
+    CHECK(bytes[0] == 1 && bytes[1] == 2 && bytes[2] == 3 && bytes[3] == 4);
+    CHECK(bytes[122] == HYDRONIC_DUR_FIRST && bytes[123] == 0);
+    CHECK(bytes[HYDRONIC_PAYLOAD_BYTES] == 0xa5);
+    HydronicHourlyPayload decoded;
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(decoded.samples == 1 && decoded.command_samples == 1);
+    CHECK(decoded.duration_edges == HYDRONIC_DUR_FIRST);
+    CHECK(decoded.command.sum_milli == 40450 && decoded.first_accepted_unix_us == p.last_unix_us);
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, bucket, decoded));
+    CHECK(!hydronic_decode(nullptr, HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    bytes[HYDRONIC_PAYLOAD_BYTES - 1] = 1;
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    bytes[HYDRONIC_PAYLOAD_BYTES - 1] = 0;
+    bytes[122]                        = 0x80;
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+
+    auto q          = p;
+    q.first_unix_us = p.last_unix_us;
+    q.last_unix_us += SECOND;
+    q.first_accepted_unix_us = q.last_accepted_unix_us = q.last_unix_us;
+    q.qualified_us                                     = SECOND;
+    q.spread                                           = {-500, -500, -500};
+    q.flow                                             = {20000, 20000, 20000};
+    q.command_samples                                  = 0;
+    q.command                                          = {};
+    q.limitations                                      = HydronicCommandUnavailable;
+    CHECK(hydronic_hourly_valid(q, bucket));
+    hydronic_encode(q, bytes.data());
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(decoded.spread.sum_milli == -500 && decoded.spread.min_milli == -500);
+    auto merged = p;
+    CHECK(hydronic_hourly_merge(merged, q));
+    CHECK(merged.samples == 2 && merged.command_samples == 1);
+    CHECK(merged.observed_us == 2 * SECOND && merged.qualified_us == SECOND);
+    CHECK(approx(merged.spread.mean(merged.samples), 4.75));
+    CHECK(approx(merged.flow.mean(merged.samples), 15));
+    CHECK(approx(merged.command.mean(merged.command_samples), 40.45));
+    CHECK(merged.spread.min_milli == -500 && merged.spread.max_milli == 10000);
+    CHECK(merged.first_accepted_unix_us == p.last_unix_us &&
+          merged.last_accepted_unix_us == q.last_unix_us);
+    CHECK(merged.duration_edges == HYDRONIC_DUR_FIRST);
+    auto overlap = q;
+    overlap.first_unix_us -= SECOND / 2;
+    auto duplicate                   = q;
+    duplicate.first_accepted_unix_us = duplicate.last_accepted_unix_us = p.last_unix_us;
+    --duplicate.last_unix_us;
+    duplicate.duration_edges = HYDRONIC_DUR_BOTH;
+    CHECK(hydronic_hourly_valid(overlap, bucket) && hydronic_hourly_valid(duplicate, bucket));
+    std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES> original{}, preserved{};
+    hydronic_encode(p, original.data());
+    for (const auto& conflicting : {overlap, duplicate}) {
+        auto untouched = p;
+        CHECK(!hydronic_hourly_merge(untouched, conflicting));
+        hydronic_encode(untouched, preserved.data());
+        CHECK(original == preserved);
+    }
+    auto timed_edge = p;
+    // A hole leaves one spare tick in the span even though both fragments own the shared tick.
+    timed_edge.duration_edges = HYDRONIC_DUR_BOTH;
+    CHECK(hydronic_hourly_valid(timed_edge, bucket));
+    hydronic_encode(timed_edge, original.data());
+    CHECK(!hydronic_hourly_merge(timed_edge, q));
+    hydronic_encode(timed_edge, preserved.data());
+    CHECK(original == preserved);
+    auto point          = p;
+    point.first_unix_us = point.last_unix_us;
+    point.observed_us = point.candidate_us = point.qualified_us = 0;
+    point.duration_edges                                        = 0;
+    CHECK(hydronic_hourly_valid(point, bucket));
+    auto point_merge = q;
+    CHECK(hydronic_hourly_merge(point_merge, point));
+    CHECK(point_merge.samples == 2 && point_merge.observed_us == SECOND &&
+          point_merge.duration_edges == HYDRONIC_DUR_FIRST);
+    auto one_tick           = point;
+    one_tick.observed_us    = 1;
+    one_tick.duration_edges = HYDRONIC_DUR_BOTH;
+    CHECK(hydronic_hourly_valid(one_tick, bucket));
+    one_tick.duration_edges = HYDRONIC_DUR_FIRST;
+    CHECK(!hydronic_hourly_valid(one_tick, bucket));
+    auto reverse = q;
+    CHECK(hydronic_hourly_merge(reverse, p));
+    hydronic_encode(reverse, original.data());
+    hydronic_encode(merged, preserved.data());
+    CHECK(original == preserved);
+    auto wrong = q;
+    wrong.identity.schema_fp++;
+    const auto sum_before = merged.flow.sum_milli;
+    CHECK(!hydronic_hourly_merge(merged, wrong));
+    CHECK(merged.flow.sum_milli == sum_before && merged.samples == 2);
+    wrong                = q;
+    wrong.flow.min_milli = 0;
+    CHECK(!hydronic_hourly_valid(wrong, bucket));
+    wrong             = q;
+    wrong.observed_us = 2 * SECOND; // cannot exceed its actual one-second evidence interval
+    CHECK(!hydronic_hourly_valid(wrong, bucket));
+    wrong = q;
+    ++wrong.observed_us; // the last tick belongs solely to a sample
+    CHECK(!hydronic_hourly_valid(wrong, bucket));
+
+    HydronicTotals totals;
+    hydronic_totals_add(totals, p);
+    hydronic_totals_add(totals, q);
+    CHECK(totals.samples == 2 && totals.command_samples == 1);
+    CHECK(totals.first_evidence_unix_us == p.first_unix_us &&
+          totals.last_evidence_unix_us == q.last_unix_us);
+    CHECK(totals.first_accepted_unix_us == p.last_unix_us &&
+          totals.last_accepted_unix_us == q.last_unix_us);
+    CHECK(totals.limitations & HydronicCommandUnavailable);
+    CHECK(totals.flow.sum_milli == 30000 && totals.command.sum_milli == 40450);
+    CHECK(totals.duration_edges == HYDRONIC_DUR_FIRST);
+
+    HydronicHourlyPayload fence;
+    fence.identity      = p.identity;
+    fence.kind          = HydronicHourlyKind::Fence;
+    fence.first_unix_us = fence.last_unix_us = p.last_unix_us;
+    CHECK(hydronic_hourly_valid(fence, bucket));
+    hydronic_encode(fence, bytes.data());
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(decoded.first_accepted_unix_us == -1 && decoded.last_accepted_unix_us == -1);
+    CHECK(hydronic_signed64(UINT64_MAX) == -1 && hydronic_signed64(1ULL << 63) == INT64_MIN);
+    CHECK(hydronic_signed32(UINT32_MAX) == -1 && hydronic_signed32(1u << 31) == INT32_MIN);
+
+    HistoryJournalHeader h{};
+    h.magic       = HISTORY_JOURNAL_MAGIC;
+    h.version     = HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    h.catalog_fp  = hydronic_fingerprint();
+    h.commit      = HISTORY_JOURNAL_COMMITTED;
+    h.value_count = HYDRONIC_WORDS;
+    h.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = 1;
+    h.bucket      = bucket;
+    h.dt_s        = 3600;
+    h.rings[0]    = TREND_COUNT;
+    h.rings[1]    = HOMEHUB_HISTORY_COUNT;
+    h.rings[2]    = ENV3_HISTORY_COUNT;
+    CHECK(hydronic_header_recognizable(h) && hydronic_header_matches(h));
+    CHECK(hydronic_append_owned(h));
+    CHECK(!observation_append_owned(h));
+    h.catalog_fp = 3490136859u; // preceding H1 fingerprint without explicit duration edges
+    CHECK(!hydronic_header_recognizable(h) && !hydronic_header_matches(h) &&
+          !hydronic_append_owned(h));
+    h.catalog_fp = hydronic_fingerprint();
+    h.commit     = HISTORY_JOURNAL_ERASED;
+    CHECK(!hydronic_header_matches(h));
+    CHECK(hydronic_append_owned(h));
+    h.commit = 0;
+    CHECK(!hydronic_header_matches(h));
+    CHECK(hydronic_append_owned(h));
+    h.commit = HISTORY_JOURNAL_COMMITTED;
+    CHECK(!observation_header_matches(h));
+    h.source = static_cast<uint8_t>(HistoryJournalSource::X10a);
+    CHECK(hydronic_header_recognizable(h) && !hydronic_header_matches(h));
+    CHECK(!hydronic_append_owned(h));
+    h.source     = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    h.catalog_fp = observation_fingerprint();
+    CHECK(!hydronic_append_owned(h));
+    h.catalog_fp = hydronic_fingerprint();
+    h.commit     = HISTORY_JOURNAL_ERASED;
+    CHECK(!hydronic_header_recognizable(h));
+
+    // Verify JSON decimal rounding and dual HTTP/MQTT projection without target_delta fabrication.
+    struct FakeReport {
+        struct Obs {
+            HydronicTotals totals;
+            uint32_t       dropped        = 0;
+            uint8_t        observed_hours = 0;
+            bool           confirmed = false, dated = false, partial = false;
+            bool           restore_pending = false, persistence_pending = false;
+        } observation;
+        HydronicReason reason               = HydronicReason::NoSource;
+        uint32_t       source_generation    = 0;
+        uint32_t       schema_fp            = 0;
+        uint32_t       settling_remaining_s = 0;
+        uint8_t        limitations          = 0;
+        bool           current              = false;
+    } rep;
+    std::string nested, flat = "{";
+    daik::append_hydronic_json(nested, rep, false);
+    daik::append_hydronic_json(flat, rep, true);
+    flat.push_back('}');
+    CHECK(nested.find("\"confirmed\":false") != std::string::npos);
+    CHECK(nested.find("\"reason\":\"no_source\"") != std::string::npos);
+    CHECK(nested.find("\"target_delta_k\":null") != std::string::npos);
+    CHECK(nested.find("\"target_supported\":false") != std::string::npos);
+    CHECK(nested.find("\"secondary") == std::string::npos);
+    CHECK(flat.find("\"hydronic_confirmed\":0") != std::string::npos);
+    CHECK(flat.find("\"hydronic_target_supported\":0") != std::string::npos);
+    CHECK(flat.size() <= daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
+
+    rep.observation.confirmed      = true;
+    rep.observation.dated          = true;
+    rep.observation.observed_hours = 1;
+    rep.observation.totals         = totals;
+    rep.current                    = true;
+    rep.reason                     = HydronicReason::None;
+    rep.source_generation          = 1;
+    rep.schema_fp                  = 2;
+    std::string populated_nested, populated_flat = "{";
+    daik::append_hydronic_json(populated_nested, rep, false);
+    daik::append_hydronic_json(populated_flat, rep, true);
+    populated_flat.push_back('}');
+    CHECK(populated_nested.find("\"spread_k\":{\"min\":-0.5,\"mean\":4.75,\"max\":10}") !=
+          std::string::npos);
+    CHECK(populated_nested.find(
+              "\"pump_command_pct\":{\"min\":40.45,\"mean\":40.45,\"max\":40.45}") !=
+          std::string::npos);
+    CHECK(populated_flat.find("\"hydronic_spread_mean_k\":4.75") != std::string::npos);
+    CHECK(populated_flat.size() <= daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
+}
+} // namespace hydronic_host_tests
+
+void test_cycling_run_context() {
+    using namespace daik::logic;
+    // Enum helper coverage
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Space), "space") == 0);
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Dhw), "dhw") == 0);
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Cooling), "cooling") == 0);
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Other), "other") == 0);
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Unknown), "unknown") == 0);
+
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::CooldownRestart),
+                      "cooldown_restart") == 0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::RequestOn), "request_on") == 0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::TargetRaised), "target_raised") ==
+          0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::AfterDefrost), "after_defrost") ==
+          0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::AfterDhw), "after_dhw") == 0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::DefrostStart), "defrost_start") ==
+          0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::DhwStart), "dhw_start") == 0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::Unknown), "unknown") == 0);
+
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::LowRpsAboveTarget),
+                      "low_rps_above_target") == 0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::RequestWithdrawal),
+                      "request_withdrawal") == 0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::TargetChanged), "target_changed") ==
+          0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::Defrost), "defrost") == 0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::DhwTransition), "dhw_transition") ==
+          0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::Normal), "normal") == 0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::Unknown), "unknown") == 0);
+
+    CHECK(!cycling_run_tenths_valid(CHECKUP_ABSENT));
+    CHECK(cycling_run_tenths_valid(INT16_MAX));
+    CHECK(cycling_run_tenths_valid(-50));
+
+    auto mk = [](bool rps_known, bool rps_run, uint16_t rps, StopContextMode mode,
+                 StopContextRoute route, int16_t lwt, int16_t rwt, int16_t tgt, int16_t flow,
+                 StopContextBit req = StopContextBit::On,
+                 StopContextBit dfr = StopContextBit::Off) {
+        CyclingRunSample s;
+        s.base.rps_known       = rps_known;
+        s.base.rps_running     = rps_run;
+        s.base.rps_value_known = rps_known;
+        s.base.rps_tenths      = rps;
+        s.base.mode            = mode;
+        s.base.route           = route;
+        s.base.lwt_known       = lwt != CHECKUP_ABSENT;
+        s.base.lwt_tenths      = lwt;
+        s.base.target_known    = tgt != CHECKUP_ABSENT;
+        s.base.target_tenths   = tgt;
+        s.base.request         = req;
+        s.base.defrost         = dfr;
+        s.rwt_ok               = rwt != CHECKUP_ABSENT;
+        s.rwt_tenths           = rwt;
+        s.flow_ok              = flow >= 0;
+        s.flow_tenths          = flow >= 0 ? flow : 0;
+        s.outdoor_ok           = true;
+        s.outdoor_tenths       = 110;
+        return s;
+    };
+
+    // Classify mode branches
+    CHECK(cycling_run_classify_mode(mk(true, true, 200, StopContextMode::Cooling,
+                                       StopContextRoute::Space, 200, 220, 180, 150)
+                                        .base) == CyclingRunMode::Cooling);
+    CHECK(cycling_run_classify_mode(mk(true, true, 200, StopContextMode::Other,
+                                       StopContextRoute::Space, 200, 220, 180, 150)
+                                        .base) == CyclingRunMode::Other);
+    CHECK(cycling_run_classify_mode(mk(true, true, 200, StopContextMode::Unknown,
+                                       StopContextRoute::Unknown, 200, 220, 180, 150)
+                                        .base) == CyclingRunMode::Unknown);
+
+    CyclingRunContextTracker st_uninit;
+    cycling_run_context_expire(st_uninit, 1000000);
+    CHECK(!st_uninit.initialized);
+
+    CyclingRunContextTracker st;
+    CheckupRunContextTrace   tr;
+    const uint32_t           gen = 7;
+
+    // 1) CooldownRestart + LowRpsAboveTarget + settled flow + post-stop refine must NOT overwrite
+    // LowRpsAboveTarget with steady-Off or On->Off request withdrawal.
+    auto step = [&](int64_t sec, const CyclingRunSample& s, uint32_t g = 7) {
+        cycling_run_context_step(st, tr, s, sec * 1000000LL, g);
+    };
+    step(10,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 290, 270, 320, 0));
+    step(15,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 285, 268, 320, 0));
+    step(20, mk(true, true, 250, StopContextMode::Heating, StopContextRoute::Space, 285, 268, 320,
+                160));
+    step(35,
+         mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 315, 285, 320, 82));
+    step(45,
+         mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 330, 305, 320, 82));
+    step(55,
+         mk(true, true, 180, StopContextMode::Heating, StopContextRoute::Space, 342, 325, 320, 82));
+    step(65,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 351, 336, 320, 82));
+    step(70, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 348, 335, 320, 0,
+                StopContextBit::Off)); // On->Off in post-stop must not override LowRpsAboveTarget
+    step(75, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 345, 334, 320, 0,
+                StopContextBit::Off)); // steady Off ignored
+    CHECK(tr.count == 1);
+    {
+        const auto& r = tr.at(0);
+        CHECK(r.start_s == 20 && r.stop_s == 65);
+        CHECK(r.start_kind == static_cast<uint8_t>(CyclingStartKind::CooldownRestart));
+        CHECK(r.stop_kind == static_cast<uint8_t>(CyclingStopKind::LowRpsAboveTarget));
+        CHECK((r.flags & RUN_CTX_F_STOPPED) != 0);
+        CHECK((r.flags & RUN_CTX_F_LOW_RPS_ABOVE_TGT) != 0);
+        CHECK(r.flow_tenths == 82 && r.min_rps_tenths == 180);
+        CHECK(r.start_lwt_tenths == 285 && r.stop_lwt_tenths == 351 && r.stop_rwt_tenths == 336);
+    }
+
+    // 2) RequestOn -> stop Normal -> post-stop RequestWithdrawal refinement
+    step(105, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 290, 270, 320,
+                 0, StopContextBit::Off));
+    step(110, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 290, 270, 320,
+                 0, StopContextBit::On));
+    step(115, mk(true, true, 260, StopContextMode::Heating, StopContextRoute::Space, 295, 272, 320,
+                 140));
+    step(130,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 318, 295, 320, 140));
+    step(135, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 315, 294, 320,
+                 0, StopContextBit::Off));
+    CHECK(tr.count == 2);
+    CHECK(tr.at(1).start_kind == static_cast<uint8_t>(CyclingStartKind::RequestOn));
+    CHECK(tr.at(1).stop_kind == static_cast<uint8_t>(CyclingStopKind::RequestWithdrawal));
+    CHECK(tr.at(1).flow_tenths == 140);
+
+    // 3) TargetRaised -> LowRpsAboveTarget withdrawn by post-stop TargetChanged
+    cycling_run_context_expire(st, 175 * 1000000LL);
+    CHECK(!st.initialized);
+    step(180,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 330, 300, 310, 0));
+    step(185,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 330, 300, 340, 0));
+    step(190, mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 330, 300, 340,
+                 170));
+    step(205, mk(true, true, 195, StopContextMode::Heating, StopContextRoute::Space, 345, 318, 340,
+                 170));
+    step(220, mk(true, true, 190, StopContextMode::Heating, StopContextRoute::Space, 355, 330, 340,
+                 170));
+    step(230, mk(true, true, 180, StopContextMode::Heating, StopContextRoute::Space, 365, 340, 340,
+                 170));
+    step(240,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 368, 342, 340, 170));
+    CHECK(tr.at(2).stop_kind == static_cast<uint8_t>(CyclingStopKind::LowRpsAboveTarget));
+    step(245,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 365, 341, 300, 0));
+    CHECK(tr.at(2).start_kind == static_cast<uint8_t>(CyclingStartKind::TargetRaised));
+    CHECK(tr.at(2).start_tgt_prev_tenths == 310 && tr.at(2).start_tgt_tenths == 340);
+    CHECK(tr.at(2).stop_kind == static_cast<uint8_t>(CyclingStopKind::TargetChanged));
+    CHECK(tr.at(2).stop_tgt_prev_tenths == 340 && tr.at(2).stop_tgt_tenths == 300);
+    CHECK((tr.at(2).flags & RUN_CTX_F_LOW_RPS_ABOVE_TGT) == 0);
+
+    // 4) DefrostStart -> Defrost stop -> AfterDefrost start; then DhwTransition handover + DhwStart
+    // -> AfterDhw
+    step(275,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 330, 0));
+    step(280, mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330,
+                 160, StopContextBit::On, StopContextBit::On));
+    step(290, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 250, 240, 330,
+                 160, StopContextBit::On, StopContextBit::Off));
+    CHECK(tr.at(3).start_kind == static_cast<uint8_t>(CyclingStartKind::DefrostStart));
+    CHECK(tr.at(3).mode == static_cast<uint8_t>(CyclingRunMode::Other));
+    CHECK(tr.at(3).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
+
+    step(300, mk(true, true, 260, StopContextMode::Heating, StopContextRoute::Space, 270, 250, 330,
+                 180));
+    step(310,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 330, 300, 330, 180));
+    step(315, mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 330, 300, 480, 0));
+    CHECK(tr.at(4).start_kind == static_cast<uint8_t>(CyclingStartKind::AfterDefrost));
+    CHECK(tr.at(4).stop_kind == static_cast<uint8_t>(CyclingStopKind::DhwTransition));
+
+    step(325,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 320, 295, 330, 0));
+    step(330, mk(true, true, 300, StopContextMode::Dhw, StopContextRoute::Dhw, 420, 390, 500, 150));
+    step(340, mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 490, 460, 500, 150));
+    CHECK(tr.at(5).start_kind == static_cast<uint8_t>(CyclingStartKind::DhwStart));
+    CHECK(tr.at(5).mode == static_cast<uint8_t>(CyclingRunMode::Dhw));
+    CHECK(tr.at(5).stop_kind == static_cast<uint8_t>(CyclingStopKind::Normal));
+
+    step(350, mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 330,
+                 175));
+    step(990,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 335, 310, 330, 175));
+    // Note gap > 15s re-baselines cleanly without closing the active run; let's add two continuous
+    // >=600s runs
+    CHECK(tr.count == 7);
+    CHECK(tr.at(6).start_kind == static_cast<uint8_t>(CyclingStartKind::AfterDhw));
+    CHECK((tr.at(6).flags & RUN_CTX_F_STOPPED) == 0); // aborted at gap!
+
+    // Brief <=15s unreadable RPS mid-run preserves active tracking; >15s aborts without fabricating
+    // stop, plus negative/overflow clock guards
+    step(1000,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 0));
+    step(1005, mk(true, true, 210, StopContextMode::Heating, StopContextRoute::Space, 305, 282, 330,
+                  160));
+    step(1010, mk(false, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 285, 330,
+                  999));
+    CHECK(st.run_active);
+    step(1015, mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 315, 288, 330,
+                  180));
+    CHECK(st.run_active);
+    step(1020,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 320, 290, 330, 180));
+    CHECK(tr.latest_mut() != nullptr);
+    CHECK((tr.latest_mut()->flags & RUN_CTX_F_STOPPED) != 0 && tr.latest_mut()->stop_s == 1020);
+    CHECK(tr.latest_mut()->stop_kind == static_cast<uint8_t>(CyclingStopKind::Normal));
+    CHECK(tr.latest_mut()->flow_tenths == 170);
+
+    // <=15s unreadable RPS blip immediately before OFF still records stop
+    step(1030, mk(true, true, 230, StopContextMode::Heating, StopContextRoute::Space, 305, 285, 330,
+                  170));
+    step(1035, mk(false, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 285, 330,
+                  170));
+    CHECK(st.run_active);
+    step(1040,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 320, 290, 330, 170));
+    CHECK((tr.latest_mut()->flags & RUN_CTX_F_STOPPED) != 0 && tr.latest_mut()->stop_s == 1040);
+    CHECK(tr.latest_mut()->stop_kind == static_cast<uint8_t>(CyclingStopKind::Normal));
+
+    // >15s unreadable RPS gap clears active run without fabricating stop
+    step(1050, mk(true, true, 230, StopContextMode::Heating, StopContextRoute::Space, 305, 285, 330,
+                  170));
+    step(1055, mk(false, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 285, 330,
+                  170));
+    CHECK(st.run_active);
+    step(1070, mk(false, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 285, 330,
+                  170));
+    CHECK(!st.run_active && (tr.latest_mut()->flags & RUN_CTX_F_STOPPED) == 0);
+    step(995,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 285, 330, 0));
+    CHECK(st.last_sample_us == -1);
+    step(static_cast<int64_t>(CheckupCyclingTrace::max_second) + 10,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 285, 330, 0));
+    CHECK(st.last_sample_us == -1);
+
+    // Expire across gap & clock inversion preserves completed trace entries
+    step(1100,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 0));
+    cycling_run_context_expire(st, -1);
+    CHECK(!st.initialized);
+    step(1105,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 0));
+    cycling_run_context_expire(st, 1130 * 1000000LL);
+    CHECK(!st.initialized);
+
+    // Fresh trace for snapshot median flow (even & odd count) + wrap > 48 entries + boot_s clamping
+    step(2000,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 0),
+         gen + 1);
+    CHECK(tr.count == 0);
+    int64_t t              = 2010;
+    auto    push_space_run = [&](int dur_s, int16_t flow) {
+        step(
+            t,
+            mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 290, 270, 330, 0),
+            gen + 1);
+        t += 5;
+        step(t,
+                mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 295, 275, 330,
+                   flow),
+                gen + 1);
+        for (int elapsed = 10; elapsed < dur_s; elapsed += 10) {
+            t += 10;
+            step(t,
+                    mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 310, 285,
+                       330, flow),
+                    gen + 1);
+        }
+        t += 5;
+        step(t,
+                mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 330, 305, 330,
+                   flow),
+                gen + 1);
+        t += 10;
+    };
+    push_space_run(620, 180);
+    push_space_run(620, 160);
+    CheckupRunContextSnapshot snap;
+    cycling_run_context_snapshot(snap, tr, static_cast<uint32_t>(t));
+    CHECK(snap.count == 2 && snap.flow_typical_tenths == 170);
+
+    push_space_run(620, 200);
+    cycling_run_context_snapshot(snap, tr, static_cast<uint32_t>(t));
+    CHECK(snap.count == 3 && snap.flow_typical_tenths == 180);
+
+    // Future-stop run with boot_s in middle strips stopped flag safely
+    const uint32_t open_boot = static_cast<uint32_t>(tr.at(2).start_s + 10);
+    cycling_run_context_snapshot(snap, tr, open_boot);
+    CHECK(snap.count == 3 && (snap.entries[2].flags & RUN_CTX_F_STOPPED) == 0);
+
+    // Snapshot edge cases: missing flow on >=600s space run, non-space >=600s DHW run,
+    // open/unstopped run, and future-start run excluded against boot_s.
+    {
+        CheckupRunContextTrace snap_tr;
+        CyclingRunContext      r1 = cycling_run_context_empty();
+        r1.start_s                = 100;
+        r1.stop_s                 = 800;
+        r1.mode                   = static_cast<uint8_t>(CyclingRunMode::Space);
+        r1.flags                  = RUN_CTX_F_STOPPED;
+        snap_tr.push(r1);
+
+        CyclingRunContext r2 = cycling_run_context_empty();
+        r2.start_s           = 900;
+        r2.stop_s            = 1600;
+        r2.mode              = static_cast<uint8_t>(CyclingRunMode::Dhw);
+        r2.flow_tenths       = 150;
+        r2.flags             = RUN_CTX_F_STOPPED;
+        snap_tr.push(r2);
+
+        CyclingRunContext r3 = cycling_run_context_empty();
+        r3.start_s           = 1700;
+        r3.mode              = static_cast<uint8_t>(CyclingRunMode::Space);
+        snap_tr.push(r3);
+
+        CyclingRunContext r4 = cycling_run_context_empty();
+        r4.start_s           = 2000;
+        r4.mode              = static_cast<uint8_t>(CyclingRunMode::Space);
+        snap_tr.push(r4);
+
+        cycling_run_context_snapshot(snap, snap_tr, 1800);
+        CHECK(snap.count == 3 && snap.flow_typical_tenths == CHECKUP_ABSENT);
+        CHECK((snap.entries[2].flags & RUN_CTX_F_STOPPED) == 0);
+    }
+
+    // Additional state branches: late LWT/target backfill <=5s, Unknown->DhwStart <=15s, flow on
+    // stop sample, in-run target drop / request withdrawal / defrost transition, post-stop defrost
+    // upgrade, and target_known=false clearing target_stable_us.
+    step(t,
+         mk(true, false, 0, StopContextMode::Unknown, StopContextRoute::Unknown, CHECKUP_ABSENT,
+            CHECKUP_ABSENT, CHECKUP_ABSENT, -1),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 240, StopContextMode::Unknown, StopContextRoute::Unknown, CHECKUP_ABSENT,
+            CHECKUP_ABSENT, CHECKUP_ABSENT, -1),
+         gen + 2);
+    t += 4;
+    step(t, mk(true, true, 240, StopContextMode::Dhw, StopContextRoute::Dhw, 410, 380, 500, -1),
+         gen + 2);
+    t += 4;
+    step(t,
+         mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 420, 390, CHECKUP_ABSENT,
+            145),
+         gen + 2);
+    CHECK(tr.count == 1 && tr.at(0).start_lwt_tenths == 410 && tr.at(0).start_tgt_tenths == 500 &&
+          tr.at(0).start_kind == static_cast<uint8_t>(CyclingStartKind::DhwStart) &&
+          tr.at(0).flow_tenths == 145 && st.target_stable_us == -1);
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 415, 385, 500, 0,
+            StopContextBit::On, StopContextBit::On),
+         gen + 2);
+    CHECK(tr.at(0).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
+    t += 35; // expire pending_stop_us via step (> 30s while keeping <= 15s steps)
+    step(t - 20,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 2);
+    step(t - 5,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 2);
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 2);
+    CHECK(st.pending_stop_us == -1);
+
+    // Unknown mode start -> Unknown->DefrostStart <=15s
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Unknown, StopContextRoute::Unknown, CHECKUP_ABSENT,
+            CHECKUP_ABSENT, CHECKUP_ABSENT, 0, StopContextBit::Off),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 200, StopContextMode::Unknown, StopContextRoute::Unknown, CHECKUP_ABSENT,
+            CHECKUP_ABSENT, CHECKUP_ABSENT, 160, StopContextBit::Off),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 160,
+            StopContextBit::On, StopContextBit::On),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 270, 260, 330, 160,
+            StopContextBit::On, StopContextBit::On),
+         gen + 2);
+    CHECK(tr.at(1).start_kind == static_cast<uint8_t>(CyclingStartKind::DefrostStart) &&
+          tr.at(1).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
+
+    // In-run target drop stop, in-run request withdrawal stop, Unknown->Unknown stop, expire
+    // timeout
+    t += 10;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 305, 285, 340, 170),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 320, 295, 310, 170),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 325, 300, 310, 170),
+         gen + 2);
+    CHECK(tr.at(2).stop_kind == static_cast<uint8_t>(CyclingStopKind::TargetChanged));
+
+    t += 5;
+    step(t,
+         mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 305, 285, 340, 170),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 315, 290, 340, 170,
+            StopContextBit::Off),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 315, 290, 340, 170,
+            StopContextBit::Off),
+         gen + 2);
+    CHECK(tr.at(3).stop_kind == static_cast<uint8_t>(CyclingStopKind::RequestWithdrawal));
+
+    // In-run space->DHW transition before stop
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 305, 285, 340, 0),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 340, 170),
+         gen + 2);
+    t += 5;
+    step(t, mk(true, true, 260, StopContextMode::Dhw, StopContextRoute::Dhw, 420, 390, 500, 150),
+         gen + 2);
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 480, 450, 500, 150),
+         gen + 2);
+    CHECK(tr.at(4).stop_kind == static_cast<uint8_t>(CyclingStopKind::DhwTransition));
+
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 320, 300, 340, 0),
+         gen + 2);
+    t += 12;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 320, 300, 340, 0),
+         gen + 2);
+    cycling_run_context_expire(st, (t + 14) * 1000000LL);
+    CHECK(st.pending_stop_us == -1);
+
+    // Expire clears after last_rps_us timeout and clears pending_stop_us at >= 30s
+    t += 10;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 340, 0),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(false, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 340, 0),
+         gen + 2);
+    cycling_run_context_expire(st, (t + 20) * 1000000LL);
+    CHECK(!st.initialized);
+
+    // >48 runs wrap cleanly
+    t += 30;
+    for (int k = 0; k < 50; ++k) push_space_run(40, 150);
+    CHECK(tr.count == CYCLING_RUN_CONTEXT_CAP);
+    cycling_run_context_snapshot(snap, tr, static_cast<uint32_t>(t));
+    CHECK(snap.count == CYCLING_RUN_CONTEXT_CAP);
+
+    // Pause resets active tracker/pending window while preserving generation and retained runs.
+    const uint16_t count_before_pause = tr.count;
+    const uint32_t last_start_before  = tr.at(tr.count - 1).start_s;
+    st.pause();
+    CHECK(!st.initialized && st.have_generation && st.source_generation == gen + 1);
+    CHECK(tr.count == count_before_pause);
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 1);
+    CHECK(st.initialized && tr.count == count_before_pause &&
+          tr.at(tr.count - 1).start_s == last_start_before);
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 2);
+    CHECK(tr.count == 0);
+
+    // Post-defrost startup-tail reclassification (<=30s defrost tail followed by >=15s Off in
+    // DHW/Space)
+    auto step_cont = [&](int total_s, int dt_s, const CyclingRunSample& s) {
+        for (int e = dt_s; e <= total_s; e += dt_s) {
+            t += dt_s;
+            step(t, s, gen + 3);
+        }
+    };
+    t = 5000;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 350, 330, 435, 0),
+         gen + 3);
+    t += 5;
+    step(t,
+         mk(true, true, 300, StopContextMode::Heating, StopContextRoute::Space, 358, 330, 435, 248,
+            StopContextBit::On, StopContextBit::On),
+         gen + 3); // real defrost run
+    step_cont(40, 10,
+              mk(true, true, 300, StopContextMode::Heating, StopContextRoute::Space, 280, 290, 435,
+                 248, StopContextBit::On, StopContextBit::On));
+    t += 10;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 265, 285, 435, 248,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    CHECK(tr.count == 1 && tr.at(0).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
+    // Reclassify 13s defrost tail -> DHW run after >=15s defrost-off
+    step_cont(30, 10,
+              mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 280, 285, 435,
+                 0, StopContextBit::On, StopContextBit::Off));
+    t += 5;
+    step(t,
+         mk(true, true, 350, StopContextMode::Heating, StopContextRoute::Space, 293, 290, 435, 200,
+            StopContextBit::On, StopContextBit::On),
+         gen + 3);
+    t += 10;
+    step(t,
+         mk(true, true, 350, StopContextMode::Heating, StopContextRoute::Space, 310, 300, 435, 200,
+            StopContextBit::On, StopContextBit::On),
+         gen + 3);
+    t += 5;
+    step(t,
+         mk(true, true, 350, StopContextMode::Dhw, StopContextRoute::Dhw, 340, 310, 480, 180,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    t += 10; // only 10s off -> still stays Other/DefrostStart
+    step(t,
+         mk(true, true, 350, StopContextMode::Dhw, StopContextRoute::Dhw, 360, 330, 480, 180,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    CHECK(tr.at(1).mode == static_cast<uint8_t>(CyclingRunMode::Other));
+    CHECK(tr.at(1).start_kind == static_cast<uint8_t>(CyclingStartKind::DefrostStart));
+    t += 5; // >=15s off -> reclassifies to DHW + DhwStart
+    step(t,
+         mk(true, true, 350, StopContextMode::Dhw, StopContextRoute::Dhw, 380, 350, 480, 180,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    CHECK(tr.at(1).mode == static_cast<uint8_t>(CyclingRunMode::Dhw));
+    CHECK(tr.at(1).start_kind == static_cast<uint8_t>(CyclingStartKind::DhwStart));
+    t += 10;
+    step(t,
+         mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 485, 455, 480, 180,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    CHECK(tr.at(1).stop_kind == static_cast<uint8_t>(CyclingStopKind::Normal));
+
+    // Space heating tail reclassification (Defrost -> <=30s tail with bounce -> AfterDefrost ->
+    // LowRpsAboveTarget)
+    t += 10;
+    step(t,
+         mk(true, true, 300, StopContextMode::Heating, StopContextRoute::Space, 350, 330, 400, 220,
+            StopContextBit::On, StopContextBit::On),
+         gen + 3);
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 270, 290, 400, 220,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    t += 10;
+    step(t,
+         mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 280, 285, 330, 160,
+            StopContextBit::On, StopContextBit::On),
+         gen + 3);
+    t += 5;
+    step(t,
+         mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 290, 288, 330, 160,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    t += 5; // defrost briefly turns On again before 15s clear -> resets off timer
+    step(t,
+         mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 295, 290, 330, 160,
+            StopContextBit::On, StopContextBit::On),
+         gen + 3);
+    t += 5;
+    step(t,
+         mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 305, 295, 330, 160,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    step_cont(15, 5,
+              mk(true, true, 190, StopContextMode::Heating, StopContextRoute::Space, 320, 305, 330,
+                 160, StopContextBit::On, StopContextBit::Off));
+    CHECK(tr.at(3).mode == static_cast<uint8_t>(CyclingRunMode::Space));
+    CHECK(tr.at(3).start_kind == static_cast<uint8_t>(CyclingStartKind::AfterDefrost));
+    step_cont(20, 5,
+              mk(true, true, 180, StopContextMode::Heating, StopContextRoute::Space, 352, 335, 330,
+                 160, StopContextBit::On, StopContextBit::Off));
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 355, 336, 330, 160,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    CHECK(tr.at(3).stop_kind == static_cast<uint8_t>(CyclingStopKind::LowRpsAboveTarget));
+
+    // <=30s tail WITHOUT prior defrost stop -> Space + Unknown
+    t += 10;
+    step(t,
+         mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 300, 290, 330, 160,
+            StopContextBit::On, StopContextBit::On),
+         gen + 3);
+    t += 5;
+    step(t,
+         mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 310, 295, 330, 160,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    step_cont(15, 5,
+              mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 320, 300, 330,
+                 160, StopContextBit::On, StopContextBit::Off));
+    CHECK(tr.at(4).mode == static_cast<uint8_t>(CyclingRunMode::Space));
+    CHECK(tr.at(4).start_kind == static_cast<uint8_t>(CyclingStartKind::Unknown));
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 325, 305, 330, 160,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    CHECK(tr.at(4).stop_kind == static_cast<uint8_t>(CyclingStopKind::Normal));
+
+    // >30s real defrost followed by >=15s Off must NOT reclassify (stays Other / DefrostStart /
+    // Defrost)
+    t += 10;
+    step(t,
+         mk(true, true, 300, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 330, 200,
+            StopContextBit::On, StopContextBit::On),
+         gen + 3);
+    step_cont(35, 5,
+              mk(true, true, 300, StopContextMode::Heating, StopContextRoute::Space, 290, 280, 330,
+                 200, StopContextBit::On, StopContextBit::On));
+    step_cont(25, 5,
+              mk(true, true, 300, StopContextMode::Heating, StopContextRoute::Space, 285, 278, 330,
+                 200, StopContextBit::On, StopContextBit::Off));
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 285, 330, 200,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 3);
+    CHECK(tr.at(5).mode == static_cast<uint8_t>(CyclingRunMode::Other));
+    CHECK(tr.at(5).start_kind == static_cast<uint8_t>(CyclingStartKind::DefrostStart));
+    CHECK(tr.at(5).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
 }
 
 int main() {
+    hydronic_host_tests::test_hourly_wire_and_population();
+    hydronic_host_tests::test_population_and_boundaries();
+    hydronic_host_tests::test_witnesses_and_ranges();
+    hydronic_host_tests::test_barriers_and_saturation();
+    hydronic_host_tests::test_clock_epoch_after_interruptions();
+    hydronic_host_tests::test_inputs();
+    hydronic_host_tests::test_secondary_supply_inputs();
+    hydronic_host_tests::test_secondary_supply_continuity();
+    test_cycling_run_context();
     test_stop_context();
     test_stop_context_inputs();
     test_stop_context_output();
@@ -34076,7 +36138,9 @@ int main() {
     test_history_measurement_units();
     test_history();
     test_defrost_start_context();
-    test_checkup();
+    test_checkup(false);
+    test_checkup(true);
+    test_dhw_loss_trace();
     test_checkup_population();
     test_checkup_evidence_overhaul();
     test_no_publish();

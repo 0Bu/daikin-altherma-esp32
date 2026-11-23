@@ -441,6 +441,10 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?config_load\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?11config_load[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 2384
     },
+    "config_blob_load_issue": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?log_blob_load_issue\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?19log_blob_load_issue[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
     "history_start": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_start\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13history_start[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 1632
@@ -2634,8 +2638,8 @@
       "max_bytes": 128
     },
     "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_": {
-      "pattern": "^daik::checkup_record\\(daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool,\\ daik::logic::CheckupCoverage\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool\\)$",
-      "max_bytes": 576
+      "pattern": "^daik::checkup_record\\(daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool,\\ daik::logic::CheckupCoverage\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool,\\ long\\ long\\)$",
+      "max_bytes": 448
     },
     "stop_dated": {
       "pattern": "^daik::\\(anonymous\\ namespace\\)::dated\\(long\\ long\\)$",
@@ -3006,11 +3010,11 @@
       "max_bytes": 128
     },
     "modbus_checkup_record": {
-      "pattern": "^daik::checkup_record_modbus\\(daik::CachedValue const\\*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool\\)$",
+      "pattern": "^daik::checkup_record_modbus\\(daik::CachedValue const\\*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis\\)$",
       "max_bytes": 208
     },
     "modbus_checkup_coverage": {
-      "pattern": "^daik::logic::checkup_modbus_coverage\\(daik::ModbusProfile\\)$",
+      "pattern": "^daik::logic::checkup_modbus_coverage\\(daik::ModbusProfile, daik::ModbusProfileBasis\\)$",
       "max_bytes": 64
     },
     "checkup_commit_and_fold": {
@@ -3163,6 +3167,10 @@
     },
     "status_service_metric": {
       "pattern": "^void daik::append_status_service_metric<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, daik::logic::RefrigerantServiceMetricSnapshot const&\\)$",
+      "max_bytes": 64
+    },
+    "status_service_meta": {
+      "pattern": "^void daik::append_status_service_meta<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, daik::logic::RefrigerantServiceMetricSnapshot const&, daik::logic::RefrigerantServiceSource const&\\)$",
       "max_bytes": 64
     },
     "curve_json_bool": {
@@ -3323,6 +3331,90 @@
     },
     "fault_handoff_decode": {
       "pattern": "^daik::logic::checkup_fault_handoff_decode\\(daik::logic::CheckupFaultTrace&, daik::logic::FaultHandoffPayload const&\\)$",
+      "max_bytes": 64
+    },
+    "cycling_run_status_json": {
+      "pattern": "^(?:(?:void )?daik::append_cycling_run_contexts_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\((?![^\\n]*\\{lambda)[^\\n]*\\)|_ZN4daikL32append_cycling_run_contexts_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_mNS_17DiagnosticsSourceE(?:\\$(?:constprop|isra|part)\\$[0-9]+)?)$",
+      "max_bytes": 128
+    },
+    "cycling_run_status_opt": {
+      "pattern": "^daik::append_cycling_run_contexts_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\([^\\n]*\\)::\\{lambda\\(char const\\*, short\\)[#]1\\}::operator\\(\\)\\(char const\\*, short\\) const$",
+      "max_bytes": 64
+    },
+    "cycling_run_has_contexts": {
+      "pattern": "^daik::checkup_has_cycling_run_contexts\\(daik::DiagnosticsSource\\)$",
+      "max_bytes": 96
+    },
+    "cycling_run_contexts_fetch": {
+      "pattern": "^daik::checkup_cycling_run_contexts\\(daik::logic::CheckupRunContextSnapshot&, unsigned long, daik::DiagnosticsSource\\)$",
+      "max_bytes": 128
+    },
+    "cycling_run_expire": {
+      "pattern": "^daik::logic::cycling_run_context_expire\\(daik::logic::CyclingRunContextTracker&, long long\\)$",
+      "max_bytes": 96
+    },
+    "cycling_run_snapshot": {
+      "pattern": "^daik::logic::cycling_run_context_snapshot\\(daik::logic::CheckupRunContextSnapshot&, daik::logic::CheckupRunContextTrace const&, unsigned long\\)$",
+      "max_bytes": 256
+    },
+    "cycling_run_checkup_record": {
+      "pattern": "^daik::checkup_record\\(daik::CachedValue const\\*, unsigned int, bool, bool, daik::logic::CheckupCoverage const&, unsigned long, unsigned long, bool, long long\\)$",
+      "max_bytes": 512
+    },
+    "cycling_run_record_locked": {
+      "pattern": "^daik::\\(anonymous namespace\\)::record_cycling_run_context_locked\\(daik::logic::StopContextSample const&, daik::CachedValue const\\*, unsigned int, daik::logic::CheckupSample const&, int, bool, long long, unsigned long\\)$",
+      "max_bytes": 160
+    },
+    "cycling_run_step": {
+      "pattern": "^daik::logic::cycling_run_context_step\\(daik::logic::CyclingRunContextTracker&, daik::logic::CheckupRunContextTrace&, daik::logic::CyclingRunSample const&, long long, unsigned long\\)$",
+      "max_bytes": 192
+    },
+    "cycling_run_rwt_locator": {
+      "pattern": "^daik::resolve_rwt_locator\\(daik::logic::ProfileView const&\\)$",
+      "max_bytes": 128
+    },
+    "dhw_trace_modbus_gap": {
+      "pattern": "^daik::mb_record_poll_gap\\(unsigned\\ long,\\ unsigned\\ long\\)$",
+      "max_bytes": 64
+    },
+    "dhw_trace_copy": {
+      "pattern": "^daik::copy_dhw_trace_locked\\(daik::\\(anonymous\\ namespace\\)::CheckupSlot\\&,\\ daik::logic::DhwLossTimeline\\*,\\ long\\ long,\\ bool\\)$",
+      "max_bytes": 80
+    },
+    "dhw_trace_expire": {
+      "pattern": "^daik::logic::DhwLossTrace::expire\\(unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "dhw_trace_reset": {
+      "pattern": "^daik::logic::DhwLossTrace::reset\\(\\)$",
+      "max_bytes": 32
+    },
+    "checkup_cycling_anchor": {
+      "pattern": "^daik::logic::checkup_cycling_end_unix_s\\(long\\ long,\\ long\\ long,\\ long\\ long,\\ long\\)$",
+      "max_bytes": 32
+    },
+    "dhw_trace_monotonic": {
+      "pattern": "^esp_timer_get_time$",
+      "max_bytes": 32
+    },
+    "dhw_trace_dhw_reset": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::apply_dhw_reset_locked\\(daik::\\(anonymous\\ namespace\\)::CheckupSlot\\&\\)$",
+      "max_bytes": 32
+    },
+    "dhw_trace_persist_wipe": {
+      "pattern": "^_ZN4daik12_GLOBAL__N_1L12persist_wipeERNS0_11CheckupSlotEb\\$constprop\\$0$",
+      "max_bytes": 64
+    },
+    "dhw_trace_slot_start": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::slot_start\\(daik::\\(anonymous\\ namespace\\)::CheckupSlot\\&,\\ bool,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool\\)$",
+      "max_bytes": 64
+    },
+    "dhw_trace_slot_config": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::slot_set_diagnostics\\(daik::\\(anonymous\\ namespace\\)::CheckupSlot\\&,\\ bool,\\ bool\\)$",
+      "max_bytes": 64
+    },
+    "dhw_trace_step": {
+      "pattern": "^daik::logic::dhw_loss_step_traced\\(daik::logic::DhwLossState\\&,\\ daik::logic::DhwLossBucket\\&,\\ daik::logic::CheckupSample\\ const\\&,\\ daik::logic::DhwLossTrace\\*,\\ long\\ long\\)$",
       "max_bytes": 64
     }
   },
@@ -4239,7 +4331,8 @@
       "symbols": [
         "main_task",
         "boot_sequence",
-        "config_load"
+        "config_load",
+        "config_blob_load_issue"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -14710,6 +14803,17 @@
       "base_bytes": 1536,
       "max_bytes": 8192
     },
+    "httpd_direct_status_service_meta": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_service_meta",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
     "httpd_direct_curve_scalar_fields": {
       "symbols": [
         "http_send_status_json",
@@ -14780,6 +14884,18 @@
         "status_serializer",
         "status_service_metric",
         "status_tenths_value",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_status_service_meta": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_service_meta",
         "status_unsigned_number"
       ],
       "multipliers": {},
@@ -17656,6 +17772,931 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 3072
+    },
+    "httpd_mcp_cycling_run_contexts": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_contexts_fetch",
+        "cycling_run_snapshot"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_cycling_run_contexts": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_contexts_fetch",
+        "cycling_run_snapshot"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_run_emit": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_status_opt",
+        "status_tenths_value",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_run_expire": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_contexts_fetch",
+        "cycling_run_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_run_has": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_has_contexts"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_cycling_run_record": {
+      "symbols": [
+        "poll_task",
+        "cycling_run_checkup_record",
+        "cycling_run_record_locked",
+        "cycling_run_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_cycling_run_detect": {
+      "symbols": [
+        "poll_task",
+        "checkup_detect_schema",
+        "cycling_run_rwt_locator",
+        "stop_instrument_",
+        "stop_profileview_const__",
+        "checkup_schema_adjudicated_view"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_cycling_run_detect": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "checkup_detect_schema",
+        "cycling_run_rwt_locator",
+        "stop_instrument_",
+        "stop_profileview_const__",
+        "checkup_schema_adjudicated_view"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_run_quoted": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_cycling_run_expire": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "stop_checkup_stop_context_expire",
+        "cycling_run_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_cycling_run_gap": {
+      "symbols": [
+        "poll_task",
+        "stop_checkup_record_poll_gap",
+        "cycling_run_checkup_record",
+        "cycling_run_record_locked",
+        "cycling_run_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_direct_dhw_trace_expire": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "dhw_trace_copy",
+        "dhw_trace_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_dhw_trace_clock": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "dhw_trace_copy",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_dhw_trace_monotonic": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "dhw_trace_copy",
+        "dhw_trace_monotonic"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_cycling_hours_anchor": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_cycling_hours_locked",
+        "checkup_cycling_anchor"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_dhw_trace_guard": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "dhw_trace_copy",
+        "stop_atomic_bool_load"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_dhw_trace_expire": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "dhw_trace_copy",
+        "dhw_trace_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_dhw_trace_clock": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "dhw_trace_copy",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_dhw_trace_monotonic": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "dhw_trace_copy",
+        "dhw_trace_monotonic"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_hours_anchor": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_cycling_hours_locked",
+        "checkup_cycling_anchor"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_dhw_trace_guard": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "dhw_trace_copy",
+        "stop_atomic_bool_load"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_dhw_trace_core": {
+      "symbols": [
+        "poll_task",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_commit_and_fold",
+        "dhw_trace_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_dhw_trace_expire": {
+      "symbols": [
+        "poll_task",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_trace_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_dhw_trace_backclock": {
+      "symbols": [
+        "poll_task",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_trace_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_dhw_trace_aggregate": {
+      "symbols": [
+        "poll_task",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_loss_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_dhw_trace_reset": {
+      "symbols": [
+        "poll_task",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 7168
+    },
+    "poll_dhw_trace_scope_reset": {
+      "symbols": [
+        "poll_task",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 7168
+    },
+    "poll_gap_dhw_trace_core": {
+      "symbols": [
+        "poll_task",
+        "stop_checkup_record_poll_gap",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_commit_and_fold",
+        "dhw_trace_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_gap_dhw_trace_expire": {
+      "symbols": [
+        "poll_task",
+        "stop_checkup_record_poll_gap",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_trace_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_gap_dhw_trace_backclock": {
+      "symbols": [
+        "poll_task",
+        "stop_checkup_record_poll_gap",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_trace_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_gap_dhw_trace_aggregate": {
+      "symbols": [
+        "poll_task",
+        "stop_checkup_record_poll_gap",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_loss_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_gap_dhw_trace_reset": {
+      "symbols": [
+        "poll_task",
+        "stop_checkup_record_poll_gap",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 7168
+    },
+    "poll_gap_dhw_trace_scope_reset": {
+      "symbols": [
+        "poll_task",
+        "stop_checkup_record_poll_gap",
+        "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 7168
+    },
+    "modbus_gap_dhw_trace_core": {
+      "symbols": [
+        "modbus_task",
+        "dhw_trace_modbus_gap",
+        "modbus_checkup_record",
+        "checkup_commit_and_fold",
+        "dhw_trace_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_gap_dhw_trace_expire": {
+      "symbols": [
+        "modbus_task",
+        "dhw_trace_modbus_gap",
+        "modbus_checkup_record",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_trace_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_gap_dhw_trace_backclock": {
+      "symbols": [
+        "modbus_task",
+        "dhw_trace_modbus_gap",
+        "modbus_checkup_record",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_trace_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_gap_dhw_trace_aggregate": {
+      "symbols": [
+        "modbus_task",
+        "dhw_trace_modbus_gap",
+        "modbus_checkup_record",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_loss_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_gap_dhw_trace_reset": {
+      "symbols": [
+        "modbus_task",
+        "dhw_trace_modbus_gap",
+        "modbus_checkup_record",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 5120
+    },
+    "modbus_gap_dhw_trace_scope_reset": {
+      "symbols": [
+        "modbus_task",
+        "dhw_trace_modbus_gap",
+        "modbus_checkup_record",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 5120
+    },
+    "modbus_dhw_trace_core": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_checkup_record",
+        "checkup_commit_and_fold",
+        "dhw_trace_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_dhw_trace_expire": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_checkup_record",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_trace_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_dhw_trace_backclock": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_checkup_record",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_trace_reset"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_dhw_trace_aggregate": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_checkup_record",
+        "checkup_commit_and_fold",
+        "dhw_trace_step",
+        "dhw_loss_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_dhw_trace_reset": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_checkup_record",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 5120
+    },
+    "modbus_dhw_trace_scope_reset": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_checkup_record",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 5120
+    },
+    "main_dhw_trace_reset": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "stop_checkup_start",
+        "dhw_trace_slot_start",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 5120
+    },
+    "httpd_dhw_trace_reset": {
+      "symbols": [
+        "config_diagnostics",
+        "config_document",
+        "stop_checkup_set_diagnostics",
+        "dhw_trace_slot_config",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_checkup_dhw_trace_reset": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_checkup_dhw_trace_reset": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_checkup_dhw_trace_reset": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_checkup_dhw_trace_reset": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_checkup_dhw_trace_reset": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_checkup_dhw_trace_reset": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 8192
+    },
+    "poll_shutdown_checkup_dhw_trace_reset": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 7168
+    },
+    "eth_shutdown_checkup_dhw_trace_reset": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 3072
+    },
+    "ota_shutdown_checkup_dhw_trace_reset": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 10752
+    },
+    "ota_health_shutdown_checkup_dhw_trace_reset": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 3072
+    },
+    "button_shutdown_checkup_dhw_trace_reset": {
+      "symbols": [
+        "button_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "dhw_trace_dhw_reset",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_shutdown_checkup_dhw_trace_scope_reset": {
+      "symbols": [
+        "button_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "checkup_shutdown_reset",
+        "dhw_trace_persist_wipe",
+        "dhw_trace_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
     }
   },
   "tasks": {
@@ -17960,11 +19001,13 @@
         "httpd_direct_status_opt_quoted",
         "httpd_direct_status_outdoor_context",
         "httpd_direct_status_service_metric",
+        "httpd_direct_status_service_meta",
         "httpd_direct_curve_scalar_fields",
         "httpd_mcp_status_redacted",
         "httpd_mcp_status_opt_quoted",
         "httpd_mcp_status_outdoor_context",
         "httpd_mcp_status_service_metric",
+        "httpd_mcp_status_service_meta",
         "httpd_mcp_curve_scalar_fields",
         "httpd_direct_defrost_start_fence",
         "httpd_mcp_defrost_start_fence",
@@ -18076,7 +19119,37 @@
         "httpd_shutdown_env3_fault_validate",
         "httpd_shutdown_env3_fault_shape",
         "httpd_shutdown_env3_fault_decode",
-        "httpd_shutdown_env3_fault_adopt"
+        "httpd_shutdown_env3_fault_adopt",
+        "httpd_mcp_cycling_run_contexts",
+        "httpd_direct_cycling_run_contexts",
+        "httpd_mcp_cycling_run_emit",
+        "httpd_mcp_cycling_run_expire",
+        "httpd_mcp_cycling_run_has",
+        "httpd_cycling_run_detect",
+        "httpd_mcp_cycling_run_quoted",
+        "httpd_direct_dhw_trace_expire",
+        "httpd_direct_dhw_trace_clock",
+        "httpd_direct_dhw_trace_monotonic",
+        "httpd_direct_cycling_hours_anchor",
+        "httpd_direct_dhw_trace_guard",
+        "httpd_mcp_dhw_trace_expire",
+        "httpd_mcp_dhw_trace_clock",
+        "httpd_mcp_dhw_trace_monotonic",
+        "httpd_mcp_cycling_hours_anchor",
+        "httpd_mcp_dhw_trace_guard",
+        "httpd_dhw_trace_reset",
+        "httpd_shutdown_wifi_checkup_dhw_trace_reset",
+        "httpd_shutdown_wifi_checkup_dhw_trace_scope_reset",
+        "httpd_shutdown_mqtt_checkup_dhw_trace_reset",
+        "httpd_shutdown_mqtt_checkup_dhw_trace_scope_reset",
+        "httpd_shutdown_syslog_checkup_dhw_trace_reset",
+        "httpd_shutdown_syslog_checkup_dhw_trace_scope_reset",
+        "httpd_shutdown_ntp_checkup_dhw_trace_reset",
+        "httpd_shutdown_ntp_checkup_dhw_trace_scope_reset",
+        "httpd_shutdown_board_checkup_dhw_trace_reset",
+        "httpd_shutdown_board_checkup_dhw_trace_scope_reset",
+        "httpd_shutdown_env3_checkup_dhw_trace_reset",
+        "httpd_shutdown_env3_checkup_dhw_trace_scope_reset"
       ]
     },
     "main": {
@@ -18105,7 +19178,8 @@
         "main_cycling_scan_owner",
         "main_fault_scan",
         "main_fault_scan_shape",
-        "main_fault_scan_owner"
+        "main_fault_scan_owner",
+        "main_dhw_trace_reset"
       ]
     },
     "mqtt": {
@@ -18322,7 +19396,25 @@
         "poll_shutdown_fault_validate",
         "poll_shutdown_fault_shape",
         "poll_shutdown_fault_decode",
-        "poll_shutdown_fault_adopt"
+        "poll_shutdown_fault_adopt",
+        "poll_cycling_run_record",
+        "poll_cycling_run_detect",
+        "poll_cycling_run_expire",
+        "poll_cycling_run_gap",
+        "poll_dhw_trace_core",
+        "poll_dhw_trace_expire",
+        "poll_dhw_trace_backclock",
+        "poll_dhw_trace_aggregate",
+        "poll_dhw_trace_reset",
+        "poll_dhw_trace_scope_reset",
+        "poll_gap_dhw_trace_core",
+        "poll_gap_dhw_trace_expire",
+        "poll_gap_dhw_trace_backclock",
+        "poll_gap_dhw_trace_aggregate",
+        "poll_gap_dhw_trace_reset",
+        "poll_gap_dhw_trace_scope_reset",
+        "poll_shutdown_checkup_dhw_trace_reset",
+        "poll_shutdown_checkup_dhw_trace_scope_reset"
       ]
     },
     "modbus": {
@@ -18332,7 +19424,19 @@
         "modbus_poll",
         "modbus_history",
         "modbus_checkup_confirm",
-        "modbus_checkup_record"
+        "modbus_checkup_record",
+        "modbus_dhw_trace_core",
+        "modbus_dhw_trace_expire",
+        "modbus_dhw_trace_backclock",
+        "modbus_dhw_trace_aggregate",
+        "modbus_dhw_trace_reset",
+        "modbus_dhw_trace_scope_reset",
+        "modbus_gap_dhw_trace_core",
+        "modbus_gap_dhw_trace_expire",
+        "modbus_gap_dhw_trace_backclock",
+        "modbus_gap_dhw_trace_aggregate",
+        "modbus_gap_dhw_trace_reset",
+        "modbus_gap_dhw_trace_scope_reset"
       ]
     },
     "syslog": {
@@ -18422,7 +19526,9 @@
         "button_stop_forget_catalog_crc",
         "button_stop_forget_manifest_reset",
         "button_stop_forget_floor_reset",
-        "button_stop_forget_preflight"
+        "button_stop_forget_preflight",
+        "button_shutdown_checkup_dhw_trace_reset",
+        "button_shutdown_checkup_dhw_trace_scope_reset"
       ]
     },
     "wifi": {
@@ -18490,7 +19596,9 @@
         "eth_shutdown_fault_validate",
         "eth_shutdown_fault_shape",
         "eth_shutdown_fault_decode",
-        "eth_shutdown_fault_adopt"
+        "eth_shutdown_fault_adopt",
+        "eth_shutdown_checkup_dhw_trace_reset",
+        "eth_shutdown_checkup_dhw_trace_scope_reset"
       ]
     },
     "dns": {
@@ -18575,7 +19683,9 @@
         "ota_shutdown_fault_validate",
         "ota_shutdown_fault_shape",
         "ota_shutdown_fault_decode",
-        "ota_shutdown_fault_adopt"
+        "ota_shutdown_fault_adopt",
+        "ota_shutdown_checkup_dhw_trace_reset",
+        "ota_shutdown_checkup_dhw_trace_scope_reset"
       ]
     },
     "ota_health": {
@@ -18630,7 +19740,9 @@
         "ota_health_shutdown_fault_validate",
         "ota_health_shutdown_fault_shape",
         "ota_health_shutdown_fault_decode",
-        "ota_health_shutdown_fault_adopt"
+        "ota_health_shutdown_fault_adopt",
+        "ota_health_shutdown_checkup_dhw_trace_reset",
+        "ota_health_shutdown_checkup_dhw_trace_scope_reset"
       ]
     },
     "deadline": {
