@@ -1492,19 +1492,33 @@ function checkupCyclingShortRunCount(c) {
   if (Array.isArray(c.run_contexts)) {
     for (const rc of c.run_contexts) ctxByStart.set(rc.at, rc);
   }
-  let shortN = 0, run = null;
+  const bootStart = Number.isSafeInteger(c?.timeline?.boot_s) && Number.isSafeInteger(c?.timeline?.window_end_s)
+    ? c.timeline.window_end_s - c.timeline.boot_s
+    : null;
+  let shortN = 0, run = null, gapRun = null, gapAt = -1;
   for (const r of rec) {
     const at = r >>> 3, k = r & 7;
     if (k === 5) {
+      gapRun = null;
       run = { start: at, mode: ctxByStart.get(at)?.mode || null };
     } else if (k === 6) {
+      gapRun = null;
       if (run && run.mode === "space" && at >= run.start && at - run.start < 300) shortN++;
       run = null;
     } else if (k === 0) {
-      run = null;
-    } else if (run && !ctxByStart.has(run.start)) {
-      if (k === 3) run.mode = "space";
-      else if (k === 2 || k === 4) run.mode = "other";
+      if (run) { gapRun = run; gapAt = at; run = null; }
+      else gapRun = null;
+    } else if (k === 1) {
+      gapRun = null;
+    } else {
+      if (!run && gapRun && !(bootStart !== null && gapAt <= bootStart && at >= bootStart) && at - gapAt <= 15) {
+        run = gapRun;
+      }
+      gapRun = null;
+      if (run && !ctxByStart.has(run.start)) {
+        if (k === 3) run.mode = "space";
+        else if (k === 2 || k === 4) run.mode = "other";
+      }
     }
   }
   return shortN;
@@ -1708,6 +1722,10 @@ function cyclingPeriodFindingHtml(model, from, to) {
   const startsTotal = model.hours.slice(from, to + 1).reduce((s, h) => s + h.starts.length, 0);
   if (!runs.length && startsTotal === 0) return esc(t("check.cycling.no_timed_runs"));
   if (!runs.length) return esc(t("check.cycling.run_details_unavailable"));
+  if (runs.every(r => !r.ctx)) {
+    const preBoot = model.source === "x10a" && model.bootStart != null && runs.some(r => r.start < model.bootStart);
+    return esc(t(preBoot ? "check.cycling.cause_since_boot" : "check.cycling.cause_unavailable"));
+  }
 
   const heating = runs.filter(r => (r.ctx?.mode || r.mode) === "space");
   const completedHeat = heating.filter(r => r.stop != null);
@@ -1833,7 +1851,11 @@ function cyclingPeriodDetailsHtml(model, from, to) {
   const runs = collectPeriodRuns(model, from, to);
 
   if (!model.hasContext) {
-    if (runs.length) return checkupCyclingRunsHtml(runs, model.wall);
+    if (runs.length) {
+      const note = model.source === "x10a" && model.bootStart != null && runs.every(r => r.start < model.bootStart)
+        ? `<p class="vdesc-p checkup-period-finding">${esc(t("check.cycling.cause_since_boot"))}</p>` : "";
+      return note + checkupCyclingRunsHtml(runs, model.wall);
+    }
     const anyObserved = model.runEdges && model.hours.slice(from, to + 1).some(h => h.observed);
     return esc(t(anyObserved ? "check.cycling.no_timed_runs" : "check.cycling.run_details_unavailable"));
   }
@@ -1864,7 +1886,7 @@ function cyclingPeriodDetailsHtml(model, from, to) {
       : (r.latest == null ? "—" : ongoing(esc(checkupCyclingDuration(r.latest - r.start)), "—"));
     const stopTxt = ctx ? cyclingStopSummaryText(r, model.flowTypical) : null;
     const stopCellHtml = r.stop != null
-      ? esc(stopTxt || t("check.cycling.run_stop_unknown"))
+      ? esc(stopTxt || t("check.cycling.cause_unavailable"))
       : (r.latest == null ? unknownStop : ongoing(esc(t("check.cycling.run_ongoing")), unknownStop));
     const rowKey = r.key ?? `s:${r.start}`;
     const isOpen = !!ctx && S.cyclingExpandedRun === rowKey;
@@ -1896,7 +1918,7 @@ function cyclingPeriodDetailsHtml(model, from, to) {
 
 // Geometry uses seconds in the trace's frame and labels use its wall-clock anchor.
 // A dated frame can include older boots, with a gap record standing between observations.
-function checkupCyclingTimelineHtml(trace, scope, checkObj) {
+function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
   const end = trace?.window_end_s, observedEnd = trace?.observed_end_s, unix = trace?.unix_s;
   const records = trace?.records, boot = trace?.boot_s;
   if (![end, observedEnd, unix].every(Number.isSafeInteger) || end > 0x1fffffff || end < observedEnd ||
@@ -1905,6 +1927,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj) {
         observedEnd > 86400 || typeof trace.live !== "boolean")) ||
       !Array.isArray(records) || !records.length || records.length > 192) return "";
   const start = end - 86400;
+  const bootStart = boot !== undefined ? end - boot : null;
   const runKey = at => {
     if (boot !== undefined) {
       return at >= end - boot ? `b:${at + boot - end}` : `u:${unix + at - end}`;
@@ -1918,7 +1941,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj) {
   const readable = [];
   const modes = ["", "", "other", "space", "dhw"];
   const runEdges = trace.run_edges === true;
-  let run;
+  let run, gapRun, gapAt = -1;
   let cursor = start, kind = 0, prior = -1;
   const cover = (from, until, state) => {
     if (until <= from) return;
@@ -1951,6 +1974,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj) {
     if (at < prior || at > observedEnd || next > 6) return "";
     prior = at;
     if (next === 5) {
+      gapRun = undefined;
       if (at >= start) {
         const hour = hours[Math.min(23, Math.floor((at - start) / 3600))];
         hour.starts.push(at);
@@ -1962,13 +1986,24 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj) {
       continue;
     }
     if (next === 6) {
+      gapRun = undefined;
       if (run) run.stop = at;
       run = undefined;
       continue;
     }
-    // A later stop cannot establish that the same run continued through a gap.
-    if (next === 0) run = undefined;
-    if (run && !run.mode && (next === 2 || next === 3 || next === 4)) run.mode = modes[next];
+    // A later stop cannot establish that the same run continued through a gap, except brief <=15s intra-boot poll blips.
+    if (next === 0) {
+      if (run) { gapRun = run; gapAt = at; run = undefined; }
+      else gapRun = undefined;
+    } else if (next === 1) {
+      gapRun = undefined;
+    } else {
+      if (!run && gapRun && !(bootStart !== null && gapAt <= bootStart && at >= bootStart) && at - gapAt <= 15) {
+        run = gapRun;
+      }
+      gapRun = undefined;
+      if (run && !run.mode) run.mode = modes[next];
+    }
     if (at > cursor) cover(cursor, at, kind);
     cursor = Math.max(at, start);
     kind = next;
@@ -1983,10 +2018,20 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj) {
   if (hasContext) {
     for (const rc of checkObj.run_contexts) runContextByStart.set(rc.at, rc);
   }
-  for (const h of hours) {
+  let latestContextHour = null;
+  for (let i = 0; i < 24; ++i) {
+    const h = hours[i];
     let shortHeating = 0;
     for (const r of h.runs) {
-      const mode = runContextByStart.get(r.start)?.mode || r.mode;
+      const ctx = runContextByStart.get(r.start);
+      if (ctx) {
+        latestContextHour = i;
+        if (Number.isSafeInteger(ctx.stop) && ctx.stop >= r.start && r.stop == null) {
+          r.stop = ctx.stop;
+          delete r.latest;
+        }
+      }
+      const mode = ctx?.mode || r.mode;
       if (mode === "space" && r.stop != null && (r.stop - r.start) < 600) ++shortHeating;
     }
     h.isCycling = shortHeating >= 2;
@@ -2037,7 +2082,8 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj) {
 
   _cyclingModels.clear();
   _cyclingModels.set(scope, {
-    hours, wall, clock, offsetStamp, episodes, runContextByStart, prevRunByStart, hasContext,
+    hours, wall, clock, offsetStamp, episodes, latestContextHour, bootStart, source,
+    runContextByStart, prevRunByStart, hasContext,
     runEdges, rev: ++cyclingModelRev,
     flowTypical: Number.isFinite(checkObj?.flow_typical_l_min) ? checkObj.flow_typical_l_min : null,
     outdoorMean: Number.isFinite(checkObj?.outdoor_mean_c) ? checkObj.outdoor_mean_c : null,
@@ -2102,7 +2148,7 @@ function checkupCyclingChartHtml(c) {
     } : c;
     const key = JSON.stringify([LANG, scope, trace, mergedCheck?.run_contexts, mergedCheck?.flow_typical_l_min]);
     if (cyclingMarkup[0] === key) return cyclingMarkup[1];
-    const timeline = checkupCyclingTimelineHtml(trace, scope, mergedCheck);
+    const timeline = checkupCyclingTimelineHtml(trace, scope, mergedCheck, source);
     if (timeline) {
       if (trace === c.timeline) {
         cyclingTrace = {

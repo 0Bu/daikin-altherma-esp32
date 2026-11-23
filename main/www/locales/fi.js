@@ -1,4 +1,4 @@
-// translation-source: 3a5add9912946b8cfda4203d0021a3fc68549843dcdf74fe50ee364b268f985c
+// translation-source: a0b77e6154de7503df1d2d35e17a9324cefe13632b5b9c0d926440af9661d87b
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -294,6 +294,8 @@ I18N.fi = localeValues([
   /* check.cycling.e_dhw */ (to, vals) => `Pysäytys ${to}: vaihto käyttöveteen${vals}.`,
   /* check.cycling.e_norm */ (to, vals) => `Päättyi ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Kävi vielä viime lukemalla.",
+  /* check.cycling.cause_unavailable */ "Ei tarkempia tietoja",
+  /* check.cycling.cause_since_boot */ "Käynnistys- ja pysäytyssyyt tallennetaan vasta viimeisimmästä uudelleenkäynnistyksestä alkaen.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · keskiarvo ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

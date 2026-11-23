@@ -980,7 +980,7 @@ button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong);
 .checkup-run-table.has-cause th:nth-child(1) { width: 20%; }
 .checkup-run-table.has-cause th:nth-child(2) { width: 22%; }
 .checkup-run-table.has-cause th:nth-child(3) { width: 58%; }
-.checkup-run-row { cursor: pointer; }
+.checkup-run-row[data-run-row] { cursor: pointer; }
 .checkup-run-row:hover .checkup-run-chev { color: var(--brand-strong); }
 .checkup-run-row:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 .checkup-run-start { display: inline-flex; align-items: center; gap: 6px; }

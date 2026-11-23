@@ -129,21 +129,23 @@ function paintCyclingChart(chart, focus = document.activeElement) {
   const scope = chart.dataset.cycling;
   const isTimeline = chart.classList.contains("checkup-cycling-timeline");
   const model = isTimeline ? _cyclingModels.get(scope) : null;
+  const defaultRange = () => {
+    if (!isTimeline || !model?.hasContext) return null;
+    if (model.episodes.length) {
+      const latest = model.episodes[model.episodes.length - 1];
+      return [latest.from, latest.to];
+    }
+    return model.latestContextHour != null ? [model.latestContextHour, model.latestContextHour] : null;
+  };
   if (S.cyclingScope !== scope) {
     S.cyclingScope = scope;
     S.cyclingPin = S.cyclingHover = null;
     S.cyclingHoverRange = null;
     S.cyclingExpandedRun = null;
     S.cyclingUserTouched = false;
-    if (isTimeline && model?.hasContext && model.episodes.length) {
-      const latest = model.episodes[model.episodes.length - 1];
-      S.cyclingRange = [latest.from, latest.to];
-    } else {
-      S.cyclingRange = null;
-    }
-  } else if (isTimeline && model?.hasContext && !S.cyclingUserTouched && model.episodes.length) {
-    const latest = model.episodes[model.episodes.length - 1];
-    S.cyclingRange = [latest.from, latest.to];
+    S.cyclingRange = defaultRange();
+  } else if (isTimeline && model?.hasContext && !S.cyclingUserTouched) {
+    S.cyclingRange = defaultRange();
   }
   const focusInside = focus?.matches?.("[data-bucket]") && chart.contains(focus);
   if (!isTimeline) {
