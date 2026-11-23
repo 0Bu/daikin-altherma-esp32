@@ -2201,7 +2201,9 @@ bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage& page, uint32_t& token
     if (!lk.acquired() || slot.dhw_trace_forgotten.load(std::memory_order_acquire)) return false;
     apply_dhw_reset_locked(slot);
     const auto     uptime_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
-    const uint32_t unix_s   = slot.dhw_trace.count ? dhw_trace_wall_locked(slot, uptime_s) : 0;
+    const uint32_t unix_s   = (slot.dhw_trace.count || slot.dhw_trace_clock_anchor_s)
+                                  ? dhw_trace_wall_locked(slot, uptime_s)
+                                  : 0;
     if (slot.dhw_trace_forgotten.load(std::memory_order_acquire)) return false;
     const uint32_t barrier = slot.dhw_trace_barrier.load(std::memory_order_relaxed);
     std::memset(&page, 0, sizeof(page));

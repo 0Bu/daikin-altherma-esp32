@@ -667,7 +667,7 @@ BODIES = {
         'retire_dhw_trace_locked': '05165d7d154dbe74cf51162f8c056ba03283c054e751ef1a07a8ee5d36621bbf',
         'dhw_trace_wall_s': 'f3d131de9489fbe972287f7008952c138d63c290990b928dbbec8ae28c57f624',
         'dhw_trace_wall_locked': 'ec44cc7e71ab9e8b095238204962174465abd8b2aaab58040e6389b5da767d8c',
-        'checkup_dhw_trace_checkpoint': '65481cf0f03a9ac552d266a1c0ac657865eaa6387261ea4f3c8790aa332527c0',
+        'checkup_dhw_trace_checkpoint': 'd979106ecea4c3bb5a124032f25ca2c8005aeb793da2b80b250483a147a9ad87',
         'checkup_dhw_trace_restore': '352ca569a580ae36ad718c9325f32aec66eefaaa257ed8fca9f5d8584b7caed8',
         'checkup_dhw_trace_forget': 'bf10f2b5dc08c24bed8fa59a54a36649b6094deb5585fc9a9c4e3789618f012a',
         'checkup_dhw_trace_reset_pending': '18b46c0777e737857b5c22cde9f1cd4c28704869e3c978462c1a8702890b1646',

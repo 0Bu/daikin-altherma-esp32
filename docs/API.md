@@ -321,8 +321,8 @@ including on reads after polling stops. A retained start may precede the left ed
 earlier windows can adopt a new, biased uptime frame so pre-boot endpoints remain unsigned.
 Use endpoint differences for durations. With `unix_s`, map coordinate `s` to
 `unix_s - window_end_s + s`. Without that anchor, use times relative to the snapshot.
-Retention advances with the monotonic clock. Restoration or the first checkpoint sets the wall
-anchor. A confirmed wall-clock reading within one second of the predicted time retains that
+Retention advances with the monotonic clock. Restoration or first checkpoint preparation sets the
+wall anchor. A confirmed wall-clock reading within one second of the predicted time retains that
 anchor. A larger confirmed difference withdraws restored windows and schedules a journal barrier.
 Current-boot measurements keep their monotonic frame. See
 [reboot and persistence](PLANT.md#reboot-and-persistence) for barrier durability.

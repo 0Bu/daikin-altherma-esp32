@@ -1070,6 +1070,14 @@ void dhw_trace_case(const std::string& name) {
         require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) &&
                     checkpoint.count == 1 && checkpoint.unix_s == prior_unix_s + 120,
                 "fresh_tank_checkpoint_is_redated_without_new_completion");
+        checkup_dhw_trace_checkpoint_appended(token, source);
+        sdk::now_us += int64_t{CHECKUP_WINDOW_S} * 1000000;
+        take(source, x);
+        require(!x.count, "tank_checkpoint_window_has_expired_in_ram");
+        adapter::unix_origin -= 120;
+        require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) &&
+                    dhw_loss_trace_page_valid(checkpoint, true),
+                "expired_tank_checkpoint_clock_step_commits_barrier");
     } else if (name == "dhw_trace_restore_forward" || name == "dhw_trace_restore_backward") {
         constexpr auto source = DiagnosticsSource::X10a;
         using Result          = CheckupFlashRestoreResult;

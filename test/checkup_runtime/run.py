@@ -447,6 +447,9 @@ for name, needle, replacement, occurrences, case, oracle in [
      "    if (!slot.dhw_trace_clock_anchor_s && unix_s >= uptime_s)\n"
      "        slot.dhw_trace_clock_anchor_s = unix_s - uptime_s;\n", "", 1,
      "dhw_trace_checkpoint_clock_step", "fresh_tank_checkpoint_clock_step_commits_barrier"),
+    ("ignore_clock_step_after_tank_checkpoint_expiry",
+     "(slot.dhw_trace.count || slot.dhw_trace_clock_anchor_s)", "slot.dhw_trace.count", 1,
+     "dhw_trace_checkpoint_clock_step", "expired_tank_checkpoint_clock_step_commits_barrier"),
     ("omit_dhw_trace_final_withdrawal_guard",
      "if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire))", "if (false)", 1,
      "dhw_trace_forget_during_snapshot", "dhw_trace_withdrawal_during_clock_read_clears_captured_output"),
