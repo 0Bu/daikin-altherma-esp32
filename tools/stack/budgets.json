@@ -133,14 +133,6 @@
       "pattern": "^daik::set_gas_comparison\\(",
       "max_bytes": 1536
     },
-    "config_power_meter": {
-      "pattern": "^daik::set_power_meter\\(",
-      "max_bytes": 1280
-    },
-    "power_meter_parser": {
-      "pattern": "^daik::parse_power_meter_request\\(",
-      "max_bytes": 1600
-    },
     "hp_query_probe": {
       "pattern": "^daik::hp_query_probe\\(",
       "max_bytes": 2736
@@ -223,18 +215,6 @@
     },
     "circulation_decode": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?decode_circulation_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24decode_circulation_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 64
-    },
-    "power_meter_frame": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_power_meter_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?25service_power_meter_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 352
-    },
-    "power_meter_probe": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_power_meter_probe_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?31service_power_meter_probe_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 192
-    },
-    "power_meter_decode": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?decode_power_meter_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24decode_power_meter_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 64
     },
     "reference_subscription": {
@@ -3828,23 +3808,6 @@
       "base_bytes": 1536,
       "max_bytes": 8192
     },
-    "httpd_config_power_meter": {
-      "symbols": [
-        "config_power_meter",
-        "config_document",
-        "power_meter_parser",
-        "cjson_parse_length_opts",
-        "cjson_parse_value",
-        "cjson_delete",
-        "cjson_parse_string"
-      ],
-      "multipliers": {
-        "cjson_parse_value": 17,
-        "cjson_delete": 17
-      },
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
     "httpd_hp_query_probe": {
       "symbols": [
         "hp_query_probe",
@@ -3976,42 +3939,6 @@
         "cjson_parse_string",
         "json_guard_reset",
         "json_guard_destroy"
-      ],
-      "multipliers": {
-        "cjson_parse_value": 17,
-        "cjson_delete": 17
-      },
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_power_meter_parse": {
-      "symbols": [
-        "mqtt_task",
-        "reference_dispatch",
-        "power_meter_frame",
-        "power_meter_decode",
-        "cjson_parse_length_opts",
-        "cjson_parse_value",
-        "cjson_delete",
-        "cjson_parse_string"
-      ],
-      "multipliers": {
-        "cjson_parse_value": 17,
-        "cjson_delete": 17
-      },
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_power_meter_probe_parse": {
-      "symbols": [
-        "mqtt_task",
-        "reference_dispatch",
-        "power_meter_probe",
-        "power_meter_decode",
-        "cjson_parse_length_opts",
-        "cjson_parse_value",
-        "cjson_delete",
-        "cjson_parse_string"
       ],
       "multipliers": {
         "cjson_parse_value": 17,
@@ -17766,7 +17693,6 @@
         "httpd_config_diagnostics",
         "httpd_config_circulation",
         "httpd_config_gas_comparison",
-        "httpd_config_power_meter",
         "httpd_hp_query_probe",
         "httpd_mcp_parse",
         "httpd_config_save",
@@ -18189,8 +18115,6 @@
         "mqtt_reference_parse",
         "mqtt_circulation_parse",
         "mqtt_circulation_probe_parse",
-        "mqtt_power_meter_parse",
-        "mqtt_power_meter_probe_parse",
         "mqtt_reference_subscribe",
         "mqtt_circulation_subscribe",
         "mqtt_cleanup",

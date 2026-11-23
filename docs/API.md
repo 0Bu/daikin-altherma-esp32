@@ -7,7 +7,7 @@ privacy; [ARCHITECTURE.md](ARCHITECTURE.md) describes ownership. HTTP implementa
 
 ## Surface and errors
 
-The trusted-LAN route count of 43 includes assets, aliases and the catch-all. The open setup AP
+The trusted-LAN route count of 41 includes assets, aliases and the catch-all. The open setup AP
 serves only provisioning (`/`, `/index.html`, `/favicon.ico`, `/set_wifi` and captive GET fallback).
 A withheld GET serves the setup page; a withheld POST is 404. `/scan`, live data, configuration other
 than WiFi, OTA and MCP are not available on that AP.
@@ -144,22 +144,6 @@ retained, messages, errors, rejections, optional error
 power spike or a reading in the hysteresis band is not proof of off/on. This independently measured
 DHW circulation witness follows the same consent/deletion lifecycle as the room input.
 
-`power_meter` fields (always emitted at top level):
-
-```text
-configured, name, topic, power_path, timestamp_path, unit, scope, max_age_s,
-subscribed, has_value, power_w, source_at, source_unix_s, timestamp_source,
-age_s, fresh, freshness_reason, retained, messages, errors, rejections, optional error
-```
-
-Read-only external MQTT electrical power meter (`unit`: `"W"` or `"kW"`; `scope`: `"whole_unit"`
-or `"compressor_only"`; `max_age_s`: `10`–`300`, default `60`). `name`, `topic`, `power_path` and
-`timestamp_path` are redacted on `?redact=1` when non-empty. `power_w` normalizes valid readings to
-non-negative watts (negative PV backfeed and values above `50000 W` are rejected). Mapped
-`timestamp_path` requires a readable source timestamp (`retained` payloads without one fail closed
-instead of trusting arrival time); without `timestamp_path`, only non-retained live deliveries age
-from arrival.
-
 `gas_comparison` fields (always emitted at top level):
 
 ```text
@@ -168,8 +152,10 @@ configured, elec_price, gas_price, gas_efficiency_pct, currency, break_even_az
 
 `configured` is `true` when both `elec_price` and `gas_price` are positive (half-set tariffs are
 rejected); unconfigured omits `elec_price`, `gas_price` and `break_even_az` as `null`.
-`gas_efficiency_pct` defaults to `88` (valid `50`–`98`, gross calorific value $H_s$), `currency`
-defaults to `"EUR"`, and `break_even_az = (elec_price * (gas_efficiency_pct / 100.0)) / gas_price`.
+`gas_efficiency_pct` is a read-only `88` (fixed `88%` gross calorific value $H_s$ modern
+condensing gas boiler baseline), `currency` defaults to `"EUR"` within the curated 12-code
+allowlist (`EUR`, `CHF`, `GBP`, `USD`, `PLN`, `CZK`, `SEK`, `NOK`, `DKK`, `UAH`, `JPY`, `CNY`),
+and `break_even_az = (elec_price * 0.88) / gas_price`.
 
 `weather_forecast` fields:
 
@@ -495,10 +481,11 @@ proof of refrigerant charge or valve position.
 
 ### Performance factor observation
 
-`working_figure` is emitted at the top level of `GET /status` when `diagnostics.enabled` is true,
-`diagnostics.effective_source` is `"x10a"`, and this boot has established a valid X10A profile
-fingerprint (`fp_valid`); otherwise it is omitted. It is an observation (`kind:"observation"`), not a
-ninth verdict in `health`.
+`working_figure` is emitted at the top level of `GET /status` when `diagnostics.enabled` is true and
+the effective display source is ready — either `diagnostics.effective_source` is `"x10a"` with a
+valid boot profile fingerprint (`fp_valid`), or `diagnostics.effective_source` is `"modbus"` with a
+configured Modbus target (`modbus_diag_avail`); otherwise it is omitted. It is an observation
+(`kind:"observation"`), not a ninth verdict in `health`.
 
 ```text
 kind, supported, state, tariffs_configured, full_window, source_fresh, is_estimate,
@@ -510,14 +497,17 @@ ct_unwired
 ```
 
 `state` is one of `unsupported`, `collecting`, `standby`, `partial`, `limited`, `cheaper`,
-`similar`, `more_expensive`, or `measured`. `pel_source` is `none`, `mqtt_whole_unit`,
-`mqtt_compressor`, `x10a_ct`, or `x10a_inv` (`is_estimate` is true for onboard X10A sources;
-`neutral_band_pct` is `10` for MQTT meters and `20` for X10A estimates). `heat_kwh` and `elec_kwh`
+`similar`, `more_expensive`, or `measured`. `pel_source` is `none`, `x10a_ct`, `x10a_inv`, or
+`modbus` (`is_estimate` is always `true` and `neutral_band_pct` is uniformly `20` across all
+supported onboard X10A and Modbus sources). Native Altherma 4 Modbus reports `supported:false` and
+`state:"unsupported"` (`buh_s` stays `0` on HomeHub Modbus, while `limited_buh` flags active-flow
+post-BUH rises `41 − 40 > 1.5 K`). `heat_kwh` and `elec_kwh`
 are `null` when `!supported`; `az` is `null` in `unsupported`, `collecting`, and `standby`.
 Tariff fields (`elec_price`, `gas_price`, `break_even_az`) are `null` unless `tariffs_configured`;
-`gas_equiv_kwh`, `cost_wp`, `cost_gas`, `cost_delta` (`cost_wp - cost_gas`, negative = heat pump
-cheaper), and `cost_delta_pct` are `null` unless `supported`, past `collecting`/`standby`, and
-`tariffs_configured`. `outdoor_mean_c` and `outdoor_min_c` are `null` when no running-compressor
+`gas_efficiency_pct` is always read-only `88` (fixed `88%` $H_s$ modern condensing gas boiler
+baseline), and `gas_equiv_kwh`, `cost_wp`, `cost_gas`, `cost_delta` (`cost_wp - cost_gas`, negative =
+heat pump cheaper), and `cost_delta_pct` are `null` unless `supported`, past
+`collecting`/`standby`, and `tariffs_configured`. `outdoor_mean_c` and `outdoor_min_c` are `null` when no running-compressor
 outdoor sample was recorded. See [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#working-figure-observation)
 for thresholds, source selection and exclusions.
 
@@ -650,14 +640,13 @@ the link blob; it does not migrate or write the service blob.
 
 | NVS item | Purpose |
 |---|---|
-| `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation/power-meter mappings, gas-comparison tariffs, weather, ENV III, diagnostics consent/generation/source |
+| `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation mappings, gas-comparison tariffs, weather, ENV III, diagnostics consent/generation/source |
 | `link` | Complete RX/TX/protocol/observation-identity cache; failed write preserves the previous complete entry. A rejected entry is reported in `/diag`; only detection (cached pair, build default, their swaps) or `/set_hp` rewrites it |
 | Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
 | `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; which boot or uptime clears which is in [ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) |
 
 The current service layout is v22; it appends gas-comparison tariffs (`elec_price`, `gas_price`,
-`gas_efficiency_pct`, `currency`) and the optional MQTT electrical power meter mapping with its
-`power_meter_generation`. v21 appended the preferred plant-diagnostics display source byte
+`currency`). v21 appended the preferred plant-diagnostics display source byte
 (`0` = X10A, `1` = Modbus; older records default to X10A). v20 appended a room-history generation that
 defaults to zero for
 older records and prevents a removed or replaced source from restoring its earlier history.
@@ -745,20 +734,20 @@ the revision has changed. Both refusals leave the submitted settings unwritten.
 
 ### Plant diagnostics and sources
 
-`/set_ref_temp`, `/set_circulation`, `/set_power_meter` and `/set_weather` replace their complete
-source configuration; they are not patches. An omitted topic or both omitted coordinate strings
-disables that source. `/set_gas_comparison` updates supplied fields (or clears prices with
-`clear:true`) while keeping omitted fields.
+`/set_ref_temp`, `/set_circulation` and `/set_weather` replace their complete source configuration;
+they are not patches. An omitted topic or both omitted coordinate strings disables that source.
+`/set_gas_comparison` updates supplied fields (or clears prices with `clear:true`) while keeping
+omitted fields.
 
 `POST /set_diagnostics {enabled?:boolean, source?:"x10a"|"modbus"}` persists diagnostics state and
 applies live (at least one field is required; invalid `source` returns `400`). The first opt-in
 (`enabled:true` while `diagnostics_generation == 0`) draws a durable non-zero generation. Setting
-`enabled:false` pauses new diagnostic, room, forecast, circulation and power-meter collection while
-preserving collected 24 h X10A and Modbus diagnostic stores (checkup/DHW/cycling/stop-context/energy
-plus room and circulation 24 h histories continue aging out after 24 h; weather MQTT cleanup still
-clears retained forecast evidence), and re-enabling resumes within the same generation without
-bridging the paused interval. Switching `source` between `"x10a"` and `"modbus"` updates the displayed
-card source without advancing `diagnostics_generation`, resetting weather/room state, or clearing
+`enabled:false` pauses new diagnostic, room, forecast and circulation collection while preserving
+collected 24 h X10A and Modbus diagnostic stores (checkup/DHW/cycling/stop-context/energy plus room
+and circulation 24 h histories continue aging out after 24 h; weather MQTT cleanup still clears
+retained forecast evidence), and re-enabling resumes within the same generation without bridging
+the paused interval. Switching `source` between `"x10a"` and `"modbus"` updates the displayed card
+source without advancing `diagnostics_generation`, resetting weather/room state, or clearing
 collected X10A or Modbus history. In-flight diagnosis samples captured before a transition are
 rejected. X10A, HomeHub, history, ENV III and heartbeat remain active.
 
@@ -794,30 +783,16 @@ proof. Save applies live; cosmetic renaming does not retire evidence. Unchanged 
 `saved:false,reboot:false`. Numeric bounds/decoder policy are in `logic/circulation_source.hpp`.
 
 `POST /set_gas_comparison` accepts optional `elec_price` (number, `0`–`99.9999`), `gas_price`
-(number, `0`–`99.9999`), `gas_efficiency_pct` (integer `50`–`98`, default `88`, gross calorific
-value $H_s$), `currency` (3-letter ISO code normalized to uppercase, default `"EUR"`), and `clear`
-(boolean; resets both prices to `0` while keeping efficiency/currency unless also updated). Prices
-quantize to `1e-4` currency/kWh; either both prices must be positive or both `0` (half-set tariffs
-return `400`). Missing fields retain saved values; unchanged config returns `{ok:true,saved:false,reboot:false}`.
-Saves apply live without reboot (`reboot:false`) and immediately recalculate `gas_comparison` and the
-existing 24 h `working_figure` buckets at read time without clearing energy history.
-
-`POST /test_power_meter` fields: `name` (max 48 bytes), `topic` (exact MQTT topic), `power_path`
-(optional dotted JSON path; empty accepts a plain numeric payload), `timestamp_path` (optional
-dotted JSON path; requires non-empty `power_path`), `unit` (`"W"` or `"kW"`, default `"W"`),
-`scope` (`"whole_unit"` or `"compressor_only"`, default `"whole_unit"`), `max_age_s` (integer
-`10`–`300`, default `60`). Diagnostics off returns `409`; empty topic returns `400`. Probes the
-candidate mapping through the connected MQTT client for up to 12 seconds and returns
-`{ok:true,power_w,retained}` or `422` without writing configuration or issuing a `test_proof` token.
-
-`POST /set_power_meter` accepts the same fields and replaces the complete mapping with no 12 s
-test-proof gate (saving without prior `/test_power_meter` is valid). Empty `topic` clears
-`power_path` and `timestamp_path` and disables the external meter. Saves apply live without reboot;
-unchanged mappings return `saved:false,reboot:false`. Changing behavioral fields (`topic`,
-`power_path`, `timestamp_path`, `max_age_s`, `unit`, `scope`) advances `power_meter_generation`,
-reconfigures MQTT subscription, and retires accumulated energy history (`pel_source_fp`), whereas
-renaming `name` alone preserves collected buckets. Numeric bounds and decoder rules are in
-`logic/power_meter_source.hpp`.
+(number, `0`–`99.9999`), `currency` (normalized to uppercase against the curated 12-code allowlist
+`EUR`, `CHF`, `GBP`, `USD`, `PLN`, `CZK`, `SEK`, `NOK`, `DKK`, `UAH`, `JPY`, `CNY`; default
+`"EUR"`), and `clear` (boolean; resets both prices to `0` while keeping `currency` unless also
+updated). Boiler efficiency is fixed at `88%` ($H_s$); any legacy `gas_efficiency_pct` key is
+ignored without changing the baseline. Prices quantize to `1e-4` currency/kWh; either both prices
+must be positive or both `0` (half-set tariffs return `400`). Missing fields retain saved values;
+unchanged config returns `{ok:true,saved:false,reboot:false}`. Saves apply live without reboot
+(`reboot:false`) and immediately recalculate `gas_comparison` and the existing 24 h `working_figure`
+buckets at read time without clearing energy history. Validation and currency rules live in
+`logic/gas_comparison.hpp`.
 
 `POST /set_weather {latitude,longitude[,refresh:true]}` saves/notifies without reboot or request-path
 DNS/TLS. Coordinates are strict decimal strings with optional minus, dot/comma, at most six decimals;

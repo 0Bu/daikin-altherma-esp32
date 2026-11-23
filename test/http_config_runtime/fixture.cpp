@@ -50,7 +50,7 @@ int      detected_rx = -1, detected_tx = -1;
 daik::ConfigSaveOutcome last_save_outcome;
 
 size_t live_arrays = 0, body_capacity = 0;
-bool   fail_next_array = false;
+bool   fail_next_array    = false;
 bool   deny_after_boot_id = false, deny_rejection_allocations = false;
 
 bool   tracking = false, durable_started = false, network = true, dns_ok = true, tcp_ok = true;
@@ -401,7 +401,6 @@ size_t       heap_largest_internal_block() { return fixture::largest_block; }
 void         diag_printf(const char*, ...) {}
 void         mqtt_reference_reconfigure() { ++fixture::runtime_changes; }
 void         mqtt_circulation_reconfigure(bool) { ++fixture::runtime_changes; }
-void         mqtt_power_meter_reconfigure(bool, bool) { ++fixture::runtime_changes; }
 void         mqtt_request_weather_cleanup() { ++fixture::runtime_changes; }
 void         mqtt_request_modbus_cleanup() { ++fixture::runtime_changes; }
 void         mqtt_heating_curve_homehub_reset() noexcept { ++fixture::runtime_changes; }
@@ -411,19 +410,18 @@ void         checkup_modbus_reset() {
     ++fixture::modbus_checkup_resets;
     ++fixture::runtime_changes;
 }
-void         checkup_reset_on_detect(const char*, uint32_t) { ++fixture::runtime_changes; }
-void         dwell_reset() { ++fixture::runtime_changes; }
-void         dwell_reset_on_detect(const char*) { ++fixture::runtime_changes; }
-void         history_reset() { ++fixture::runtime_changes; }
-void         history_reset_on_detect(uint32_t) { ++fixture::runtime_changes; }
-uint32_t     history_x10a_identity(const char* profile, int32_t rx, int32_t tx, char proto) {
+void     checkup_reset_on_detect(const char*, uint32_t) { ++fixture::runtime_changes; }
+void     dwell_reset() { ++fixture::runtime_changes; }
+void     dwell_reset_on_detect(const char*) { ++fixture::runtime_changes; }
+void     history_reset() { ++fixture::runtime_changes; }
+void     history_reset_on_detect(uint32_t) { ++fixture::runtime_changes; }
+uint32_t history_x10a_identity(const char* profile, int32_t rx, int32_t tx, char proto) {
     return logic::history_x10a_target_fingerprint(profile, rx, tx, proto);
 }
 void history_checkup_reset() { ++fixture::runtime_changes; }
 void history_set_diagnostics(bool) { ++fixture::runtime_changes; }
 void history_circulation_reset() { ++fixture::runtime_changes; }
 void mqtt_circulation_set_diagnostics(bool) { ++fixture::runtime_changes; }
-void mqtt_power_meter_set_diagnostics(bool) {}
 void history_modbus_reset(uint32_t) noexcept { ++fixture::runtime_changes; }
 void history_room_reset(uint32_t identity) noexcept {
     if (fixture::room_history_identity != identity) {
@@ -453,7 +451,6 @@ CirculationSourceTestResult mqtt_circulation_test(const CirculationSourceTestCon
     result.power_w = 5;
     return result;
 }
-PowerMeterTestResult mqtt_power_meter_test(const PowerMeterTestConfig&, uint32_t) { return {}; }
 WeatherSourceChange::WeatherSourceChange(bool configured, bool diagnostics) {
     configured_          = configured;
     diagnostics_enabled_ = diagnostics;
@@ -470,8 +467,8 @@ bool weather_forecast_request_refresh(uint64_t& token) noexcept {
 esp_err_t http_send_json(httpd_req_t* request, const char* body) {
     // The harness records bytes in a string. Exclude that copy from the handler's budget.
     fixture::deny_rejection_allocations = false;
-    request->content_type = "application/json";
-    request->response     = body;
+    request->content_type               = "application/json";
+    request->response                   = body;
     return ESP_OK;
 }
 int http_read_body(httpd_req_t* request, char* buffer, size_t capacity) {
@@ -1353,7 +1350,7 @@ void room_history_lifetime() {
     check(send(daik::set_mqtt, R"({"broker":"mqtt://room-history.invalid"})").status == "200 OK" &&
               generation() == first + 4 && room_history_identity != 0,
           "broker replacement must open a distinct room history lifetime");
-    const uint32_t active = room_history_identity;
+    const uint32_t active        = room_history_identity;
     const unsigned resets_before = room_history_resets;
     check(send(daik::set_diagnostics, R"({"enabled":false})").status == "200 OK" &&
               room_history_identity == active && room_history_resets == resets_before,
@@ -1425,6 +1422,81 @@ void diagnostics_source() {
               modbus_checkup_resets == 1,
           "changing HomeHub unit id must reset modbus checkup state");
 }
+void gas_comparison() {
+#ifdef HTTP_CONFIG_ORIGINAL_CONTROL
+    fail("gas_comparison cannot run against original control");
+#else
+    reset();
+    const auto send = [](Handler handler, const std::string& body) {
+        saves = service_writes = link_writes = runtime_changes = weather_commits = 0;
+        durable_started                                                          = false;
+        return invoke(handler, body);
+    };
+    const auto persisted = [] {
+        daik::ConfigBlob blob;
+        check(daik::config_blob_deserialize(service.data(), service.size(), blob),
+              "gas comparison service blob must decode");
+        check(blob.elec_price_tenth_mill == current.elec_price_tenth_mill &&
+                  blob.gas_price_tenth_mill == current.gas_price_tenth_mill &&
+                  blob.tariff_currency == current.tariff_currency,
+              "gas comparison durable and RAM state must agree");
+        return blob;
+    };
+
+    // Valid save normalizes currency case and ignores legacy/unknown gas_efficiency_pct.
+    const auto first =
+        send(daik::set_gas_comparison,
+             R"({"elec_price":0.32,"gas_price":0.105,"currency":"chf","gas_efficiency_pct":50})");
+    check(first.status == "200 OK" && saves == 1 && service_writes == 1 &&
+              current.elec_price_tenth_mill == 3200 && current.gas_price_tenth_mill == 1050 &&
+              current.tariff_currency == "CHF" && persisted().tariff_currency == "CHF" &&
+              daik::GAS_EFFICIENCY_PCT == 88,
+          "valid gas comparison save must persist tariffs and ignore gas_efficiency_pct");
+
+    const auto same =
+        send(daik::set_gas_comparison, R"({"elec_price":0.32,"gas_price":0.105,"currency":"CHF"})");
+    check(same.status == "200 OK" && saves == 0 && service_writes == 0 &&
+              same.response == R"({"ok":true,"saved":false,"reboot":false})",
+          "omitted gas_efficiency_pct must compare identical and skip redundant NVS writes");
+
+    for (const char* cur :
+         {"EUR", "CHF", "GBP", "USD", "PLN", "CZK", "SEK", "NOK", "DKK", "UAH", "JPY", "CNY"}) {
+        const std::string body =
+            std::string(R"({"elec_price":0.30,"gas_price":0.10,"currency":")") + cur + "\"}";
+        const auto ok = send(daik::set_gas_comparison, body);
+        check(ok.status == "200 OK" && current.tariff_currency == cur &&
+                  persisted().tariff_currency == cur,
+              "every curated currency must be accepted by /set_gas_comparison");
+    }
+
+    const auto before_service = service;
+    for (const char* bad :
+         {R"({"elec_price":0.32,"gas_price":0.105,"currency":"CAD"})",
+          R"({"elec_price":0.32,"gas_price":0.105,"currency":"AUD"})",
+          R"({"elec_price":0.32,"gas_price":0.105,"currency":"EU"})",
+          R"({"elec_price":0.32,"gas_price":0,"currency":"EUR"})",
+          R"({"elec_price":100.0,"gas_price":0.10,"currency":"EUR"})", R"({"currency":123})"}) {
+        const auto rej = send(daik::set_gas_comparison, bad);
+        check(rej.status == "400 Bad Request" && saves == 0 && service_writes == 0 &&
+                  service == before_service && current.tariff_currency == "CNY",
+              "unsupported 3-letter currency or invalid tariff must reject 400 without mutating");
+    }
+
+    save_fault = 1;
+    const auto fail_save =
+        send(daik::set_gas_comparison, R"({"elec_price":0.31,"gas_price":0.11,"currency":"EUR"})");
+    check(fail_save.status == "500 Internal Server Error" && service == before_service &&
+              current.elec_price_tenth_mill == 3000 && current.tariff_currency == "CNY",
+          "failed gas comparison NVS write must return 500 and leave RAM/durable intact");
+    save_fault = 0;
+
+    const auto cleared = send(daik::set_gas_comparison, R"({"clear":true})");
+    check(cleared.status == "200 OK" && saves == 1 && current.elec_price_tenth_mill == 0 &&
+              current.gas_price_tenth_mill == 0 && persisted().elec_price_tenth_mill == 0 &&
+              persisted().gas_price_tenth_mill == 0,
+          "clear must zero both tariffs while keeping currency valid");
+#endif
+}
 } // namespace test
 
 int main(int argc, char** argv) {
@@ -1451,7 +1523,8 @@ int main(int argc, char** argv) {
                           {"diagnostics_generation", test::diagnostics_generation},
                           {"board_draft_revision", test::board_draft_revision},
                           {"room_history_lifetime", test::room_history_lifetime},
-                          {"diagnostics_source", test::diagnostics_source}};
+                          {"diagnostics_source", test::diagnostics_source},
+                          {"gas_comparison", test::gas_comparison}};
     unsigned   ran     = 0;
     for (const auto& candidate : cases) {
         if (argc > 1) {
@@ -1461,7 +1534,8 @@ int main(int argc, char** argv) {
                     std::strcmp(candidate.name, "diagnostics_generation") == 0 ||
                     std::strcmp(candidate.name, "board_draft_revision") == 0 ||
                     std::strcmp(candidate.name, "room_history_lifetime") == 0 ||
-                    std::strcmp(candidate.name, "diagnostics_source") == 0)
+                    std::strcmp(candidate.name, "diagnostics_source") == 0 ||
+                    std::strcmp(candidate.name, "gas_comparison") == 0)
                     continue;
             } else if (std::strcmp(argv[1], candidate.name) != 0)
                 continue;

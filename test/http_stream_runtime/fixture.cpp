@@ -63,16 +63,16 @@ inline bool                             change_history_epoch      = false;
 inline bool                             history_restored          = false;
 inline uint32_t                         epoch                     = 42;
 inline uint32_t                         room_identity             = 0;
-inline bool                           room_snapshot_unavailable = false;
-inline unsigned                       room_snapshot_calls       = 0;
-inline int                            failure = 0, stage_race = 0;
-inline unsigned                       stack_samples = 0;
-inline unsigned                       wifi_calls    = 0;
-inline daik::WifiScanEntry            scan_rows[20]{};
-inline int                            scan_count = 0, scan_failure = 0;
-inline unsigned                       scan_calls             = 0;
-inline size_t                         scan_first_allocations = 0;
-inline daik::CheckupStopContextReport stop_report{};
+inline bool                             room_snapshot_unavailable = false;
+inline unsigned                         room_snapshot_calls       = 0;
+inline int                              failure = 0, stage_race = 0;
+inline unsigned                         stack_samples = 0;
+inline unsigned                         wifi_calls    = 0;
+inline daik::WifiScanEntry              scan_rows[20]{};
+inline int                              scan_count = 0, scan_failure = 0;
+inline unsigned                         scan_calls             = 0;
+inline size_t                           scan_first_allocations = 0;
+inline daik::CheckupStopContextReport   stop_report{};
 inline daik::logic::DefrostStartReport  defrost_start{};
 inline daik::HeatingCurveBinsReport     curve_bins;
 inline bool                             curve_bins_available = false;
@@ -87,8 +87,10 @@ inline unsigned                         stop_report_calls   = 0;
 inline bool                             checkup_x10a_has_data      = false;
 inline bool                             checkup_modbus_has_data    = false;
 inline daik::DiagnosticsSource          last_checkup_report_source = daik::DiagnosticsSource::X10a;
+inline daik::logic::WorkingFigureReport working_figure_x10a{};
+inline daik::logic::WorkingFigureReport working_figure_modbus{};
 inline std::string                      log;
-[[noreturn]] void                     fail(const char* message) {
+[[noreturn]] void                       fail(const char* message) {
     std::fprintf(stderr, "FAIL %s: %s\n", oracle.c_str(), message);
     std::exit(1);
 }
@@ -122,16 +124,18 @@ void reset() {
     scan_calls                = 0;
     scan_first_allocations    = 0;
     stop_report               = {};
-    defrost_start              = {};
-    curve_bins                 = {};
-    curve_bins_available       = false;
+    defrost_start             = {};
+    curve_bins                = {};
+    curve_bins_available      = false;
     cycling_hours             = {};
-    fault_status               = {};
+    fault_status              = {};
     fault_trace.reset();
+    working_figure_x10a        = {};
+    working_figure_modbus      = {};
     fault_trace_present        = false;
-    checkup_persist           = daik::logic::CheckupRestore::NoRecord;
-    reset_after_checkup       = false;
-    stop_report_calls         = 0;
+    checkup_persist            = daik::logic::CheckupRestore::NoRecord;
+    reset_after_checkup        = false;
+    stop_report_calls          = 0;
     checkup_x10a_has_data      = false;
     checkup_modbus_has_data    = false;
     last_checkup_report_source = daik::DiagnosticsSource::X10a;
@@ -341,12 +345,11 @@ logic::HeatingCurveSnapshot heating_curve_status(HeatingCurveBinsReport* out) {
     }
     return {};
 }
-CirculationSourceStatus     circulation_source_status(const Config&) { return {}; }
-CirculationPumpSample       circulation_pump_sample() { return {}; }
-PowerMeterStatus            power_meter_status(const Config&) { return {}; }
-WeatherForecastStatus       weather_forecast_status() { return {}; }
-bool                        weather_fetch_active() { return fixture::weather; }
-bool                        weather_values_reader_enter() noexcept {
+CirculationSourceStatus circulation_source_status(const Config&) { return {}; }
+CirculationPumpSample   circulation_pump_sample() { return {}; }
+WeatherForecastStatus   weather_forecast_status() { return {}; }
+bool                    weather_fetch_active() { return fixture::weather; }
+bool                    weather_values_reader_enter() noexcept {
     if (fixture::weather) return false;
     fixture::values_readers_peak =
         std::max(fixture::values_readers_peak, ++fixture::values_readers);
@@ -491,7 +494,10 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     }
     return report;
 }
-logic::WorkingFigureReport checkup_working_figure_status(const Config&, bool) { return {}; }
+logic::WorkingFigureReport checkup_working_figure_status(const Config&, DiagnosticsSource source) {
+    return source == DiagnosticsSource::Modbus ? fixture::working_figure_modbus
+                                               : fixture::working_figure_x10a;
+}
 CheckupFaultStatus checkup_fault_latest_status(DiagnosticsSource, bool source_fresh) {
     if (fixture::fault_trace_present) {
         CheckupFaultStatus st;
@@ -597,7 +603,7 @@ int main(int argc, char** argv) {
         cycling_hours.end_unix_s[0] = 1'999'998'000;
         // An older restored hour has a negative bucket ID. Only parts of its observed runtime
         // are attributable to the two positively witnessed modes.
-        cycling_hours.hours[0] = {2700, 1200, 600, 300, 2, Slot::Restored};
+        cycling_hours.hours[0]     = {2700, 1200, 600, 300, 2, Slot::Restored};
         using Trace                = daik::logic::CheckupCyclingTrace;
         cycling_trace.unix_s       = 2'000'000'000;
         cycling_trace.window_end_s = 86400;
@@ -763,11 +769,11 @@ int main(int argc, char** argv) {
         emit(req, "stop-covered-zero");
     });
     run("stop_context_populated", [] {
-        cycling_hours.count    = 2;
+        cycling_hours.count             = 2;
         cycling_hours.pending_elapsed_s = 3600;
-        cycling_hours.hours[0] = {3600, 1800, 900, 900, 2};
-        cycling_hours.hours[1] = {3600, 600, 0, 0, 1};
-        auto empty = request();
+        cycling_hours.hours[0]          = {3600, 1800, 900, 900, 2};
+        cycling_hours.hours[1]          = {3600, 600, 0, 0, 1};
+        auto empty                      = request();
         check(invoke(empty, "/status", daik::h_status) == ESP_OK,
               "stop allocation baseline failed");
         const size_t baseline_allocations = sdk::allocations;
@@ -1188,9 +1194,25 @@ int main(int argc, char** argv) {
               "OTA admission reached the scan service");
     });
     run("status_modbus_diagnostics", [] {
-        current.mb_host             = "192.0.2.50";
-        current.diagnostics_enabled = true;
-        current.diagnostics_source  = daik::DiagnosticsSource::X10a;
+        current.mb_host                 = "192.0.2.50";
+        current.diagnostics_enabled     = true;
+        current.diagnostics_source      = daik::DiagnosticsSource::X10a;
+        current.elec_price_tenth_mill   = 3000;
+        current.gas_price_tenth_mill    = 1000;
+        current.tariff_currency         = "CHF";
+        working_figure_modbus.supported = true;
+        working_figure_modbus.pel_kind  = daik::logic::EnergyPelKind::Modbus;
+        working_figure_modbus.state     = daik::logic::WorkingFigureState::Limited;
+        working_figure_modbus.flags     = daik::logic::ENERGY_F_LIMITED_BUH;
+        working_figure_modbus.heat_kwh  = 12.0;
+        working_figure_modbus.elec_kwh  = 3.0;
+        working_figure_modbus.az        = 4.0;
+        working_figure_x10a.supported   = true;
+        working_figure_x10a.pel_kind    = daik::logic::EnergyPelKind::X10aCt;
+        working_figure_x10a.state       = daik::logic::WorkingFigureState::Measured;
+        working_figure_x10a.heat_kwh    = 8.0;
+        working_figure_x10a.elec_kwh    = 2.0;
+        working_figure_x10a.az          = 4.0;
         rows.clear();
         checkup_x10a_has_data               = false;
         checkup_modbus_has_data             = true;
@@ -1211,10 +1233,21 @@ int main(int argc, char** argv) {
                       "\"modbus\",\"available_sources\":[\"modbus\"]}") != std::string::npos &&
                   req.response.find("\"stop_context\":{\"confirmed\":false") != std::string::npos,
               "status payload missing modbus diagnostics provenance or empty stop_context");
+        check(
+            req.response.find("\"gas_comparison\":{\"configured\":true,\"elec_price\":0.3,"
+                              "\"gas_price\":0.1,\"gas_efficiency_pct\":88,\"currency\":\"CHF\"") !=
+                    std::string::npos &&
+                req.response.find("\"working_figure\":{\"kind\":\"observation\",\"supported\":true,"
+                                  "\"state\":\"limited\"") != std::string::npos &&
+                req.response.find("\"pel_source\":\"modbus\"") != std::string::npos &&
+                req.response.find("\"limited_buh\":true") != std::string::npos,
+            "status payload missing modbus working_figure or gas_comparison");
     });
     run("status_fault_timeline", [] {
         current.diagnostics_enabled = true;
         fault_trace.reset();
+        working_figure_x10a      = {};
+        working_figure_modbus    = {};
         fault_trace.window_end_s = daik::logic::CHECKUP_FAULT_WINDOW_S;
         fault_trace.unix_s       = 1795000000u;
         fault_trace.boot_s       = 500;

@@ -71,7 +71,6 @@ function wire() {
     const act = e.target.closest("[data-act]");
     if (act) {
       if (act.dataset.act === "gas-comparison") openGasComparison();
-      else if (act.dataset.act === "power-meter") openPowerMeter();
       return;
     }
     const desc = e.target.closest("[data-desc]");
@@ -518,7 +517,6 @@ function wireRestOfApp() {
     else if (act.dataset.act === "ref-temp") openRefTemp();
     else if (act.dataset.act === "circulation") openCirculation();
     else if (act.dataset.act === "gas-comparison") openGasComparison();
-    else if (act.dataset.act === "power-meter") openPowerMeter();
     else if (act.dataset.act === "weather") openWeather();
   });
   $("settingsCards").addEventListener("change", (e) => {
@@ -943,11 +941,14 @@ function wireRestOfApp() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("gasComparisonModal").hidden) closeGasComparison();
   });
-  for (const id of ["gcElecPrice", "gcGasPrice", "gcGasEff", "gcCurrency"])
+  for (const id of ["gcElecPrice", "gcGasPrice", "gcCurrency"])
     $(id).addEventListener("input", () => {
       $(id).classList.remove("invalid"); $("gcError").hidden = true;
       updateGasComparisonPreview();
     });
+  $("gcCurrency").addEventListener("change", () => {
+    $("gcCurrency").classList.remove("invalid"); $("gcError").hidden = true;
+  });
   const gasComparisonInput = () => {
     const input = gasComparisonFormPayload();
     const bad = (id, msg) => {
@@ -961,14 +962,12 @@ function wireRestOfApp() {
       return bad("gcElecPrice", t("wf.gas.err_price"));
     if (!Number.isFinite(input.gas_price) || input.gas_price < 0.0001 || input.gas_price > 99.9999)
       return bad("gcGasPrice", t("wf.gas.err_price"));
-    if (!Number.isInteger(input.gas_efficiency_pct) || input.gas_efficiency_pct < 50 || input.gas_efficiency_pct > 98)
-      return bad("gcGasEff", t("wf.gas.err_eff"));
-    if (!/^[A-Z]{3}$/.test(input.currency))
+    if (!WF_CURRENCIES.includes(input.currency))
       return bad("gcCurrency", t("wf.gas.err_currency"));
     return input;
   };
   const showGasComparisonRequestError = (msg) => {
-    const field = /efficiency/i.test(msg) ? "gcGasEff" : /currency/i.test(msg) ? "gcCurrency" :
+    const field = /currency/i.test(msg) ? "gcCurrency" :
       /gas/i.test(msg) ? "gcGasPrice" : /elec|tariff|price/i.test(msg) ? "gcElecPrice" : null;
     if (field) $(field).classList.add("invalid");
     $("gcError").textContent = msg;
@@ -1028,134 +1027,6 @@ function wireRestOfApp() {
     }
     idle(); closeGasComparison();
     toast(t("wf.gas.deleted"), "ok");
-    await refreshStatus();
-  };
-
-  $("pmCancel").onclick = closePowerMeter;
-  $("powerMeterBackdrop").onclick = closePowerMeter;
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !$("powerMeterModal").hidden) closePowerMeter();
-  });
-  const clearPowerMeterTestResult = () => {
-    $("pmTestResult").hidden = true;
-    $("pmTestResult").classList.remove("ok", "warn");
-  };
-  for (const id of ["pmName", "pmTopic", "pmPowerPath", "pmTimePath", "pmMaxAge"])
-    $(id).addEventListener("input", () => {
-      $(id).classList.remove("invalid"); $("pmError").hidden = true;
-      clearPowerMeterTestResult();
-    });
-  for (const id of ["pmUnit", "pmScope"])
-    $(id).addEventListener("change", () => {
-      $(id).classList.remove("invalid"); $("pmError").hidden = true;
-      clearPowerMeterTestResult();
-    });
-  const powerMeterInput = () => {
-    const input = powerMeterFormPayload();
-    const bad = (id, msg) => {
-      $(id).classList.add("invalid");
-      $("pmError").textContent = msg;
-      $("pmError").hidden = false;
-      toast(msg, "err");
-      return null;
-    };
-    if (!input.topic || !validRefTopic(input.topic)) return bad("pmTopic", t("circ.err_topic"));
-    if (input.power_path && !validRefPath(input.power_path)) return bad("pmPowerPath", t("pm.err_power_path"));
-    if (input.timestamp_path && (!input.power_path || !validRefPath(input.timestamp_path)))
-      return bad("pmTimePath", t("pm.err_time_path"));
-    if (!Number.isInteger(input.max_age_s) || input.max_age_s < 10 || input.max_age_s > 300)
-      return bad("pmMaxAge", t("pm.err_max_age"));
-    return input;
-  };
-  const showPowerMeterRequestError = (msg) => {
-    const field = /maximum age/i.test(msg) ? "pmMaxAge" : /timestamp/i.test(msg) ? "pmTimePath" :
-      /JSON path|power path|path is/i.test(msg) ? "pmPowerPath" : /unit/i.test(msg) ? "pmUnit" :
-      /scope/i.test(msg) ? "pmScope" : /name/i.test(msg) ? "pmName" :
-      /topic|mapping/i.test(msg) ? "pmTopic" : null;
-    if (field) $(field).classList.add("invalid");
-    $("pmError").textContent = msg;
-    $("pmError").hidden = false;
-    toast(msg, "err");
-  };
-  const setPowerMeterActionBusy = (button, on, label) => {
-    setBusy(button, on, label);
-    if (on) {
-      $("pmBtn").disabled = true;
-      $("pmTestBtn").disabled = true;
-      $("pmDeleteBtn").disabled = true;
-    } else {
-      $("pmBtn").disabled = false;
-      $("pmTestBtn").disabled = false;
-      $("pmDeleteBtn").disabled = !S.status?.power_meter?.configured;
-    }
-  };
-  $("pmTestBtn").onclick = async () => {
-    const input = powerMeterInput();
-    if (!input) return;
-    if (S.busy) { toast(t("toast.applying"), "info"); return; }
-    clearPowerMeterTestResult();
-    $("pmError").hidden = true;
-    S.busy = true;
-    setPowerMeterActionBusy("pmTestBtn", true, "pm.testing");
-    const idle = () => { S.busy = false; setPowerMeterActionBusy("pmTestBtn", false); };
-    let r;
-    try { r = await post("/test_power_meter", input); }
-    catch { idle(); showPowerMeterRequestError(t("toast.unreachable")); return; }
-    if (!r.ok) {
-      const msg = await errorOf(r, t("pm.test_failed"));
-      idle(); showPowerMeterRequestError(msg); return;
-    }
-    const res = await r.json().catch(() => ({}));
-    if (typeof res.power_w !== "number" || !Number.isFinite(res.power_w)) {
-      idle(); showPowerMeterRequestError(t("pm.test_failed")); return;
-    }
-    idle();
-    const powerStr = res.power_w.toLocaleString(LANG, { maximumFractionDigits: 1 });
-    $("pmTestResult").textContent = t(res.retained ? "pm.test_retained" : "pm.test_ok", powerStr);
-    $("pmTestResult").classList.add(res.retained ? "warn" : "ok");
-    $("pmTestResult").hidden = false;
-  };
-  $("powerMeterForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const input = powerMeterInput();
-    if (!input) return;
-    if (S.busy) { toast(t("toast.applying"), "info"); return; }
-    S.busy = true;
-    setPowerMeterActionBusy("pmBtn", true, "btn.saving");
-    const idle = () => { S.busy = false; setPowerMeterActionBusy("pmBtn", false); };
-    let r;
-    try { r = await post("/set_power_meter", input); }
-    catch { idle(); showPowerMeterRequestError(t("toast.unreachable")); return; }
-    if (!r.ok) {
-      const msg = await errorOf(r, t("toast.rejected"));
-      idle(); showPowerMeterRequestError(msg); return;
-    }
-    const res = await r.json().catch(() => ({}));
-    idle(); closePowerMeter();
-    toast(t(res.saved === false ? "toast.no_changes" : "pm.saved"), res.saved === false ? "info" : "ok");
-    await refreshStatus();
-  });
-  $("pmDeleteBtn").onclick = async () => {
-    if (S.busy) { toast(t("toast.applying"), "info"); return; }
-    if (!S.status?.power_meter?.configured) return;
-    const status = S.status;
-    S.busy = true;
-    setPowerMeterActionBusy("pmDeleteBtn", true, "circ.deleting");
-    const idle = () => { S.busy = false; setPowerMeterActionBusy("pmDeleteBtn", false); };
-    let r;
-    try {
-      r = await post("/set_power_meter", {
-        name: "", topic: "", power_path: "", timestamp_path: "", unit: "W", scope: "whole_unit", max_age_s: 60,
-      });
-    } catch { idle(); showPowerMeterRequestError(t("toast.unreachable")); return; }
-    if (!r.ok) {
-      const msg = await errorOf(r, t("toast.rejected"));
-      idle(); showPowerMeterRequestError(msg); return;
-    }
-    if (S.status === status && !S.imageReloading)
-      status.power_meter = { configured: false, unit: "W", scope: "whole_unit", max_age_s: 60 };
-    idle(); closePowerMeter();
-    toast(t("pm.deleted"), "ok");
     await refreshStatus();
   };
 

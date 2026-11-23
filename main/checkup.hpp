@@ -129,10 +129,6 @@ void checkup_modbus_reset();
 // thresholds change. Other findings keep their already-collected 24-hour evidence.
 void checkup_dhw_reset();
 
-// Start only the X10A 24 h working-figure energy window over after its independent MQTT power
-// meter source, mapping or unit/scope changes. Other findings keep their 24-hour evidence.
-void checkup_energy_reset();
-
 // True when the requested source has non-empty live or restored evidence in its slot.
 bool checkup_has_data(DiagnosticsSource source);
 
@@ -146,9 +142,10 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours   = nullpt
                                     DiagnosticsSource           source  = DiagnosticsSource::X10a,
                                     logic::DefrostStartReport*  defrost = nullptr);
 
-// Evaluate the 24 h working figure and gas-cost comparison for the X10A slot under one lock,
-// using the caller's Config snapshot and MQTT power-meter freshness without allocating.
-logic::WorkingFigureReport checkup_working_figure_status(const Config& c, bool mqtt_fresh = false);
+// Evaluate the 24 h working figure and gas-cost comparison for the requested source under one lock,
+// using the caller's Config snapshot without allocating.
+logic::WorkingFigureReport
+checkup_working_figure_status(const Config& c, DiagnosticsSource source = DiagnosticsSource::X10a);
 
 // Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
 // constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.

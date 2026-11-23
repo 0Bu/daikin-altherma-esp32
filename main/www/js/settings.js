@@ -214,15 +214,72 @@ function circulationFormPayload() {
 }
 
 // ── Gas heating comparison tariffs ──────────────────────────────────────
+const WF_REG_CUR = Object.freeze({
+  CH: "CHF", LI: "CHF", GB: "GBP", UK: "GBP", US: "USD",
+  PL: "PLN", CZ: "CZK", SE: "SEK", NO: "NOK", SJ: "NOK",
+  DK: "DKK", FO: "DKK", GL: "DKK", UA: "UAH", JP: "JPY", CN: "CNY",
+});
+const WF_EUR_REG = /^(AD|AT|BE|CY|DE|EE|ES|FI|FR|GR|HR|IE|IT|LT|LU|LV|MC|MT|NL|PT|SI|SK|SM|VA|ME|XK)$/;
+const WF_LANG_CUR = Object.freeze({
+  pl: "PLN", cs: "CZK", nb: "NOK", no: "NOK", nn: "NOK",
+  sv: "SEK", uk: "UAH", ja: "JPY", zh: "CNY", da: "DKK",
+});
+function parseNavLocale(raw) {
+  const parts = String(raw || "").trim().replace(/_/g, "-").split("-").filter(Boolean);
+  const lang = (parts[0] || "").toLowerCase();
+  let region = "";
+  for (let i = 1; i < parts.length; i++) {
+    if (/^[a-zA-Z]{2}$/.test(parts[i])) {
+      region = parts[i].toUpperCase();
+      break;
+    }
+  }
+  return { lang, region };
+}
+function defaultTariffCurrency() {
+  const { lang: navLang, region: navRegion } =
+    parseNavLocale(typeof navigator !== "undefined" ? navigator.language : "");
+  const navPrimary = (navLang === "no" || navLang === "nn") ? "nb" : navLang;
+  const statusLang = S.status?.ui?.lang;
+  let manualLang = null;
+  if (uiLangSupported(statusLang)) {
+    manualLang = statusLang;
+  } else if (statusLang !== "auto") {
+    const storedMode = typeof lsGet === "function" ? lsGet("uiLangMode") : null;
+    if (uiLangSupported(storedMode)) {
+      manualLang = storedMode;
+    } else if (storedMode !== "auto") {
+      if (typeof UI_LANG_MODE !== "undefined" && uiLangSupported(UI_LANG_MODE)) {
+        manualLang = UI_LANG_MODE;
+      } else if (typeof LANG === "string" && uiLangSupported(LANG) &&
+                 typeof INITIAL_AUTO_LANG === "string" &&
+                 LANG !== INITIAL_AUTO_LANG && LANG !== autoLang()) {
+        manualLang = LANG;
+      }
+    }
+  }
+  if (manualLang) {
+    if (navPrimary === manualLang) {
+      if ((manualLang === "de" || manualLang === "fr" || manualLang === "it") &&
+          (navRegion === "CH" || navRegion === "LI")) return "CHF";
+      if (manualLang === "en" && (navRegion === "GB" || navRegion === "UK")) return "GBP";
+      if (manualLang === "en" && navRegion === "US") return "USD";
+    }
+    return WF_LANG_CUR[manualLang] || "EUR";
+  }
+  if (navRegion) {
+    if (WF_REG_CUR[navRegion]) return WF_REG_CUR[navRegion];
+    if (WF_EUR_REG.test(navRegion)) return "EUR";
+  }
+  return WF_LANG_CUR[navLang] || "EUR";
+}
 function updateGasComparisonPreview() {
   const el = $("gcPreview");
   if (!el) return;
   const elec = Number($("gcElecPrice").value);
   const gas = Number($("gcGasPrice").value);
-  const eff = Number($("gcGasEff").value);
-  if (Number.isFinite(elec) && elec > 0 && Number.isFinite(gas) && gas > 0 &&
-      Number.isFinite(eff) && eff >= 50 && eff <= 98) {
-    const be = (elec * (eff / 100)) / gas;
+  if (Number.isFinite(elec) && elec > 0 && Number.isFinite(gas) && gas > 0) {
+    const be = (elec * 0.88) / gas;
     el.textContent = t("wf.gas.preview", be.toLocaleString(LANG, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
   } else {
     el.textContent = t("wf.gas.preview_empty");
@@ -233,14 +290,16 @@ function fillGasComparison() {
   const configured = !!g.configured;
   $("gcElecPrice").value = configured && typeof g.elec_price === "number" && Number.isFinite(g.elec_price) ? g.elec_price : "";
   $("gcGasPrice").value = configured && typeof g.gas_price === "number" && Number.isFinite(g.gas_price) ? g.gas_price : "";
-  $("gcGasEff").value = typeof g.gas_efficiency_pct === "number" && Number.isInteger(g.gas_efficiency_pct) ? g.gas_efficiency_pct : 88;
-  $("gcCurrency").value = typeof g.currency === "string" && g.currency ? g.currency : "EUR";
+  const cur = configured && typeof g.currency === "string" && WF_CURRENCIES.includes(g.currency)
+    ? g.currency
+    : defaultTariffCurrency();
+  $("gcCurrency").value = cur;
   $("gcDeleteBtn").disabled = !configured;
   updateGasComparisonPreview();
 }
 function openGasComparison() {
   fillGasComparison();
-  for (const id of ["gcElecPrice", "gcGasPrice", "gcGasEff", "gcCurrency"])
+  for (const id of ["gcElecPrice", "gcGasPrice", "gcCurrency"])
     $(id).classList.remove("invalid");
   $("gcError").hidden = true;
   openPopup("gasComparisonModal");
@@ -250,46 +309,7 @@ function gasComparisonFormPayload() {
   return {
     elec_price: Number($("gcElecPrice").value),
     gas_price: Number($("gcGasPrice").value),
-    gas_efficiency_pct: Number($("gcGasEff").value),
     currency: $("gcCurrency").value.trim().toUpperCase(),
-  };
-}
-
-// ── External MQTT electrical power meter ────────────────────────────────
-function fillPowerMeter() {
-  const pm = S.status?.power_meter || {};
-  const mqtt = S.status?.mqtt || {};
-  const configured = !!pm.configured;
-  $("pmBrokerHint").hidden = !!(mqtt.configured || mqtt.broker);
-  $("pmName").value = configured ? (pm.name || "") : t("pm.default_name");
-  $("pmTopic").value = configured ? (pm.topic || "") : "";
-  $("pmPowerPath").value = configured ? (pm.power_path || "") : "";
-  $("pmTimePath").value = configured ? (pm.timestamp_path || "") : "";
-  $("pmUnit").value = pm.unit === "kW" ? "kW" : "W";
-  $("pmScope").value = pm.scope === "compressor_only" ? "compressor_only" : "whole_unit";
-  $("pmMaxAge").value = configured && Number.isInteger(pm.max_age_s) ? pm.max_age_s : 60;
-  $("pmDeleteBtn").disabled = !configured;
-}
-function openPowerMeter() {
-  fillPowerMeter();
-  for (const id of ["pmName", "pmTopic", "pmPowerPath", "pmTimePath", "pmUnit", "pmScope", "pmMaxAge"])
-    $(id).classList.remove("invalid");
-  $("pmError").hidden = true;
-  $("pmTestResult").hidden = true;
-  $("pmTestResult").classList.remove("ok", "warn");
-  openPopup("powerMeterModal");
-}
-function closePowerMeter() { closePopup("powerMeterModal"); }
-function powerMeterFormPayload() {
-  const topic = $("pmTopic").value.trim();
-  return {
-    name: topic ? $("pmName").value.trim() : "",
-    topic,
-    power_path: topic ? $("pmPowerPath").value.trim() : "",
-    timestamp_path: topic ? $("pmTimePath").value.trim() : "",
-    unit: $("pmUnit").value === "kW" ? "kW" : "W",
-    scope: $("pmScope").value === "compressor_only" ? "compressor_only" : "whole_unit",
-    max_age_s: topic ? Number($("pmMaxAge").value) : 60,
   };
 }
 

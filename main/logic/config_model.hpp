@@ -13,7 +13,7 @@
 #include "modbus.hpp"       // MODBUS_TCP_PORT / MODBUS_DEFAULT_UNIT — the mb_* field defaults
 #include "heating_curve_diagnosis.hpp"
 #include "circulation_source.hpp"
-#include "power_meter_source.hpp"
+#include "gas_comparison.hpp"
 #include "reference_temperature.hpp"
 #include "ui_lang.hpp"      // UiLang — the web UI's manual language override (else browser-detected)
 
@@ -166,22 +166,12 @@ struct Config {
     // an earlier consent interval cannot be restored from RAM/flash into a newly enabled one.
     uint32_t    diagnostics_generation = 0;
     DiagnosticsSource diagnostics_source     = DiagnosticsSource::X10a;
-    // Gas-cost comparison tariffs and optional independent MQTT electrical power meter.
-    // Price units are 1e-4 currency/kWh (`tenth_mill`); 0 disables cost comparison while keeping
-    // the measured 24 h working figure active.
-    uint32_t        elec_price_tenth_mill = 0;
-    uint32_t        gas_price_tenth_mill  = 0;
-    uint8_t         gas_efficiency_pct    = GAS_EFFICIENCY_DEFAULT_PCT;
-    std::string     tariff_currency       = "EUR";
-    std::string     power_meter_name;
-    std::string     power_meter_topic;
-    std::string     power_meter_power_path;
-    std::string     power_meter_time_path;
-    uint32_t        power_meter_max_age_s  = POWER_METER_MAX_AGE_DEFAULT_S;
-    PowerMeterUnit  power_meter_unit       = PowerMeterUnit::Watts;
-    PowerMeterScope power_meter_scope      = PowerMeterScope::WholeUnit;
-    uint32_t        power_meter_generation = 0;
-    std::string syslog_host;       // "" = Syslog disabled
+    // Gas-cost comparison tariffs. Price units are 1e-4 currency/kWh (`tenth_mill`); 0 disables
+    // cost comparison while keeping the measured 24 h working figure active.
+    uint32_t    elec_price_tenth_mill = 0;
+    uint32_t    gas_price_tenth_mill  = 0;
+    std::string tariff_currency       = "EUR";
+    std::string syslog_host; // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled
     // state, it just idles until a route to the server exists — so an empty save is read by
@@ -795,15 +785,8 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48, bo
     }
     const char* gas_why = nullptr;
     if (!gas_comparison_config_valid(c.elec_price_tenth_mill, c.gas_price_tenth_mill,
-                                     c.gas_efficiency_pct, c.tariff_currency, &gas_why)) {
+                                     c.tariff_currency, &gas_why)) {
         reason = gas_why ? gas_why : "invalid gas comparison config";
-        return false;
-    }
-    const char* power_meter_why = nullptr;
-    if (!power_meter_config_valid(c.power_meter_name, c.power_meter_topic, c.power_meter_power_path,
-                                  c.power_meter_time_path, c.power_meter_max_age_s,
-                                  &power_meter_why)) {
-        reason = power_meter_why ? power_meter_why : "invalid power meter config";
         return false;
     }
     return true;

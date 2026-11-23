@@ -136,18 +136,8 @@ const fetch = async (url, options = {}) => {
   const body = options.body ? JSON.parse(options.body) : null;
   fetchState.calls.push({ url, body });
   if (url === "/status") return response(true, fetchState.status || {});
-  if (url === "/test_power_meter") {
-    if (fetchState.mode === "pm_test_live")
-      return response(true, { ok: true, power_w: 1420.5, retained: false });
-    if (fetchState.mode === "pm_test_retained")
-      return response(true, { ok: true, power_w: 850, retained: true });
-    if (fetchState.mode === "pm_test_fail")
-      return response(false, { error: "No fresh power-meter value received before timeout" }, 422);
-  }
   if (fetchState.mode === "gc_reject" && url === "/set_gas_comparison")
     return response(false, { error: fetchState.error || "Invalid gas tariff" }, 400);
-  if (fetchState.mode === "pm_reject" && url === "/set_power_meter")
-    return response(false, { error: fetchState.error || "Invalid power meter path" }, 400);
   return response(true, { ok: true, saved: true, reboot: false });
 };
 
@@ -213,11 +203,16 @@ for (let i = 0; i < modalStarts.length; i++) {
     [...block.matchAll(/<(?:button|input|select|textarea)\b[^>]*\bid="([^"]+)"/g)].map((m) => m[1]));
 }
 
+const navigatorState = { language: "en-US" };
+let storedLangMode = null;
 const context = vm.createContext({
   document,
   fetch,
-  navigator: { language: "en-US" },
-  localStorage: { getItem() { return null; }, setItem() {} },
+  navigator: navigatorState,
+  localStorage: {
+    getItem(key) { return key === "uiLangMode" ? storedLangMode : null; },
+    setItem() {},
+  },
   window,
   history,
   location,
@@ -243,7 +238,8 @@ vm.runInContext(`${source}
   this.__wf = {
     S, t, esc, notices, wire, initNavigation, applyRouteFromLocation,
     workingFigureRowHtml, checkupCardHtml, circulationSettingsCardHtml,
-    openGasComparison, closeGasComparison, openPowerMeter, closePowerMeter,
+    openGasComparison, closeGasComparison,
+    WF_CURRENCIES, WF_CURRENCY_SYM, wfMoney, defaultTariffCurrency,
     MODALS, ROUTED_MODALS, POPUP_ROUTES,
   };`, context, { filename: "main/www/app.sources" });
 
@@ -272,7 +268,6 @@ function baseStatus() {
     mqtt: { configured: true, connected: true, broker: "192.0.2.27:1883", base: "daikin-altherma-esp32" },
     circulation_source: { configured: false, max_age_s: 120 },
     gas_comparison: { configured: false, gas_efficiency_pct: 88, currency: "EUR" },
-    power_meter: { configured: false, unit: "W", scope: "whole_unit", max_age_s: 60 },
     health: {
       source: "x10a",
       status: "ok",
@@ -296,9 +291,9 @@ function baseStatus() {
       tariffs_configured: true,
       full_window: true,
       source_fresh: true,
-      is_estimate: false,
+      is_estimate: true,
       is_compressor_only: false,
-      pel_source: "mqtt_whole_unit",
+      pel_source: "x10a_ct",
       span_s: 86400,
       observed_s: 86400,
       unpairable_s: 0,
@@ -307,7 +302,7 @@ function baseStatus() {
       bsh_excluded_s: 0,
       cooling_excluded_s: 0,
       coverage_pct: 100,
-      neutral_band_pct: 10,
+      neutral_band_pct: 20,
       heat_kwh: 41.0,
       elec_kwh: 10.0,
       az: 4.10,
@@ -330,7 +325,7 @@ function baseStatus() {
   };
 }
 
-// ── 1. Absence on older firmware / Modbus / diagnostics disabled ────────────────────────────────
+// ── 1. Absence on older firmware / diagnostics disabled & HomeHub Modbus rendering ────────────────
 {
   const s = baseStatus();
   for (const absent of [undefined, null, "invalid", []]) {
@@ -343,18 +338,24 @@ function baseStatus() {
     ...s,
     diagnostics: { enabled: true, source: "modbus", effective_source: "modbus", available_sources: ["x10a", "modbus"] },
     health: { ...s.health, source: "modbus" },
+    working_figure: { ...s.working_figure, pel_source: "modbus", is_estimate: true, neutral_band_pct: 20 },
   };
   const modbusCard = ui.checkupCardHtml(true);
-  assert.doesNotMatch(modbusCard, /observation:working_figure/,
-    "working_figure must stay hidden when health.source is modbus");
+  assert.match(modbusCard, /observation:working_figure/,
+    "working_figure must render on HomeHub Modbus when /status.working_figure is present");
+  assert.doesNotMatch(modbusCard, /observation:refrigerant_service/,
+    "refrigerant_service must stay hidden when health.source is modbus");
+  assert.match(modbusCard, /HomeHub Modbus \(est\.\)/);
+  assert.match(modbusCard, /HomeHub Modbus: LWT PHE \(40\) − RWT \(42\), Input 51 power \(unspecified scope\), BSH \(32\) excluded, BUH rise \(&gt; 1\.5 K\) flagged limited\./);
 
   ui.S.status = {
     ...s,
     diagnostics: { enabled: true, source: "modbus", effective_source: "modbus", available_sources: ["modbus"] },
     health: { status: "collecting", checks: [] },
+    working_figure: undefined,
   };
   assert.doesNotMatch(ui.checkupCardHtml(true), /observation:working_figure/,
-    "working_figure must stay hidden when diagnostics.effective_source is modbus");
+    "working_figure row must stay hidden when /status.working_figure is absent on modbus");
 }
 
 // ── 2. Card summary badge invariance across working_figure states ───────────────────────────────
@@ -407,7 +408,7 @@ function baseStatus() {
     { state: "limited", supported: true, est: true, az: 3.25, limitedBuh: true, text: "~3.25 · lim.", tone: "warn", aria: "estimated 3.25 · limited" },
   ];
 
-  const disclosure = "24 h Heating+DHW (excl. cooling); pure water 4.186 kJ/(L·K); gas Hs; no fixed fees.";
+  const disclosure = "24 h Heating + DHW (excl. cooling); pure water (4.186 kJ/(L·K)); fixed 88% Hs modern condensing gas boiler; no fixed fees.";
   for (const spec of stateExpectations) {
     const s = baseStatus();
     s.working_figure = {
@@ -429,6 +430,11 @@ function baseStatus() {
       `${spec.state} (est=${spec.est}): expected aria-label "Performance factor: ${spec.aria}"`);
     assert.ok(row.includes(disclosure),
       `${spec.state}: pure-water / Heating+DHW / Hs disclosure must always be present`);
+    if (spec.state === "unsupported") {
+      assert.match(row, /Required flow, temperature, or electrical inputs unavailable\./);
+      assert.doesNotMatch(row, /data-act="gas-comparison"/,
+        "unsupported working_figure must not emit a tariff CTA inside the row body");
+    }
   }
 }
 
@@ -461,14 +467,14 @@ function baseStatus() {
   assert.match(body, /Cooling excl\./, "cooling exclusion metadata must appear when positive");
   assert.match(body, /data-act="gas-comparison">Edit tariffs</);
 
-  // (b) Tariffs unconfigured -> 2 KPI tiles + Set tariffs button, NO scale bar
+  // (b) Tariffs unconfigured on HomeHub Modbus -> 2 KPI tiles + Modbus scope + Set tariffs button, NO scale bar
   s.working_figure = {
     ...s.working_figure,
     state: "measured",
     tariffs_configured: false,
-    is_estimate: false,
-    is_compressor_only: true,
-    pel_source: "mqtt_compressor",
+    is_estimate: true,
+    is_compressor_only: false,
+    pel_source: "modbus",
     buh_s: 0,
   };
   ui.S.status = s;
@@ -476,7 +482,9 @@ function baseStatus() {
   assert.doesNotMatch(body, /wf-kpis-4/, "unconfigured tariffs must not render 4 KPI tiles");
   assert.equal((body.match(/class="wf-kpi"/g) || []).length, 2, "unconfigured tariffs must render 2 KPI tiles");
   assert.doesNotMatch(body, /class="wf-scale"/, "unconfigured tariffs must omit Break-Even scale bar");
-  assert.match(body, /comp\. only/, "compressor-only scope label must appear in KPI tile");
+  assert.match(body, /Modbus est\./, "HomeHub Modbus scope label must appear in KPI tile");
+  assert.match(body, /HomeHub Modbus: LWT PHE \(40\) − RWT \(42\), Input 51 power \(unspecified scope\), BSH \(32\) excluded, BUH rise \(&gt; 1\.5 K\) flagged limited\./,
+    "HomeHub Modbus working_figure must expose wf.disclosure_modbus");
   assert.match(body, /data-act="gas-comparison">Set tariffs</);
 
   // (c) limited_buh: true -> renders wf.banner.buh_limited warning instead of buh_active even with buh_s > 0
@@ -488,13 +496,15 @@ function baseStatus() {
     buh_s: 1200,
     bsh_excluded_s: 900,
     ct_unwired: true,
+    is_compressor_only: true,
     source_fresh: false,
     pel_source: "x10a_inv",
   };
   ui.S.status = s;
   body = ui.workingFigureRowHtml();
-  assert.match(body, /<div class="wf-banner warn">Backup\/booster heater ran while metering compressor only — excluded load may distort the figure\.<\/div>/,
+  assert.match(body, /<div class="wf-banner warn">Backup\/booster heater active \(unmeasured or excluded load\) — figure may be skewed\.<\/div>/,
     "limited_buh must render buh_limited warning");
+  assert.match(body, /comp\. only/, "compressor-only scope label must appear for x10a_inv");
   assert.doesNotMatch(body, /Backup electric heater ran/,
     "limited_buh must suppress whole-unit 1:1 buh_active claim");
   assert.match(body, /<div class="wf-banner warn">BSH \(15 min\) excluded \(outside circuit\)\.<\/div>/);
@@ -529,38 +539,38 @@ function baseStatus() {
     break_even_az: 2.68,
   };
   s.mqtt = { configured: false, connected: false, broker: "" };
-  s.power_meter = {
-    configured: true,
-    name: "Heat pump meter",
-    topic: "fixture/power-meter/status",
-    scope: "whole_unit",
-    max_age_s: 60,
-    has_value: false,
-    fresh: false,
-  };
   ui.S.status = s;
   const card = ui.circulationSettingsCardHtml();
-  assert.match(card, /data-desc="diagnostics:gas_comparison"[\s\S]*data-act="gas-comparison"[\s\S]*2\.68 · 88% Hs/,
+  assert.match(card, /data-desc="diagnostics:gas_comparison"[\s\S]*data-act="gas-comparison"[\s\S]*>2\.68<\/span>/,
     "Settings card must render configured gas_comparison even when working_figure is absent");
+  assert.doesNotMatch(card, /2\.68 · 88% Hs|Efficiency \(Hs\)/,
+    "Settings gas-comparison row and tongue must omit redundant efficiency setting text");
   assert.match(card, /Electricity<\/span> 0\.3200 EUR\/kWh/);
-  assert.match(card, /data-desc="diagnostics:power_meter"[\s\S]*class="settings-split-action vrow-val settings-wrap err"[^>]*data-act="power-meter" aria-label="External MQTT meter: Heat pump meter · No MQTT broker"/,
-    "configured power meter with disabled MQTT must show No MQTT broker error state");
-  assert.match(card, /State<\/span> No MQTT broker/);
+  assert.doesNotMatch(card, /data-act="power-meter"|diagnostics:power_meter/,
+    "Settings card must not expose removed external power-meter row");
 }
 
 // ── 6. gasComparisonModal lifecycle (#settings/gas-comparison) ──────────────────────────────────
 {
-  const gcHtml = html.slice(html.indexOf('id="gasComparisonModal"'), html.indexOf('id="powerMeterModal"'));
-  assert.doesNotMatch(gcHtml, /<select|fluid|glycol/i,
-    "gasComparisonModal must contain no fluid or glycol selector");
+  const gcHtml = html.slice(html.indexOf('id="gasComparisonModal"'), html.indexOf('id="weatherModal"'));
+  assert.doesNotMatch(gcHtml, /gcGasEff|fluid|glycol/i,
+    "gasComparisonModal must contain no efficiency input or fluid/glycol selector");
+  const gcCurrencySelect = gcHtml.match(/<select[^>]*id="gcCurrency"[\s\S]*?<\/select>/)?.[0] || "";
+  assert.deepEqual(
+    [...gcCurrencySelect.matchAll(/<option value="([^"]+)"/g)].map((m) => m[1]),
+    ["EUR", "CHF", "GBP", "USD", "PLN", "CZK", "SEK", "NOK", "DKK", "UAH", "JPY", "CNY"],
+    "gasComparisonModal #gcCurrency must expose the exact 12 curated currency options",
+  );
 
   const s = baseStatus();
+  s.ui = { lang: "auto" };
+  navigatorState.language = "en-US";
   ui.S.status = s;
   ui.S.busy = false;
   fetchState.mode = "ok";
   fetchState.calls.length = 0;
 
-  // Open from dashboard CTA
+  // Open from dashboard CTA (defaults currency from browser locale when unconfigured)
   loadRoute("");
   ui.S.stage = "dashboard";
   await document.getElementById("valueGroups").fire("click", {
@@ -568,28 +578,26 @@ function baseStatus() {
   });
   assert.equal(document.getElementById("gasComparisonModal").hidden, false);
   assert.equal(location.hash, "#settings/gas-comparison");
+  assert.equal(document.getElementById("gcCurrency").value, "USD");
   assert.equal(document.getElementById("gcDeleteBtn").disabled, true);
   assert.equal(document.getElementById("gcPreview").textContent, "Enter prices for break-even.");
 
   // Live preview update
   document.getElementById("gcElecPrice").value = "0.3200";
   document.getElementById("gcGasPrice").value = "0.1050";
-  document.getElementById("gcGasEff").value = "88";
   await document.getElementById("gcElecPrice").fire("input");
   assert.equal(document.getElementById("gcPreview").textContent,
-    "Break-even: 2.68 (±20% X10A / ±10% MQTT)");
+    "Break-even: 2.68 (±20%)");
 
-  // Client-side validation: invalid elec price, gas price, efficiency, currency
+  // Client-side validation: invalid elec price, gas price, non-curated currency
   for (const [field, badVal, errId, errText] of [
     ["gcElecPrice", "0", "gcElecPrice", "0.0001–99.9999."],
     ["gcGasPrice", "100", "gcGasPrice", "0.0001–99.9999."],
-    ["gcGasEff", "49", "gcGasEff", "Whole % (50–98)."],
-    ["gcGasEff", "88.5", "gcGasEff", "Whole % (50–98)."],
-    ["gcCurrency", "eu1", "gcCurrency", "3 uppercase letters (EUR)."],
+    ["gcCurrency", "CAD", "gcCurrency", "Select a supported currency."],
+    ["gcCurrency", "eu1", "gcCurrency", "Select a supported currency."],
   ]) {
     document.getElementById("gcElecPrice").value = "0.3200";
     document.getElementById("gcGasPrice").value = "0.1050";
-    document.getElementById("gcGasEff").value = "88";
     document.getElementById("gcCurrency").value = "EUR";
     document.getElementById(field).value = badVal;
     fetchState.calls.length = 0;
@@ -602,18 +610,18 @@ function baseStatus() {
     assert.equal(document.getElementById("gasComparisonModal").hidden, false);
   }
 
-  // Valid save
+  // Valid save omits gas_efficiency_pct
   document.getElementById("gcElecPrice").value = "0.3200";
   document.getElementById("gcGasPrice").value = "0.1050";
-  document.getElementById("gcGasEff").value = "88";
-  document.getElementById("gcCurrency").value = " chf ";
+  document.getElementById("gcCurrency").value = "CHF";
   fetchState.calls.length = 0;
   await document.getElementById("gasComparisonForm").fire("submit");
   await settle();
   assert.deepEqual(fetchState.calls.map((c) => c.url), ["/set_gas_comparison"]);
   assert.deepEqual(fetchState.calls[0].body, {
-    elec_price: 0.32, gas_price: 0.105, gas_efficiency_pct: 88, currency: "CHF",
+    elec_price: 0.32, gas_price: 0.105, currency: "CHF",
   });
+  assert.equal("gas_efficiency_pct" in fetchState.calls[0].body, false);
   assert.equal(document.getElementById("gasComparisonModal").hidden, true);
   assert.equal(location.hash, "#settings");
 
@@ -622,6 +630,7 @@ function baseStatus() {
     configured: true, elec_price: 0.32, gas_price: 0.105, gas_efficiency_pct: 88, currency: "CHF", break_even_az: 2.68,
   };
   loadRoute("#settings/gas-comparison");
+  assert.equal(document.getElementById("gcCurrency").value, "CHF");
   assert.equal(document.getElementById("gcDeleteBtn").disabled, false);
   fetchState.calls.length = 0;
   await document.getElementById("gcDeleteBtn").fire("click");
@@ -638,7 +647,6 @@ function baseStatus() {
   fetchState.error = "Gas tariff out of range";
   document.getElementById("gcElecPrice").value = "0.3200";
   document.getElementById("gcGasPrice").value = "0.1050";
-  document.getElementById("gcGasEff").value = "88";
   document.getElementById("gcCurrency").value = "EUR";
   await document.getElementById("gasComparisonForm").fire("submit");
   await settle();
@@ -651,139 +659,81 @@ function baseStatus() {
   await document.getElementById("gcCancel").onclick();
 }
 
-// ── 7. powerMeterModal lifecycle (#settings/power-meter) ────────────────────────────────────────
+// ── 7. WF_CURRENCY_SYM, wfMoney formatting (JPY 0-dec / deadband), and defaultTariffCurrency ─────
 {
-  const s = baseStatus();
-  ui.S.status = s;
-  ui.S.busy = false;
-  fetchState.mode = "ok";
-  fetchState.calls.length = 0;
+  assert.deepEqual(
+    [...ui.WF_CURRENCIES],
+    ["EUR", "CHF", "GBP", "USD", "PLN", "CZK", "SEK", "NOK", "DKK", "UAH", "JPY", "CNY"],
+  );
+  assert.deepEqual({ ...ui.WF_CURRENCY_SYM }, {
+    EUR: "€", CHF: "CHF", GBP: "£", USD: "$", PLN: "zł", CZK: "Kč",
+    SEK: "kr", NOK: "kr", DKK: "kr", UAH: "₴", JPY: "¥", CNY: "CN¥",
+  });
 
-  // #pmBrokerHint visibility follows MQTT broker configuration
-  ui.S.status.mqtt = { configured: false, connected: false, broker: "" };
-  loadRoute("#settings/power-meter");
-  assert.equal(document.getElementById("powerMeterModal").hidden, false);
-  assert.equal(document.getElementById("pmBrokerHint").hidden, false,
-    "pmBrokerHint must be visible when MQTT broker is unconfigured");
-  await document.getElementById("pmCancel").onclick();
+  // JPY: 0 decimal digits & 0.5 deadband
+  assert.equal(ui.wfMoney(1234.4, "JPY"), "1,234 ¥");
+  assert.equal(ui.wfMoney(-0.49, "JPY"), "0 ¥");
+  assert.equal(ui.wfMoney(-0.51, "JPY"), "−1 ¥");
+  assert.equal(ui.wfMoney(0.49, "JPY", true), "0 ¥");
+  assert.equal(ui.wfMoney(-0.49, "JPY", true), "0 ¥");
+  assert.equal(ui.wfMoney(0.51, "JPY", true), "+1 ¥");
+  assert.equal(ui.wfMoney(-0.51, "JPY", true), "−1 ¥");
 
-  ui.S.status.mqtt = { configured: true, connected: true, broker: "192.0.2.27:1883" };
-  loadRoute("#settings/power-meter");
-  assert.equal(document.getElementById("pmBrokerHint").hidden, true,
-    "pmBrokerHint must stay hidden when MQTT broker is configured");
+  // 2-decimal currencies & 0.005 deadband
+  assert.equal(ui.wfMoney(3.2, "EUR"), "3.20 €");
+  assert.equal(ui.wfMoney(12.345, "UAH"), "12.35 ₴");
+  assert.equal(ui.wfMoney(0.004, "CNY", true), "0.00 CN¥");
+  assert.equal(ui.wfMoney(0.01, "CNY", true), "+0.01 CN¥");
+  assert.equal(ui.wfMoney(-0.01, "DKK", true), "−0.01 kr");
 
-  // Client validation: wildcards, invalid power_path, timestamp_path requiring power_path, max_age 10..300
-  const fillValidPm = () => {
-    document.getElementById("pmName").value = "Heat pump meter";
-    document.getElementById("pmTopic").value = "fixture/power-meter/status";
-    document.getElementById("pmPowerPath").value = "total_act_power";
-    document.getElementById("pmTimePath").value = "ts";
-    document.getElementById("pmUnit").value = "W";
-    document.getElementById("pmScope").value = "whole_unit";
-    document.getElementById("pmMaxAge").value = "60";
-  };
-  for (const [setupBad, badField] of [
-    [() => { document.getElementById("pmTopic").value = "fixture/+/status"; }, "pmTopic"],
-    [() => { document.getElementById("pmTopic").value = "fixture/#"; }, "pmTopic"],
-    [() => { document.getElementById("pmPowerPath").value = "a..b"; }, "pmPowerPath"],
-    [() => { document.getElementById("pmPowerPath").value = ""; document.getElementById("pmTimePath").value = "ts"; }, "pmTimePath"],
-    [() => { document.getElementById("pmMaxAge").value = "9"; }, "pmMaxAge"],
-    [() => { document.getElementById("pmMaxAge").value = "301"; }, "pmMaxAge"],
-    [() => { document.getElementById("pmMaxAge").value = "60.5"; }, "pmMaxAge"],
-  ]) {
-    fillValidPm();
-    setupBad();
-    fetchState.calls.length = 0;
-    await document.getElementById("powerMeterForm").fire("submit");
-    await settle();
-    assert.equal(fetchState.calls.length, 0, `invalid ${badField} must block POST`);
-    assert.equal(document.getElementById(badField).classList.contains("invalid"), true);
-    assert.equal(document.getElementById("pmError").hidden, false);
-    assert.equal(document.getElementById("powerMeterModal").hidden, false);
+  // defaultTariffCurrency(): auto browser locale vs manual UI lang + regional Swiss/UK/US overrides
+  const origStatus = ui.S.status;
+  const origNavLang = navigatorState.language;
+  const origStored = storedLangMode;
+  try {
+    storedLangMode = null;
+    for (const [navLang, expectedCur] of [
+      ["de-CH", "CHF"], ["fr-CH", "CHF"], ["it-LI", "CHF"],
+      ["en-GB", "GBP"], ["en_UK", "GBP"], ["en-US", "USD"],
+      ["de-DE", "EUR"], ["da-DK", "DKK"], ["nb-NO", "NOK"],
+      ["sv-SE", "SEK"], ["pl-PL", "PLN"], ["cs-CZ", "CZK"],
+      ["uk-UA", "UAH"], ["ja-JP", "JPY"], ["zh-CN", "CNY"],
+      ["ja-DE", "EUR"], ["pt-BR", "EUR"],
+    ]) {
+      ui.S.status = { ui: { lang: "auto" } };
+      navigatorState.language = navLang;
+      assert.equal(ui.defaultTariffCurrency(), expectedCur,
+        `auto navigator.language=${navLang} should default to ${expectedCur}`);
+    }
+
+    for (const [uiLang, navLang, expectedCur] of [
+      ["pl", "en-US", "PLN"],
+      ["uk", "de-DE", "UAH"],
+      ["ja", "en-GB", "JPY"],
+      ["de", "de-CH", "CHF"],
+      ["fr", "fr-CH", "CHF"],
+      ["it", "it-LI", "CHF"],
+      ["en", "en-GB", "GBP"],
+      ["en", "en-US", "USD"],
+      ["de", "en-CH", "EUR"],
+    ]) {
+      ui.S.status = { ui: { lang: uiLang } };
+      navigatorState.language = navLang;
+      assert.equal(ui.defaultTariffCurrency(), expectedCur,
+        `manual ui.lang=${uiLang} with navigator.language=${navLang} should resolve to ${expectedCur}`);
+    }
+
+    // Invalid persisted currency in status falls back to defaultTariffCurrency() when filling modal
+    ui.S.status = { ui: { lang: "auto" }, gas_comparison: { configured: true, elec_price: 0.3, gas_price: 0.1, currency: "CAD" } };
+    navigatorState.language = "en-GB";
+    ui.openGasComparison();
+    assert.equal(document.getElementById("gcCurrency").value, "GBP");
+    await document.getElementById("gcCancel").onclick();
+  } finally {
+    ui.S.status = origStatus;
+    navigatorState.language = origNavLang;
+    storedLangMode = origStored;
   }
-
-  // POST /test_power_meter: live, retained, failure, and clear on edit
-  fillValidPm();
-  fetchState.mode = "pm_test_live";
-  fetchState.calls.length = 0;
-  await document.getElementById("pmTestBtn").fire("click");
-  await settle();
-  assert.deepEqual(fetchState.calls.map((c) => c.url), ["/test_power_meter"]);
-  assert.equal(document.getElementById("pmTestResult").hidden, false);
-  assert.equal(document.getElementById("pmTestResult").classList.contains("ok"), true);
-  assert.equal(document.getElementById("pmTestResult").textContent, "1,420.5 W (live)");
-
-  fetchState.mode = "pm_test_retained";
-  await document.getElementById("pmTestBtn").fire("click");
-  await settle();
-  assert.equal(document.getElementById("pmTestResult").hidden, false);
-  assert.equal(document.getElementById("pmTestResult").classList.contains("warn"), true);
-  assert.equal(document.getElementById("pmTestResult").textContent, "850 W (retained; needs timestamp)");
-
-  await document.getElementById("pmPowerPath").fire("input");
-  assert.equal(document.getElementById("pmTestResult").hidden, true,
-    "editing a field must clear stale power-meter test result");
-
-  fetchState.mode = "pm_test_fail";
-  await document.getElementById("pmTestBtn").fire("click");
-  await settle();
-  assert.equal(document.getElementById("pmTestResult").hidden, true);
-  assert.equal(document.getElementById("pmError").hidden, false);
-  assert.equal(document.getElementById("pmError").textContent, "No fresh power-meter value received before timeout");
-
-  // Direct POST /set_power_meter save WITHOUT calling /test_power_meter
-  fetchState.mode = "ok";
-  fetchState.calls.length = 0;
-  fillValidPm();
-  document.getElementById("pmUnit").value = "kW";
-  document.getElementById("pmScope").value = "compressor_only";
-  await document.getElementById("powerMeterForm").fire("submit");
-  await settle();
-  assert.deepEqual(fetchState.calls.map((c) => c.url), ["/set_power_meter"],
-    "Save must persist directly without requiring /test_power_meter");
-  assert.deepEqual(fetchState.calls[0].body, {
-    name: "Heat pump meter",
-    topic: "fixture/power-meter/status",
-    power_path: "total_act_power",
-    timestamp_path: "ts",
-    unit: "kW",
-    scope: "compressor_only",
-    max_age_s: 60,
-  });
-  assert.equal(document.getElementById("powerMeterModal").hidden, true);
-
-  // Server 400 rejection on /set_power_meter
-  ui.S.status.power_meter = {
-    configured: true, name: "Heat pump meter", topic: "fixture/power-meter/status",
-    power_path: "total_act_power", timestamp_path: "ts", unit: "kW", scope: "compressor_only", max_age_s: 60,
-  };
-  loadRoute("#settings/power-meter");
-  fetchState.mode = "pm_reject";
-  fetchState.error = "Invalid timestamp JSON path";
-  fetchState.calls.length = 0;
-  await document.getElementById("powerMeterForm").fire("submit");
-  await settle();
-  assert.equal(document.getElementById("powerMeterModal").hidden, false);
-  assert.equal(document.getElementById("pmError").hidden, false);
-  assert.equal(document.getElementById("pmError").textContent, "Invalid timestamp JSON path");
-  assert.equal(document.getElementById("pmTimePath").classList.contains("invalid"), true);
-  assert.equal(ui.S.busy, false);
-
-  // Delete submits topic: "" even if draft inputs are invalid, without calling /test_power_meter
-  fetchState.mode = "ok";
-  fetchState.calls.length = 0;
-  document.getElementById("pmTopic").value = "bad/#";
-  await document.getElementById("pmDeleteBtn").fire("click");
-  await settle();
-  assert.deepEqual(fetchState.calls.map((c) => c.url), ["/set_power_meter"]);
-  assert.deepEqual(fetchState.calls[0].body, {
-    name: "", topic: "", power_path: "", timestamp_path: "", unit: "W", scope: "whole_unit", max_age_s: 60,
-  });
-  assert.equal(document.getElementById("powerMeterModal").hidden, true);
-  ui.openPowerMeter();
-  assert.equal(document.getElementById("pmDeleteBtn").disabled, true);
-  assert.equal(document.getElementById("pmTopic").value, "");
-  await document.getElementById("pmCancel").onclick();
 }
 
-console.log("UI working figure: 9 states, badge invariance, banners, Settings rows, and gas-comparison + power-meter modals passed");
+console.log("UI working figure: 9 states, Modbus support, badge invariance, banners, Settings rows, currency/locale defaults, and gas-comparison modal passed");

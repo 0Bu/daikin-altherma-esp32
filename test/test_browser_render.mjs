@@ -1708,14 +1708,10 @@ async function assertWorkingFigure(page, context) {
       configured: true, elec_price: 0.30, gas_price: 0.10, gas_efficiency_pct: 88,
       break_even_az: 2.64, currency: "EUR",
     };
-    S.status.power_meter = {
-      configured: true, name: "Heat pump meter", scope: "whole_unit",
-      has_value: true, fresh: true, power_w: 1100, age_s: 12,
-    };
     S.status.working_figure = {
-      supported: true, state: "cheaper", pel_source: "mqtt_whole_unit", source_fresh: true,
-      is_estimate: false, is_compressor_only: false, az: 3.45, break_even_az: 2.64,
-      neutral_band_pct: 10, tariffs_configured: true, currency: "EUR", gas_efficiency_pct: 88,
+      supported: true, state: "cheaper", pel_source: "x10a_ct", source_fresh: true,
+      is_estimate: true, is_compressor_only: false, az: 3.45, break_even_az: 2.64,
+      neutral_band_pct: 20, tariffs_configured: true, currency: "EUR", gas_efficiency_pct: 88,
       heat_kwh: 34.5, elec_kwh: 10.0, gas_equiv_kwh: 39.2, cost_wp: 3.00, cost_gas: 3.92,
       cost_delta: -0.92, cost_delta_pct: -23.5, full_window: true, coverage_pct: 99,
       observed_s: 85500, outdoor_mean_c: 4.5, outdoor_min_c: 1.2, defrost_s: 0, buh_s: 0,
@@ -1795,12 +1791,39 @@ async function assertWorkingFigure(page, context) {
 
     await page.evaluate(`(() => {
       S.status.health = { ...S.status.health, source: "modbus" };
+      S.status.working_figure = {
+        ...S.status.working_figure,
+        pel_source: "modbus", is_estimate: true, neutral_band_pct: 20, limited_buh: false, buh_s: 0,
+      };
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    const modbusState = await page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='observation:working_figure']");
+      const bodyText = row?.closest(".vitem")?.querySelector(".vdesc-body")?.innerText || "";
+      return {
+        present: !!row,
+        hasRefrigerant: !!document.querySelector("[data-desc='observation:refrigerant_service']"),
+        hasModbusDisclosure: bodyText.includes(t("wf.disclosure_modbus")),
+      };
+    })()`);
+    assert.equal(modbusState.present, true,
+      `${context}: working figure must render on HomeHub Modbus when /status.working_figure is present`);
+    assert.equal(modbusState.hasRefrigerant, false,
+      `${context}: refrigerant service stays hidden on Modbus`);
+    assert.equal(modbusState.hasModbusDisclosure, true,
+      `${context}: HomeHub Modbus disclosure must appear on modbus working figure`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/modbus`);
+
+    await page.evaluate(`(() => {
+      delete S.status.working_figure;
       renderApp();
       return true;
     })()`);
     await page.frame();
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='observation:working_figure']")`), null,
-      `${context}: working figure must remain hidden on Modbus diagnostics source`);
+      `${context}: working figure stays hidden when omitted from /status`);
   } finally {
     await page.evaluate(`(() => {
       S.status = window.__browserWorkingFigureOriginal.status;
@@ -2748,7 +2771,6 @@ try {
     refTempModal: "#settingsCards [data-act='ref-temp']",
     circulationModal: "#settingsCards [data-act='circulation']",
     gasComparisonModal: "#settingsCards [data-act='gas-comparison']",
-    powerMeterModal: "#settingsCards [data-act='power-meter']",
     weatherModal: "#settingsCards [data-act='weather']",
     syslogModal: "#connTile [data-edit='syslog']",
     ntpModal: "#connTile [data-edit='ntp']",
@@ -3099,6 +3121,17 @@ try {
         }
         await openModalWithKeyboard(page, modalId, modalTriggers[modalId],
           `${viewport.name}/${locale}/${modalId}`, { route: exerciseRoute });
+        if (modalId === "gasComparisonModal" && exerciseRoute) {
+          assert.deepEqual(await page.evaluate(`({
+            hasEff: document.getElementById("gcGasEff") !== null,
+            tag: document.getElementById("gcCurrency")?.tagName,
+            options: Array.from(document.querySelectorAll("#gcCurrency option"), (o) => o.value),
+          })`), {
+            hasEff: false,
+            tag: "SELECT",
+            options: ["EUR", "CHF", "GBP", "USD", "PLN", "CZK", "SEK", "NOK", "DKK", "UAH", "JPY", "CNY"],
+          }, `${viewport.name}/${locale}/gasComparisonModal: currency must be a 12-option select without efficiency input`);
+        }
         assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/${modalId}`);
         await assertAccessibility(page, `${viewport.name}/${locale}/${modalId}`, { nativeTree: true });
         await assertModalKeyboard(page, modalId, `${viewport.name}/${locale}/${modalId}`,

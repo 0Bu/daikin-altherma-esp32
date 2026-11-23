@@ -80,8 +80,8 @@ void* operator new(size_t size) {
     if (cpp_witness::fail_after > 0) --cpp_witness::fail_after;
     if (staged_failure || sdk::fail_next_new || (sdk::fail_locked_new && sdk::locks > 0)) {
         cpp_witness::fail_after = -1;
-        sdk::fail_locked_new = false;
-        sdk::fail_next_new   = false;
+        sdk::fail_locked_new    = false;
+        sdk::fail_next_new      = false;
         ++sdk::failed_news;
         sdk::allocation_fail_lock_depth = sdk::locks;
         throw std::bad_alloc();
@@ -96,34 +96,34 @@ void  operator delete[](void* p) noexcept { std::free(p); }
 void  operator delete[](void* p, size_t) noexcept { std::free(p); }
 
 namespace adapter {
-daik::Config cfg;
-int          config_locks = 0, skipped_logs = 0, retirement_logs = 0;
-int64_t                                                            clock_shift_s = 0;
-char         last_skip[256]{};
-daik::HpStats               hp;
-daik::WifiInfo              wifi{};
-daik::ModbusStatus          modbus;
+daik::Config                   cfg;
+int                            config_locks = 0, skipped_logs = 0, retirement_logs = 0;
+int64_t                        clock_shift_s = 0;
+char                           last_skip[256]{};
+daik::HpStats                  hp;
+daik::WifiInfo                 wifi{};
+daik::ModbusStatus             modbus;
 bool                           modbus_enabled = false, modbus_live = false;
 uint32_t                       modbus_generation = 0, x10a_generation = 0;
 std::vector<daik::CachedValue> modbus_values;
 daik::Env3Status               env;
 // One-shot seam: the heating-curve evaluator reads ENV III after the room status and before its
 // evaluation lock, so a scenario can land a concurrent HTTP reconfiguration exactly there.
-void (*on_env3_status)() = nullptr;
-void (*on_config)()                            = nullptr;
-uint32_t                       room_generation = 1, room_last_generation = 0;
-unsigned                       room_history_calls = 0, room_history_accepted = 0;
-bool                           room_history_valid       = false;
-double                         room_history_temperature = 0.0;
-std::string                    x10a_payload;
-daik::WeatherForecastStatus weather;
-daik::logic::CheckupCyclingEvidence                                cycling;
-daik::logic::CheckupCyclingEvidence                                modbus_cycling;
-daik::CheckupStopContextReport                                     stop_context;
-daik::CrashInfo             boot, live_crash;
-daik::EthInfo               ethernet;
-daik::NetLink               link            = daik::NetLink::None;
-uint32_t                    wifi_reconnects = 0, poll_skips = 0;
+void (*on_env3_status)()                            = nullptr;
+void (*on_config)()                                 = nullptr;
+uint32_t                            room_generation = 1, room_last_generation = 0;
+unsigned                            room_history_calls = 0, room_history_accepted = 0;
+bool                                room_history_valid       = false;
+double                              room_history_temperature = 0.0;
+std::string                         x10a_payload;
+daik::WeatherForecastStatus         weather;
+daik::logic::CheckupCyclingEvidence cycling;
+daik::logic::CheckupCyclingEvidence modbus_cycling;
+daik::CheckupStopContextReport      stop_context;
+daik::CrashInfo                     boot, live_crash;
+daik::EthInfo                       ethernet;
+daik::NetLink                       link            = daik::NetLink::None;
+uint32_t                            wifi_reconnects = 0, poll_skips = 0;
 std::array<uint32_t, static_cast<size_t>(daik::StackWatch::COUNT)> stack_minima = [] {
     std::array<uint32_t, static_cast<size_t>(daik::StackWatch::COUNT)> minima{};
     minima.fill(4096);
@@ -222,16 +222,16 @@ HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t, uint64_t
 bool          mb_target_enabled() noexcept { return adapter::modbus_enabled; }
 ModbusStatus  mb_status() { return adapter::modbus; }
 ModbusProfile mb_active_profile() { return adapter::modbus.profile; }
-size_t       mb_values_capacity() { return adapter::modbus_values.size(); }
-size_t       mb_values_snapshot(CachedValue* out, size_t capacity, bool& live) {
+size_t        mb_values_capacity() { return adapter::modbus_values.size(); }
+size_t        mb_values_snapshot(CachedValue* out, size_t capacity, bool& live) {
     live               = adapter::modbus_live;
     const size_t count = std::min(capacity, adapter::modbus_values.size());
     for (size_t i = 0; i < count; ++i) out[i] = adapter::modbus_values[i];
     return count;
 }
-bool                  mb_values_live() { return adapter::modbus_live; }
-uint32_t              mb_cache_generation() { return adapter::modbus_generation; }
-Env3Status            env3_status() {
+bool       mb_values_live() { return adapter::modbus_live; }
+uint32_t   mb_cache_generation() { return adapter::modbus_generation; }
+Env3Status env3_status() {
     if (void (*hook)() = adapter::on_env3_status) {
         adapter::on_env3_status = nullptr;
         hook();
@@ -250,19 +250,18 @@ void                  history_record_room(bool valid, double temperature, uint32
     adapter::room_last_generation     = generation;
     if (generation == adapter::room_generation) ++adapter::room_history_accepted;
 }
-void                  checkup_dhw_reset() {}
-void                          checkup_energy_reset() {}
+void                          checkup_dhw_reset() {}
 logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source) {
     return source == DiagnosticsSource::Modbus ? adapter::modbus_cycling : adapter::cycling;
 }
-CheckupStopContextReport      checkup_stop_context_report() { return adapter::stop_context; }
-CrashInfo             diag_crash_info() { return adapter::boot; }
-CrashInfo             diag_crash_info_live() { return adapter::live_crash; }
-WifiInfo              wifi_info() { return adapter::wifi; }
-uint32_t              wifi_reconnect_count() { return adapter::wifi_reconnects; }
-EthInfo               net_eth_info() { return adapter::ethernet; }
-NetLink               net_kind() { return adapter::link; }
-void                  time_now(int64_t& unix_s, int32_t& ms) {
+CheckupStopContextReport checkup_stop_context_report() { return adapter::stop_context; }
+CrashInfo                diag_crash_info() { return adapter::boot; }
+CrashInfo                diag_crash_info_live() { return adapter::live_crash; }
+WifiInfo                 wifi_info() { return adapter::wifi; }
+uint32_t                 wifi_reconnect_count() { return adapter::wifi_reconnects; }
+EthInfo                  net_eth_info() { return adapter::ethernet; }
+NetLink                  net_kind() { return adapter::link; }
+void                     time_now(int64_t& unix_s, int32_t& ms) {
     unix_s = 1700000000 + sdk::ticks / 1000 + adapter::clock_shift_s;
     ms     = sdk::ticks % 1000;
 }
@@ -1557,14 +1556,14 @@ void outgoing_heartbeat() {
         wire_number(root.get(), "stop_context_readable_s", 60,
                     "STOP_CONTEXT_INDEPENDENT_READABLE_CLOCK");
     }
-    adapter::cycling.cycling_censored_transition_runs = 1;
-    adapter::cycling.cycling_censored_handover_runs   = 2;
-    adapter::cycling.cycling_censored_unreadable_runs = 3;
-    adapter::cycling.cycling_censored_restart_runs    = 4;
-    adapter::cycling.cycling_censored_start_runs      = 0;
-    adapter::cycling.cycling_classified_runtime_s     = 6696;
-    adapter::cycling.cycling_censored_runtime_s       = 65535;
-    adapter::cycling.cycling_runtime_saturated        = true;
+    adapter::cycling.cycling_censored_transition_runs        = 1;
+    adapter::cycling.cycling_censored_handover_runs          = 2;
+    adapter::cycling.cycling_censored_unreadable_runs        = 3;
+    adapter::cycling.cycling_censored_restart_runs           = 4;
+    adapter::cycling.cycling_censored_start_runs             = 0;
+    adapter::cycling.cycling_classified_runtime_s            = 6696;
+    adapter::cycling.cycling_censored_runtime_s              = 65535;
+    adapter::cycling.cycling_runtime_saturated               = true;
     adapter::modbus_cycling.cycling_censored_transition_runs = 2;
     adapter::modbus_cycling.cycling_censored_handover_runs   = 1;
     adapter::modbus_cycling.cycling_censored_unreadable_runs = 4;
@@ -1891,8 +1890,8 @@ void curve_first_scope_event() {
     adapter::modbus.enabled = adapter::modbus.connected = true;
     adapter::modbus.plant_gate_known = adapter::modbus.plant_gate_active = true;
     adapter::modbus.heating_mode_known = adapter::modbus.heating_mode_active = true;
-    adapter::modbus.space_route_known = adapter::modbus.space_route_active   = true;
-    adapter::cfg.mb_host                                                     = "homehub-fixture";
+    adapter::modbus.space_route_known = adapter::modbus.space_route_active = true;
+    adapter::cfg.mb_host                                                   = "homehub-fixture";
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
     feed("room", R"({"temperature":20.5,"time":1700000100,"enabled":true})");
@@ -2389,18 +2388,18 @@ void callback_queue_full() {
                 daik::s_ref_status.temperature_c == 20 && sdk::queue.count == 0,
             "QUEUE_OVERFLOW_PRESERVES_QUEUED_EVIDENCE_AND_NORMAL_DRAIN");
 
-    // Max-size frames fill the static 4,608 B SPSC ring without padding waste; exceeding the ring
+    // Max-size frames fill the static 3,584 B SPSC ring without padding waste; exceeding the ring
     // fails closed and advances s_ref_dropped before wrap-around drain restores full capacity.
     std::string padded = R"({"temperature":22,"time":1700000102,"enabled":true,"pad":")";
     padded.append(daik::REF_TEMP_PAYLOAD_MAX - padded.size() - 2, 'x');
     padded += "\"}";
     require(padded.size() == daik::REF_TEMP_PAYLOAD_MAX, "PADDED_MAX_FRAME_FITS_BOUND");
-    for (int i = 0; i < 4; ++i) feed("room", padded.c_str());
-    require(sdk::queue.count == 4 && daik::s_ref_dropped.load() == 1,
-            "FOUR_MAX_FRAMES_FIT_SPSC_RING");
+    for (int i = 0; i < 3; ++i) feed("room", padded.c_str());
+    require(sdk::queue.count == 3 && daik::s_ref_dropped.load() == 1,
+            "THREE_MAX_FRAMES_FIT_SPSC_RING");
     feed("room", padded.c_str());
-    require(sdk::queue.count == 4 && daik::s_ref_dropped.load() == 2,
-            "RING_FULL_DROPS_FIFTH_MAX_FRAME");
+    require(sdk::queue.count == 3 && daik::s_ref_dropped.load() == 2,
+            "RING_FULL_DROPS_FOURTH_MAX_FRAME");
     daik::service_reference_frames(adapter::cfg);
     require(sdk::queue.count == 0 &&
                 daik::s_ref_ring_consumed.load() == daik::s_ref_ring_produced &&
@@ -2408,7 +2407,7 @@ void callback_queue_full() {
             "RING_DRAIN_RELEASES_ALL_CONSUMED_BYTES");
     feed("room", R"({"temperature":24,"time":1700000103,"enabled":true})");
     daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.messages == daik::REF_QUEUE_DEPTH + 5 &&
+    require(daik::s_ref_status.messages == daik::REF_QUEUE_DEPTH + 4 &&
                 daik::s_ref_status.temperature_c == 24,
             "RING_WRAP_PRESERVES_SUBSEQUENT_FRAME");
 
@@ -2531,25 +2530,25 @@ void cleanup_fixture() {
     // Preserved-node retained admission is exercised separately through real event callbacks.
     daik::s_discovery_owner_required = false;
     daik::s_discovery_owner_state    = daik::DiscoveryOwnerState::Encoded;
-    daik::s_client                 = &sdk::client;
-    daik::s_mtx                    = &sdk::mutex;
-    daik::s_connected              = true;
-    daik::s_client_running         = true;
-    daik::s_mqtt_client_epoch      = 17;
-    daik::s_connected_client_epoch = 17;
-    daik::s_prefix                 = "homeassistant";
-    daik::s_node                   = "daikin_altherma_esp32_install";
-    daik::s_board                  = "daikin_abcdef";
-    daik::s_base                   = "daikin-altherma-esp32-install";
-    daik::s_avail                  = "daikin-altherma-esp32-install/availability";
-    daik::s_x10a                   = "daikin-altherma-esp32-install/x10a";
-    daik::s_weather                = "daikin-altherma-esp32-install/weather/openmeteo/forecast";
-    daik::s_modbus                 = "daikin-altherma-esp32-install/modbus";
-    daik::s_env3                   = "daikin-altherma-esp32-install/env3";
-    daik::s_legacy_state           = "daikin-altherma-esp32-install/state";
-    daik::s_retired_modbus_status  = "daikin-altherma-esp32-install/modbus/status";
-    daik::s_retired_weather        = "daikin-altherma-esp32-install/weather/forecast";
-    daik::s_crash                  = "daikin-altherma-esp32-install/crash";
+    daik::s_client                   = &sdk::client;
+    daik::s_mtx                      = &sdk::mutex;
+    daik::s_connected                = true;
+    daik::s_client_running           = true;
+    daik::s_mqtt_client_epoch        = 17;
+    daik::s_connected_client_epoch   = 17;
+    daik::s_prefix                   = "homeassistant";
+    daik::s_node                     = "daikin_altherma_esp32_install";
+    daik::s_board                    = "daikin_abcdef";
+    daik::s_base                     = "daikin-altherma-esp32-install";
+    daik::s_avail                    = "daikin-altherma-esp32-install/availability";
+    daik::s_x10a                     = "daikin-altherma-esp32-install/x10a";
+    daik::s_weather                  = "daikin-altherma-esp32-install/weather/openmeteo/forecast";
+    daik::s_modbus                   = "daikin-altherma-esp32-install/modbus";
+    daik::s_env3                     = "daikin-altherma-esp32-install/env3";
+    daik::s_legacy_state             = "daikin-altherma-esp32-install/state";
+    daik::s_retired_modbus_status    = "daikin-altherma-esp32-install/modbus/status";
+    daik::s_retired_weather          = "daikin-altherma-esp32-install/weather/forecast";
+    daik::s_crash                    = "daikin-altherma-esp32-install/crash";
 }
 
 void cleanup_event(int                        id,

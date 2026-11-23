@@ -149,13 +149,6 @@ const fetch = async (url, options = {}) => {
       ok: true, test_proof: 83, power_w: 5.7, state: "on", retained: false,
     });
   }
-  if (url === "/test_power_meter") {
-    if (fetchState.mode === "pm_test_reject")
-      return response(false, { error: "No fresh power-meter value received before timeout" }, 422);
-    return response(true, {
-      ok: true, power_w: 1420.5, retained: false,
-    });
-  }
   if (fetchState.mode === "mqtt_base_reject" && url === "/set_mqtt")
     return response(false, {
       code: "mqtt_base_not_sluggable",
@@ -249,7 +242,11 @@ const context = vm.createContext({
 const dashboard = readAppFragments(["dashboard.js"]);
 const retirement = dashboard.slice(dashboard.indexOf("function retireMountedHistory()"),
   dashboard.indexOf("function selectDashboardCard("));
-const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + retirement +
+const wfCurStart = dashboard.indexOf("const WF_CURRENCY_SYM =");
+const wfCurEnd = dashboard.indexOf("function wfMoney(");
+assert.ok(wfCurStart >= 0 && wfCurEnd > wfCurStart, "dashboard.js currency slice must remain non-empty");
+const wfCurrencies = dashboard.slice(wfCurStart, wfCurEnd);
+const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + retirement + wfCurrencies +
   readAppFragments(["app_state.js", "settings.js", "bootstrap.js"])
     .replace(/\nboot\(\);\s*$/, "\n");
 vm.runInContext(`${source}
@@ -263,7 +260,7 @@ vm.runInContext(`${source}
     S, MODALS, ROUTED_MODALS, TRANSIENT_MODALS, POPUP_ROUTES, notices, wire, initNavigation,
     applyRouteFromLocation, hydrateRoutedPopup, askOtaInstall, settleOtaDecision,
     otaFail, paintOtaAlert, dismissOtaAlert,
-    openWifi, openMqtt, openRefTemp, openCirculation, openGasComparison, openPowerMeter,
+    openWifi, openMqtt, openRefTemp, openCirculation, openGasComparison,
     openWeather, openSyslog, openNtp, openHomehub, openBoard, openBug,
     refreshStatus: productionRefreshStatus,
     realStatusReader: () => { refreshStatus = productionRefreshStatus; },
@@ -287,7 +284,6 @@ ui.S.status = {
     max_age_s: 120, on_threshold_w: 3.0, off_threshold_w: 1.0, confirm_s: 60,
   },
   gas_comparison: { configured: false, gas_efficiency_pct: 88, currency: "EUR" },
-  power_meter: { configured: false, unit: "W", scope: "whole_unit", max_age_s: 60 },
   weather_forecast: { latitude: "", longitude: "" },
   syslog: {},
   ntp: { server: "pool.ntp.org" },
@@ -319,7 +315,6 @@ const cases = [
   { name: "Room temperature", modal: "refTempModal", open: "openRefTemp", cancel: "rtCancel", backdrop: "refTempBackdrop", form: "refTempForm", url: "/set_ref_temp", customSave: true },
   { name: "Circulation pump", modal: "circulationModal", open: "openCirculation", cancel: "circCancel", backdrop: "circulationBackdrop", form: "circulationForm", url: "/set_circulation", customSave: true },
   { name: "Gas comparison", modal: "gasComparisonModal", open: "openGasComparison", cancel: "gcCancel", backdrop: "gasComparisonBackdrop", form: "gasComparisonForm", url: "/set_gas_comparison", customSave: true },
-  { name: "Power meter", modal: "powerMeterModal", open: "openPowerMeter", cancel: "pmCancel", backdrop: "powerMeterBackdrop", form: "powerMeterForm", url: "/set_power_meter", customSave: true },
   { name: "Weather", modal: "weatherModal", open: "openWeather", cancel: "wxCancel", backdrop: "weatherBackdrop", form: "weatherForm", url: "/set_weather" },
   { name: "Syslog", modal: "syslogModal", open: "openSyslog", cancel: "slCancel", backdrop: "syslogBackdrop", form: "syslogForm", url: "/set_syslog" },
   { name: "NTP", modal: "ntpModal", open: "openNtp", cancel: "ntpCancel", backdrop: "ntpBackdrop", form: "ntpForm", url: "/set_ntp" },
@@ -498,7 +493,6 @@ for (const entry of [
   ["settingsCards", "[data-act]", "act", "ref-temp", "refTempModal"],
   ["settingsCards", "[data-act]", "act", "circulation", "circulationModal"],
   ["settingsCards", "[data-act]", "act", "gas-comparison", "gasComparisonModal"],
-  ["settingsCards", "[data-act]", "act", "power-meter", "powerMeterModal"],
   ["settingsCards", "[data-act]", "act", "weather", "weatherModal"],
   ["connTile", "[data-edit]", "edit", "wifi", "wifiModal"],
   ["connTile", "[data-edit]", "edit", "mqtt", "mqttModal"],
@@ -515,7 +509,6 @@ for (const entry of [
 }
 for (const [value, modal] of [
   ["gas-comparison", "gasComparisonModal"],
-  ["power-meter", "powerMeterModal"],
 ]) {
   loadRoute("");
   await document.getElementById("valueGroups").fire("click", { target: delegatedTarget("[data-act]", "act", value) });
@@ -747,16 +740,7 @@ const configureValid = (item) => {
   } else if (item.modal === "gasComparisonModal") {
     document.getElementById("gcElecPrice").value = "0.3200";
     document.getElementById("gcGasPrice").value = "0.1050";
-    document.getElementById("gcGasEff").value = "88";
     document.getElementById("gcCurrency").value = "EUR";
-  } else if (item.modal === "powerMeterModal") {
-    document.getElementById("pmName").value = "Heat pump meter";
-    document.getElementById("pmTopic").value = "fixture/power-meter/status";
-    document.getElementById("pmPowerPath").value = "total_act_power";
-    document.getElementById("pmTimePath").value = "ts";
-    document.getElementById("pmUnit").value = "W";
-    document.getElementById("pmScope").value = "whole_unit";
-    document.getElementById("pmMaxAge").value = "60";
   }
 };
 
@@ -794,9 +778,6 @@ for (const item of cases.filter((entry) => entry.form)) {
   } else if (item.modal === "gasComparisonModal") {
     assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_gas_comparison"],
       "gas comparison Save must persist directly");
-  } else if (item.modal === "powerMeterModal") {
-    assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_power_meter"],
-      "power meter Save must persist directly without requiring /test_power_meter");
   }
 
   fetchState.mode = "reject";
@@ -1187,8 +1168,7 @@ const invalid = [
   { modal: "wifiModal", form: "wifiForm", set() { document.getElementById("wfSSID").value = ""; } },
   { modal: "mqttModal", form: "mqttForm", set() { document.getElementById("mqBroker").value = "bad uri"; } },
   { modal: "refTempModal", form: "refTempForm", set() { document.getElementById("rtTemperatureSource").value = "bad/#$value"; } },
-  { modal: "gasComparisonModal", form: "gasComparisonForm", set() { document.getElementById("gcElecPrice").value = "0.32"; document.getElementById("gcGasPrice").value = "0.10"; document.getElementById("gcCurrency").value = "EU"; } },
-  { modal: "powerMeterModal", form: "powerMeterForm", set() { document.getElementById("pmTopic").value = "bad/#"; } },
+  { modal: "gasComparisonModal", form: "gasComparisonForm", set() { document.getElementById("gcElecPrice").value = "0.32"; document.getElementById("gcGasPrice").value = "0.10"; document.getElementById("gcCurrency").value = "CAD"; } },
   { modal: "weatherModal", form: "weatherForm", set() { document.getElementById("wxLatitude").value = "51.0"; document.getElementById("wxLongitude").value = ""; } },
   { modal: "syslogModal", form: "syslogForm", set() { document.getElementById("slHost").value = "host:not-a-port"; } },
   { modal: "homehubModal", form: "homehubForm", set() { document.getElementById("hhPort").value = "70000"; } },

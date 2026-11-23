@@ -7,6 +7,7 @@
 #include "logic/weather_forecast.hpp"
 #include "logic/board_presets.hpp"
 #include "logic/env3.hpp"
+#include "logic/gas_comparison.hpp"
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"   // SOC_GPIO_PIN_COUNT — per-target GPIO count for the link-pin check
 #include "esp_log.h"
@@ -274,31 +275,12 @@ void config_load() {
         if (b.has_gas_comparison) {
             const char* why = nullptr;
             if (gas_comparison_config_valid(b.elec_price_tenth_mill, b.gas_price_tenth_mill,
-                                            b.gas_efficiency_pct, b.tariff_currency, &why)) {
+                                            b.tariff_currency, &why)) {
                 c.elec_price_tenth_mill = b.elec_price_tenth_mill;
                 c.gas_price_tenth_mill  = b.gas_price_tenth_mill;
-                c.gas_efficiency_pct    = b.gas_efficiency_pct;
                 c.tariff_currency       = std::move(b.tariff_currency);
             } else {
                 diag_printf("config: invalid gas comparison config ignored (%s)\n",
-                            why ? why : "invalid config");
-            }
-        }
-        if (b.has_power_meter) {
-            const char* why = nullptr;
-            if (power_meter_config_valid(b.power_meter_name, b.power_meter_topic,
-                                         b.power_meter_power_path, b.power_meter_time_path,
-                                         b.power_meter_max_age_s, &why)) {
-                c.power_meter_name       = std::move(b.power_meter_name);
-                c.power_meter_topic      = std::move(b.power_meter_topic);
-                c.power_meter_power_path = std::move(b.power_meter_power_path);
-                c.power_meter_time_path  = std::move(b.power_meter_time_path);
-                c.power_meter_max_age_s  = b.power_meter_max_age_s;
-                c.power_meter_unit       = power_meter_unit_from_int(b.power_meter_unit);
-                c.power_meter_scope      = power_meter_scope_from_int(b.power_meter_scope);
-                c.power_meter_generation = b.power_meter_generation;
-            } else {
-                diag_printf("config: invalid power meter source ignored (%s)\n",
                             why ? why : "invalid config");
             }
         }

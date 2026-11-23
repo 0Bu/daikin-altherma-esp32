@@ -163,6 +163,11 @@ def stage_source(source_value, destination_value):
             raise StageError("malformed Git source inventory")
         candidates = sorted({name.decode("utf-8") for name in inventory.split(b"\0") if name})
         candidates = [name for name in candidates if public_path(name)]
+        deleted = git(root, ["ls-files", "-d", "-z", "--", *DIRECTORIES, *FILES])
+        if deleted and not deleted.endswith(b"\0"):
+            raise StageError("malformed Git deleted source inventory")
+        deleted_names = {name.decode("utf-8") for name in deleted.split(b"\0") if name}
+        candidates = [name for name in candidates if name not in deleted_names]
         # ls-files -c includes tracked files even when they now match .gitignore. Exclude those too.
         ignored = git(root, ["check-ignore", "--no-index", "-z", "--stdin"],
                       data=b"".join(name.encode("utf-8") + b"\0" for name in candidates), accepted=(0, 1))

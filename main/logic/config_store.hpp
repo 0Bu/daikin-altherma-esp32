@@ -200,21 +200,11 @@ struct ConfigBlob {
     // upgrade so existing installations keep their active card view.
     uint8_t diagnostics_source     = 0;
     bool    has_diagnostics_source = false;
-    // v22: gas comparison tariffs + independent MQTT electrical power meter.
+    // v22: gas comparison tariffs.
     uint32_t    elec_price_tenth_mill = 0;
     uint32_t    gas_price_tenth_mill  = 0;
-    uint8_t     gas_efficiency_pct    = 88;
     std::string tariff_currency       = "EUR";
     bool        has_gas_comparison    = false;
-    std::string power_meter_name;
-    std::string power_meter_topic;
-    std::string power_meter_power_path;
-    std::string power_meter_time_path;
-    uint32_t    power_meter_max_age_s  = 60;
-    uint8_t     power_meter_unit       = 0;
-    uint8_t     power_meter_scope      = 0;
-    uint32_t    power_meter_generation = 0;
-    bool        has_power_meter        = false;
 };
 
 inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
@@ -234,8 +224,7 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // the one-shot HomeHub discovery decision, and v19 appends the default-off diagnostics consent plus
 // a transition generation; v20 appends the independent room-history generation; v21 appends the
 // preferred plant-diagnostics display source byte (0 = X10A, 1 = Modbus); v22 appends gas
-// comparison tariffs and the optional MQTT electrical power meter mapping. HomeHub enabled
-// derives solely from whether mb_host is empty;
+// comparison tariffs. HomeHub enabled derives solely from whether mb_host is empty;
 // v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
@@ -266,7 +255,7 @@ inline constexpr uint16_t CONFIG_BLOB_MAX_STR = 512;
 // field belongs in this list AND in test_config_blob_strings_fit()'s own field list, which is what
 // proves the invariant this exists for (fit() ⟹ the blob round-trips). Stated precisely because the
 // test cannot discover a member nobody added to it: C++ gives it no way to enumerate the struct, so
-// the `== 29` pin catches a field dropped from the TEST, not one added to the STRUCT and forgotten
+// the `== 25` pin catches a field dropped from the TEST, not one added to the STRUCT and forgotten
 // in both places.
 inline bool config_blob_strings_fit(const ConfigBlob& c) {
     for (const std::string* s : {&c.wifi_ssid,
@@ -293,11 +282,7 @@ inline bool config_blob_strings_fit(const ConfigBlob& c) {
                                  &c.circulation_time_path,
                                  &c.ref_temp_setpoint_topic,
                                  &c.ref_temp_time_topic,
-                                 &c.tariff_currency,
-                                 &c.power_meter_name,
-                                 &c.power_meter_topic,
-                                 &c.power_meter_power_path,
-                                 &c.power_meter_time_path})
+                                 &c.tariff_currency})
         if (s->size() > CONFIG_BLOB_MAX_STR) return false;
     return true;
 }
@@ -449,20 +434,11 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_u32(v, c.ref_temp_generation);
     // v21 block: preferred plant-diagnostics display source (0 = X10A, 1 = Modbus).
     v.push_back(c.diagnostics_source);
-    // v22 block: gas comparison tariffs + independent MQTT electrical power meter.
+    // v22 block: gas comparison tariffs.
     detail::blob_put_u32(v, c.elec_price_tenth_mill);
     detail::blob_put_u32(v, c.gas_price_tenth_mill);
-    v.push_back(c.gas_efficiency_pct);
     detail::blob_put_str(v, c.tariff_currency);
-    detail::blob_put_str(v, c.power_meter_name);
-    detail::blob_put_str(v, c.power_meter_topic);
-    detail::blob_put_str(v, c.power_meter_power_path);
-    detail::blob_put_str(v, c.power_meter_time_path);
-    detail::blob_put_u32(v, c.power_meter_max_age_s);
-    v.push_back(c.power_meter_unit);
-    v.push_back(c.power_meter_scope);
-    detail::blob_put_u32(v, c.power_meter_generation);
-    detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
+    detail::blob_put_u32(v, config_crc32(v.data(), v.size())); // CRC covers everything before it
     return v;
 }
 
@@ -618,19 +594,10 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         c.has_diagnostics_source = true;
     }
     if (version >= 22) {
-        if (!get_u32(c.elec_price_tenth_mill) || !get_u32(c.gas_price_tenth_mill)) return false;
-        if (p + 1 > body_end) return false;
-        c.gas_efficiency_pct = d[p++];
-        if (!get_str(c.tariff_currency) || !get_str(c.power_meter_name) ||
-            !get_str(c.power_meter_topic) || !get_str(c.power_meter_power_path) ||
-            !get_str(c.power_meter_time_path) || !get_u32(c.power_meter_max_age_s))
+        if (!get_u32(c.elec_price_tenth_mill) || !get_u32(c.gas_price_tenth_mill) ||
+            !get_str(c.tariff_currency))
             return false;
-        if (p + 2 > body_end) return false;
-        c.power_meter_unit  = d[p++];
-        c.power_meter_scope = d[p++];
-        if (!get_u32(c.power_meter_generation)) return false;
         c.has_gas_comparison = true;
-        c.has_power_meter    = true;
     }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block

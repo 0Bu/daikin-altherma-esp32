@@ -43,7 +43,7 @@ const boardPresets = fs.readFileSync(new URL("../main/logic/board_presets.hpp", 
 const mqttHa = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
 const referenceLogic = fs.readFileSync(new URL("../main/logic/reference_temperature.hpp", import.meta.url), "utf8");
 const dialogs = [...html.matchAll(/<[^>]+class="[^"]*\bmodal-card\b[^"]*"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
-assert.equal(dialogs.length, 13, "every custom popup must remain identifiable as a dialog");
+assert.equal(dialogs.length, 12, "every custom popup must remain identifiable as a dialog");
 for (const dialog of dialogs)
   assert.match(dialog, /tabindex="-1"/, "popup focus must land on the dialog container, not an input");
 assert.match(app, /function openOverlay\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
@@ -54,20 +54,18 @@ assert.match(app, /function closeOverlay\(id\)[\s\S]*hidden = true;[\s\S]*syncMo
   "all overlay close paths must also release the shared scroll lock");
 assert.doesNotMatch(app, /\b(?:confirm|alert)\s*\(/,
   "the shipped UI must use its accessible in-app decisions instead of native browser dialogs");
-for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openCirculation", "openGasComparison", "openPowerMeter", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
+for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openCirculation", "openGasComparison", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
   assert.match(app, new RegExp(`function ${opener}\\(\\)[\\s\\S]*?openPopup\\(\\"[^\\"]+\\"\\);`),
     `${opener} must use the no-field-autofocus popup path`);
-const gasComparisonHtml = html.slice(html.indexOf('id="gasComparisonModal"'), html.indexOf('id="powerMeterModal"'));
-assert.match(gasComparisonHtml, /id="gcElecPrice"[\s\S]*id="gcGasPrice"[\s\S]*id="gcGasEff"[\s\S]*id="gcCurrency"[\s\S]*id="gcDeleteBtn"/,
-  "the gas-comparison modal must expose electricity/gas price, boiler efficiency, currency and Clear controls");
-assert.doesNotMatch(gasComparisonHtml, /<select|fluid|glycol/i,
-  "the gas-comparison modal must not offer a fluid or glycol selector");
-const powerMeterHtml = html.slice(html.indexOf('id="powerMeterModal"'), html.indexOf('id="weatherModal"'));
-for (const id of ["pmName", "pmTopic", "pmPowerPath", "pmTimePath", "pmUnit", "pmScope", "pmMaxAge", "pmDeleteBtn", "pmTestBtn", "pmBtn"])
-  assert.match(powerMeterHtml, new RegExp(`id="${id}"`),
-    `the external power-meter modal must expose #${id}`);
-assert.match(app, /const rows = healthRows \+ \(isModbus \? "" : refrigerantServiceRowHtml\(\) \+ workingFigureRowHtml\(\)\);/,
-  "working_figure must stay hidden on Modbus diagnostics");
+const gasComparisonHtml = html.slice(html.indexOf('id="gasComparisonModal"'), html.indexOf('id="weatherModal"'));
+assert.match(gasComparisonHtml, /id="gcElecPrice"[\s\S]*id="gcGasPrice"[\s\S]*<select[^>]*id="gcCurrency"[\s\S]*id="gcDeleteBtn"/,
+  "the gas-comparison modal must expose electricity/gas price, currency select and Clear controls");
+assert.doesNotMatch(gasComparisonHtml, /gcGasEff|fluid|glycol/i,
+  "the gas-comparison modal must not offer an efficiency input or a fluid/glycol selector");
+assert.doesNotMatch(html, /id="powerMeterModal"/,
+  "the external MQTT power-meter modal must be removed");
+assert.match(app, /const rows = healthRows \+ \(isModbus \? "" : refrigerantServiceRowHtml\(\)\) \+ workingFigureRowHtml\(\);/,
+  "refrigerant service stays X10A-only while working_figure renders when status carries it");
 assert.match(app, /function workingFigureRowHtml\(\)[\s\S]*descAccordion\("observation:working_figure"/,
   "the working-figure row must render through the shared observation accordion");
 assert.match(html, /id="gPth"[\s\S]*id="svPth"[\s\S]*id="svCop"/,

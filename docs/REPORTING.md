@@ -36,11 +36,11 @@ using the [redaction list](SECURITY.md#report-redaction-contract) before posting
 ## Privacy and crash evidence
 
 The report protects known network/location identifiers and user-entered service/source names, topics
-and paths, including optional MQTT room, DHW circulation and external electricity-meter
-(`power_meter.*`) mappings. The complete **status redaction contract** has one home in
-[SECURITY.md](SECURITY.md#report-redaction-contract). Unset fields remain unset/empty rather than
-inventing a configured service. Room-source HVAC mode keeps only the fixed public vocabulary
-`off`, `heat`, `cool`, `heat_cool`, `auto`, `dry`, `fan_only`; other source text is redacted.
+and paths, including optional MQTT room and DHW circulation-witness mappings. The complete
+**status redaction contract** has one home in [SECURITY.md](SECURITY.md#report-redaction-contract).
+Unset fields remain unset/empty rather than inventing a configured service. Room-source HVAC mode
+keeps only the fixed public vocabulary `off`, `heat`, `cool`, `heat_cool`, `auto`, `dry`, `fan_only`;
+other source text is redacted.
 
 `/ota/status?redact=1` additionally hides set `effective_manifest_url` and
 `effective_firmware_base_url`; empty URLs stay empty. Operational `/ota/status` keeps them and can
@@ -55,9 +55,10 @@ or clipped records. Intact raw X10A records and error details remain. The crash 
 evidence, not an empty log or proof that nothing happened.
 
 Version/build fingerprint, model, readings, uptime, memory, error counters, and non-identifying
-observation/tariff summaries (`gas_comparison` and, when active on X10A, `working_figure` 24-hour
-aggregates) remain so the issue can be diagnosed. Automatic redaction does not sanitize your
-description, screenshots or logs copied from an external server; review those separately.
+observation/tariff summaries (`gas_comparison` and, when active on X10A or Modbus,
+`working_figure` 24-hour aggregates) remain so the issue can be diagnosed. Automatic redaction does
+not sanitize your description, screenshots or logs copied from an external server; review those
+separately.
 
 <a id="the-one-exception-crash-dumps"></a>
 A **coredump contains raw task memory and can include credentials**. It is excluded from the report

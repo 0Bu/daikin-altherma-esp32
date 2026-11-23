@@ -12,7 +12,6 @@
 #include "logic/heating_curve_diagnosis.hpp"
 #include "logic/heating_curve_bins.hpp"
 #include "logic/circulation_source.hpp"
-#include "logic/power_meter_source.hpp"
 #include "logic/reference_temperature.hpp"
 
 namespace daik {
@@ -142,46 +141,6 @@ bool mqtt_circulation_test_proof_valid(uint32_t proof,
                                        const CirculationSourceTestConfig& candidate);
 void                        mqtt_circulation_set_diagnostics(bool configured);
 void                        mqtt_circulation_reconfigure(bool configured);
-
-// Independent read-only external electrical power meter for the 24h working figure and gas-cost
-// comparison. Shares the configured MQTT client but has its own exact topic, decoder, freshness
-// and pre-save probe without replacing X10A CT/inverter readings unless explicitly configured.
-struct PowerMeterStatus {
-    bool configured = false, subscribed = false, has_value = false, retained = false,
-         has_source_time = false;
-    bool        fresh = false, age_known = false;
-    double      power_w     = 0.0;
-    uint64_t    received_ms = 0, age_s = 0;
-    int64_t     received_unix_s = -1, source_unix_s = -1;
-    uint32_t    messages = 0, errors = 0, rejections = 0;
-    std::string timestamp_source, freshness_reason, error;
-};
-PowerMeterStatus power_meter_status(const Config& expected);
-uint32_t         power_meter_source_generation();
-
-struct PowerMeterSample {
-    bool            configured = false;
-    bool            fresh      = false;
-    double          power_w    = 0.0;
-    PowerMeterScope scope      = PowerMeterScope::WholeUnit;
-};
-PowerMeterSample power_meter_sample();
-
-struct PowerMeterTestConfig {
-    std::string     topic, power_path, timestamp_path;
-    uint32_t        max_age_s = POWER_METER_MAX_AGE_DEFAULT_S;
-    PowerMeterUnit  unit      = PowerMeterUnit::Watts;
-    PowerMeterScope scope     = PowerMeterScope::WholeUnit;
-};
-struct PowerMeterTestResult {
-    bool        passed = false, retained = false;
-    double      power_w = 0.0;
-    std::string error;
-};
-PowerMeterTestResult mqtt_power_meter_test(const PowerMeterTestConfig& candidate,
-                                           uint32_t                    timeout_ms = 12000);
-void                 mqtt_power_meter_set_diagnostics(bool configured);
-void                 mqtt_power_meter_reconfigure(bool configured, bool reset_energy);
 
 // Explicit source/consent changes own these retained-topic tombstones independently of X10A.
 // Requests stay pending across broker outages and are

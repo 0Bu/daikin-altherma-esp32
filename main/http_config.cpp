@@ -33,7 +33,7 @@
 #include "logic/json.hpp"       // json_append_escaped — the ONE encoder every payload uses
 #include "logic/mqtt_base.hpp"  // mqtt_base_valid — the installation base topic's rules, host-tested
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
-#include "logic/power_meter_source.hpp"
+#include "logic/gas_comparison.hpp"
 #include "logic/reference_temperature.hpp"
 #include "logic/weather_forecast.hpp"
 #include "hp_modbus.hpp"        // mb_reconfigure — start/stop the second, independent stack
@@ -858,13 +858,10 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
             history_set_diagnostics(next_enabled);
         history_room_reset(room_identity);
         mqtt_reference_reconfigure();
-        if (generation_chg) {
+        if (generation_chg)
             mqtt_circulation_reconfigure(!c.circulation_topic.empty());
-            mqtt_power_meter_reconfigure(!c.power_meter_topic.empty(), true);
-        } else {
+        else
             mqtt_circulation_set_diagnostics(!c.circulation_topic.empty());
-            mqtt_power_meter_set_diagnostics(!c.power_meter_topic.empty());
-        }
         if (weather_was_publishable && !next_enabled) mqtt_request_weather_cleanup();
         weather_forecast_reconfigure();
         diag_printf("diagnostics: %s (generation %lu, source %s)\n",
@@ -930,23 +927,18 @@ static esp_err_t set_gas_comparison(httpd_req_t* req) {
     if (!j) return send_bad_req(req, parse_error);
     const char* error =
         config_request_field_error(j, HttpConfigFieldType::Number, {"elec_price", "gas_price"});
-    if (!error)
-        error = config_request_field_error(j, HttpConfigFieldType::Integer, {"gas_efficiency_pct"});
     if (!error) error = config_request_field_error(j, HttpConfigFieldType::String, {"currency"});
     if (!error) error = config_request_field_error(j, HttpConfigFieldType::Boolean, {"clear"});
     if (error) return send_bad_req(req, error);
 
     const cJSON* const elec_item = cJSON_GetObjectItem(j, "elec_price");
     const cJSON* const gas_item  = cJSON_GetObjectItem(j, "gas_price");
-    const cJSON* const eta_item  = cJSON_GetObjectItem(j, "gas_efficiency_pct");
     const cJSON* const cur_item  = cJSON_GetObjectItem(j, "currency");
     const bool         clear     = jb(j, "clear", false);
     const double       elec_val  = elec_item ? elec_item->valuedouble : 0.0;
     const double       gas_val   = gas_item ? gas_item->valuedouble : 0.0;
     const bool         has_elec  = elec_item != nullptr;
     const bool         has_gas   = gas_item != nullptr;
-    const bool         has_eta   = eta_item != nullptr;
-    const int          eta_raw   = eta_item ? eta_item->valueint : 0;
     const bool         has_cur   = cur_item != nullptr;
     std::string        currency  = has_cur ? js(j, "currency") : std::string{};
     j.reset();
@@ -962,10 +954,6 @@ static esp_err_t set_gas_comparison(httpd_req_t* req) {
             (has_gas && !parse_tariff_price_tm(gas_val, gas_tm)))
             return send_bad_req(req, "Tariff price out of range");
     }
-    const int eta_int = has_eta ? eta_raw : static_cast<int>(c.gas_efficiency_pct);
-    if (eta_int < GAS_EFFICIENCY_MIN_PCT || eta_int > GAS_EFFICIENCY_MAX_PCT)
-        return send_bad_req(req, "Gas boiler efficiency must be between 50% and 98%");
-    const uint8_t eta = static_cast<uint8_t>(eta_int);
     if (has_cur) {
         for (char& ch : currency) {
             if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
@@ -974,113 +962,18 @@ static esp_err_t set_gas_comparison(httpd_req_t* req) {
     const std::string_view cur_sv =
         has_cur ? std::string_view(currency) : std::string_view(c.tariff_currency);
     const char* why = nullptr;
-    if (!gas_comparison_config_valid(elec_tm, gas_tm, eta, cur_sv, &why))
+    if (!gas_comparison_config_valid(elec_tm, gas_tm, cur_sv, &why))
         return send_bad_req(req, why ? why : "invalid gas comparison config");
 
     if (c.elec_price_tenth_mill == elec_tm && c.gas_price_tenth_mill == gas_tm &&
-        c.gas_efficiency_pct == eta && c.tariff_currency == cur_sv) {
+        c.tariff_currency == cur_sv) {
         return send_saved_json(req, false);
     }
     c.elec_price_tenth_mill = elec_tm;
     c.gas_price_tenth_mill  = gas_tm;
-    c.gas_efficiency_pct    = eta;
     if (has_cur) c.tariff_currency = std::move(currency);
     if (!config_save(c)) return send_write_failed(req);
     diag_printf("tariff: gas comparison %s\n", elec_tm == 0 ? "cleared" : "saved");
-    return send_saved_json(req, true);
-}
-
-struct PowerMeterRequest {
-    std::string     name, topic, power_path, time_path;
-    uint32_t        max_age_s = POWER_METER_MAX_AGE_DEFAULT_S;
-    PowerMeterUnit  unit      = PowerMeterUnit::Watts;
-    PowerMeterScope scope     = PowerMeterScope::WholeUnit;
-};
-
-static const char* parse_power_meter_request(httpd_req_t* req, PowerMeterRequest& out) {
-    const char* parse_error = nullptr;
-    JsonGuard   j(read_config_document(req, 1280, parse_error));
-    if (!j) return parse_error;
-    if (const char* error = config_request_field_error(
-            j, HttpConfigFieldType::String,
-            {"name", "topic", "power_path", "timestamp_path", "unit", "scope"}))
-        return error;
-    out.name              = js(j, "name");
-    out.topic             = js(j, "topic");
-    out.power_path        = js(j, "power_path");
-    out.time_path         = js(j, "timestamp_path");
-    cJSON*     unit_item  = cJSON_GetObjectItem(j, "unit");
-    cJSON*     scope_item = cJSON_GetObjectItem(j, "scope");
-    cJSON*     age_item   = cJSON_GetObjectItem(j, "max_age_s");
-    const bool unit_ok    = !unit_item || parse_power_meter_unit(js(j, "unit"), out.unit);
-    const bool scope_ok   = !scope_item || parse_power_meter_scope(js(j, "scope"), out.scope);
-    int        age_int    = static_cast<int>(POWER_METER_MAX_AGE_DEFAULT_S);
-    const bool age_is_int =
-        !age_item ||
-        (cJSON_IsNumber(age_item) && http_config_integer_value(age_item->valuedouble, age_int));
-    j.reset();
-    if (!unit_ok) return "Power unit must be W or kW";
-    if (!scope_ok) return "Power meter scope must be whole_unit or compressor_only";
-    if (!age_is_int) return "Maximum age must be a whole number";
-    if (age_int < 0) return "Maximum age must be between 10 and 300 seconds";
-    out.max_age_s = static_cast<uint32_t>(age_int);
-    if (out.topic.empty()) {
-        out.power_path.clear();
-        out.time_path.clear();
-    }
-    const char* why = nullptr;
-    if (!power_meter_config_valid(out.name, out.topic, out.power_path, out.time_path, out.max_age_s,
-                                  &why))
-        return why ? why : "invalid power meter config";
-    return nullptr;
-}
-
-static esp_err_t test_power_meter(httpd_req_t* req) {
-    if (!config_diagnostics_enabled())
-        return send_err(req, "409 Conflict", "Enable plant diagnostics before testing this source");
-    PowerMeterRequest in;
-    if (const char* error = parse_power_meter_request(req, in)) return send_bad_req(req, error);
-    if (in.topic.empty()) return send_bad_req(req, "MQTT topic is required for a test");
-    const PowerMeterTestConfig candidate{in.topic,     in.power_path, in.time_path,
-                                         in.max_age_s, in.unit,       in.scope};
-    const PowerMeterTestResult result = mqtt_power_meter_test(candidate, 12000);
-    if (!result.passed)
-        return send_err(req, "422 Unprocessable Entity",
-                        result.error.empty() ? "No fresh MQTT value received"
-                                             : result.error.c_str());
-    char response[160];
-    std::snprintf(response, sizeof(response), "{\"ok\":true,\"power_w\":%.6g,\"retained\":%s}",
-                  result.power_w, result.retained ? "true" : "false");
-    return http_send_json(req, response);
-}
-
-static esp_err_t set_power_meter(httpd_req_t* req) {
-    PowerMeterRequest in;
-    if (const char* error = parse_power_meter_request(req, in)) return send_bad_req(req, error);
-
-    Config     c = config();
-    const bool evidence_mapping_changed =
-        c.power_meter_topic != in.topic || c.power_meter_power_path != in.power_path ||
-        c.power_meter_time_path != in.time_path || c.power_meter_max_age_s != in.max_age_s ||
-        c.power_meter_unit != in.unit || c.power_meter_scope != in.scope;
-    if (!evidence_mapping_changed && c.power_meter_name == in.name) {
-        return send_saved_json(req, false);
-    }
-    const bool mapping_disabled = in.topic.empty();
-    c.power_meter_name          = std::move(in.name);
-    c.power_meter_topic         = std::move(in.topic);
-    c.power_meter_power_path    = std::move(in.power_path);
-    c.power_meter_time_path     = std::move(in.time_path);
-    c.power_meter_max_age_s     = in.max_age_s;
-    c.power_meter_unit          = in.unit;
-    c.power_meter_scope         = in.scope;
-    if (evidence_mapping_changed) {
-        c.power_meter_generation =
-            c.power_meter_generation == UINT32_MAX ? 1u : c.power_meter_generation + 1u;
-    }
-    if (!config_save(c)) return send_write_failed(req);
-    if (evidence_mapping_changed) mqtt_power_meter_reconfigure(!c.power_meter_topic.empty(), true);
-    diag_printf("mqtt: power meter mapping saved%s\n", mapping_disabled ? " (disabled)" : "");
     return send_saved_json(req, true);
 }
 
@@ -1805,8 +1698,6 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/test_circulation", HTTP_POST, test_circulation);
     http_register_on(s, surface, "/set_circulation", HTTP_POST, set_circulation);
     http_register_on(s, surface, "/set_gas_comparison", HTTP_POST, set_gas_comparison);
-    http_register_on(s, surface, "/test_power_meter", HTTP_POST, test_power_meter);
-    http_register_on(s, surface, "/set_power_meter", HTTP_POST, set_power_meter);
     http_register_on(s, surface, "/set_syslog", HTTP_POST, set_syslog);
     http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
     http_register_on(s, surface, "/set_weather", HTTP_POST, set_weather);

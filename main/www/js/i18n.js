@@ -119,7 +119,9 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private
 // Mutable, because the device's stored override can switch it at runtime. Seeded from a localStorage
 // cache of the last effective language so the FIRST paint doesn't flash the browser default before
 // the async /status lands, then reconciled with the device on every poll (setLangFromStatus).
-let LANG = (() => { const c = lsGet("uiLang"); return uiLangSupported(c) ? c : autoLang(); })();
+const INITIAL_AUTO_LANG = autoLang();
+let UI_LANG_MODE = (() => { const m = lsGet("uiLangMode"); return uiLangSupported(m) ? m : "auto"; })();
+let LANG = (() => { const c = lsGet("uiLang"); return uiLangSupported(c) ? c : INITIAL_AUTO_LANG; })();
 // English stays in the startup page as the guaranteed fallback. The other catalogs share one
 // lossless pre-compressed asset served by this ESP32. Its first load registers all languages;
 // the startup page stays independent of that request and the internet. One Promise per
@@ -975,45 +977,31 @@ const I18N = {
     "wf.kpi.gas_cost": "Fictional gas", "wf.kpi.gas_sub": (k, e) => `${k} kWh · ${e}% Hs`,
     "wf.kpi.delta": "Delta", "wf.kpi.energy": "24 h energy",
     "wf.kpi.heat_elec": (h, e) => `${h} kWh heat / ${e} kWh el.`,
-    "wf.scope.whole": "whole unit", "wf.scope.comp": "comp. only",
+    "wf.scope.whole": "whole unit", "wf.scope.comp": "comp. only", "wf.scope.modbus": "Modbus est.",
     "wf.scale.label": "Break-even", "wf.scale.band": (p) => `±${p}%`,
     "wf.scale.cheaper": "Cheaper →", "wf.scale.expensive": "← Costlier",
-    "wf.cta.tariffs": "Set tariffs", "wf.cta.edit_tariffs": "Edit tariffs", "wf.cta.power_meter": "Add meter", "wf.cta.edit_meter": "Edit meter",
+    "wf.cta.tariffs": "Set tariffs", "wf.cta.edit_tariffs": "Edit tariffs",
     "wf.desc.collecting": (o) => `Collecting (${o} / 2h min.). Needs ≥ 2h data.`,
     "wf.desc.standby": (o) => `Standby (< 1.0 kWh heat / < 0.2 kWh el.; ${o}).`,
-    "wf.desc.unsupported": "X10A lacks comp./current data. Add MQTT meter.",
-    "wf.banner.partial": (c, o) => `Provisional (${c}% · ${o}) or stale meter.`,
+    "wf.desc.unsupported": "Required flow, temperature, or electrical inputs unavailable.",
+    "wf.banner.partial": (c, o) => `Provisional (${c}% · ${o}).`,
     "wf.banner.buh_active": (d) => `Backup electric heater ran (${d}); included.`,
-    "wf.banner.buh_limited": "Backup/booster heater ran while metering compressor only — excluded load may distort the figure.",
+    "wf.banner.buh_limited": "Backup/booster heater active (unmeasured or excluded load) — figure may be skewed.",
     "wf.banner.buh_unpaired": "BUH active/unknown without post-BUH R2T — excluded.",
     "wf.banner.bsh_excluded": (d) => `BSH (${d}) excluded (outside circuit).`,
     "wf.banner.ct_unwired": "CT 0 A with comp.; using inverter (comp. only).",
     "wf.ctx.source": "Source", "wf.ctx.window": "Window", "wf.ctx.outdoor": "Outdoor", "wf.ctx.defrost_buh": "Defrost/BUH", "wf.ctx.cooling": "Cooling excl.",
-    "wf.src.mqtt_whole": "MQTT meter (whole unit)", "wf.src.mqtt_comp": "MQTT meter (comp. only)",
-    "wf.src.x10a_ct": "X10A clamp (est., whole)", "wf.src.x10a_inv": "X10A inv. (est., comp. only)", "wf.src.stale": "stale",
-    "wf.disclosure": "24 h Heating+DHW (excl. cooling); pure water 4.186 kJ/(L·K); gas Hs; no fixed fees.",
+    "wf.src.x10a_ct": "X10A clamp (est., whole)", "wf.src.x10a_inv": "X10A inv. (est., comp. only)", "wf.src.modbus": "HomeHub Modbus (est.)", "wf.src.stale": "stale",
+    "wf.disclosure": "24 h Heating + DHW (excl. cooling); pure water (4.186 kJ/(L·K)); fixed 88% Hs modern condensing gas boiler; no fixed fees.",
+    "wf.disclosure_modbus": "HomeHub Modbus: LWT PHE (40) − RWT (42), Input 51 power (unspecified scope), BSH (32) excluded, BUH rise (> 1.5 K) flagged limited.",
     "wf.gas.row": "Gas comparison", "wf.gas.title": "Gas tariffs", "wf.not_configured": "No tariffs",
-    "wf.gas.detail.elec": "Electricity", "wf.gas.detail.gas": "Gas", "wf.gas.detail.eff": "Efficiency (Hs)", "wf.gas.detail.breakeven": "Break-even",
-    "wf.gas.settings_help": "24 h HP vs gas boiler (Hs, no fixed fees).",
-    "wf.gas.elec_price": "Elec. / kWh", "wf.gas.gas_price": "Gas / kWh", "wf.gas.efficiency": "Efficiency % (Hs)",
-    "wf.gas.eff_help": "Gross Hs (50–98%; cond. 82–90%).", "wf.gas.currency": "Currency",
-    "wf.gas.preview": (b) => `Break-even: ${b} (±20% X10A / ±10% MQTT)`, "wf.gas.preview_empty": "Enter prices for break-even.",
-    "wf.gas.hint": "Pure water 4.186 kJ/(L·K), Heating+DHW, Hs 50–98%, no fixed fees. Updates 24 h now.",
+    "wf.gas.detail.elec": "Electricity", "wf.gas.detail.gas": "Gas", "wf.gas.detail.breakeven": "Break-even",
+    "wf.gas.settings_help": "24 h HP vs. fixed 88% Hs modern condensing gas boiler (pure water 4.186 kJ/(L·K), no fixed fees).",
+    "wf.gas.elec_price": "Elec. / kWh", "wf.gas.gas_price": "Gas / kWh", "wf.gas.currency": "Currency",
+    "wf.gas.preview": (b) => `Break-even: ${b} (±20%)`, "wf.gas.preview_empty": "Enter prices for break-even.",
+    "wf.gas.hint": "Fixed 88% Hs modern condensing gas boiler & pure water (4.186 kJ/(L·K)), Heating + DHW, no fixed fees. Updates 24 h.",
     "wf.gas.delete": "Clear", "wf.gas.deleting": "Clearing…", "wf.gas.saved": "Tariffs saved", "wf.gas.deleted": "Tariffs cleared",
-    "wf.gas.err_price": "0.0001–99.9999.", "wf.gas.err_eff": "Whole % (50–98).", "wf.gas.err_currency": "3 uppercase letters (EUR).",
-    "pm.row": "External power meter", "pm.title": "External MQTT meter", "pm.not_configured": "None (X10A)",
-    "pm.broker_hint": "Set MQTT broker first; stays dormant until connected.",
-    "pm.detail.power": "Power", "pm.detail.scope": "Scope", "pm.detail.state": "State", "pm.detail.error": "Error",
-    "pm.settings_help": "MQTT meter (±10% vs ±20% band). Lost feed never reverts silently to X10A.",
-    "pm.default_name": "HP meter", "pm.power_path": "Power path · opt.", "pm.power_help": "Dot path (e.g. total_act_power), or empty.",
-    "pm.time_path": "Time path · opt.", "pm.time_help": "RFC3339/Unix s (needs Power path); empty = arrival.",
-    "pm.unit": "Unit", "pm.unit_w": "W", "pm.unit_kw": "kW", "pm.scope": "Scope",
-    "pm.scope_whole": "Whole unit (comp.+pumps+BUH)", "pm.scope_comp": "Compressor only", "pm.max_age_help": "Max age 10–300 s.",
-    "pm.hint": "Read-only; test optional. No silent X10A fallback.",
-    "pm.test": "Test", "pm.testing": "Testing…", "pm.test_ok": (w) => `${w} W (live)`,
-    "pm.test_retained": (w) => `${w} W (retained; needs timestamp)`, "pm.test_failed": "No fresh MQTT value",
-    "pm.saved": "Meter saved", "pm.deleted": "Meter deleted",
-    "pm.err_power_path": "Invalid dot path.", "pm.err_time_path": "Needs Power path & dot syntax.", "pm.err_max_age": "Max age 10–300 s.",
+    "wf.gas.err_price": "0.0001–99.9999.", "wf.gas.err_currency": "Select a supported currency.",
   },
 };
 function t(k, ...a) {
@@ -1093,9 +1081,13 @@ function activateLang(next) {
   return true;
 }
 let _languageRequest = 0;
-function setLang(next, current = () => true) {
+function setLang(next, current = () => true, fromStatus = false) {
   const request = ++_languageRequest;
   const activate = (lang) => request === _languageRequest && current() ? activateLang(lang) : false;
+  if (!fromStatus) {
+    UI_LANG_MODE = uiLangSupported(next) ? next : "auto";
+    lsSet("uiLangMode", UI_LANG_MODE);
+  }
   if (!uiLangSupported(next)) next = autoLang();
   if (localeReady(next)) return activate(next);
   return loadLocale(next).then((loaded) => activate(loaded ? next : "en"));
@@ -1105,5 +1097,8 @@ function setLang(next, current = () => true) {
 // the choice back to the browser. Called from refreshStatus before the frame is painted.
 function setLangFromStatus(s, current = () => true) {
   const stored = s && s.ui && s.ui.lang;
-  return setLang(uiLangSupported(stored) ? stored : autoLang(), current);
+  const mode = uiLangSupported(stored) ? stored : "auto";
+  UI_LANG_MODE = mode;
+  lsSet("uiLangMode", mode);
+  return setLang(uiLangSupported(stored) ? stored : autoLang(), current, true);
 }

@@ -412,7 +412,7 @@ apply. See `tools/web_asset/` and the delivery and locale contracts in [test/REA
 
 Registration goes through the common exception boundary. The open setup AP exposes provisioning;
 the configured LAN exposes the full API. The surface follows whether that AP is running, not the
-radio's STA mode. The exact trusted-LAN route count of 40 is checked against registration; fields,
+radio's STA mode. The exact trusted-LAN route count of 41 is checked against registration; fields,
 route aliases, body limits and error behavior belong in [API.md](API.md).
 
 The common HTTP admission guard rejects every non-OTA route during active OTA, including assets

@@ -49,10 +49,10 @@ def command(argv, success=True):
     return result
 
 
-def compile(source, tag, ota=OTA_SOURCE, include_main=None):
+def compile(source, tag, ota=OTA_SOURCE, include_main=None, extra_flags=()):
     binary = OUT / (tag + '.bin')
     extra = ['-I' + str(include_main)] if include_main else []
-    command([CXX, *extra, *FLAGS, '-MMD', '-MF', OUT / (tag + '.d'),
+    command([CXX, *extra, *extra_flags, *FLAGS, '-MMD', '-MF', OUT / (tag + '.d'),
              '-DCONFIG_HTTP_PRODUCTION_SOURCE="' + str(source) + '"',
              '-DOTA_HTTP_PRODUCTION_SOURCE="' + str(ota) + '"',
              HERE / 'fixture.cpp', OUT / 'cjson.o', *LINK, '-o', binary])
@@ -108,7 +108,7 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=19 assertions=5688\n' not in baseline.stdout:
+if 'PASS total=20 assertions=5784\n' not in baseline.stdout:
     raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
                        + baseline.stdout)
 print(baseline.stdout, end='')
@@ -151,7 +151,7 @@ original = replace_once(
     'diagnostics_next_generation(c.diagnostics_generation, 1u)', 'original-generation-signature')
 original_path = OUT / 'original.cpp'
 original_path.write_text(original)
-original_binary = compile(original_path, 'original')
+original_binary = compile(original_path, 'original', extra_flags=('-DHTTP_CONFIG_ORIGINAL_CONTROL=1',))
 original_positive = command([original_binary, 'valid_setters'])
 print('ORIGINAL POSITIVE CONTROL ' + original_positive.stdout.strip())
 controls = [rejected(original_binary, 'wrong_types', 'original-present-type'),

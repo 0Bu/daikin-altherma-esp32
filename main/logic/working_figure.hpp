@@ -13,40 +13,39 @@
 #include "checkup.hpp"
 #include "convert.hpp"
 #include "cop_scope.hpp"
+#include "gas_comparison.hpp"
 #include "lwt_select.hpp"
 #include "ou_stale.hpp"
-#include "power_meter_source.hpp"
 #include "rwt_select.hpp"
 
 namespace daik::logic {
 
-inline constexpr uint32_t WORKING_FIGURE_METHOD_VERSION        = 1;
-inline constexpr uint32_t WORKING_FIGURE_MIN_OBSERVED_S        = 7200; // 2 h minimum
-inline constexpr uint32_t WORKING_FIGURE_MIN_HEAT_WH           = 1000; // 1.0 kWh
-inline constexpr uint32_t WORKING_FIGURE_MIN_ELEC_WH           = 200;  // 0.2 kWh
-inline constexpr uint8_t  WORKING_FIGURE_FULL_COVERAGE_PCT     = 90;
-inline constexpr uint32_t WORKING_FIGURE_FULL_OBSERVED_S       = 77760; // 90% of 86400 s
-inline constexpr int32_t  WORKING_FIGURE_CT_UNWIRED_RPS_TENTHS = 100;   // > 10.0 rps
-inline constexpr uint32_t WORKING_FIGURE_CT_UNWIRED_CONFIRM_S  = 30;
+inline constexpr uint32_t WORKING_FIGURE_METHOD_VERSION          = 1;
+inline constexpr uint32_t WORKING_FIGURE_MIN_OBSERVED_S          = 7200; // 2 h minimum
+inline constexpr uint32_t WORKING_FIGURE_MIN_HEAT_WH             = 1000; // 1.0 kWh
+inline constexpr uint32_t WORKING_FIGURE_MIN_ELEC_WH             = 200;  // 0.2 kWh
+inline constexpr uint8_t  WORKING_FIGURE_FULL_COVERAGE_PCT       = 90;
+inline constexpr uint32_t WORKING_FIGURE_FULL_OBSERVED_S         = 77760; // 90% of 86400 s
+inline constexpr int32_t  WORKING_FIGURE_CT_UNWIRED_RPS_TENTHS   = 100;   // > 10.0 rps
+inline constexpr uint32_t WORKING_FIGURE_CT_UNWIRED_CONFIRM_S    = 30;
+inline constexpr int32_t  WORKING_FIGURE_MODBUS_BUH_DELTA_TENTHS = 15; // 1.5 K LWT BUH - PHE rise
+inline constexpr double   WORKING_FIGURE_MODBUS_POWER_MAX_W      = 50000.0;
 
 enum class EnergyPelKind : uint8_t {
-    None           = 0,
-    MqttWholeUnit  = 1,
-    MqttCompressor = 2,
-    X10aCt         = 3,
-    X10aInv        = 4,
+    None    = 0,
+    X10aCt  = 1,
+    X10aInv = 2,
+    Modbus  = 3,
 };
 
 inline constexpr const char* energy_pel_kind_name(EnergyPelKind k) noexcept {
     switch (k) {
-    case EnergyPelKind::MqttWholeUnit:
-        return "mqtt_whole_unit";
-    case EnergyPelKind::MqttCompressor:
-        return "mqtt_compressor";
     case EnergyPelKind::X10aCt:
         return "x10a_ct";
     case EnergyPelKind::X10aInv:
         return "x10a_inv";
+    case EnergyPelKind::Modbus:
+        return "modbus";
     case EnergyPelKind::None:
         return "none";
     }
@@ -60,7 +59,7 @@ enum class CtWireState : uint8_t {
 };
 
 enum EnergyFlags : uint8_t {
-    ENERGY_F_LIMITED_BUH  = 1u << 0, // compressor-only scope while BUH or BSH ran
+    ENERGY_F_LIMITED_BUH  = 1u << 0, // compressor-only scope while BUH/BSH ran, or Modbus BUH rise
     ENERGY_F_UNPAIRED_BUH = 1u << 1, // whole-unit scope had active/unknown BUH without R2T
     ENERGY_F_CT_UNWIRED   = 1u << 2, // CT clamps read 0 A while compressor ran > 10 rps for >= 30 s
 };
@@ -124,7 +123,9 @@ struct EnergyRing {
 struct EnergyCoverage {
     uint8_t        ct_rows = 0;
     CheckupLocator ct_locs[3]{};
-    bool           has_inv = false;
+    bool           is_modbus        = false;
+    bool           has_modbus_power = false;
+    bool           has_inv          = false;
     CheckupLocator inv_loc{};
     bool           has_rps       = false;
     bool           has_flow      = false;
@@ -141,11 +142,35 @@ struct EnergyCoverage {
 
     constexpr bool has_buh() const noexcept { return has_buh1 || has_buh2; }
     constexpr bool has_x10a_pel() const noexcept { return ct_rows > 0 || (has_inv && has_rps); }
-    constexpr bool supported(bool mqtt_meter_configured) const noexcept {
+    constexpr bool supported() const noexcept {
+        if (is_modbus) {
+            return has_flow && has_rwt && has_lwt && (has_valve_dhw || has_iu_mode) && has_rps &&
+                   has_modbus_power;
+        }
         return has_flow && has_rwt && (has_lwt || has_post_buh) && (has_valve_dhw || has_iu_mode) &&
-               (mqtt_meter_configured || has_x10a_pel());
+               has_x10a_pel();
     }
 };
+
+// HomeHub (EKRHH) Modbus carries verified flow, PHE/post-BUH LWT, RWT, BSH, mode, valve and
+// electrical power. Altherma 4 remains unsupported until Input 49 flow scaling is verified.
+inline constexpr EnergyCoverage energy_modbus_coverage(ModbusProfile profile) noexcept {
+    EnergyCoverage c;
+    if (profile != ModbusProfile::HomeHub) return c;
+    c.is_modbus        = true;
+    c.has_rps          = true;
+    c.has_flow         = true;
+    c.has_lwt          = true;
+    c.has_post_buh     = true;
+    c.has_rwt          = true;
+    c.has_bsh          = true;
+    c.has_defrost      = true;
+    c.has_valve_dhw    = true;
+    c.has_iu_mode      = true;
+    c.has_outdoor      = true;
+    c.has_modbus_power = true;
+    return c;
+}
 
 // Fold one publishable, adjudicated X10A profile row into EnergyCoverage.
 // CT clamps are matched structurally by (0x63, 14..16, conv 161) so label variants such as
@@ -261,40 +286,38 @@ constexpr EnergyIuMode energy_parse_iu_mode(const char* text) noexcept {
 }
 
 struct EnergyStepInput {
-    int64_t         now_us                    = -1;
-    bool            source_ok                 = false;
-    bool            mqtt_configured           = false;
-    bool            mqtt_fresh                = false;
-    double          mqtt_power_w              = 0.0;
-    PowerMeterScope mqtt_scope                = PowerMeterScope::WholeUnit;
-    uint8_t         ct_valid_count            = 0;
-    int32_t         ct_sum_tenths             = 0;
-    bool            inv_known                 = false;
-    int32_t         inv_tenths                = 0;
-    bool            rps_known                 = false;
-    bool            rps_running               = false;
-    int32_t         rps_tenths                = 0;
-    bool            flow_known                = false;
-    int32_t         flow_tenths               = 0;
-    bool            lwt_known                 = false;
-    int32_t         lwt_tenths                = 0;
-    bool            post_buh_known            = false;
-    int32_t         post_buh_tenths           = 0;
-    bool            rwt_known                 = false;
-    int32_t         rwt_tenths                = 0;
-    bool            buh_known                 = false;
-    bool            buh_on                    = false;
-    bool            bsh_known                 = false;
-    bool            bsh_on                    = false;
-    bool            defrost_known             = false;
-    bool            defrost_on                = false;
-    bool            valve_dhw_known           = false;
-    bool            valve_dhw_on              = false;
-    bool            iu_cooling_only           = false;
-    bool            iu_cooling_dhw            = false;
-    bool            iu_heating_or_dhw_or_stop = false;
-    bool            outdoor_known             = false;
-    int32_t         outdoor_tenths            = 0;
+    int64_t now_us                    = -1;
+    bool    source_ok                 = false;
+    bool    modbus_power_known        = false;
+    double  modbus_power_w            = 0.0;
+    uint8_t ct_valid_count            = 0;
+    int32_t ct_sum_tenths             = 0;
+    bool    inv_known                 = false;
+    int32_t inv_tenths                = 0;
+    bool    rps_known                 = false;
+    bool    rps_running               = false;
+    int32_t rps_tenths                = 0;
+    bool    flow_known                = false;
+    int32_t flow_tenths               = 0;
+    bool    lwt_known                 = false;
+    int32_t lwt_tenths                = 0;
+    bool    post_buh_known            = false;
+    int32_t post_buh_tenths           = 0;
+    bool    rwt_known                 = false;
+    int32_t rwt_tenths                = 0;
+    bool    buh_known                 = false;
+    bool    buh_on                    = false;
+    bool    bsh_known                 = false;
+    bool    bsh_on                    = false;
+    bool    defrost_known             = false;
+    bool    defrost_on                = false;
+    bool    valve_dhw_known           = false;
+    bool    valve_dhw_on              = false;
+    bool    iu_cooling_only           = false;
+    bool    iu_cooling_dhw            = false;
+    bool    iu_heating_or_dhw_or_stop = false;
+    bool    outdoor_known             = false;
+    int32_t outdoor_tenths            = 0;
 
     void set_iu_mode(EnergyIuMode m) noexcept {
         iu_cooling_only           = (m == EnergyIuMode::CoolingOnly);
@@ -375,16 +398,15 @@ inline void working_figure_step(EnergyAccumulator& acc, const EnergyCoverage& co
     // 3. Electrical source selection & strict no-fallback.
     double        pel_w    = 0.0;
     EnergyPelKind pel_kind = EnergyPelKind::None;
-    if (in.mqtt_configured) {
-        if (!in.mqtt_fresh || !std::isfinite(in.mqtt_power_w) || in.mqtt_power_w < 0.0 ||
-            in.mqtt_power_w > POWER_METER_MAX_W) {
+    if (cov.is_modbus) {
+        if (!cov.has_modbus_power) return;
+        if (!in.modbus_power_known || !std::isfinite(in.modbus_power_w) ||
+            in.modbus_power_w < 0.0 || in.modbus_power_w > WORKING_FIGURE_MODBUS_POWER_MAX_W) {
             acc.pending.unpairable_s = checkup_add_u16(acc.pending.unpairable_s, dt);
             return;
         }
-        pel_w    = in.mqtt_power_w;
-        pel_kind = (in.mqtt_scope == PowerMeterScope::CompressorOnly)
-                       ? EnergyPelKind::MqttCompressor
-                       : EnergyPelKind::MqttWholeUnit;
+        pel_w    = in.modbus_power_w;
+        pel_kind = EnergyPelKind::Modbus;
     } else if (cov.ct_rows > 0 && acc.ct_state != CtWireState::Unwired) {
         if (in.ct_valid_count < cov.ct_rows || in.ct_sum_tenths < 0) {
             acc.ct_zero_run_s        = 0;
@@ -430,12 +452,22 @@ inline void working_figure_step(EnergyAccumulator& acc, const EnergyCoverage& co
     }
 
     // 4. System boundary & BSH/BUH pairing.
-    const bool is_compressor_only =
-        (pel_kind == EnergyPelKind::MqttCompressor || pel_kind == EnergyPelKind::X10aInv);
-    bool    selected_lwt_known  = false;
-    int32_t selected_lwt_tenths = 0;
+    const bool is_compressor_only  = (pel_kind == EnergyPelKind::X10aInv);
+    bool       selected_lwt_known  = false;
+    int32_t    selected_lwt_tenths = 0;
 
-    if (!is_compressor_only) {
+    if (cov.is_modbus) {
+        if ((cov.has_bsh && !in.bsh_known) || (in.bsh_known && in.bsh_on)) {
+            acc.pending.bsh_excluded_s = checkup_add_u16(acc.pending.bsh_excluded_s, dt);
+            return;
+        }
+        if (!in.lwt_known) {
+            acc.pending.unpairable_s = checkup_add_u16(acc.pending.unpairable_s, dt);
+            return;
+        }
+        selected_lwt_known  = true;
+        selected_lwt_tenths = in.lwt_tenths;
+    } else if (!is_compressor_only) {
         if ((cov.has_bsh && !in.bsh_known) || (in.bsh_known && in.bsh_on)) {
             acc.pending.bsh_excluded_s = checkup_add_u16(acc.pending.bsh_excluded_s, dt);
             return;
@@ -471,14 +503,14 @@ inline void working_figure_step(EnergyAccumulator& acc, const EnergyCoverage& co
         return;
     }
 
-    // When a profile lacks an RPS witness (e.g., 17 X10A tables with MQTT/CT metering), pump-only
+    // When an X10A profile lacks an RPS witness (e.g., 17 X10A tables with CT metering), pump-only
     // standby can draw ~10-80 W; require >= 150 W (above pump/PCB draw) or active BUH to treat
-    // flow as active thermal generation instead of standby drift.
-    const bool rps_or_no_witness_active = cov.has_rps
-                                              ? (in.rps_known && in.rps_running)
-                                              : (in.rps_known ? in.rps_running : (pel_w >= 150.0));
+    // flow as active thermal generation instead of standby drift. Modbus always requires RPS.
     const bool heat_active =
-        rps_or_no_witness_active || (!is_compressor_only && in.buh_known && in.buh_on);
+        cov.is_modbus ? (in.rps_known && in.rps_running)
+                      : ((cov.has_rps ? (in.rps_known && in.rps_running)
+                                      : (in.rps_known ? in.rps_running : (pel_w >= 150.0))) ||
+                         (!is_compressor_only && in.buh_known && in.buh_on));
 
     // 6. Accumulate energy, auxiliary runtime & outdoor context.
     acc.pending.pel_kind   = static_cast<uint8_t>(pel_kind);
@@ -487,6 +519,10 @@ inline void working_figure_step(EnergyAccumulator& acc, const EnergyCoverage& co
     if (is_compressor_only) {
         if (in.buh_known && in.buh_on) acc.pending.flags |= ENERGY_F_LIMITED_BUH;
         if (in.bsh_known && in.bsh_on) acc.pending.flags |= ENERGY_F_LIMITED_BUH;
+    }
+    if (cov.is_modbus && heat_active && in.flow_tenths > 5 && in.post_buh_known &&
+        (in.post_buh_tenths - in.lwt_tenths) > WORKING_FIGURE_MODBUS_BUH_DELTA_TENTHS) {
+        acc.pending.flags |= ENERGY_F_LIMITED_BUH;
     }
 
     if (heat_active && in.flow_tenths > 5 && dt > 0) {
@@ -524,7 +560,8 @@ inline void working_figure_step(EnergyAccumulator& acc, const EnergyCoverage& co
 
     if (in.defrost_known && in.defrost_on)
         acc.pending.defrost_s = checkup_add_u16(acc.pending.defrost_s, dt);
-    if (in.buh_known && in.buh_on) acc.pending.buh_s = checkup_add_u16(acc.pending.buh_s, dt);
+    if (!cov.is_modbus && in.buh_known && in.buh_on)
+        acc.pending.buh_s = checkup_add_u16(acc.pending.buh_s, dt);
 
     if (dt > 0 && in.rps_known && in.rps_running && in.outdoor_known &&
         in.outdoor_tenths >= -3276 && in.outdoor_tenths <= 3276 &&
@@ -540,7 +577,6 @@ inline void working_figure_step(EnergyAccumulator& acc, const EnergyCoverage& co
 struct WorkingFigureTariffs {
     uint32_t elec_price_tenth_mill = 0; // 1e-4 currency/kWh; 0 = unconfigured
     uint32_t gas_price_tenth_mill  = 0; // 1e-4 currency/kWh; 0 = unconfigured
-    uint8_t  gas_efficiency_pct    = GAS_EFFICIENCY_DEFAULT_PCT;
     char     currency[4]           = "EUR";
 };
 
@@ -587,7 +623,7 @@ struct WorkingFigureReport {
     bool               tariffs_configured    = false;
     bool               full_window           = false;
     bool               source_fresh          = false;
-    bool               is_estimate           = false;
+    bool               is_estimate           = true;
     bool               is_compressor_only    = false;
     WorkingFigureState state                 = WorkingFigureState::Unsupported;
     EnergyPelKind      pel_kind              = EnergyPelKind::None;
@@ -599,8 +635,8 @@ struct WorkingFigureReport {
     uint32_t           bsh_excluded_s        = 0;
     uint32_t           cooling_excluded_s    = 0;
     uint8_t            coverage_pct          = 0;
-    uint8_t            neutral_band_pct      = 10;
-    uint8_t            gas_efficiency_pct    = GAS_EFFICIENCY_DEFAULT_PCT;
+    uint8_t            neutral_band_pct      = 20;
+    uint8_t            gas_efficiency_pct    = GAS_EFFICIENCY_PCT;
     uint32_t           elec_price_tenth_mill = 0;
     uint32_t           gas_price_tenth_mill  = 0;
     char               currency[4]           = "EUR";
@@ -633,33 +669,27 @@ inline uint32_t energy_span_s(const EnergyAccumulator& acc, int64_t carried_span
 inline WorkingFigureReport
 working_figure_evaluate(const EnergyRing& ring, const EnergyAccumulator& acc,
                         const EnergyCoverage& cov, const WorkingFigureTariffs& tariffs,
-                        bool mqtt_configured, bool mqtt_fresh, PowerMeterScope mqtt_scope,
                         bool source_fresh, uint32_t span_s, const int64_t* slot_expiry_us = nullptr,
                         int64_t now_us = -1) noexcept {
     WorkingFigureReport r;
     const bool          ct_unwired_dead =
-        !mqtt_configured && acc.ct_state == CtWireState::Unwired && !(cov.has_inv && cov.has_rps);
-    r.supported    = cov.supported(mqtt_configured) && !ct_unwired_dead;
-    r.source_fresh = source_fresh && (!mqtt_configured || mqtt_fresh);
+        !cov.is_modbus && acc.ct_state == CtWireState::Unwired && !(cov.has_inv && cov.has_rps);
+    r.supported    = cov.supported() && !ct_unwired_dead;
+    r.source_fresh = source_fresh;
     r.span_s       = std::min<uint32_t>(span_s, CHECKUP_WINDOW_S);
 
     if (r.supported) {
-        if (mqtt_configured) {
-            r.pel_kind = (mqtt_scope == PowerMeterScope::CompressorOnly)
-                             ? EnergyPelKind::MqttCompressor
-                             : EnergyPelKind::MqttWholeUnit;
+        if (cov.is_modbus) {
+            r.pel_kind = EnergyPelKind::Modbus;
         } else if (cov.ct_rows > 0 && acc.ct_state != CtWireState::Unwired) {
             r.pel_kind = EnergyPelKind::X10aCt;
         } else if (cov.has_inv && cov.has_rps) {
             r.pel_kind = EnergyPelKind::X10aInv;
         }
     }
-    const bool is_mqtt =
-        (r.pel_kind == EnergyPelKind::MqttWholeUnit || r.pel_kind == EnergyPelKind::MqttCompressor);
-    r.is_estimate = !is_mqtt;
-    r.is_compressor_only =
-        (r.pel_kind == EnergyPelKind::MqttCompressor || r.pel_kind == EnergyPelKind::X10aInv);
-    r.neutral_band_pct = is_mqtt ? 10 : 20;
+    r.is_estimate        = true;
+    r.is_compressor_only = (r.pel_kind == EnergyPelKind::X10aInv);
+    r.neutral_band_pct   = 20;
 
     int64_t  heat_ws_sum     = 0;
     uint64_t elec_ws_sum     = 0;
@@ -718,10 +748,7 @@ working_figure_evaluate(const EnergyRing& ring, const EnergyAccumulator& acc,
 
     r.elec_price_tenth_mill = tariffs.elec_price_tenth_mill;
     r.gas_price_tenth_mill  = tariffs.gas_price_tenth_mill;
-    r.gas_efficiency_pct    = (tariffs.gas_efficiency_pct >= GAS_EFFICIENCY_MIN_PCT &&
-                            tariffs.gas_efficiency_pct <= GAS_EFFICIENCY_MAX_PCT)
-                                  ? tariffs.gas_efficiency_pct
-                                  : GAS_EFFICIENCY_DEFAULT_PCT;
+    r.gas_efficiency_pct    = GAS_EFFICIENCY_PCT;
     if (tariff_currency_valid(tariffs.currency)) {
         std::memcpy(r.currency, tariffs.currency, 3);
         r.currency[3] = '\0';
@@ -729,14 +756,13 @@ working_figure_evaluate(const EnergyRing& ring, const EnergyAccumulator& acc,
         std::memcpy(r.currency, "EUR", 4);
     }
 
-    r.tariffs_configured =
-        (tariffs.elec_price_tenth_mill > 0 && tariffs.gas_price_tenth_mill > 0 &&
-         gas_comparison_config_valid(tariffs.elec_price_tenth_mill, tariffs.gas_price_tenth_mill,
-                                     r.gas_efficiency_pct, r.currency));
+    r.tariffs_configured = (tariffs.elec_price_tenth_mill > 0 && tariffs.gas_price_tenth_mill > 0 &&
+                            gas_comparison_config_valid(tariffs.elec_price_tenth_mill,
+                                                        tariffs.gas_price_tenth_mill, r.currency));
     if (r.tariffs_configured) {
         const double elec_price        = static_cast<double>(tariffs.elec_price_tenth_mill) * 1e-4;
         const double gas_price         = static_cast<double>(tariffs.gas_price_tenth_mill) * 1e-4;
-        const double gas_eff           = static_cast<double>(r.gas_efficiency_pct) / 100.0;
+        const double gas_eff           = static_cast<double>(GAS_EFFICIENCY_PCT) / 100.0;
         const double positive_heat_kwh = r.heat_kwh > 0.0 ? r.heat_kwh : 0.0;
         r.break_even_az                = (elec_price * gas_eff) / gas_price;
         r.gas_equiv_kwh                = positive_heat_kwh / gas_eff;
@@ -762,7 +788,7 @@ working_figure_evaluate(const EnergyRing& ring, const EnergyAccumulator& acc,
     } else if (!r.tariffs_configured) {
         r.state = WorkingFigureState::Measured;
     } else {
-        const double band = is_mqtt ? 0.10 : 0.20;
+        const double band = 0.20;
         if (r.az > r.break_even_az * (1.0 + band)) {
             r.state = WorkingFigureState::Cheaper;
         } else if (r.az < r.break_even_az * (1.0 - band)) {

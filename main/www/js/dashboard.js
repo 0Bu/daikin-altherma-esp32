@@ -708,7 +708,7 @@ function circulationSettingsCardHtml() {
   const circRow = settingsInfoRow("diagnostics:circulation", "diagnostics-circulation-detail",
     t("circ.row"), right, body, "", "circulation_state");
 
-  return vcard(t("settings.diagnostics"), circRow + gasComparisonSettingsRowHtml() + powerMeterSettingsRowHtml());
+  return vcard(t("settings.diagnostics"), circRow + gasComparisonSettingsRowHtml());
 }
 
 const wfNum = (v) => typeof v === "number" && Number.isFinite(v);
@@ -716,34 +716,36 @@ const wfFmt = (v, digits) => wfNum(v)
   ? v.toLocaleString(LANG, { minimumFractionDigits: digits, maximumFractionDigits: digits })
   : "—";
 const WF_CURRENCY_SYM = Object.freeze({
-  EUR: "€", GBP: "£", USD: "$", PLN: "zł", CZK: "Kč", NOK: "kr", SEK: "kr", CHF: "CHF",
+  EUR: "€", CHF: "CHF", GBP: "£", USD: "$", PLN: "zł", CZK: "Kč",
+  SEK: "kr", NOK: "kr", DKK: "kr", UAH: "₴", JPY: "¥", CNY: "CN¥",
 });
+const WF_CURRENCIES = Object.freeze(Object.keys(WF_CURRENCY_SYM));
 function wfMoney(v, currency, signed = false) {
   if (!wfNum(v)) return "—";
   const cur = typeof currency === "string" && currency ? currency : "EUR";
-  const absStr = Math.abs(v).toLocaleString(LANG, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const digits = cur === "JPY" ? 0 : 2;
+  const deadband = cur === "JPY" ? 0.5 : 0.005;
+  const absStr = Math.abs(v).toLocaleString(LANG, { minimumFractionDigits: digits, maximumFractionDigits: digits });
   const unit = WF_CURRENCY_SYM[cur] || cur;
   const amount = `${absStr} ${unit}`;
-  if (!signed) return (v < 0 ? "−" : "") + amount;
-  if (v < -0.005) return `−${amount}`;
-  if (v > 0.005) return `+${amount}`;
+  if (!signed) return (v <= -deadband ? "−" : "") + amount;
+  if (v < -deadband) return `−${amount}`;
+  if (v > deadband) return `+${amount}`;
   return amount;
 }
 
 function gasComparisonSettingsRowHtml() {
   const g = S.status?.gas_comparison || {};
   const configured = !!g.configured && wfNum(g.break_even_az) && g.break_even_az > 0;
-  const eff = wfNum(g.gas_efficiency_pct) ? Math.round(g.gas_efficiency_pct) : 88;
   const cur = typeof g.currency === "string" && g.currency ? g.currency : "EUR";
   const label = configured
-    ? `${wfFmt(g.break_even_az, 2)} · ${eff}% Hs`
+    ? wfFmt(g.break_even_az, 2)
     : t("wf.not_configured");
   const cls = configured ? "ok" : "dim";
   let body = "";
   if (configured) {
     if (wfNum(g.elec_price)) body += descNoteHtml(t("wf.gas.detail.elec"), `${wfFmt(g.elec_price, 4)} ${cur}/kWh`);
     if (wfNum(g.gas_price)) body += descNoteHtml(t("wf.gas.detail.gas"), `${wfFmt(g.gas_price, 4)} ${cur}/kWh`);
-    body += descNoteHtml(t("wf.gas.detail.eff"), `${eff}% Hs`);
     body += descNoteHtml(t("wf.gas.detail.breakeven"), wfFmt(g.break_even_az, 2));
   }
   body += `<div class="vdesc-p">${esc(t("wf.gas.settings_help"))}</div>`;
@@ -752,47 +754,6 @@ function gasComparisonSettingsRowHtml() {
     `<span>${esc(label)}</span>${editIcon}</button>`;
   return settingsInfoRow("diagnostics:gas_comparison", "diagnostics-gas-comparison-detail",
     t("wf.gas.row"), right, body);
-}
-
-function powerMeterSourceStatus(pm, mqtt) {
-  if (S.transportUnavailable === "status")
-    return { key: "unavailable", text: t("circ.unavailable"), cls: "dim" };
-  if (!pm.configured) return { key: "not_configured", text: t("pm.not_configured"), cls: "dim" };
-  if (!mqtt.configured && !mqtt.broker) return { key: "broker_off", text: t("circ.broker_off"), cls: "err" };
-  if (pm.error) return { key: "unavailable", text: t("circ.unavailable"), cls: "err" };
-  if (pm.has_value && pm.fresh) return { key: "live", text: t("env.live"), cls: "ok" };
-  if (pm.has_value) return { key: "stale", text: t("circ.stale"), cls: "warn" };
-  return { key: "waiting", text: t("circ.waiting"), cls: "warn" };
-}
-
-function powerMeterSettingsRowHtml() {
-  const pm = S.status?.power_meter || {};
-  const mqtt = S.status?.mqtt || {};
-  const status = powerMeterSourceStatus(pm, mqtt);
-  const value = status.text;
-  let body = "";
-  if (pm.configured) {
-    const source = pm.name || "MQTT";
-    const scopeText = pm.scope === "compressor_only" ? t("pm.scope_comp") : t("pm.scope_whole");
-    body = descNoteHtml(t("circ.detail.source"), source) +
-      descNoteHtml(t("pm.detail.scope"), scopeText);
-    if (pm.has_value && S.transportUnavailable !== "status" && wfNum(pm.power_w)) {
-      const power = pm.power_w.toLocaleString(LANG, { maximumFractionDigits: 1 });
-      body += descNoteHtml(t("pm.detail.power"), `${power} W`);
-    }
-    body += descNoteHtml(t("pm.detail.state"), value);
-    if (pm.error) body += descNoteHtml(t("pm.detail.error"), pm.error);
-    if (pm.has_value && S.transportUnavailable !== "status" && wfNum(pm.age_s))
-      body += descNoteHtml(t("circ.detail.age"), checkupDuration(pm.age_s));
-  }
-  body += `<div class="vdesc-p">${esc(t("pm.settings_help"))}</div>`;
-  const sourceName = pm.configured ? (pm.name || "MQTT") : t("pm.not_configured");
-  const ariaState = value === sourceName ? "" : ` · ${value}`;
-  const right = `<button class="settings-split-action vrow-val settings-wrap ${status.cls}" type="button" ` +
-    `data-act="power-meter" aria-label="${esc(`${t("pm.title")}: ${sourceName}${ariaState}`)}">` +
-    `<span>${esc(sourceName)}</span>${editIcon}</button>`;
-  return settingsInfoRow("diagnostics:power_meter", "diagnostics-power-meter-detail",
-    t("pm.row"), right, body);
 }
 
 // Settings cards rendered below Connections: THREE permanent ESP32-family cards, the plant-
@@ -2535,7 +2496,7 @@ function checkupCardHtml(includeHealth = true) {
   }
   // This row remains independent of /status.health and is not counted by the badge below.
   // renderCards() gates the whole card on the diagnostics opt-in, including this observation.
-  const rows = healthRows + (isModbus ? "" : refrigerantServiceRowHtml() + workingFigureRowHtml());
+  const rows = healthRows + (isModbus ? "" : refrigerantServiceRowHtml()) + workingFigureRowHtml();
   if (!rows) return "";                               // older firmware — no card rather than an empty one
   if (unreadable || !healthRows)
     return vcard(cardTitle, rows, "", "", "diagnosis", t("nav.diagnosis"));
@@ -2616,9 +2577,8 @@ function refrigerantServiceRowHtml() {
 
 function workingFigureScaleHtml(wf, azStr, scaleTone) {
   if (!wfNum(wf.break_even_az) || wf.break_even_az <= 0 || !wfNum(wf.az) || wf.az <= 0) return "";
-  const isMqtt = typeof wf.pel_source === "string" && wf.pel_source.startsWith("mqtt");
   const bandPct = wfNum(wf.neutral_band_pct) && wf.neutral_band_pct > 0
-    ? Math.round(wf.neutral_band_pct) : (isMqtt ? 10 : 20);
+    ? Math.round(wf.neutral_band_pct) : 20;
   const band = bandPct / 100;
   const pLow = Math.max(4, Math.min(96, 50 * (1 - band)));
   const pHigh = Math.max(4, Math.min(96, 50 * (1 + band)));
@@ -2738,7 +2698,7 @@ function workingFigureRowHtml() {
                     : (wf.state === "more_expensive" || wf.state === "limited") ? "warn" : "";
     body += workingFigureScaleHtml(wf, azStr, scaleTone);
   } else if (haveMetrics) {
-    const scopeKey = wf.is_compressor_only ? "wf.scope.comp" : "wf.scope.whole";
+    const scopeKey = wf.pel_source === "modbus" ? "wf.scope.modbus" : (wf.is_compressor_only ? "wf.scope.comp" : "wf.scope.whole");
     body += `<div class="wf-kpis">` +
       `<div class="wf-kpi"><div class="wf-kpi-label">${esc(t("wf.label"))}</div>` +
         `<div class="wf-kpi-val num">${esc(azStr)}</div>` +
@@ -2755,15 +2715,13 @@ function workingFigureRowHtml() {
     const obs = wfNum(wf.observed_s) ? checkupDuration(wf.observed_s) : "0m";
     body += descParaHtml(esc(t("wf.desc.standby", obs)));
   } else {
-    body += descParaHtml(esc(t("wf.desc.unsupported"))) +
-      `<div class="wf-actions"><button type="button" class="btn secondary wf-btn" data-act="power-meter">${esc(t("wf.cta.power_meter"))}</button></div>`;
+    body += descParaHtml(esc(t("wf.desc.unsupported")));
   }
 
   const srcKeys = {
-    mqtt_whole_unit: "wf.src.mqtt_whole",
-    mqtt_compressor: "wf.src.mqtt_comp",
     x10a_ct: "wf.src.x10a_ct",
     x10a_inv: "wf.src.x10a_inv",
+    modbus: "wf.src.modbus",
   };
   let meta = "";
   if (srcKeys[wf.pel_source]) {
@@ -2784,13 +2742,10 @@ function workingFigureRowHtml() {
   if (meta) body += `<div class="wf-meta">${meta}</div>`;
 
   body += `<div class="vdesc-p">${esc(t("wf.disclosure"))}</div>`;
-  if (wf.supported === true) {
-    const meterKey = S.status?.power_meter?.configured ? "wf.cta.edit_meter" : "wf.cta.power_meter";
-    let actions = "";
-    if (haveMetrics && wf.tariffs_configured === true)
-      actions += `<button type="button" class="btn secondary wf-btn" data-act="gas-comparison">${esc(t("wf.cta.edit_tariffs"))}</button>`;
-    actions += `<button type="button" class="btn secondary wf-btn" data-act="power-meter">${esc(t(meterKey))}</button>`;
-    body += `<div class="wf-actions">${actions}</div>`;
+  if (wf.pel_source === "modbus")
+    body += `<div class="vdesc-p">${esc(t("wf.disclosure_modbus"))}</div>`;
+  if (wf.supported === true && haveMetrics && wf.tariffs_configured === true) {
+    body += `<div class="wf-actions"><button type="button" class="btn secondary wf-btn" data-act="gas-comparison">${esc(t("wf.cta.edit_tariffs"))}</button></div>`;
   }
   body += `</div>`;
 

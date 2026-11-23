@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: b274768e88d5a5e99139ab356a8a233e6dce0aceb505f87de9f5ca4d3235addf -->
+<!-- diagnostic-evidence-contract: 5fab3e1ea1e0f5be1df4e87f296ebd97b40013c7051834776bf9077619bdd3ab -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -152,91 +152,120 @@ not established by any field reading; on the Monobloc CA it rests on the project
 The UI names this row **Performance factor** (`working_figure` in `GET /status`). This object is
 deliberately outside the eight-diagnosis evidence matrix and `/status.health`. It is an
 **observation**, not a manufacturer limit, health verdict, or seasonal JAZ/billing measurement. It
-is emitted only while Plant diagnostics opt-in is enabled, `diagnostics.effective_source` is
-`"x10a"`, and this boot has established a valid X10A profile fingerprint (`fp_valid`).
+is emitted while Plant diagnostics opt-in is enabled and either `diagnostics.effective_source` is
+`"x10a"` with a valid X10A profile fingerprint (`fp_valid`), or `diagnostics.effective_source` is
+`"modbus"` with a configured HomeHub Modbus target (`modbus_diag_avail`).
 
 **Evidence boundary:** Pure water's volumetric heat capacity factor `4.186 kJ/(L·K)` (`4186.0 / 60.0` W
 per `(L/min)·K`) approximates liquid-phase water heat capacity (~`4.18 kJ/(kg·K)` in [E2]) at unit
 density (`1 kg/L`); it is not calibrated calorimetry and overestimates water–glycol heat transfer
-(where glycol reduces specific heat capacity by roughly 6–8%). X10A signal locations come from
-[REGISTERS.md](REGISTERS.md): flow (`0x62/9`, `L/min`/`l/min`), return `R4T` (`rwt_select.hpp`),
-pre-BUH `R1T` (`lwt_select.hpp`), post-BUH `R2T` (`cop_is_post_buh`), `IU_MODE` (`0x60/2`, conv
-`315`), 3-way valve (`0x60/12`, conv `306`), `BUH Step1`/`Step2` (`0x60/12`, conv `304`/`303`),
-`BSH` (`0x60/12`, conv `305`), `Defrost Operation` (`0x10/1`, conv `304`), CT phase currents
-(`0x63/14–16`, conv `161`, `0.5 A` steps), and inverter primary current (`0x21/0`, unit `A`).
-Onboard X10A electrical estimates convert current to watts at assumed `230 V` (`tenths * 23 W`,
-unity power factor), ignoring voltage drift, `cos φ`, phase imbalances and, for `0x21/0`, indoor
-pump/PCB/heater power. No Daikin specification validates X10A CT or inverter current as a billing
-meter or sets universal gas tariffs or boiler efficiency (`50–98%`, default `88%` gross calorific
-value $H_s$ basis).
+(where glycol reduces specific heat capacity by roughly 6–8%).
+
+- **X10A signals ([REGISTERS.md](REGISTERS.md)):** flow (`0x62/9`, `L/min`/`l/min`), return `R4T`
+  (`rwt_select.hpp`), pre-BUH `R1T` (`lwt_select.hpp`), post-BUH `R2T` (`cop_is_post_buh`),
+  `IU_MODE` (`0x60/2`, conv `315`), 3-way valve (`0x60/12`, conv `306`), `BUH Step1`/`Step2`
+  (`0x60/12`, conv `304`/`303`), `BSH` (`0x60/12`, conv `305`), `Defrost Operation` (`0x10/1`,
+  conv `304`), CT phase currents (`0x63/14–16`, conv `161`, `0.5 A` steps), and inverter primary
+  current (`0x21/0`, unit `A`). Onboard X10A electrical estimates convert current to watts at assumed
+  `230 V` (`tenths * 23 W`, unity power factor), ignoring voltage drift, `cos φ`, phase imbalances
+  and, for `0x21/0`, indoor pump/PCB/heater power.
+- **HomeHub (`EKRHH`) Modbus signals (`homehub.hpp`, guide `4P744838-1E §9.2`):** Input `49` (`Flow
+  rate`, `L/min`, `Int16 / 100`), Input `40` (`Leaving water temperature PHE`, `°C`, `Temp16`),
+  Input `41` (`Leaving water temperature BUH`, `°C`, `Temp16`), Input `42` (`Return water
+  temperature`, `°C`, `Temp16`), Input `44` (`Outside air temperature`, `°C`, `Temp16`), Input `31`
+  (`Compressor running`), Input `32` (`Booster heater run`, BSH), Input `35` (`Defrost / Restart`),
+  Input `37` (`3-way valve`), Input `38` (`Current operation mode`, `1` Heating / `2` Cooling), and
+  Input `51` (`Heat pump power consumption`, `kW`, `Pow16`, scaled via `kw * 1000.0` W). Input `51`
+  has unspecified electrical scope in the HomeHub register specification (whether BUH or indoor
+  auxiliaries are always included is unverified), and Altherma 4 Modbus Input `49` flow scaling
+  remains unverified, so Altherma 4 is explicitly `unsupported`.
+
+No Daikin specification validates X10A current estimates or HomeHub Input `51` as a billing meter,
+or sets universal gas tariffs or boiler efficiency assumptions (the firmware applies a fixed `88%`
+gross calorific value $H_s$ modern condensing gas boiler baseline alongside pure water
+`4.186 kJ/(L·K)`). Every supported electrical source carries `is_estimate: true` and a `±20%`
+neutral comparison band (`neutral_band_pct = 20`).
 
 **Firmware rule:** [`working_figure.hpp`](../main/logic/working_figure.hpp) integrates continuous
-second-level intervals (`dt <= CHECKUP_MAX_GAP_S = 15 s`) across monotonic X10A sweeps; longer gaps,
+second-level intervals (`dt <= CHECKUP_MAX_GAP_S = 15 s`) across monotonic sweeps; longer gaps,
 non-monotonic timestamps, missing source sweeps, or source/consent transitions break continuity
-without bridging. Completed hourly `EnergyBucket` records (`32 bytes`, zero padding) live in a
-23-slot `EnergyRing` inside v5 `CheckupJournalPayload` (`160 bytes`, `pel_source_fp` at offset `124`),
-plus the open live hour (`EnergyAccumulator::pending`). On flash restore, `checkup_journal_rebuild()`
-retains checkup/DHW buckets independently while retiring only energy buckets whose `pel_source_fp`
-differs from the active electrical source identity (`checkup_journal_pel_identity_matches`) or after
-an unwired-CT switch (`checkup_journal_energy_withheld`).
+without bridging. X10A (`s_x10a`) and Modbus (`s_modbus`) maintain separate accumulators, 23-slot
+`EnergyRing` buffers (`EnergyBucket`, `32 bytes`, zero padding), open live-hour counters, and v5
+`CheckupJournalPayload` flash journals (`160 bytes`, `pel_source_fp` at offset `124` stamped
+`"x10a-pel-v1"` on X10A and `"modbus-pel-v1"` on Modbus). On flash restore,
+`checkup_journal_rebuild()` retains checkup/DHW buckets independently while retiring only energy
+buckets whose `pel_source_fp` differs from the active electrical source identity
+(`checkup_journal_pel_identity_matches`) or after an unwired-CT switch
+(`checkup_journal_energy_withheld`).
 
 Mode and boundary pairing exclude `Cooling` (`cooling_excluded_s`), admit `Cooling + DHW` only when
 `valve_dhw == 1` (excluding `!valve_dhw` as `cooling_excluded_s` and unknown valve as `unpairable_s`),
-and admit `Heating`, `DHW`, `Heating + DHW`, and `Stop` so summer DHW and standby draw stay in the
-denominator. Unknown `IU_MODE` on a profile with `0x60/2` records `unpairable_s`. Whole-unit
-electrical sources (`mqtt_whole_unit`, `x10a_ct`) require `BSH` known off (active or unknown `BSH` on
-a BSH-capable profile books `bsh_excluded_s`) and pair with post-BUH `R2T` (`cop_is_post_buh`),
-falling back to `R1T` only while `BUH` is known off (otherwise setting `ENERGY_F_UNPAIRED_BUH` and
-`unpairable_s`). Compressor-only sources (`mqtt_compressor`, `x10a_inv`) pair with `R1T` and latch
-`ENERGY_F_LIMITED_BUH` whenever `BUH` or `BSH` is observed on.
+and admit `Heating`, `DHW`, `Heating + DHW`, and `Stop` (on Modbus mapped from Input `38` `1` ->
+Heating/DHW/Stop, `2` -> Cooling + DHW, other -> Unknown) so summer DHW and standby draw stay in
+the denominator. Unknown mode when mode coverage exists records `unpairable_s`. Both whole-unit X10A
+(`x10a_ct`) and HomeHub Modbus (`modbus`) require `BSH` known off (active or unknown `BSH` on a
+BSH-capable profile books `bsh_excluded_s`). On X10A, `x10a_ct` pairs with post-BUH `R2T`
+(`cop_is_post_buh`), falling back to `R1T` only while `BUH` is known off (otherwise setting
+`ENERGY_F_UNPAIRED_BUH` and `unpairable_s`), while compressor-only `x10a_inv` pairs with `R1T` and
+latches `ENERGY_F_LIMITED_BUH` whenever `BUH` or `BSH` is observed on. On HomeHub Modbus, thermal ΔT
+pairs Input `40` (`LWT PHE`, pre-BUH) with Input `42` (`RWT`), and if active flow (`flow_tenths > 5`)
+shows `(Input 41 − Input 40) > 1.5 K` (`WORKING_FIGURE_MODBUS_BUH_DELTA_TENTHS = 15`),
+`ENERGY_F_LIMITED_BUH` latches (`limited`) because Input `51` electrical scope vs. post-BUH heat
+cannot be guaranteed.
 
 Thermal energy integrates exact `int64_t` integer watt-seconds
 `round((flow_tenths * 4186 * dt * (selected_lwt_tenths - rwt_tenths)) / 6000)` (half away from
 zero, overflow-guarded and clamped to `int32_t` bounds on `heat_ws`) only when `flow > 0.5 L/min`
-(`flow_tenths > 5`), `dt > 0`, and active heat generation is confirmed (`rps_running`, whole-unit
-`buh_on`, or `pel_w >= 150 W` when a profile has no `rps` witness so pump-only standby draw
-~10–80 W cannot integrate residual pipe temperature differences). Signed `ΔT` stays signed during
-active operation to capture defrost heat withdrawal and 3-way valve transients. Missing required
-flow/temperature inputs book `unpairable_s`; fresh running-compressor outdoor air populates
-`outdoor_mean_c` and `outdoor_min_c` without changing energy rules.
+(`flow_tenths > 5`), `dt > 0`, and active heat generation is confirmed (`rps_running` on Modbus or
+RPS-capable X10A profiles, whole-unit X10A `buh_on`, or `pel_w >= 150 W` when an X10A profile lacks
+an `rps` witness so pump-only standby draw ~10–80 W cannot integrate residual pipe temperature
+differences). Signed `ΔT` stays signed during active operation to capture defrost heat withdrawal
+and 3-way valve transients. Missing required flow/temperature inputs book `unpairable_s`; fresh
+running-compressor outdoor air populates `outdoor_mean_c` and `outdoor_min_c` without changing
+energy rules.
 
-Electrical sources follow strict priority without silent MQTT fallback:
-1. Configured external MQTT meter ([`power_meter_source.hpp`](../main/logic/power_meter_source.hpp)):
-   if configured, stale (`power_meter_freshness()` — mapped `timestamp_path` requires a readable
-   source timestamp and rejects timestamp-less retained messages), non-finite, negative (`< 0 W` PV
-   backfeed), or `> 50000 W` values book `unpairable_s` instead of falling back to X10A CT or INV.
-2. X10A CT clamps (`0x63/14–16`, conv `161`): partial phase reads book `unpairable_s`. If all valid
-   CT phases read `0 A` continuously for `>= 30 s` with `rps > 10.0 rps`, `ct_state` latches `Unwired`
-   (`ENERGY_F_CT_UNWIRED`), clears only `X10aCt` ring buckets via `acknowledge_ct_unwired_switch()`
-   (preserving restored `X10aInv` hours), and falls back to `X10aInv` if supported.
-3. X10A INV primary current (`0x21/0`, unit `A`): gated by `rps` freshness (`ou_stale.hpp`); unknown
-   `rps` books `unpairable_s`, `rps_running == false` integrates `0 W`, and `rps_running == true`
-   integrates fresh non-negative `inv_tenths * 23 W`.
+Electrical sources select strictly from the active diagnostic bus (`diagnostics.effective_source`):
+1. **HomeHub (`EKRHH`) Modbus (`modbus`):** uses Input `51` (`kw * 1000.0` W). Non-finite,
+   negative, or `> 50000 W` (`WORKING_FIGURE_MODBUS_POWER_MAX_W`) readings book `unpairable_s`.
+   Altherma 4 returns `unsupported` from `energy_modbus_coverage()`.
+2. **X10A CT clamps (`x10a_ct`, `0x63/14–16`, conv `161`):** partial phase reads book `unpairable_s`.
+   If all valid CT phases read `0 A` continuously for `>= 30 s` with `rps > 10.0 rps`, `ct_state`
+   latches `Unwired` (`ENERGY_F_CT_UNWIRED`), clears only `X10aCt` ring buckets via
+   `acknowledge_ct_unwired_switch()` (preserving restored `X10aInv` hours), and falls back to
+   `x10a_inv` if supported.
+3. **X10A INV primary current (`x10a_inv`, `0x21/0`, unit `A`):** gated by `rps` freshness
+   (`ou_stale.hpp`); unknown `rps` books `unpairable_s`, `rps_running == false` integrates `0 W`,
+   and `rps_running == true` integrates fresh non-negative `inv_tenths * 23 W`.
 
-Across the 46 catalog profiles (`def::profiles`), 27 are supported via X10A electrical sources alone,
-43 are supported with an external MQTT meter, 17 profiles carry `0x21/0` without `rps` or CT clamps
-(unsupported without MQTT), and 3 (including `protocol_s`) lack required water/mode signals even
-with MQTT. When tariffs are configured (`elec_price > 0` and `gas_price > 0` at `1e-4`
-currency/kWh precision), `break_even_az = (elec_price * gas_efficiency_pct / 100) / gas_price`,
-`gas_equiv_kwh = max(0, heat_kwh) / (gas_efficiency_pct / 100)`, `cost_wp = elec_kwh * elec_price`,
-`cost_gas = gas_equiv_kwh * gas_price`, and `cost_delta = cost_wp - cost_gas` recalculate over
-existing buckets at read time without discarding energy history.
+Across the `46` X10A catalog profiles (`def::profiles`), `27` meet `EnergyCoverage::supported()`
+(`22` carry `0x63/14–16` CT clamps), while `17` carry `0x21/0` without `rps` or CT clamps and the
+remaining profiles (including `protocol_s`) lack required flow, water-temperature, or mode/valve
+signals. Separately, HomeHub (`EKRHH`) Modbus is supported via `energy_modbus_coverage()`. When
+tariffs are configured ([`gas_comparison.hpp`](../main/logic/gas_comparison.hpp): `elec_price > 0`
+and `gas_price > 0` at `1e-4` currency/kWh precision using a currency from the 12-code allowlist
+`EUR`, `CHF`, `GBP`, `USD`, `PLN`, `CZK`, `SEK`, `NOK`, `DKK`, `UAH`, `JPY`, `CNY`),
+`gas_efficiency_pct` is fixed at `GAS_EFFICIENCY_PCT = 88` (`88%` $H_s$),
+`break_even_az = (elec_price * 0.88) / gas_price`, `gas_equiv_kwh = max(0, heat_kwh) / 0.88`,
+`cost_wp = elec_kwh * elec_price`, `cost_gas = gas_equiv_kwh * gas_price`, and
+`cost_delta = cost_wp - cost_gas` recalculate over existing buckets at read time without discarding
+energy history.
 
 **Project boundary:** Minimum `7200 s` observed time (`collecting`), `1.0 kWh` net heat and
 `0.2 kWh` electrical minimums (`standby`), `86400 s` span with `77760 s` (`90%`) coverage
 (`partial`), `0.5 L/min` flow gate, `150 W` no-RPS standby threshold, `30 s` / `> 10.0 rps` CT
-unwired latch, `50000 W` MQTT meter ceiling, `50–98%` (default `88%`) gas efficiency bounds, and
-`±10%` (MQTT) / `±20%` (X10A estimate) neutral comparison bands are project rules, not Daikin or
-statutory limits. State precedence is `unsupported`, `collecting`, `standby`, `partial`, `limited`
-(`bsh_excluded_s > 0`, `ENERGY_F_LIMITED_BUH`, or `ENERGY_F_UNPAIRED_BUH`), `measured`, then
-`cheaper` / `similar` / `more_expensive`.
+unwired latch, `50000 W` Modbus power ceiling, `1.5 K` Modbus post-BUH rise threshold, the fixed
+`88%` ($H_s$) modern condensing gas boiler baseline (`GAS_EFFICIENCY_PCT = 88`) and curated
+12-currency allowlist, and the uniform `±20%` neutral comparison band (`neutral_band_pct = 20`) are
+project rules, not Daikin or statutory limits. State precedence is `unsupported`, `collecting`,
+`standby`, `partial`, `limited` (`bsh_excluded_s > 0`, `ENERGY_F_LIMITED_BUH`, or
+`ENERGY_F_UNPAIRED_BUH`), `measured`, then `cheaper` / `similar` / `more_expensive`.
 
 **Not established:** This observation does not establish seasonal JAZ/SCOP, calibrated heat-meter
 accuracy, or billing-grade electrical consumption. Uncalibrated flow/temperature bias at low ΔT,
 water–glycol heat capacity differences, `0.5 A` CT quantization, assumed `230 V` and unity power
-factor on X10A current estimates, unmonitored `BUH`/`BSH`/pump electricity in `compressor_only`
-scopes, and excluded fixed utility fees (annual chimney sweep, meter, standing base charges) remain
-outside what 24-hour telemetry proves.
+factor on X10A current estimates, unspecified electrical scope of HomeHub Input `51`, unmonitored
+`BUH`/`BSH`/pump electricity in `compressor_only` scopes, and excluded fixed utility fees (annual
+chimney sweep, meter, standing base charges) remain outside what 24-hour telemetry proves.
 
 ## Evidence matrix for all eight diagnoses
 

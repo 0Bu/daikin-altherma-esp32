@@ -15,7 +15,7 @@ export const OBSERVATION_SOURCE_FILES = Object.freeze([
   "main/logic/fault_trace.hpp", "main/logic/fault_persist.hpp",
   "main/stop_observation_store.hpp", "main/stop_observation_store.cpp", "main/history.cpp",
   "main/logic/defrost_start.hpp", "main/logic/working_figure.hpp",
-  "main/logic/power_meter_source.hpp",
+  "main/logic/gas_comparison.hpp",
 ]);
 
 function occurrences(text, needle) {

@@ -446,7 +446,11 @@ row stays available in Settings.
 `kW`. The [Daikin EKRHH guide, 4P744838-1E, §9.2.2, p. 43][homehub-ekrhh-guide] leaves the
 measurement point and heater inclusion unspecified. The dashboard displays that input and
 withholds COP in the HomeHub-only view because the electrical and heat-exchanger boundaries
-cannot be matched.
+cannot be matched. Separately, when Plant diagnostics is enabled, HomeHub (`EKRHH`) runs the
+rolling 24-hour [Performance factor](DIAGNOSTICS.md#working-figure-observation) (`working_figure`)
+estimate from `LWT PHE (40) − RWT (42)` and Input `51` (`±20%` band, excluding BSH `32` and flagging
+a `> 1.5 K` BUH rise `41 − 40` as limited), while native Altherma 4 remains unsupported until
+Input `49` flow scaling is verified ([evidence boundary](DIAGNOSTIC_EVIDENCE.md#working-figure-observation)).
 
 **MQTT preserves the two sources instead of merging them.** X10A is retained as grouped JSON on
 `<base>/x10a`; an enabled HomeHub publishes its separate flat map on `<base>/modbus`. A disconnected

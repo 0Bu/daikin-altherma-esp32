@@ -124,18 +124,8 @@ inline ConfigBlob config_blob_from(const Config& c) {
     b.mb_discovery_done              = c.mb_discovery_done;
     b.elec_price_tenth_mill          = c.elec_price_tenth_mill;
     b.gas_price_tenth_mill           = c.gas_price_tenth_mill;
-    b.gas_efficiency_pct             = c.gas_efficiency_pct;
     b.tariff_currency                = c.tariff_currency;
     b.has_gas_comparison             = true;
-    b.power_meter_name               = c.power_meter_name;
-    b.power_meter_topic              = c.power_meter_topic;
-    b.power_meter_power_path         = c.power_meter_power_path;
-    b.power_meter_time_path          = c.power_meter_time_path;
-    b.power_meter_max_age_s          = c.power_meter_max_age_s;
-    b.power_meter_unit               = power_meter_unit_to_int(c.power_meter_unit);
-    b.power_meter_scope              = power_meter_scope_to_int(c.power_meter_scope);
-    b.power_meter_generation         = c.power_meter_generation;
-    b.has_power_meter                = true;
     return b;
 }
 

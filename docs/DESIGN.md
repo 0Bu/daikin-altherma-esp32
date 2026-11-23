@@ -422,18 +422,23 @@ settling/charge, establish a universal range or confirm mechanical EEV motion. E
 a command, not measured valve position.
 
 A separate neutral **Performance factor** (`Arbeitszahl` in German) observation row presents rolling
-24-hour X10A heating/DHW energy and optional break-even gas comparison when `working_figure` is
-emitted (Plant diagnostics on, `X10A` display source active, valid boot profile fingerprint; hidden
-in `Modbus` mode or on older firmware). Like **Refrigerant (heating)**, it contributes no badge
-count or `/status.health` verdict. Collapsed rows show the computed working figure (prefixed with
-`~` for X10A current estimates) or state (`Collecting`, `Standby`, `Partial` / *prov.*,
-`Limited` / *lim.*, `Measured`, `Cheaper than gas`, `Like gas`, `Costlier than gas`,
-`Not supported`). Expanded panels show 24-hour thermal/electrical kWh,
-outdoor context when present, electrical source and estimate/compressor-only scope, a horizontal
-break-even scale combining color zones (`±10%` MQTT / `±20%` X10A neutral band) with accessible
-words-only `ariaValue` (`estimated <value>` without `~`, plus verdict text) and cost difference
-excluding fixed utility charges, and explicit limits
-(pure-water constant, excluded cooling/BSH, uncalibrated sensors).
+24-hour heating/DHW energy and optional break-even gas comparison when `working_figure` is
+emitted (Plant diagnostics on, active display source either `X10A` with valid boot profile
+fingerprint or configured `Modbus`; omitted on older firmware). Like **Refrigerant (heating)**, it
+contributes no badge count or `/status.health` verdict. Collapsed rows show the computed working
+figure (prefixed with `~` for onboard X10A and HomeHub Modbus estimates) or state (`Collecting`,
+`Standby`, `Partial` / *prov.*, `Limited` / *lim.*, `Measured`, `Cheaper than gas`, `Like gas`,
+`Costlier than gas`, `Not supported`, which also appears on native Altherma 4 Modbus). Expanded
+panels show 24-hour thermal/electrical kWh, outdoor context when present, electrical source
+(`X10A clamp (est., whole)`, `X10A inv. (est., comp. only)`, or `HomeHub Modbus (est.)`) and
+scope (`whole unit`, `comp. only`, or `Modbus est.`), a horizontal break-even scale combining color
+zones (`±20%` neutral band) with accessible words-only `ariaValue` (`estimated <value>` without
+`~`, plus verdict text), cost figures formatted to `0` decimals for `JPY` and `2` decimals for all
+other currencies (`88%` $H_s$ modern condensing gas boiler baseline, pure water `4.186 kJ/(L·K)`,
+fixed utility charges excluded), a HomeHub Modbus boundary disclosure (`LWT PHE (40) − RWT (42)`,
+Input `51` power, BSH `32` excluded, `> 1.5 K` BUH rise flagged limited) when `pel_source === "modbus"`,
+tariff setup/edit buttons (`Set tariffs` / `Edit tariffs`) when metrics are present, and explicit
+limits (excluded cooling/BSH, uncalibrated sensors).
 
 Value groups show the exact supported profile rows, units and qualified values. Binary metadata
 renders flags as ON/OFF, known selector bits as Space heating/DHW and Smart Grid as its four-state
@@ -533,7 +538,7 @@ Plant diagnostics and Heating-curve diagnosis. Gear/back/Escape follow the hiera
 | ESP32 | Hardware editor, Uptime, Free memory and Largest free block; the two memory rows have recorded trends |
 | Protocol | X10A link, detected protocol, RX/TX and connection-gated Protocol diagnostics |
 | Firmware | Version/update check, channel, Language and default-off Plant diagnostics selector |
-| Plant diagnostics | Split rows and modals for **DHW circulation pump**, **External power meter** (`Test`/`Save`/`Delete`) and **Gas comparison** (`Save`/`Clear`) under the master opt-in |
+| Plant diagnostics | Split rows and modals for **DHW circulation pump** (`Test`/`Save`/`Delete`) and **Gas comparison** (`Save`/`Clear`) under the master opt-in |
 | Heating-curve diagnosis | Status, room source, optional forecast/measured-outdoor context and method explanation |
 
 Connections use green for connected, amber for transient attention and red for failure. Disabled
@@ -564,20 +569,22 @@ IDs and concise meaning. Query disables for the complete round trip; show status
 valid payload, selected bytes and grouped converter results. There is no duplicate JSON preview.
 
 Firmware opt-in applies live (`Off` / `X10A` / `Modbus`). First opt-in starts a fresh generation;
-switching to `Off` pauses new checkup, room, circulation, power-meter and forecast collection while
-preserving collected 24-hour X10A, Modbus, room and circulation histories (retained forecast topics
-still clear), and switching between `X10A` and `Modbus` selects which 24-hour checkup store the
-dashboard card displays while both keep recording. Normal X10A/HomeHub bridging and passive
-refrigerant observation keep their separate lifecycle.
+switching to `Off` pauses new checkup, room, circulation and forecast collection while preserving
+collected 24-hour X10A, Modbus, room and circulation histories (retained forecast topics still
+clear), and switching between `X10A` and `Modbus` selects which 24-hour checkup store the dashboard
+card displays while both keep recording. Normal X10A/HomeHub bridging and passive refrigerant
+observation keep their separate lifecycle.
 
-Under **Plant diagnostics**, split Settings rows (`DHW circulation pump`, `External power meter`,
-`Gas comparison`) open dedicated modals. **External power meter** opens **External MQTT meter** to
-configure the optional read-only MQTT meter (`name`, `topic`, `power_path`, `timestamp_path`,
-`unit`, `scope`, `max_age_s`) with **Test** (12 s live MQTT probe), **Save** (valid without a prior
-test step; changing behavioral fields starts fresh 24 h energy collection) and **Delete** (disables
-external metering). **Gas comparison** opens **Gas tariffs** to configure electricity/gas unit
-prices, boiler efficiency (`50–98%` $H_s$, default `88%`) and 3-letter currency with **Save** and
-**Clear** actions that recalculate existing 24 h buckets immediately without clearing energy history.
+Under **Plant diagnostics**, split Settings rows (`DHW circulation pump` and `Gas comparison`) open
+dedicated modals. **Gas comparison** opens **Gas tariffs** to configure electricity/gas unit prices
+and a curated 12-currency dropdown (`EUR`, `CHF`, `GBP`, `USD`, `PLN`, `CZK`, `SEK`, `NOK`, `DKK`,
+`UAH`, `JPY`, `CNY`) with **Save** and **Clear** actions that recalculate existing 24 h buckets
+immediately without clearing energy history. When unconfigured, `defaultTariffCurrency()` pre-selects
+a currency from the browser locale/region (`navigator.language`) when UI language is `auto`, and from
+the manual UI language (`ui.lang` when not `auto`) while still honoring matching regional pairs
+(`de`/`fr`/`it` + `CH`/`LI` → `CHF`, `en` + `GB`/`UK` → `GBP`, `en` + `US` → `USD`). No efficiency
+input is exposed; the UI explains the fixed `88%` ($H_s$) modern condensing gas boiler baseline
+alongside pure water (`4.186 kJ/(L·K)`), Heating + DHW, excluding cooling and fixed utility fees.
 
 Heating-curve diagnosis observes confirmed heating windows; raw target-minus-room deviation is an
 uncalibrated indicator, not a water-temperature correction. Status distinguishes recording, missing

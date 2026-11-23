@@ -252,7 +252,7 @@ an authorized signing invocation passes the offline key by path without wrapping
 
 ## Report redaction contract
 
-`GET /status?redact=1` redacts the following 33 identifying fields at emission, with `<redacted>`
+`GET /status?redact=1` redacts the following 29 identifying fields at emission, with `<redacted>`
 for set identifying values. HVAC mode preserves only its allowlisted public vocabulary; unknown
 source text is hidden without changing control evaluation.
 For these substitutions, unset strings remain empty, unset coordinates stay null, and field keys,
@@ -290,10 +290,6 @@ the LAN MCP `get_status` tool use ordinary unredacted status.
 | `circulation_source.topic` | a path through your own broker — normally embeds the smart plug's device id |
 | `circulation_source.power_path` | user-typed JSON path; may contain room, person or device names |
 | `circulation_source.timestamp_path` | user-typed JSON path; may contain room, person or device names |
-| `power_meter.name` | a name you typed for the external electricity meter |
-| `power_meter.topic` | a path through your own broker — normally embeds a meter or device id |
-| `power_meter.power_path` | user-typed JSON path; may contain meter, room or device names |
-| `power_meter.timestamp_path` | user-typed JSON path; may contain meter, room or device names |
 | `weather_forecast.latitude` | where your house is, to six decimals |
 | `weather_forecast.longitude` | the other half of the same |
 | `syslog.host` | an internal hostname |

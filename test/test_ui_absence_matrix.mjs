@@ -140,10 +140,6 @@ const HEALTHY = () => ({
     off_threshold_w: "1.0", confirm_s: 60, subscribed: true, has_value: true, power_w: 5.4,
     state: "on", age_s: 5, fresh: true, freshness_reason: "fresh", retained: false, messages: 5,
     errors: 0, rejections: 0 },
-  power_meter: { configured: true, name: "Heat pump meter", topic: "fixture/power-meter/status",
-    power_path: "total_act_power", timestamp_path: "", unit: "W", scope: "whole_unit", max_age_s: 60,
-    subscribed: true, has_value: true, power_w: 1450, age_s: 5, fresh: true,
-    freshness_reason: "fresh", retained: false, messages: 5, errors: 0, rejections: 0 },
   gas_comparison: { configured: true, elec_price: 0.32, gas_price: 0.105,
     gas_efficiency_pct: 88, currency: "EUR", break_even_az: 2.68 },
   weather_forecast: { configured: true, provider: "open-meteo", model: "icon_seamless",
@@ -174,10 +170,10 @@ const HEALTHY = () => ({
     mode: "heating", blocker: "compressor_not_running", special_phases_known: true,
     load_proven: false, eev_feedback: false, limitations: [], metrics: {} },
   working_figure: { kind: "observation", supported: true, state: "cheaper",
-    tariffs_configured: true, full_window: true, source_fresh: true, is_estimate: false,
-    is_compressor_only: false, pel_source: "mqtt_whole_unit", span_s: 86400, observed_s: 86400,
+    tariffs_configured: true, full_window: true, source_fresh: true, is_estimate: true,
+    is_compressor_only: false, pel_source: "x10a_ct", span_s: 86400, observed_s: 86400,
     unpairable_s: 0, defrost_s: 0, buh_s: 0, bsh_excluded_s: 0, cooling_excluded_s: 0,
-    coverage_pct: 100, neutral_band_pct: 10, heat_kwh: 41.0, elec_kwh: 10.0, az: 4.10,
+    coverage_pct: 100, neutral_band_pct: 20, heat_kwh: 41.0, elec_kwh: 10.0, az: 4.10,
     gas_efficiency_pct: 88, currency: "EUR", elec_price: 0.32, gas_price: 0.105,
     break_even_az: 2.68, gas_equiv_kwh: 46.6, cost_wp: 3.20, cost_gas: 4.89,
     cost_delta: -1.69, cost_delta_pct: -34.6, outdoor_mean_c: 4.2, outdoor_min_c: 1.1,
@@ -207,9 +203,6 @@ const REMOVE = {
       age_s: null, received_ago_s: null };
     s.circulation_source = { ...s.circulation_source, subscribed: false, has_value: false,
       power_w: null, state: "unknown", fresh: false, freshness_reason: "no_value", age_s: null };
-    s.power_meter = { ...s.power_meter, subscribed: false, has_value: false, power_w: null,
-      fresh: false, freshness_reason: "no_value", age_s: null };
-    if (s.working_figure) s.working_figure = { ...s.working_figure, source_fresh: false };
     // heating_curve_diagnosis_armed() requires a broker, so clearing it DISARMS a fully mapped room
     // source: armed goes false and the evaluator reports its ordinary Off/Disabled.
     s.heating_curve = { ...s.heating_curve, armed: false, state: "off", state_code: 0,
@@ -241,17 +234,6 @@ const REMOVE = {
       messages: 0, errors: 0, rejections: 0 };
     // history.cpp stops labelling the ring, so /status stops offering the trend.
     s.history.rows = s.history.rows.filter((r) => r.id !== "circulation_state");
-    return s;
-  },
-  powerMeter(s) {
-    s.power_meter = { configured: false, name: "", topic: "", power_path: "",
-      timestamp_path: "", unit: "W", scope: "whole_unit", max_age_s: 60, subscribed: false,
-      has_value: false, power_w: null, age_s: null, fresh: false,
-      freshness_reason: "not_configured", retained: false, messages: 0, errors: 0, rejections: 0 };
-    if (s.working_figure) {
-      s.working_figure = { ...s.working_figure, pel_source: "x10a_ct", is_estimate: true,
-        neutral_band_pct: 20 };
-    }
     return s;
   },
   weather(s) {
@@ -347,8 +329,6 @@ const REMOVE = {
       last_sample_plant_outdoor_temperature_c: null,
       last_sample_plant_outdoor_source: null };
     s.history = { dt: 300, rows: [], modbus_rows: [], env3_rows: [] };
-    s.power_meter = { ...s.power_meter, subscribed: false, has_value: false, power_w: null,
-      fresh: false, freshness_reason: "no_value", age_s: null };
     return s;
   },
 };
@@ -360,15 +340,14 @@ const SCENARIOS = [
   { name: "no MQTT broker (MQTT sources stay saved)", remove: ["mqtt"] },
   { name: "no room source", remove: ["room"] },
   { name: "no circulation witness", remove: ["circulation"] },
-  { name: "no MQTT power meter", remove: ["powerMeter"] },
   { name: "no weather location", remove: ["weather"] },
   { name: "no HomeHub", remove: ["homehub"] },
   { name: "no ENV III", remove: ["env3"] },
   { name: "X10A bus silent", remove: ["x10a"] },
   { name: "no HomeHub and no weather", remove: ["homehub", "weather"] },
   { name: "X10A silent and no HomeHub (no plant source at all)", remove: ["x10a", "homehub"] },
-  { name: "MQTT sources deleted, broker kept", remove: ["room", "circulation", "powerMeter"] },
-  { name: "every optional source removed", remove: ["mqtt", "room", "circulation", "powerMeter",
+  { name: "MQTT sources deleted, broker kept", remove: ["room", "circulation"] },
+  { name: "every optional source removed", remove: ["mqtt", "room", "circulation",
                                                     "weather", "homehub", "env3", "x10a"] },
   { name: "no syslog collector", remove: ["syslog"] },
   { name: "clock never synced", remove: ["ntp"] },
@@ -409,9 +388,6 @@ const SETUP_COPY = [
   { card: "circulationSettingsCardHtml", text: () => ui.t("circ.not_configured"),
     falseWhen: (s) => s.circulation_source.configured,
     why: "the circulation row called a configured witness 'not configured'" },
-  { card: "circulationSettingsCardHtml", text: () => ui.t("pm.not_configured"),
-    falseWhen: (s) => s.power_meter.configured,
-    why: "the power-meter row called a configured meter 'not configured'" },
 ];
 
 let checks = 0;
@@ -463,7 +439,7 @@ for (const scenario of SCENARIOS) {
     checks += 2;
   }
   if (status.gas_comparison.configured) {
-    assert.match(rendered.circulationSettingsCardHtml, /data-act="gas-comparison"[\s\S]*?2[.,]68 · 88% Hs/,
+    assert.match(rendered.circulationSettingsCardHtml, /data-act="gas-comparison"[\s\S]*?>2[.,]68<\/span>/,
       `${scenario.name}: Settings gas-comparison row must keep reading gas_comparison regardless of working_figure`);
     checks++;
   }
@@ -504,16 +480,11 @@ for (const scenario of SCENARIOS) {
       `${scenario.name}: the circulation row must name the missing broker, as the room row does`);
     checks++;
   }
-  if (status.power_meter.configured && !status.mqtt.configured) {
-    assert.match(rendered.circulationSettingsCardHtml, /class="[^"]*\berr\b[^"]*"[^>]*data-act="power-meter"/,
-      `${scenario.name}: an unreachable MQTT power meter must render as an error row`);
-    assert.ok(rendered.circulationSettingsCardHtml.includes(ui.t("circ.broker_off")),
-      `${scenario.name}: the power-meter row must name the missing broker`);
-    checks++;
-  }
-  if (status.power_meter.configured && status.working_figure) {
-    assert.ok(status.working_figure.pel_source.startsWith("mqtt") && !status.working_figure.is_estimate,
-      `${scenario.name}: a configured MQTT power meter must never silently fall back to X10A`);
+  if (status.working_figure) {
+    assert.ok(["x10a_ct", "x10a_inv", "modbus"].includes(status.working_figure.pel_source)
+      && status.working_figure.is_estimate === true
+      && status.working_figure.neutral_band_pct === 20,
+      `${scenario.name}: working_figure must use an onboard estimated electrical source with +-20% band`);
     checks++;
   }
 
@@ -736,26 +707,23 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
   checks++;
 }
 
-// A configured MQTT power meter with missing/untrusted source time must not render as live/healthy
-// or silently fall back to X10A.
+// When X10A is absent while HomeHub Modbus carries the working_figure observation, the UI must
+// keep the refrigerant-service row hidden while rendering the Modbus estimate.
 {
-  const healthy = HEALTHY();
-  ui.S.status = {
-    ...healthy,
-    power_meter: {
-      ...healthy.power_meter,
-      fresh: false,
-      freshness_reason: "retained_without_timestamp",
-      retained: true,
-      age_s: null,
-    },
+  const modbusOnly = REMOVE.x10a(JSON.parse(JSON.stringify(HEALTHY())));
+  modbusOnly.working_figure = {
+    ...HEALTHY().working_figure,
+    pel_source: "modbus",
+    is_estimate: true,
+    neutral_band_pct: 20,
   };
-  const card = ui.circulationSettingsCardHtml();
-  assert.match(card, /class="[^"]*\bwarn\b[^"]*"[^>]*data-act="power-meter"/,
-    "a retained power-meter value without timestamp must warn rather than render live");
-  assert.ok(card.includes(ui.t("circ.stale")),
-    "a stale/untrusted power-meter reading must expose its stale status in Settings");
-  checks++;
+  ui.S.status = modbusOnly;
+  assert.equal(ui.refrigerantServiceRowHtml(), "",
+    "no detected X10A profile must keep the refrigerant-service row hidden even when Modbus answers");
+  const wfHtml = ui.workingFigureRowHtml();
+  assert.match(wfHtml, /~4[.,]10/, "HomeHub Modbus working_figure must keep rendering estimated AZ");
+  assert.match(wfHtml, /HomeHub Modbus/, "HomeHub Modbus working_figure must identify its source");
+  checks += 2;
 }
 
 console.log(`UI absence matrix: ${SCENARIOS.length} source combinations, ${checks} rules held`);

@@ -39,7 +39,7 @@
 #include "logic/detect_identity.hpp"
 #include "logic/json.hpp"
 #include "logic/query_flag.hpp"
-#include "logic/power_meter_source.hpp"
+#include "logic/gas_comparison.hpp"
 #include "logic/reference_temperature.hpp"
 #include "logic/weather_forecast.hpp"
 #include "logic/working_figure.hpp"
@@ -782,59 +782,27 @@ template <typename JsonOut>
     append_status_fmt_double(j, prefix, "%.6g", valid, v);
 }
 
-template <typename JsonOut>
-[[gnu::noinline]] static void append_status_power_meter_json(JsonOut& j, const Config& c,
-                                                             const PowerMeterStatus& pm,
-                                                             bool                    redact) {
-    append_status_bfield(j, "},\"power_meter\":{\"configured\":", !c.power_meter_topic.empty());
-    append_status_redacted(j, ",\"name\":", jstr_r(c.power_meter_name, redact));
-    append_status_redacted(j, ",\"topic\":", jstr_r(c.power_meter_topic, redact));
-    append_status_redacted(j, ",\"power_path\":", jstr_r(c.power_meter_power_path, redact));
-    append_status_redacted(j, ",\"timestamp_path\":", jstr_r(c.power_meter_time_path, redact));
-    append_status_qfield(j, ",\"unit\":", power_meter_unit_name(c.power_meter_unit));
-    append_status_qfield(j, ",\"scope\":", power_meter_scope_name(c.power_meter_scope));
-    append_status_ufield(j, ",\"max_age_s\":", c.power_meter_max_age_s);
-    append_status_bfield(j, ",\"subscribed\":", pm.subscribed);
-    append_status_bfield(j, ",\"has_value\":", pm.has_value);
-    append_status_g6(j, ",\"power_w\":", pm.has_value, pm.power_w);
-    const bool has_ts = pm.has_value && pm.has_source_time;
-    append_status_rfc3339(j, ",\"source_at\":", has_ts, pm.source_unix_s);
-    append_status_opt_int(j, ",\"source_unix_s\":", has_ts, pm.source_unix_s);
-    append_status_opt_quoted(j, ",\"timestamp_source\":", pm.has_value, pm.timestamp_source);
-    append_status_opt_uint(j, ",\"age_s\":", pm.age_known, pm.age_s);
-    append_status_bfield(j, ",\"fresh\":", pm.fresh);
-    append_status_qfield(j, ",\"freshness_reason\":", pm.freshness_reason);
-    append_status_bfield(j, ",\"retained\":", pm.has_value && pm.retained);
-    append_status_ufield(j, ",\"messages\":", pm.messages);
-    append_status_ufield(j, ",\"errors\":", pm.errors);
-    append_status_ufield(j, ",\"rejections\":", pm.rejections);
-    if (!pm.error.empty()) append_status_qfield(j, ",\"error\":", pm.error);
-}
-
 [[gnu::noinline]] static double tariff_from_tenth_mill(uint32_t tm) {
     return static_cast<double>(tm) * 1e-4;
 }
 
 template <typename JsonOut>
 [[gnu::noinline]] static void append_status_gas_comparison_json(JsonOut& j, const Config& c) {
-    const uint8_t          gas_eff_pct = (c.gas_efficiency_pct >= GAS_EFFICIENCY_MIN_PCT &&
-                                 c.gas_efficiency_pct <= GAS_EFFICIENCY_MAX_PCT)
-                                             ? c.gas_efficiency_pct
-                                             : GAS_EFFICIENCY_DEFAULT_PCT;
-    const std::string_view cur         = tariff_currency_valid(c.tariff_currency)
-                                             ? std::string_view(c.tariff_currency)
-                                             : std::string_view("EUR");
-    const bool   configured = (c.elec_price_tenth_mill > 0 && c.gas_price_tenth_mill > 0 &&
-                             gas_comparison_config_valid(c.elec_price_tenth_mill,
-                                                           c.gas_price_tenth_mill, gas_eff_pct, cur));
+    const std::string_view cur = tariff_currency_valid(c.tariff_currency)
+                                     ? std::string_view(c.tariff_currency)
+                                     : std::string_view("EUR");
+    const bool             configured =
+        (c.elec_price_tenth_mill > 0 && c.gas_price_tenth_mill > 0 &&
+         gas_comparison_config_valid(c.elec_price_tenth_mill, c.gas_price_tenth_mill, cur));
     const double elec_price = tariff_from_tenth_mill(c.elec_price_tenth_mill);
     const double gas_price  = tariff_from_tenth_mill(c.gas_price_tenth_mill);
     const double break_even_az =
-        configured ? (elec_price * (static_cast<double>(gas_eff_pct) / 100.0)) / gas_price : 0.0;
+        configured ? (elec_price * (static_cast<double>(GAS_EFFICIENCY_PCT) / 100.0)) / gas_price
+                   : 0.0;
     append_status_bfield(j, "},\"gas_comparison\":{\"configured\":", configured);
     append_status_g6(j, ",\"elec_price\":", configured, elec_price);
     append_status_g6(j, ",\"gas_price\":", configured, gas_price);
-    append_status_ufield(j, ",\"gas_efficiency_pct\":", gas_eff_pct);
+    append_status_ufield(j, ",\"gas_efficiency_pct\":", GAS_EFFICIENCY_PCT);
     append_status_qfield(j, ",\"currency\":", cur);
     append_status_g6(j, ",\"break_even_az\":", configured, break_even_az);
 }
@@ -1311,12 +1279,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         ufield(",\"errors\":", circulation.errors);
         ufield(",\"rejections\":", circulation.rejections);
         if (!circulation.error.empty()) qfield(",\"error\":", circulation.error);
-    }
-    bool power_meter_fresh = false;
-    {
-        const PowerMeterStatus pm = power_meter_status(c);
-        power_meter_fresh         = pm.fresh;
-        append_status_power_meter_json(j, c, pm, redact);
     }
     append_status_gas_comparison_json(j, c);
     // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not
@@ -1861,8 +1823,10 @@ static void append_status_json(JsonOut& j, bool redact) {
             j += "}},";
         }
     }
-    if (c.diagnostics_enabled && diag_effective == DiagnosticsSource::X10a && c.fp_valid) {
-        const logic::WorkingFigureReport wf = checkup_working_figure_status(c, power_meter_fresh);
+    if (c.diagnostics_enabled &&
+        ((diag_effective == DiagnosticsSource::X10a && c.fp_valid) ||
+         (diag_effective == DiagnosticsSource::Modbus && modbus_diag_avail))) {
+        const logic::WorkingFigureReport wf = checkup_working_figure_status(c, diag_effective);
         append_status_working_figure_json(j, wf);
     }
 

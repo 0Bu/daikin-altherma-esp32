@@ -83,7 +83,6 @@
 #include "logic/mqtt_publish_gate.hpp"
 #include "logic/ota_quiesce.hpp" // stand aside while an OTA/weather TLS op owns the heap (legacy-380)
 #include "logic/payload_complete.hpp"
-#include "logic/power_meter_source.hpp"
 #include "logic/reference_temperature.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/weather_mqtt.hpp"
@@ -141,8 +140,6 @@ static std::atomic<bool>        s_announce{false};   // set on connect -> task r
 static std::atomic<bool>        s_ref_reconfigure{false};
 static std::atomic<bool>        s_circulation_reconfigure{false};
 static std::atomic<bool>        s_circulation_probe_reconfigure{false};
-static std::atomic<bool>        s_power_meter_reconfigure{false};
-static std::atomic<bool>        s_power_meter_probe_reconfigure{false};
 static std::atomic<bool>        s_weather_cleanup_requested{false};
 static std::atomic<bool>        s_modbus_cleanup_requested{false};
 static std::atomic<bool>        s_env3_cleanup_requested{false};
@@ -195,7 +192,7 @@ static bool mqtt_publish(const std::string& topic, const char* payload, int len,
 static constexpr size_t REF_QUEUE_DEPTH = 8;
 static constexpr size_t REF_TEMP_PAYLOAD_MAX = 1024;
 static constexpr size_t DISCOVERY_OWNER_PAYLOAD_MAX = 2048;
-static constexpr size_t REF_PAYLOAD_RING_BYTES      = 4608;
+static constexpr size_t REF_PAYLOAD_RING_BYTES      = 3584;
 struct ReferenceMqttFrame {
     char   topic[REF_TEMP_TOPIC_MAX + 1] = {0};
     char   payload[REF_TEMP_PAYLOAD_MAX + 1] = {0};
@@ -204,26 +201,22 @@ struct ReferenceMqttFrame {
     int64_t received_unix_s = -1;
     uint32_t reference_epoch                   = 0;
     uint32_t circulation_epoch                 = 0;
-    uint32_t power_meter_epoch                 = 0;
     uint32_t probe_generation                  = 0;
-    uint32_t power_meter_probe_generation      = 0;
     bool   retained = false;
 };
 // Variable-length inbound topics and payloads share one static SPSC ring rather than allocating
 // eight worst-case 1,256-byte frames in internal heap (~6 KiB net DRAM reclaimed).
 // Zero default init keeps static scratch metadata descriptors in BSS; callers populate all fields.
 struct ReferenceMqttFrameQueued {
-    int64_t  received_unix_s              = 0;
-    uint64_t received_ms                  = 0;
-    uint32_t reference_epoch              = 0;
-    uint32_t circulation_epoch            = 0;
-    uint32_t power_meter_epoch            = 0;
-    uint32_t probe_generation             = 0;
-    uint32_t power_meter_probe_generation = 0;
-    uint16_t ring_offset                  = 0;
-    uint16_t topic_len                    = 0;
-    uint16_t payload_len                  = 0;
-    bool     retained                     = false;
+    int64_t  received_unix_s   = 0;
+    uint64_t received_ms       = 0;
+    uint32_t reference_epoch   = 0;
+    uint32_t circulation_epoch = 0;
+    uint32_t probe_generation  = 0;
+    uint16_t ring_offset       = 0;
+    uint16_t topic_len         = 0;
+    uint16_t payload_len       = 0;
+    bool     retained          = false;
 };
 static_assert(sizeof(ReferenceMqttFrameQueued) <= 48,
               "inbound frame queue descriptor must stay compact");
@@ -283,13 +276,11 @@ static bool                s_ref_subscription_announced = false; // one success 
 static std::array<std::string, 9> s_ref_binding_fields;                 // guarded by s_mtx
 static uint16_t            s_ref_binding_fixed_setpoint_tenths = 0;
 static bool s_ref_capture_enabled = false; // saved mapping may remain while OFF
-static std::array<std::string, 36> s_mqtt_strings;
+static std::array<std::string, 31> s_mqtt_strings;
 static std::string&                s_ref_last_logged_error =
     s_mqtt_strings[0]; // mqtt_task only; rate-limits bad mappings
 static uint64_t s_ref_last_error_log_ms = 0;
 static bool     reference_topic_owned(const std::string& topic);
-static bool     circulation_topic_owned(const std::string& topic);
-static bool     power_meter_topic_owned(const std::string& topic);
 
 static CirculationSourceStatus  s_circulation_status;
 static CirculationPowerTracker s_circulation_tracker;
@@ -321,34 +312,6 @@ static bool                  s_circulation_capture_enabled        = false;
 static uint32_t s_circulation_runtime_max_age_s = CIRC_SOURCE_MAX_AGE_DEFAULT_S; // guarded by s_mtx
 static uint16_t s_circulation_on_tenths_w = 0, s_circulation_off_tenths_w = 0;
 static uint32_t s_circulation_confirm_s = 0; // applied policy, guarded by s_mtx
-
-static PowerMeterStatus         s_power_meter_status;
-static SourceTimestampHighWater s_power_meter_source_time; // guarded by s_mtx
-static_assert(std::is_nothrow_move_assignable<PowerMeterStatus>::value,
-              "power meter status commits must not allocate or throw");
-static std::atomic<uint32_t> s_power_meter_requested_epoch{1};
-static uint32_t              s_power_meter_applied_epoch = 0; // guarded by s_mtx
-struct PowerMeterProbeState {
-    PowerMeterTestConfig config;
-    uint32_t             generation = 0;
-    bool                 active = false, subscribed = false, passed = false, retained = false;
-    double               power_w = 0.0;
-    std::string          error;
-};
-static PowerMeterProbeState  s_power_meter_probe;
-static std::atomic<uint32_t> s_power_meter_probe_capture_generation{0};
-static SemaphoreHandle_t     s_power_meter_probe_sem              = nullptr;
-static std::string&          s_power_meter_subscribed_topic       = s_mqtt_strings[31];
-static bool                  s_power_meter_subscription_retry     = false; // mqtt_task only
-static std::string&          s_power_meter_probe_subscribed_topic = s_mqtt_strings[32];
-static uint32_t              s_power_meter_probe_task_generation  = 0;
-static std::string&          s_power_meter_binding_topic          = s_mqtt_strings[33];
-static std::string&          s_power_meter_binding_power_path     = s_mqtt_strings[34];
-static std::string&          s_power_meter_binding_time_path      = s_mqtt_strings[35];
-static bool                  s_power_meter_capture_enabled        = false;
-static uint32_t s_power_meter_runtime_max_age_s = POWER_METER_MAX_AGE_DEFAULT_S; // guarded by s_mtx
-static PowerMeterUnit  s_power_meter_runtime_unit  = PowerMeterUnit::Watts;      // guarded by s_mtx
-static PowerMeterScope s_power_meter_runtime_scope = PowerMeterScope::WholeUnit; // guarded by s_mtx
 
 // RAII guard around s_mtx (same idiom as config.cpp / hp_poll.cpp). Replaces the raw take/give pairs
 // so a throw on a reader (the broker copy in mqtt_status) can't strand the mutex and wedge every
@@ -2271,22 +2234,11 @@ static bool discovery_topic_is_current_input(std::string_view topic) {
                                 s_circulation_requested_epoch.load(std::memory_order_acquire)) &&
         matches(s_circulation_binding_topic))
         return true;
-    if (s_power_meter_capture_enabled &&
-        reference_epoch_current(s_power_meter_requested_epoch.load(std::memory_order_acquire),
-                                s_power_meter_applied_epoch,
-                                s_power_meter_requested_epoch.load(std::memory_order_acquire)) &&
-        matches(s_power_meter_binding_topic))
-        return true;
     const uint32_t generation =
         s_circulation_probe_capture_generation.load(std::memory_order_acquire);
-    if (generation != 0 && s_circulation_probe.active &&
-        s_circulation_probe.generation == generation && matches(s_circulation_probe.config.topic))
-        return true;
-    const uint32_t pm_generation =
-        s_power_meter_probe_capture_generation.load(std::memory_order_acquire);
-    return pm_generation != 0 && s_power_meter_probe.active &&
-           s_power_meter_probe.generation == pm_generation &&
-           matches(s_power_meter_probe.config.topic);
+    return generation != 0 && s_circulation_probe.active &&
+           s_circulation_probe.generation == generation &&
+           matches(s_circulation_probe.config.topic);
 }
 
 // Reassemble a possibly-fragmented MQTT DATA event without allocating. Unrelated discovery does
@@ -2312,11 +2264,8 @@ static void capture_reference_frame(esp_mqtt_event_handle_t e) {
     if (e->current_data_offset == 0) {
         s_ref_rx.reference_epoch   = s_ref_requested_epoch.load(std::memory_order_acquire);
         s_ref_rx.circulation_epoch = s_circulation_requested_epoch.load(std::memory_order_acquire);
-        s_ref_rx.power_meter_epoch = s_power_meter_requested_epoch.load(std::memory_order_acquire);
         s_ref_rx.probe_generation =
             s_circulation_probe_capture_generation.load(std::memory_order_acquire);
-        s_ref_rx.power_meter_probe_generation =
-            s_power_meter_probe_capture_generation.load(std::memory_order_acquire);
         s_ref_rx_received = 0;
         s_ref_rx_active = e->topic && e->topic_len > 0 &&
                           e->topic_len <= static_cast<int>(REF_TEMP_TOPIC_MAX);
@@ -2354,17 +2303,15 @@ static void capture_reference_frame(esp_mqtt_event_handle_t e) {
             const size_t after_payload =
                 mqtt_ring_write(s_ref_payload_ring, REF_PAYLOAD_RING_BYTES, after_topic,
                                 s_ref_rx.payload, s_ref_rx.payload_len);
-            s_ref_rx_meta.received_unix_s              = s_ref_rx.received_unix_s;
-            s_ref_rx_meta.received_ms                  = s_ref_rx.received_ms;
-            s_ref_rx_meta.reference_epoch              = s_ref_rx.reference_epoch;
-            s_ref_rx_meta.circulation_epoch            = s_ref_rx.circulation_epoch;
-            s_ref_rx_meta.power_meter_epoch            = s_ref_rx.power_meter_epoch;
-            s_ref_rx_meta.probe_generation             = s_ref_rx.probe_generation;
-            s_ref_rx_meta.power_meter_probe_generation = s_ref_rx.power_meter_probe_generation;
-            s_ref_rx_meta.ring_offset                  = static_cast<uint16_t>(s_ref_ring_pos);
-            s_ref_rx_meta.topic_len                    = static_cast<uint16_t>(topic_len);
-            s_ref_rx_meta.payload_len = static_cast<uint16_t>(s_ref_rx.payload_len);
-            s_ref_rx_meta.retained    = s_ref_rx.retained;
+            s_ref_rx_meta.received_unix_s   = s_ref_rx.received_unix_s;
+            s_ref_rx_meta.received_ms       = s_ref_rx.received_ms;
+            s_ref_rx_meta.reference_epoch   = s_ref_rx.reference_epoch;
+            s_ref_rx_meta.circulation_epoch = s_ref_rx.circulation_epoch;
+            s_ref_rx_meta.probe_generation  = s_ref_rx.probe_generation;
+            s_ref_rx_meta.ring_offset       = static_cast<uint16_t>(s_ref_ring_pos);
+            s_ref_rx_meta.topic_len         = static_cast<uint16_t>(topic_len);
+            s_ref_rx_meta.payload_len       = static_cast<uint16_t>(s_ref_rx.payload_len);
+            s_ref_rx_meta.retained          = s_ref_rx.retained;
             if (xQueueSend(s_ref_queue, &s_ref_rx_meta, 0) == pdTRUE) {
                 s_ref_ring_pos = after_payload;
                 s_ref_ring_produced += static_cast<uint32_t>(total_len);
@@ -2654,7 +2601,6 @@ static void service_circulation_subscription(const Config& c, uint32_t epoch) {
         const bool retired =
             s_circulation_subscribed_topic.empty() || !s_connected ||
             reference_topic_owned(s_circulation_subscribed_topic) ||
-            power_meter_topic_owned(s_circulation_subscribed_topic) ||
             s_circulation_subscribed_topic == s_circulation_probe_subscribed_topic ||
             esp_mqtt_client_unsubscribe(s_client, s_circulation_subscribed_topic.c_str()) >= 0;
         if (retired) s_circulation_subscribed_topic.clear();
@@ -2704,7 +2650,6 @@ static void service_circulation_subscription(const Config& c, uint32_t epoch) {
     if (!s_circulation_subscribed_topic.empty() &&
         s_circulation_subscribed_topic != c.circulation_topic) {
         if (!reference_topic_owned(s_circulation_subscribed_topic) &&
-            !power_meter_topic_owned(s_circulation_subscribed_topic) &&
             s_circulation_subscribed_topic != s_circulation_probe_subscribed_topic &&
             esp_mqtt_client_unsubscribe(s_client, s_circulation_subscribed_topic.c_str()) < 0) {
             s_circulation_subscription_retry = true;
@@ -2747,7 +2692,6 @@ static void service_circulation_probe_subscription(const Config& saved) {
             s_circulation_probe_subscribed_topic.empty() || !s_connected ||
             reference_topic_owned(s_circulation_probe_subscribed_topic) ||
             s_circulation_probe_subscribed_topic == s_circulation_subscribed_topic ||
-            power_meter_topic_owned(s_circulation_probe_subscribed_topic) ||
             esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str()) >=
                 0;
         if (retired) s_circulation_probe_subscribed_topic.clear();
@@ -2772,7 +2716,6 @@ static void service_circulation_probe_subscription(const Config& saved) {
             s_circulation_probe_subscribed_topic.empty() ||
             s_circulation_probe_subscribed_topic == s_circulation_subscribed_topic ||
             reference_topic_owned(s_circulation_probe_subscribed_topic) ||
-            power_meter_topic_owned(s_circulation_probe_subscribed_topic) ||
             esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str()) >=
                 0;
         if (retired) s_circulation_probe_subscribed_topic.clear();
@@ -2786,7 +2729,6 @@ static void service_circulation_probe_subscription(const Config& saved) {
         s_circulation_probe_subscribed_topic != candidate.topic) {
         if (!reference_topic_owned(s_circulation_probe_subscribed_topic) &&
             s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic &&
-            !power_meter_topic_owned(s_circulation_probe_subscribed_topic) &&
             esp_mqtt_client_unsubscribe(s_client, s_circulation_probe_subscribed_topic.c_str()) <
                 0) {
             Lock lk(s_mtx);
@@ -2809,8 +2751,7 @@ static void service_circulation_probe_subscription(const Config& saved) {
     // Commit the accepted cleanup identity before the status-generation check, without allocation.
     if (id >= 0 && candidate.topic != s_circulation_subscribed_topic &&
         !reference_topic_owned(candidate.topic)) {
-        if (!power_meter_topic_owned(candidate.topic))
-            s_circulation_probe_subscribed_topic.swap(candidate.topic);
+        s_circulation_probe_subscribed_topic.swap(candidate.topic);
     }
     bool signal = false;
     {
@@ -2886,21 +2827,10 @@ static bool reference_topic_owned(const std::string& topic) {
     return reference_topic_set_contains(s_ref_subscribed_topics, topic);
 }
 
-static bool circulation_topic_owned(const std::string& topic) {
-    if (topic.empty()) return false;
-    return topic == s_circulation_subscribed_topic || topic == s_circulation_probe_subscribed_topic;
-}
-
-static bool power_meter_topic_owned(const std::string& topic) {
-    return !topic.empty() && (topic == s_power_meter_subscribed_topic ||
-                              topic == s_power_meter_probe_subscribed_topic);
-}
-
 static bool unsubscribe_reference_topic_if_unused(const std::string&       topic,
                                                   const ReferenceTopicSet& keep) {
     if (topic.empty() || !s_connected || reference_topic_set_contains(keep, topic) ||
-        power_meter_topic_owned(topic) || topic == s_circulation_subscribed_topic ||
-        topic == s_circulation_probe_subscribed_topic)
+        topic == s_circulation_subscribed_topic || topic == s_circulation_probe_subscribed_topic)
         return true;
     return esp_mqtt_client_unsubscribe(s_client, topic.c_str()) >= 0;
 }
@@ -3331,375 +3261,6 @@ static __attribute__((noinline)) void service_reference_frame(const ReferenceMqt
     apply_reference_frame(frame, c, decoded, setpoint_topic, timestamp_topic, timestamp_mapped);
 }
 
-struct DecodedPowerMeterFrame {
-    bool        valid            = false;
-    bool        has_source_time  = false;
-    double      power_w          = 0.0;
-    int64_t     source_unix_s    = -1;
-    const char* timestamp_source = "mqtt_arrival";
-    const char* error            = nullptr;
-};
-
-static __attribute__((noinline)) DecodedPowerMeterFrame
-decode_power_meter_frame(const ReferenceMqttFrame& frame, const std::string& power_path,
-                         const std::string& timestamp_path, PowerMeterUnit unit) {
-    DecodedPowerMeterFrame out;
-    if (frame.payload_len == 0 ||
-        !json_payload_strings_ok(std::string_view(frame.payload, frame.payload_len))) {
-        out.error = "payload is not valid JSON";
-        return out;
-    }
-    if (!json_payload_depth_ok(std::string_view(frame.payload, frame.payload_len))) {
-        out.error = "payload nesting depth exceeded";
-        return out;
-    }
-    const char* parse_end = nullptr;
-    JsonGuard root(cJSON_ParseWithLengthOpts(frame.payload, frame.payload_len, &parse_end, false));
-    if (!root) {
-        out.error = "payload is not valid JSON";
-        return out;
-    }
-    const char* payload_end = frame.payload + frame.payload_len;
-    if (!parse_end || parse_end < frame.payload || parse_end > payload_end ||
-        !json_suffix_is_whitespace(
-            std::string_view(parse_end, static_cast<size_t>(payload_end - parse_end)))) {
-        out.error = "payload has trailing data";
-        return out;
-    }
-    cJSON* power = reference_json_item(root.get(), power_path);
-    double watts = 0.0;
-    if (!cJSON_IsNumber(power) || !power_meter_watts_from_raw(power->valuedouble, unit, watts)) {
-        out.error = "Power path is missing, not numeric or out of range";
-        return out;
-    }
-    if (!timestamp_path.empty()) {
-        cJSON* timestamp = reference_json_item(root.get(), timestamp_path);
-        if (!reference_payload_timestamp(timestamp, out.source_unix_s, out.timestamp_source)) {
-            out.error = "Timestamp path is missing or not RFC3339/Unix seconds";
-            return out;
-        }
-        if (frame.received_unix_s >= 0 &&
-            out.source_unix_s > frame.received_unix_s + REF_TEMP_FUTURE_TOLERANCE_S) {
-            out.error = "Source timestamp is in the future";
-            return out;
-        }
-        out.has_source_time = true;
-    }
-    out.power_w = watts;
-    out.valid   = true;
-    return out;
-}
-
-static __attribute__((noinline)) ReferenceFreshness
-power_meter_frame_freshness(const ReferenceMqttFrame& frame, const DecodedPowerMeterFrame& decoded,
-                            bool source_time_mapped, uint32_t max_age_s) {
-    uint64_t now_ms     = 0;
-    int64_t  now_unix_s = -1;
-    mqtt_now_ms_and_unix(now_ms, now_unix_s);
-    return power_meter_freshness(source_time_mapped, true, frame.retained, decoded.has_source_time,
-                                 decoded.source_unix_s, frame.received_ms, now_unix_s, now_ms,
-                                 max_age_s);
-}
-
-static void reset_power_meter_status_locked(bool configured) {
-    s_power_meter_status            = PowerMeterStatus{};
-    s_power_meter_status.configured = configured;
-}
-
-static bool power_meter_epoch_current_locked(uint32_t epoch) {
-    return reference_epoch_current(epoch, s_power_meter_applied_epoch,
-                                   s_power_meter_requested_epoch.load(std::memory_order_acquire));
-}
-
-static bool power_meter_request_current_locked(uint32_t epoch, const Config& c) {
-    return power_meter_epoch_current_locked(epoch) &&
-           c.power_meter_topic == s_power_meter_binding_topic &&
-           c.power_meter_power_path == s_power_meter_binding_power_path &&
-           c.power_meter_time_path == s_power_meter_binding_time_path &&
-           (c.diagnostics_enabled && !c.power_meter_topic.empty()) ==
-               s_power_meter_capture_enabled &&
-           c.power_meter_max_age_s == s_power_meter_runtime_max_age_s &&
-           c.power_meter_unit == s_power_meter_runtime_unit &&
-           c.power_meter_scope == s_power_meter_runtime_scope;
-}
-
-static bool retire_power_meter_topic(std::string& topic, const std::string& other_topic) {
-    const bool retired = topic.empty() || !s_connected || topic == other_topic ||
-                         reference_topic_owned(topic) || circulation_topic_owned(topic) ||
-                         esp_mqtt_client_unsubscribe(s_client, topic.c_str()) >= 0;
-    if (retired) topic.clear();
-    return retired;
-}
-
-static void set_power_meter_sub_state(uint32_t epoch, bool subscribed, const char* err,
-                                      bool inc_err) {
-    std::string err_copy = err ? err : "";
-    Lock        lk(s_mtx);
-    if (!power_meter_epoch_current_locked(epoch)) return;
-    s_power_meter_status.subscribed = subscribed;
-    if (err) s_power_meter_status.error.swap(err_copy);
-    if (inc_err) s_power_meter_status.errors++;
-}
-
-static __attribute__((noinline)) void service_power_meter_subscription(const Config& c,
-                                                                       uint32_t      epoch) {
-    const bool configured      = !c.power_meter_topic.empty();
-    const bool capture_enabled = c.diagnostics_enabled && configured;
-    bool       mapping_changed = false;
-    bool       changed         = false;
-    {
-        Lock lk(s_mtx);
-        if (epoch != s_power_meter_requested_epoch.load(std::memory_order_acquire)) return;
-        mapping_changed = c.power_meter_topic != s_power_meter_binding_topic ||
-                          c.power_meter_power_path != s_power_meter_binding_power_path ||
-                          c.power_meter_time_path != s_power_meter_binding_time_path;
-        changed = mapping_changed || capture_enabled != s_power_meter_capture_enabled ||
-                  c.power_meter_unit != s_power_meter_runtime_unit ||
-                  c.power_meter_scope != s_power_meter_runtime_scope;
-    }
-    std::array<std::string, 3> binding;
-    if (changed) binding = {c.power_meter_topic, c.power_meter_power_path, c.power_meter_time_path};
-    {
-        Lock lk(s_mtx);
-        if (epoch != s_power_meter_requested_epoch.load(std::memory_order_acquire)) return;
-        if (changed) {
-            s_power_meter_binding_topic.swap(binding[0]);
-            s_power_meter_binding_power_path.swap(binding[1]);
-            s_power_meter_binding_time_path.swap(binding[2]);
-            s_power_meter_capture_enabled = capture_enabled;
-            reset_power_meter_status_locked(configured);
-            if (mapping_changed) s_power_meter_source_time.reset();
-        }
-        s_power_meter_runtime_max_age_s = c.power_meter_max_age_s;
-        s_power_meter_runtime_unit      = c.power_meter_unit;
-        s_power_meter_runtime_scope     = c.power_meter_scope;
-        s_power_meter_status.configured = configured;
-        s_power_meter_applied_epoch     = epoch;
-    }
-
-    if (!capture_enabled) {
-        s_power_meter_reconfigure.exchange(false);
-        const bool retired               = retire_power_meter_topic(s_power_meter_subscribed_topic,
-                                                                    s_power_meter_probe_subscribed_topic);
-        s_power_meter_subscription_retry = !retired;
-        set_power_meter_sub_state(epoch, false, retired ? nullptr : "MQTT unsubscribe failed",
-                                  false);
-        return;
-    }
-
-    const char* invalid = nullptr;
-    if (!power_meter_config_valid(c.power_meter_name, c.power_meter_topic, c.power_meter_power_path,
-                                  c.power_meter_time_path, c.power_meter_max_age_s, &invalid)) {
-        set_power_meter_sub_state(epoch, false, invalid ? invalid : "invalid power meter config",
-                                  true);
-        return;
-    }
-
-    const bool force = s_power_meter_reconfigure.exchange(false);
-    if (force) {
-        s_power_meter_subscription_retry = true;
-        Lock lk(s_mtx);
-        if (!power_meter_epoch_current_locked(epoch)) return;
-        reset_power_meter_status_locked(configured);
-    }
-    if (!s_connected) {
-        set_power_meter_sub_state(epoch, false, nullptr, false);
-        return;
-    }
-    if (!force && !s_power_meter_subscription_retry &&
-        s_power_meter_subscribed_topic == c.power_meter_topic)
-        return;
-    std::string prepared_owner = c.power_meter_topic;
-    if (!s_power_meter_subscribed_topic.empty() &&
-        s_power_meter_subscribed_topic != c.power_meter_topic &&
-        !retire_power_meter_topic(s_power_meter_subscribed_topic,
-                                  s_power_meter_probe_subscribed_topic)) {
-        s_power_meter_subscription_retry = true;
-        set_power_meter_sub_state(epoch, false, "MQTT unsubscribe failed", true);
-        return;
-    }
-
-    const int id = esp_mqtt_client_subscribe(s_client, c.power_meter_topic.c_str(), 0);
-    if (id >= 0) s_power_meter_subscribed_topic.swap(prepared_owner);
-    s_power_meter_subscription_retry = id < 0;
-    set_power_meter_sub_state(epoch, id >= 0, id >= 0 ? "" : "MQTT subscribe failed", id < 0);
-    if (id >= 0) {
-        diag_printf("mqtt: power meter subscription active\n");
-    }
-}
-
-[[gnu::noinline]] static void fail_power_meter_probe(uint32_t expected_gen, const char* msg,
-                                                     bool deactivate) {
-    std::string err_copy = msg;
-    bool        signal   = false;
-    {
-        Lock lk(s_mtx);
-        if (expected_gen != 0) {
-            if (!s_power_meter_probe.active || s_power_meter_probe.generation != expected_gen)
-                return;
-            s_power_meter_probe.subscribed = false;
-        }
-        s_power_meter_probe.error.swap(err_copy);
-        if (deactivate) {
-            signal                     = s_power_meter_probe.active;
-            s_power_meter_probe.active = false;
-            s_power_meter_probe.passed = false;
-            s_power_meter_probe_capture_generation.store(0, std::memory_order_release);
-        }
-    }
-    if (signal && s_power_meter_probe_sem) xSemaphoreGive(s_power_meter_probe_sem);
-}
-
-static __attribute__((noinline)) void service_power_meter_probe_subscription(const Config& saved) {
-    if (!saved.diagnostics_enabled) {
-        fail_power_meter_probe(0, "Plant diagnostics are disabled", true);
-        (void)retire_power_meter_topic(s_power_meter_probe_subscribed_topic,
-                                       s_power_meter_subscribed_topic);
-        s_power_meter_probe_task_generation = 0;
-        return;
-    }
-    if (!s_connected) return;
-    if (s_power_meter_probe_reconfigure.exchange(false)) s_power_meter_probe_task_generation = 0;
-    bool                 active     = false;
-    uint32_t             generation = 0;
-    PowerMeterTestConfig candidate;
-    {
-        Lock lk(s_mtx);
-        active     = s_power_meter_probe.active;
-        generation = s_power_meter_probe.generation;
-        if (active) candidate = s_power_meter_probe.config;
-    }
-    if (!active) {
-        (void)retire_power_meter_topic(s_power_meter_probe_subscribed_topic,
-                                       s_power_meter_subscribed_topic);
-        s_power_meter_probe_task_generation = 0;
-        return;
-    }
-    if (s_power_meter_probe_task_generation == generation) return;
-    if (!s_power_meter_probe_subscribed_topic.empty() &&
-        s_power_meter_probe_subscribed_topic != candidate.topic &&
-        !retire_power_meter_topic(s_power_meter_probe_subscribed_topic,
-                                  s_power_meter_subscribed_topic)) {
-        fail_power_meter_probe(generation, "MQTT unsubscribe failed", false);
-        return;
-    }
-    const int id = esp_mqtt_client_subscribe(s_client, candidate.topic.c_str(), 0);
-    if (id >= 0 && candidate.topic != s_power_meter_subscribed_topic &&
-        !reference_topic_owned(candidate.topic) && !circulation_topic_owned(candidate.topic)) {
-        s_power_meter_probe_subscribed_topic.swap(candidate.topic);
-    }
-    if (id < 0) {
-        fail_power_meter_probe(generation, "MQTT subscribe failed", true);
-    } else {
-        Lock lk(s_mtx);
-        if (s_power_meter_probe.active && s_power_meter_probe.generation == generation)
-            s_power_meter_probe.subscribed = true;
-    }
-    s_power_meter_probe_task_generation = generation;
-}
-
-static __attribute__((noinline)) void
-service_power_meter_probe_frame(const ReferenceMqttFrame& frame) {
-    struct {
-        std::string    power_path, timestamp_path;
-        uint32_t       max_age_s = 0;
-        PowerMeterUnit unit      = PowerMeterUnit::Watts;
-    } candidate;
-    uint32_t generation = 0;
-    {
-        Lock lk(s_mtx);
-        if (!s_power_meter_probe.active ||
-            frame.power_meter_probe_generation != s_power_meter_probe.generation ||
-            frame.topic != s_power_meter_probe.config.topic)
-            return;
-        candidate.power_path     = s_power_meter_probe.config.power_path;
-        candidate.timestamp_path = s_power_meter_probe.config.timestamp_path;
-        candidate.max_age_s      = s_power_meter_probe.config.max_age_s;
-        candidate.unit           = s_power_meter_probe.config.unit;
-        generation               = s_power_meter_probe.generation;
-    }
-    const DecodedPowerMeterFrame decoded = decode_power_meter_frame(
-        frame, candidate.power_path, candidate.timestamp_path, candidate.unit);
-    const ReferenceFreshness freshness =
-        decoded.valid ? power_meter_frame_freshness(
-                            frame, decoded, !candidate.timestamp_path.empty(), candidate.max_age_s)
-                      : ReferenceFreshness{};
-    bool signal = false;
-    {
-        Lock lk(s_mtx);
-        if (!s_power_meter_probe.active || s_power_meter_probe.generation != generation) return;
-        if (!decoded.valid) {
-            s_power_meter_probe.error = decoded.error ? decoded.error : "Source value is invalid";
-            return;
-        }
-        if (!freshness.fresh) {
-            s_power_meter_probe.error =
-                freshness.reason ? freshness.reason : "Source value is stale";
-            return;
-        }
-        s_power_meter_probe.active   = false;
-        s_power_meter_probe.passed   = true;
-        s_power_meter_probe.retained = frame.retained;
-        s_power_meter_probe.power_w  = decoded.power_w;
-        s_power_meter_probe.error.clear();
-        signal = true;
-    }
-    if (signal && s_power_meter_probe_sem) xSemaphoreGive(s_power_meter_probe_sem);
-}
-
-static __attribute__((noinline)) void service_power_meter_frame(const ReferenceMqttFrame& frame,
-                                                                const Config&             c) {
-    if (!c.diagnostics_enabled || c.power_meter_topic.empty() || frame.topic != c.power_meter_topic)
-        return;
-    PowerMeterStatus         candidate;
-    SourceTimestampHighWater source_time;
-    {
-        Lock lk(s_mtx);
-        if (!power_meter_request_current_locked(frame.power_meter_epoch, c)) return;
-        candidate   = s_power_meter_status;
-        source_time = s_power_meter_source_time;
-    }
-    candidate.messages++;
-    const DecodedPowerMeterFrame decoded = decode_power_meter_frame(
-        frame, c.power_meter_power_path, c.power_meter_time_path, c.power_meter_unit);
-    if (!decoded.valid) {
-        candidate.has_value       = false;
-        candidate.power_w         = 0.0;
-        candidate.retained        = false;
-        candidate.has_source_time = false;
-        candidate.source_unix_s   = -1;
-        candidate.error           = decoded.error ? decoded.error : "Source value is invalid";
-        candidate.errors++;
-        candidate.rejections++;
-    } else if (decoded.has_source_time && !source_time.allows(decoded.source_unix_s)) {
-        candidate.error = "Source timestamp moved backward";
-        candidate.errors++;
-        candidate.rejections++;
-    } else {
-        const ReferenceFreshness freshness = power_meter_frame_freshness(
-            frame, decoded, !c.power_meter_time_path.empty(), c.power_meter_max_age_s);
-        if (!freshness.fresh) {
-            candidate.error = freshness.reason ? freshness.reason : "Source value is stale";
-            candidate.rejections++;
-        } else {
-            candidate.power_w          = decoded.power_w;
-            candidate.received_ms      = frame.received_ms;
-            candidate.received_unix_s  = frame.received_unix_s;
-            candidate.source_unix_s    = decoded.has_source_time ? decoded.source_unix_s : -1;
-            candidate.retained         = frame.retained;
-            candidate.has_source_time  = decoded.has_source_time;
-            candidate.has_value        = true;
-            candidate.timestamp_source = decoded.timestamp_source;
-            candidate.error.clear();
-            if (decoded.has_source_time) (void)source_time.accept(decoded.source_unix_s);
-        }
-    }
-    Lock lk(s_mtx);
-    if (!power_meter_request_current_locked(frame.power_meter_epoch, c)) return;
-    s_power_meter_status      = std::move(candidate);
-    s_power_meter_source_time = source_time;
-}
-
 // Each source handler is a sibling. The queue dispatcher owns no mapping or status snapshot.
 static __attribute__((noinline)) void service_reference_frames(const Config& c) {
     if (!s_ref_queue) return;
@@ -3727,19 +3288,14 @@ static __attribute__((noinline)) void service_reference_frames(const Config& c) 
         s_ref_task_frame.received_unix_s                      = s_ref_task_meta.received_unix_s;
         s_ref_task_frame.reference_epoch                      = s_ref_task_meta.reference_epoch;
         s_ref_task_frame.circulation_epoch                    = s_ref_task_meta.circulation_epoch;
-        s_ref_task_frame.power_meter_epoch                    = s_ref_task_meta.power_meter_epoch;
         s_ref_task_frame.probe_generation                     = s_ref_task_meta.probe_generation;
-        s_ref_task_frame.power_meter_probe_generation =
-            s_ref_task_meta.power_meter_probe_generation;
-        s_ref_task_frame.retained = s_ref_task_meta.retained;
+        s_ref_task_frame.retained                             = s_ref_task_meta.retained;
         s_ref_ring_consumed.fetch_add(static_cast<uint32_t>(s_ref_task_meta.topic_len) +
                                           static_cast<uint32_t>(s_ref_task_meta.payload_len),
                                       std::memory_order_release);
         if (!c.diagnostics_enabled) continue;
         service_circulation_probe_frame(s_ref_task_frame);
         service_circulation_frame(s_ref_task_frame, c);
-        service_power_meter_probe_frame(s_ref_task_frame);
-        service_power_meter_frame(s_ref_task_frame, c);
         service_reference_frame(s_ref_task_frame, c);
     }
 }
@@ -3793,8 +3349,6 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         s_ref_reconfigure               = true;
         s_circulation_reconfigure       = true;
         s_circulation_probe_reconfigure = true;
-        s_power_meter_reconfigure       = true;
-        s_power_meter_probe_reconfigure = true;
         set_status(true, nullptr);
         diag_printf("mqtt: transport client connected\n");
         s_transport_connecting.store(false, std::memory_order_release);
@@ -3808,7 +3362,6 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
             Lock lk(s_mtx);
             s_ref_status.subscribed         = false;
             s_circulation_status.subscribed = false;
-            s_power_meter_status.subscribed = false;
         }
         diag_printf("mqtt: disconnected (will retry)\n");
         s_transport_connecting.store(false, std::memory_order_release);
@@ -4017,15 +3570,11 @@ static void mqtt_task(void*) {
             const uint32_t room_history_generation = history_room_generation();
             const uint32_t circulation_epoch =
                 s_circulation_requested_epoch.load(std::memory_order_acquire);
-            const uint32_t power_meter_epoch =
-                s_power_meter_requested_epoch.load(std::memory_order_acquire);
             const Config ref_config = config();
             publish_stage = "subscriptions";
             service_reference_subscription(ref_config, reference_epoch);
             service_circulation_subscription(ref_config, circulation_epoch);
             service_circulation_probe_subscription(ref_config);
-            service_power_meter_subscription(ref_config, power_meter_epoch);
-            service_power_meter_probe_subscription(ref_config);
             service_reference_frames(ref_config);
             record_room_history(ref_config, room_history_generation);
             // The circulation witness is MQTT-owned and remains meaningful while X10A auto-detect
@@ -4358,18 +3907,12 @@ void mqtt_ha_start() {
         s_ref_status.configured         = !c.ref_temp_topic.empty();
         s_circulation_status.configured = !c.circulation_topic.empty();
         s_circulation_runtime_max_age_s = c.circulation_max_age_s;
-        s_power_meter_status.configured = !c.power_meter_topic.empty();
-        s_power_meter_runtime_max_age_s = c.power_meter_max_age_s;
-        s_power_meter_runtime_unit      = c.power_meter_unit;
-        s_power_meter_runtime_scope     = c.power_meter_scope;
     }
     // The circulation test shares std::strings with the HTTP task, so it also needs its own
     // hand-off semaphore; s_mtx is guaranteed above.
     s_circulation_probe_sem = xSemaphoreCreateBinary();
     if (!s_circulation_probe_sem)
         diag_printf("mqtt: circulation-source test semaphore alloc failed\n");
-    s_power_meter_probe_sem = xSemaphoreCreateBinary();
-    if (!s_power_meter_probe_sem) diag_printf("mqtt: power-meter test semaphore alloc failed\n");
     if (!s_status.configured) return;
 
     s_transport_pause_state.store(0, std::memory_order_release);
@@ -4383,8 +3926,6 @@ void mqtt_ha_start() {
         s_ref_status.errors++;
         s_circulation_status.error = "receive queue alloc failed";
         s_circulation_status.errors++;
-        s_power_meter_status.error = "receive queue alloc failed";
-        s_power_meter_status.errors++;
         diag_printf("mqtt: reference receive queue alloc failed\n");
     }
 
@@ -4669,7 +4210,7 @@ CirculationSourceTestResult mqtt_circulation_test(
     uint32_t generation = 0;
     {
         Lock lk(s_mtx);
-        if (s_circulation_probe.active || s_power_meter_probe.active) {
+        if (s_circulation_probe.active) {
             result.error = "Another circulation source test is already running";
             return result;
         }
@@ -4776,155 +4317,6 @@ void mqtt_request_modbus_cleanup() { s_modbus_cleanup_requested = true; }
 
 uint32_t mqtt_retirement_evidence() noexcept {
     return s_retirement_evidence.load(std::memory_order_acquire);
-}
-
-PowerMeterStatus power_meter_status(const Config& expected) {
-    PowerMeterStatus st;
-    const bool       source_time_mapped = !expected.power_meter_time_path.empty();
-    if (s_mtx) {
-        Lock lk(s_mtx);
-        if (power_meter_request_current_locked(
-                s_power_meter_requested_epoch.load(std::memory_order_acquire), expected))
-            st = s_power_meter_status;
-    }
-    st.configured       = !expected.power_meter_topic.empty();
-    uint64_t now_ms     = 0;
-    int64_t  now_unix_s = -1;
-    mqtt_now_ms_and_unix(now_ms, now_unix_s);
-    ReferenceFreshness freshness = power_meter_freshness(
-        source_time_mapped, st.has_value, st.retained, st.has_source_time, st.source_unix_s,
-        st.received_ms, now_unix_s, now_ms, expected.power_meter_max_age_s);
-    if (!st.error.empty()) {
-        freshness.fresh  = false;
-        freshness.reason = "invalid";
-    }
-    st.fresh            = freshness.fresh;
-    st.age_known        = freshness.age_known;
-    st.age_s            = freshness.age_s;
-    st.freshness_reason = freshness.reason ? freshness.reason : "no_value";
-    return st;
-}
-
-uint32_t power_meter_source_generation() {
-    return s_power_meter_requested_epoch.load(std::memory_order_acquire);
-}
-
-PowerMeterSample power_meter_sample() {
-    bool     configured = false, has_value = false, retained = false, has_source_time = false;
-    bool     has_error = false, source_time_mapped = false;
-    double   power_w       = 0.0;
-    uint64_t received_ms   = 0;
-    int64_t  source_unix_s = -1;
-    uint32_t max_age_s     = POWER_METER_MAX_AGE_DEFAULT_S;
-    PowerMeterScope scope  = PowerMeterScope::WholeUnit;
-    {
-        Lock lk(s_mtx);
-        if (!lk.acquired()) return {};
-        const uint32_t requested = s_power_meter_requested_epoch.load(std::memory_order_acquire);
-        if (!power_meter_epoch_current_locked(requested)) return {};
-        configured         = s_power_meter_capture_enabled && s_power_meter_status.configured;
-        has_value          = s_power_meter_status.has_value;
-        retained           = s_power_meter_status.retained;
-        has_source_time    = s_power_meter_status.has_source_time;
-        has_error          = !s_power_meter_status.error.empty();
-        power_w            = s_power_meter_status.power_w;
-        received_ms        = s_power_meter_status.received_ms;
-        source_unix_s      = s_power_meter_status.source_unix_s;
-        max_age_s          = s_power_meter_runtime_max_age_s;
-        source_time_mapped = !s_power_meter_binding_time_path.empty();
-        scope              = s_power_meter_runtime_scope;
-    }
-    uint64_t now_ms     = 0;
-    int64_t  now_unix_s = -1;
-    mqtt_now_ms_and_unix(now_ms, now_unix_s);
-    const bool fresh =
-        configured && !has_error &&
-        power_meter_freshness(source_time_mapped, has_value, retained, has_source_time,
-                              source_unix_s, received_ms, now_unix_s, now_ms, max_age_s)
-            .fresh;
-    return {configured, fresh, fresh ? power_w : 0.0, scope};
-}
-
-PowerMeterTestResult mqtt_power_meter_test(const PowerMeterTestConfig& candidate,
-                                           uint32_t                    timeout_ms) {
-    PowerMeterTestResult result;
-    if (!s_mtx || !s_power_meter_probe_sem) {
-        result.error = "Power meter test is unavailable";
-        return result;
-    }
-    if (!s_connected) {
-        result.error = "MQTT broker is not connected";
-        return result;
-    }
-
-    PowerMeterTestConfig prepared = candidate;
-    xSemaphoreTake(s_power_meter_probe_sem, 0);
-    uint32_t generation = 0;
-    {
-        Lock lk(s_mtx);
-        if (s_power_meter_probe.active || s_circulation_probe.active) {
-            result.error = "Another MQTT source test is already running";
-            return result;
-        }
-        generation = s_power_meter_probe.generation + 1;
-        if (generation == 0 || generation > 0x7fffffffu) generation = 1;
-        s_power_meter_probe.passed = false;
-        s_power_meter_probe.config.topic.swap(prepared.topic);
-        s_power_meter_probe.config.power_path.swap(prepared.power_path);
-        s_power_meter_probe.config.timestamp_path.swap(prepared.timestamp_path);
-        s_power_meter_probe.config.max_age_s = prepared.max_age_s;
-        s_power_meter_probe.config.unit      = prepared.unit;
-        s_power_meter_probe.config.scope     = prepared.scope;
-        s_power_meter_probe.generation       = generation;
-        s_power_meter_probe.active           = true;
-        s_power_meter_probe.subscribed       = false;
-        s_power_meter_probe.retained         = false;
-        s_power_meter_probe.power_w          = 0.0;
-        s_power_meter_probe.error.clear();
-        s_power_meter_probe_capture_generation.store(generation, std::memory_order_release);
-    }
-    s_power_meter_probe_reconfigure = true;
-    xSemaphoreTake(s_power_meter_probe_sem, pdMS_TO_TICKS(timeout_ms));
-    {
-        Lock lk(s_mtx);
-        if (s_power_meter_probe.generation == generation && s_power_meter_probe.passed) {
-            result.passed   = true;
-            result.retained = s_power_meter_probe.retained;
-            result.power_w  = s_power_meter_probe.power_w;
-        } else if (s_power_meter_probe.generation == generation) {
-            s_power_meter_probe.active = false;
-            result.error               = s_power_meter_probe.error.empty()
-                                             ? "No fresh value received before the test timed out"
-                                             : s_power_meter_probe.error;
-        } else {
-            result.error = "Power meter test was replaced";
-        }
-        if (s_power_meter_probe_capture_generation.load(std::memory_order_acquire) == generation)
-            s_power_meter_probe_capture_generation.store(0, std::memory_order_release);
-    }
-    s_power_meter_probe_reconfigure = true;
-    return result;
-}
-
-void mqtt_power_meter_set_diagnostics(bool configured) {
-    mqtt_power_meter_reconfigure(configured, false);
-}
-
-void mqtt_power_meter_reconfigure(bool configured, bool reset_energy) {
-    {
-        Lock     lk(s_mtx);
-        uint32_t next = s_power_meter_requested_epoch.load(std::memory_order_relaxed) + 1;
-        s_power_meter_requested_epoch.store(next ? next : 1, std::memory_order_release);
-        s_power_meter_reconfigure       = true;
-        s_power_meter_probe_reconfigure = true;
-        if (lk.acquired()) {
-            reset_power_meter_status_locked(configured);
-            s_power_meter_probe.active = false;
-            s_power_meter_probe.passed = false;
-            s_power_meter_probe_capture_generation.store(0, std::memory_order_release);
-        }
-    }
-    if (reset_energy) checkup_energy_reset();
 }
 
 } // namespace daik

@@ -382,12 +382,21 @@ inline uint32_t checkup_dhw_source_fingerprint(const char* broker, const char* t
 }
 
 // Stable non-zero identity for onboard X10A electrical power sources (CT clamps or INV+RPS),
-// using a domain tag distinct from power_meter_source_fingerprint() so X10A and MQTT energy
-// records never cross-admit. Returns 0 when the X10A profile provides neither source.
+// using a domain tag distinct from checkup_modbus_pel_source_fingerprint() so X10A and Modbus
+// energy records never cross-admit. Returns 0 when the X10A profile provides neither source.
 inline uint32_t checkup_x10a_pel_source_fingerprint(bool has_ct, bool has_inv_rps) {
     if (!has_ct && !has_inv_rps) return 0;
     uint32_t crc = checkup_profile_name_crc("x10a-pel-v1");
     crc          = checkup_fp_u32(crc, (has_ct ? 1u : 0u) | (has_inv_rps ? 2u : 0u));
+    return checkup_nonzero_fp(crc);
+}
+
+// Stable non-zero identity for HomeHub (EKRHH) Modbus electrical power estimation. Returns 0 for
+// Altherma4 (whose Input 49 flow scaling remains unverified) or Unknown.
+inline uint32_t checkup_modbus_pel_source_fingerprint(ModbusProfile profile) {
+    if (profile != ModbusProfile::HomeHub) return 0;
+    uint32_t crc = checkup_profile_name_crc("modbus-pel-v1");
+    crc          = checkup_fp_u32(crc, static_cast<uint32_t>(profile));
     return checkup_nonzero_fp(crc);
 }
 

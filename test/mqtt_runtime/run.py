@@ -606,7 +606,6 @@ mutations = [
         s_circulation_probe_subscribed_topic != candidate.topic) {
         if (!reference_topic_owned(s_circulation_probe_subscribed_topic) &&
             s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic &&
-            !power_meter_topic_owned(s_circulation_probe_subscribed_topic) &&
             esp_mqtt_client_unsubscribe(s_client,
                                         s_circulation_probe_subscribed_topic.c_str()) < 0) {
             Lock lk(s_mtx);

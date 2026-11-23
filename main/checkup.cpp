@@ -26,6 +26,7 @@
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -113,8 +114,10 @@ constexpr logic::DhwLossBucket     kEmptyDhwLossBucket{};
 constexpr logic::EnergyBucket      kEmptyEnergyBucket{};
 constexpr logic::EnergyAccumulator kEmptyEnergyAccumulator{};
 constexpr logic::EnergyCoverage    kEmptyEnergyCoverage{};
-constexpr logic::EnergyRing        kEmptyEnergyRing{};
-constexpr int64_t                  kNoCommitUs = INT64_MIN;
+constexpr logic::EnergyCoverage    kHomeHubEnergyCoverage =
+    logic::energy_modbus_coverage(ModbusProfile::HomeHub);
+constexpr logic::EnergyRing kEmptyEnergyRing{};
+constexpr int64_t           kNoCommitUs = INT64_MIN;
 
 // One independent source slot (X10A vs HomeHub Modbus). The two sources keep completely separate
 // 24h rings, cycling traces, restore states, and flash/handoff scopes; they share only the checkup
@@ -164,6 +167,7 @@ struct CheckupSlot {
     std::atomic<uint32_t>          fault_reset_token{0};
     std::atomic<uint32_t>          fault_reset_acked{0};
     // Capability of the CURRENT confirmed profile.
+    ModbusProfile            modbus_profile = ModbusProfile::Auto;
     logic::CheckupCoverage   cov{};
     logic::EnergyCoverage    energy_cov{};
     logic::EnergyAccumulator energy_acc{};
@@ -223,10 +227,8 @@ bool stop_context_suppressed_locked() {
 }
 
 std::atomic<uint32_t> s_requested_dhw_source_fp{0};
-std::atomic<uint32_t> s_requested_mqtt_pel_fp{0};
 SemaphoreHandle_t     s_mtx = nullptr;
 std::atomic<uint32_t> s_dhw_identity_generation{1};
-std::atomic<uint32_t> s_energy_identity_generation{1};
 std::atomic<bool>     s_diagnostics_enabled{false};
 // Live admission epoch is independent of the durable consent identity: even a repeated saved
 // generation cannot let a poll begun before an off/on transition enter the new interval.
@@ -338,21 +340,8 @@ uint32_t circulation_identity() {
     });
 }
 
-uint32_t power_meter_identity() {
-    return with_config([](const Config& c) -> uint32_t {
-        if (c.power_meter_topic.empty()) return 0u;
-        return power_meter_source_fingerprint(
-            c.mqtt_uri.c_str(), c.power_meter_topic.c_str(), c.power_meter_power_path.c_str(),
-            c.power_meter_time_path.c_str(), c.power_meter_max_age_s,
-            power_meter_unit_to_int(c.power_meter_unit),
-            power_meter_scope_to_int(c.power_meter_scope), c.power_meter_generation);
-    });
-}
-
-uint32_t effective_pel_source_fp_locked(const CheckupSlot& slot) {
-    if (slot.is_modbus) return 0;
-    const uint32_t mqtt_fp = s_requested_mqtt_pel_fp.load();
-    if (mqtt_fp != 0) return mqtt_fp;
+[[gnu::noinline]] uint32_t effective_pel_source_fp_locked(const CheckupSlot& slot) {
+    if (slot.is_modbus) return logic::checkup_modbus_pel_source_fingerprint(slot.modbus_profile);
     return logic::checkup_x10a_pel_source_fingerprint(
         slot.energy_cov.ct_rows > 0, slot.energy_cov.has_inv && slot.energy_cov.has_rps);
 }
@@ -528,13 +517,15 @@ bool apply_reset_locked(CheckupSlot& slot) {
     if (!slot.is_modbus) s_stop_context = {};
     slot.cov       = logic::CheckupCoverage{};
     slot.fault_now = daik::FaultClass::Unknown;
-    if (!slot.source_confirmed) slot.energy_cov = kEmptyEnergyCoverage;
+    if (!slot.source_confirmed) {
+        slot.modbus_profile = ModbusProfile::Auto;
+        slot.energy_cov     = kEmptyEnergyCoverage;
+    }
     slot.energy_acc             = kEmptyEnergyAccumulator;
     slot.energy_carried_span_us = 0;
     slot.energy_restart_armed   = false;
     slot.energy_restart_bucket  = 0;
-    slot.pel_source_fp =
-        (!slot.is_modbus && slot.source_confirmed) ? effective_pel_source_fp_locked(slot) : 0;
+    slot.pel_source_fp          = slot.source_confirmed ? effective_pel_source_fp_locked(slot) : 0;
     persist_wipe(slot); // clears rings and the checkpoint to withdraw the previous scope
     return true;
 }
@@ -659,7 +650,6 @@ void commit_and_fold_locked(CheckupSlot& slot, const logic::CheckupSample& s, in
 
 [[gnu::noinline]] void fold_energy_locked(CheckupSlot& slot, const logic::EnergyStepInput& ein,
                                           uint32_t bucket, bool discard_energy_sample) {
-    if (slot.is_modbus) return;
     if (discard_energy_sample) {
         slot.energy_acc.reset_continuity();
         return;
@@ -724,7 +714,7 @@ bool sealed_flash_next_locked(const CheckupSlot& slot, int64_t after_bucket, int
     payload.dhw                    = slot.P().dhw.pending;
     payload.pel_source_fp          = slot.pel_source_fp;
     payload.energy                 = slot.energy_acc.pending;
-    if (!slot.is_modbus && slot.state.have_bucket &&
+    if (slot.state.have_bucket &&
         logic::checkup_journal_energy_withheld(
             slot.energy_restart_armed, slot.energy_restart_bucket, slot.state.bucket + 1, 0)) {
         payload.pel_source_fp = 0;
@@ -787,6 +777,7 @@ void checkup_reboot_save() {
     apply_energy_reset_locked(s_x10a);
     apply_reset_locked(s_modbus);
     apply_dhw_reset_locked(s_modbus);
+    apply_energy_reset_locked(s_modbus);
     const int64_t stop_now = esp_timer_get_time();
     if (!stop_context_suppressed_locked()) {
         const auto stop_event = logic::stop_context_seal(s_stop_context);
@@ -831,13 +822,14 @@ void checkup_reboot_save() {
 }
 
 void slot_start(CheckupSlot& slot, bool diagnostics_enabled, uint32_t diagnostics_generation,
-                uint32_t dhw_fp, uint32_t mqtt_pel_fp, bool flash_pending) {
+                uint32_t dhw_fp, bool flash_pending) {
     slot.last_commit_us          = kNoCommitUs;
     slot.live_commit_count       = 0;
     slot.dhw_source_fp           = dhw_fp;
+    slot.modbus_profile          = ModbusProfile::Auto;
     slot.energy_cov              = kEmptyEnergyCoverage;
     slot.energy_acc              = kEmptyEnergyAccumulator;
-    slot.pel_source_fp           = slot.is_modbus ? 0 : mqtt_pel_fp;
+    slot.pel_source_fp           = effective_pel_source_fp_locked(slot);
     slot.energy_carried_span_us  = 0;
     slot.energy_restart_armed    = false;
     slot.energy_restart_bucket   = 0;
@@ -910,9 +902,7 @@ void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_chang
         slot.energy_restart_armed   = false;
         slot.energy_restart_bucket  = 0;
         persist_wipe(slot);
-        slot.pel_source_fp   = (!slot.is_modbus && slot.source_confirmed)
-                                   ? effective_pel_source_fp_locked(slot)
-                                   : (slot.is_modbus ? 0 : s_requested_mqtt_pel_fp.load());
+        slot.pel_source_fp   = slot.source_confirmed ? effective_pel_source_fp_locked(slot) : 0;
         slot.persist_verdict = enabled ? logic::CheckupRestore::DiagnosticsChanged
                                        : logic::CheckupRestore::DiagnosticsDisabled;
         return;
@@ -955,17 +945,14 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     s_stop_allow_restore = true;
     s_stop_read_fence_us = -1;
     stop_observation_start(diagnostics_enabled, diagnostics_generation);
-    const uint32_t dhw_fp      = circulation_identity();
-    const uint32_t mqtt_pel_fp = power_meter_identity();
+    const uint32_t dhw_fp = circulation_identity();
     s_requested_dhw_source_fp.store(dhw_fp);
-    s_requested_mqtt_pel_fp.store(mqtt_pel_fp);
     s_diagnostics_enabled.store(diagnostics_enabled, std::memory_order_release);
-    s_diagnostics_generation = diagnostics_generation;
+    s_diagnostics_generation    = diagnostics_generation;
     const bool flash_pending    = history_checkup_flash_pending();
     const bool mb_flash_pending = history_modbus_checkup_flash_pending();
-    slot_start(s_x10a, diagnostics_enabled, diagnostics_generation, dhw_fp, mqtt_pel_fp,
-               flash_pending);
-    slot_start(s_modbus, diagnostics_enabled, diagnostics_generation, dhw_fp, 0, mb_flash_pending);
+    slot_start(s_x10a, diagnostics_enabled, diagnostics_generation, dhw_fp, flash_pending);
+    slot_start(s_modbus, diagnostics_enabled, diagnostics_generation, dhw_fp, mb_flash_pending);
     const esp_err_t shutdown_err = esp_register_shutdown_handler(checkup_reboot_save);
     if (shutdown_err != ESP_OK)
         diag_printf("checkup: DHW shutdown handler not registered (%s)\n",
@@ -1029,6 +1016,9 @@ void checkup_modbus_reset() {
     s_modbus.source_confirmed         = false;
     s_modbus.source_fp                = 0;
     s_modbus.model_fp                 = 0;
+    s_modbus.modbus_profile           = ModbusProfile::Auto;
+    s_modbus.energy_cov               = kEmptyEnergyCoverage;
+    s_modbus.pel_source_fp            = 0;
     s_modbus.persist_verdict          = logic::CheckupRestore::ModelChanged;
     s_modbus.reset_requested.store(true);
 }
@@ -1119,6 +1109,21 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_x10a.reset_requested.store(true);
 }
 
+[[gnu::noinline]] static bool modbus_confirm_commit_locked(ModbusProfile profile, uint32_t fp,
+                                                           uint32_t source_fp) {
+    const bool first          = !s_modbus.source_confirmed;
+    s_modbus.source_confirmed = source_fp != 0 && fp != 0;
+    s_modbus.model_fp         = fp;
+    s_modbus.source_fp        = source_fp;
+    s_modbus.modbus_profile   = s_modbus.source_confirmed ? profile : ModbusProfile::Auto;
+    s_modbus.energy_cov       = (s_modbus.source_confirmed && profile == ModbusProfile::HomeHub)
+                                    ? kHomeHubEnergyCoverage
+                                    : kEmptyEnergyCoverage;
+    s_modbus.pel_source_fp =
+        s_modbus.source_confirmed ? effective_pel_source_fp_locked(s_modbus) : 0;
+    return first;
+}
+
 void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp) {
     uint32_t fp = 0;
     if (profile == ModbusProfile::HomeHub) {
@@ -1133,11 +1138,7 @@ void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp) {
     if (!lk.acquired()) return;
     if (s_modbus.source_confirmed && s_modbus.model_fp == fp && s_modbus.source_fp == source_fp)
         return;
-    const bool first          = !s_modbus.source_confirmed;
-    s_modbus.source_confirmed = source_fp != 0 && fp != 0;
-    s_modbus.model_fp         = fp;
-    s_modbus.source_fp        = source_fp;
-    if (first) {
+    if (modbus_confirm_commit_locked(profile, fp, source_fp)) {
         if (s_modbus.source_confirmed && s_modbus.boot_handoff_valid &&
             !s_modbus.reset_requested.load() && !s_modbus.dhw_reset_requested.load() &&
             s_diagnostics_enabled.load(std::memory_order_acquire) &&
@@ -1184,12 +1185,6 @@ void checkup_dhw_reset() {
     s_modbus.dhw_reset_requested.store(true);
 }
 
-void checkup_energy_reset() {
-    s_requested_mqtt_pel_fp.store(power_meter_identity());
-    s_energy_identity_generation.fetch_add(1);
-    s_x10a.energy_reset_requested.store(true);
-}
-
 [[gnu::noinline]] static void capture_tenths(const CachedValue& cv, bool& seen, bool& known,
                                              int32_t& dst) {
     seen    = true;
@@ -1202,14 +1197,10 @@ void checkup_energy_reset() {
 
 [[gnu::noinline]] static void energy_extract_input(const CachedValue* v, size_t n, bool rps_known,
                                                    bool rps_running, const logic::CheckupSample& s,
-                                                   int outdoor_tenths, const PowerMeterSample& pm,
+                                                   int                     outdoor_tenths,
                                                    logic::EnergyStepInput& ein) {
     ein                 = logic::EnergyStepInput{};
     ein.source_ok       = (n > 0);
-    ein.mqtt_configured = pm.configured;
-    ein.mqtt_fresh      = pm.fresh;
-    ein.mqtt_power_w    = pm.power_w;
-    ein.mqtt_scope      = pm.scope;
     ein.rps_known       = rps_known;
     ein.rps_running     = rps_running;
     ein.buh_known       = s.buh_known;
@@ -1288,6 +1279,84 @@ void checkup_energy_reset() {
     }
 }
 
+[[gnu::noinline]] static void modbus_energy_extract_input(const CachedValue* v, size_t n,
+                                                          ModbusProfile               profile,
+                                                          const logic::CheckupSample& s,
+                                                          logic::EnergyStepInput&     ein) {
+    ein                 = logic::EnergyStepInput{};
+    ein.source_ok       = (n > 0);
+    ein.rps_known       = s.rps_known;
+    ein.rps_running     = s.rps_running;
+    ein.bsh_known       = s.bsh_known;
+    ein.bsh_on          = s.bsh_on;
+    ein.valve_dhw_known = s.valve_known;
+    ein.valve_dhw_on    = s.valve_dhw;
+    ein.flow_known      = s.flow_ok;
+    ein.flow_tenths     = s.flow_tenths;
+    if (s.operating_mode == logic::CheckupOperatingMode::Heating) {
+        ein.set_iu_mode(logic::EnergyIuMode::HeatingOrDhwOrStop);
+    } else if (s.operating_mode == logic::CheckupOperatingMode::Cooling) {
+        ein.set_iu_mode(logic::EnergyIuMode::CoolingDhw);
+    } else {
+        ein.set_iu_mode(logic::EnergyIuMode::Unknown);
+    }
+
+    bool seen_defrost  = false;
+    bool seen_lwt      = false;
+    bool seen_post_buh = false;
+    bool seen_rwt      = false;
+    bool seen_outdoor  = false;
+    bool seen_power    = false;
+    for (size_t i = 0; i < n; ++i) {
+        const CachedValue&     cv  = v[i];
+        const def::HomeHubReg* row = modbus_row_for_cv(cv, profile);
+        if (!row || row->space != MbFunc::ReadInput) continue;
+        switch (row->offset) {
+        case 35: {
+            int val = 0;
+            if (!seen_defrost) {
+                seen_defrost = true;
+                if (exact_int(cv, val) && (val == 0 || val == 1)) {
+                    ein.defrost_known = true;
+                    ein.defrost_on    = (val == 1);
+                }
+            }
+            break;
+        }
+        case 40:
+            if (!seen_lwt) capture_tenths(cv, seen_lwt, ein.lwt_known, ein.lwt_tenths);
+            break;
+        case 41:
+            if (!seen_post_buh)
+                capture_tenths(cv, seen_post_buh, ein.post_buh_known, ein.post_buh_tenths);
+            break;
+        case 42:
+            if (!seen_rwt) capture_tenths(cv, seen_rwt, ein.rwt_known, ein.rwt_tenths);
+            break;
+        case 44:
+            if (!seen_outdoor)
+                capture_tenths(cv, seen_outdoor, ein.outdoor_known, ein.outdoor_tenths);
+            break;
+        case 51:
+            if (!seen_power) {
+                seen_power       = true;
+                const char* text = cv.value.c_str();
+                if (text[0] != '\0') {
+                    char*        end = nullptr;
+                    const double kw  = std::strtod(text, &end);
+                    if (end != text && *end == '\0' && std::isfinite(kw) && kw >= 0.0) {
+                        ein.modbus_power_known = true;
+                        ein.modbus_power_w     = kw * 1000.0;
+                    }
+                }
+            }
+            break;
+        default:
+            break;
+        }
+    }
+}
+
 uint32_t checkup_consent_epoch() { return s_diagnostics_epoch.load(std::memory_order_acquire); }
 
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
@@ -1342,15 +1411,12 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     // Allocation-free, including on the OOM catch and TLS hold paths: the applied source epoch
     // alone withdraws a replaced witness, so no Config copy is needed on this per-cycle path.
     const CirculationPumpSample circulation = circulation_pump_sample();
-    const uint32_t              energy_generation  = s_energy_identity_generation.load();
-    const uint32_t              pm_mqtt_generation = power_meter_source_generation();
-    const PowerMeterSample      pm                 = power_meter_sample();
-    s.circulation_configured = circulation.configured;
-    s.circulation_known = circulation.known;
-    s.circulation_on = circulation.on;
-    s.retry_expected_mask = coverage.retry_mask;
+    s.circulation_configured                = circulation.configured;
+    s.circulation_known                     = circulation.known;
+    s.circulation_on                        = circulation.on;
+    s.retry_expected_mask                   = coverage.retry_mask;
     logic::EnergyStepInput ein;
-    energy_extract_input(v, n, rps_known, rps_running, s, outdoor_tenths, pm, ein);
+    energy_extract_input(v, n, rps_known, rps_running, s, outdoor_tenths, ein);
 
     // Fault class is matched by converter because a profile carries it on the outdoor page AND the
     // hydronic one. Retry counters use exact page/offset/converter identities because conv 311 also
@@ -1450,9 +1516,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     const bool discard_dhw_sample = apply_dhw_reset_locked(s_x10a) ||
                                     dhw_generation != s_dhw_identity_generation.load() ||
                                     circulation_generation != circulation_source_generation();
-    const bool discard_energy_sample = apply_energy_reset_locked(s_x10a) ||
-                                       energy_generation != s_energy_identity_generation.load() ||
-                                       pm_mqtt_generation != power_meter_source_generation();
+    const bool discard_energy_sample = apply_energy_reset_locked(s_x10a);
     // OOM/TLS callbacks report an observation gap, not a newly resolved empty profile. A genuine
     // unidentified-profile cycle still supplies confirmed empty coverage and withdraws capability.
     if (profile_confirmed) s_x10a.cov = coverage;
@@ -1471,23 +1535,11 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     fold_energy_locked(s_x10a, ein, bucket, discard_energy_sample);
 }
 
-void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
-                           uint32_t source_generation, uint32_t consent_epoch,
-                           bool source_confirmed) {
-    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
-    if (!s_mtx) return;
-    if (!v && n) return;
-
-    const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile);
-    logic::CheckupSample         s;
-    int64_t                      unix_s  = -1;
-    int32_t                      unix_ms = 0;
-    time_now(unix_s, unix_ms);
-    if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
-    s.x10a_blind = !n;
-
-    uint16_t mb_fault_code = 0;
-    int      mb_fault_sub  = 0;
+[[gnu::noinline]] static void modbus_collect_sample(const CachedValue* v, size_t n,
+                                                    ModbusProfile                 profile,
+                                                    const logic::CheckupCoverage& cov,
+                                                    logic::CheckupSample&         s,
+                                                    uint16_t& mb_fault_code, int& mb_fault_sub) {
     for (size_t i = 0; i < n; ++i) {
         const CachedValue&     cv  = v[i];
         const def::HomeHubReg* row = modbus_row_for_cv(cv, profile);
@@ -1564,6 +1616,48 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
             break;
         }
     }
+}
+
+[[gnu::noinline]] static void modbus_fault_trace_locked(uint16_t mb_fault_code, int mb_fault_sub,
+                                                        FaultClass fault, int64_t now) {
+    const logic::FaultSampleDetail mb_fault =
+        logic::checkup_modbus_fault_detail(fault, mb_fault_code, mb_fault_sub);
+    const bool was_active = logic::fault_trace_kind_active(s_modbus.fault_trace.state.kind);
+    const bool now_active = logic::fault_trace_kind_active(mb_fault.kind);
+    if (s_modbus.fault_trace.record(now, mb_fault) && (was_active || now_active))
+        s_modbus.fault_trace_dirty = true;
+    s_modbus.fault_trace.observe_window(static_cast<uint32_t>(now / 1000000));
+}
+
+[[gnu::noinline]] static void modbus_fold_energy_locked(const CachedValue* v, size_t n,
+                                                        ModbusProfile               profile,
+                                                        const logic::CheckupSample& s, int64_t now,
+                                                        uint32_t bucket,
+                                                        bool     discard_energy_sample) {
+    logic::EnergyStepInput ein;
+    modbus_energy_extract_input(v, n, profile, s, ein);
+    ein.now_us = now;
+    fold_energy_locked(s_modbus, ein, bucket, discard_energy_sample);
+}
+
+void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
+                           uint32_t source_generation, uint32_t consent_epoch,
+                           bool source_confirmed) {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
+    if (!s_mtx) return;
+    if (!v && n) return;
+
+    const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile);
+    logic::CheckupSample         s;
+    int64_t                      unix_s  = -1;
+    int32_t                      unix_ms = 0;
+    time_now(unix_s, unix_ms);
+    if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
+    s.x10a_blind = !n;
+
+    uint16_t mb_fault_code = 0;
+    int      mb_fault_sub  = 0;
+    modbus_collect_sample(v, n, profile, cov, s, mb_fault_code, mb_fault_sub);
 
     const uint32_t              dhw_generation         = s_dhw_identity_generation.load();
     const uint32_t              circulation_generation = circulation_source_generation();
@@ -1585,20 +1679,15 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
     const bool discard_dhw_sample = apply_dhw_reset_locked(s_modbus) ||
                                     dhw_generation != s_dhw_identity_generation.load() ||
                                     circulation_generation != circulation_source_generation();
+    const bool discard_energy_sample = apply_energy_reset_locked(s_modbus);
     if (source_confirmed) s_modbus.cov = cov;
     s_modbus.fault_now    = s.fault;
     s_modbus.pressure_now = -1;
     if (n) s_modbus.source_last_us = now;
-    if (s_modbus.source_confirmed && now >= 0) {
-        const logic::FaultSampleDetail mb_fault =
-            logic::checkup_modbus_fault_detail(s.fault, mb_fault_code, mb_fault_sub);
-        const bool was_active = logic::fault_trace_kind_active(s_modbus.fault_trace.state.kind);
-        const bool now_active = logic::fault_trace_kind_active(mb_fault.kind);
-        if (s_modbus.fault_trace.record(now, mb_fault) && (was_active || now_active))
-            s_modbus.fault_trace_dirty = true;
-        s_modbus.fault_trace.observe_window(static_cast<uint32_t>(now / 1000000));
-    }
+    if (s_modbus.source_confirmed && now >= 0)
+        modbus_fault_trace_locked(mb_fault_code, mb_fault_sub, s.fault, now);
     commit_and_fold_locked(s_modbus, s, now, bucket, discard_dhw_sample);
+    modbus_fold_energy_locked(v, n, profile, s, now, bucket, discard_energy_sample);
 }
 
 static void expire_restored_locked(CheckupSlot& slot);
@@ -1820,38 +1909,36 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     return report;
 }
 
-logic::WorkingFigureReport checkup_working_figure_status(const Config& c, bool mqtt_fresh) {
+logic::WorkingFigureReport checkup_working_figure_status(const Config&     c,
+                                                         DiagnosticsSource source) {
     logic::WorkingFigureReport report{};
     if (!s_mtx || !s_diagnostics_enabled.load(std::memory_order_acquire)) return report;
     logic::WorkingFigureTariffs tariffs{};
     tariffs.elec_price_tenth_mill = c.elec_price_tenth_mill;
     tariffs.gas_price_tenth_mill  = c.gas_price_tenth_mill;
-    tariffs.gas_efficiency_pct    = c.gas_efficiency_pct;
     if (tariff_currency_valid(c.tariff_currency)) {
         std::memcpy(tariffs.currency, c.tariff_currency.data(), 3);
         tariffs.currency[3] = '\0';
     }
-    const bool mqtt_configured = !c.power_meter_topic.empty();
-    Lock       lk(s_mtx);
+    CheckupSlot& slot = slot_for(source);
+    Lock         lk(s_mtx);
     if (!lk.acquired() || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
-        s_x10a.reset_requested.load() || !s_x10a.source_confirmed)
+        slot.reset_requested.load() || !slot.source_confirmed)
         return report;
-    expire_restored_locked(s_x10a);
+    expire_restored_locked(slot);
     const int64_t now_us      = esp_timer_get_time();
-    const bool    have_source = s_x10a.source_last_us >= 0 && now_us >= s_x10a.source_last_us;
+    const bool    have_source = slot.source_last_us >= 0 && now_us >= slot.source_last_us;
     const bool    source_fresh =
-        have_source && (now_us - s_x10a.source_last_us) <=
+        have_source && (now_us - slot.source_last_us) <=
                            static_cast<int64_t>(logic::CHECKUP_MAX_GAP_S) * 1000000LL;
-    const bool     energy_reset = s_x10a.energy_reset_requested.load();
+    const bool     energy_reset = slot.energy_reset_requested.load();
     const uint32_t span_s =
-        energy_reset
-            ? 0u
-            : logic::energy_span_s(s_x10a.energy_acc, s_x10a.energy_carried_span_us, now_us);
+        energy_reset ? 0u
+                     : logic::energy_span_s(slot.energy_acc, slot.energy_carried_span_us, now_us);
     report = logic::working_figure_evaluate(
-        energy_reset ? kEmptyEnergyRing : s_x10a.P().energy,
-        energy_reset ? kEmptyEnergyAccumulator : s_x10a.energy_acc, s_x10a.energy_cov, tariffs,
-        mqtt_configured, mqtt_fresh, c.power_meter_scope, source_fresh, span_s,
-        energy_reset ? nullptr : s_x10a.slot_times.expiry_us, now_us);
+        energy_reset ? kEmptyEnergyRing : slot.P().energy,
+        energy_reset ? kEmptyEnergyAccumulator : slot.energy_acc, slot.energy_cov, tariffs,
+        source_fresh, span_s, energy_reset ? nullptr : slot.slot_times.expiry_us, now_us);
     return report;
 }
 

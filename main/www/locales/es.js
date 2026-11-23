@@ -1,4 +1,4 @@
-// translation-source: 90df3e90c38eb4fd857e67b7935202a8d212c9a5e74363bb49bfa14525bdcacc
+// translation-source: 6e972a2b4ae88155965a5f3be3d4db1e55237b0aaa203b0f7b4b2df64578e5c3
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -1037,20 +1037,19 @@ I18N.es = localeValues([
   /* wf.kpi.heat_elec */ (h, e) => `${h} kWh térm. / ${e} kWh el.`,
   /* wf.scope.whole */ "equipo completo",
   /* wf.scope.comp */ "solo compresor",
+  /* wf.scope.modbus */ "Modbus (est.)",
   /* wf.scale.label */ "Umbral de paridad",
   /* wf.scale.band */ (p) => `±${p}%`,
   /* wf.scale.cheaper */ "Más barato →",
   /* wf.scale.expensive */ "← Más caro",
   /* wf.cta.tariffs */ "Fijar tarifas",
   /* wf.cta.edit_tariffs */ "Editar tarifas",
-  /* wf.cta.power_meter */ "Añadir contador",
-  /* wf.cta.edit_meter */ "Editar contador",
   /* wf.desc.collecting */ (o) => `Recopilando (${o} / mín. 2 h). Faltan ≥ 2 h.`,
   /* wf.desc.standby */ (o) => `En espera (< 1,0 kWh térm. / < 0,2 kWh el.; ${o}).`,
-  /* wf.desc.unsupported */ "X10A sin compresor/corriente. Añade contador MQTT.",
-  /* wf.banner.partial */ (c, o) => `Provisional (${c}% · ${o}) o contador antiguo.`,
+  /* wf.desc.unsupported */ "Faltan lecturas necesarias de caudal, temperatura o electricidad.",
+  /* wf.banner.partial */ (c, o) => `Provisional (${c}% · ${o}).`,
   /* wf.banner.buh_active */ (d) => `Auxiliar activo (${d}); incluido.`,
-  /* wf.banner.buh_limited */ "Auxiliar/apoyo activo midiendo solo compresor — la carga excluida puede distorsionar.",
+  /* wf.banner.buh_limited */ "Auxiliar/apoyo activo (carga no medida o excluida) — el valor puede desviarse.",
   /* wf.banner.buh_unpaired */ "BUH activo/desconocido sin R2T tras BUH — excluido.",
   /* wf.banner.bsh_excluded */ (d) => `BSH (${d}) excluido (fuera de circuito).`,
   /* wf.banner.ct_unwired */ "CT 0 A con compresor; usando inversor (solo comp.).",
@@ -1059,68 +1058,34 @@ I18N.es = localeValues([
   /* wf.ctx.outdoor */ "Exterior",
   /* wf.ctx.defrost_buh */ "Desescarche/BUH",
   /* wf.ctx.cooling */ "Refrig. excl.",
-  /* wf.src.mqtt_whole */ "Contador MQTT (completo)",
-  /* wf.src.mqtt_comp */ "Contador MQTT (solo comp.)",
   /* wf.src.x10a_ct */ "Pinza X10A (est., completo)",
   /* wf.src.x10a_inv */ "Inversor X10A (est., solo comp.)",
+  /* wf.src.modbus */ "Modbus HomeHub (est.)",
   /* wf.src.stale */ "antigua",
-  /* wf.disclosure */ "24 h Calefacción + agua caliente (sin refrig.); agua pura 4,186 kJ/(L·K); gas Hs; sin fijos.",
+  /* wf.disclosure */ "24 h Calefacción + agua caliente (sin refrig.); agua pura (4,186 kJ/(L·K)); caldera de gas de condensación moderna fija (88% Hs); sin fijos.",
+  /* wf.disclosure_modbus */ "Modbus HomeHub: impulsión PHE (40) − retorno RWT (42), potencia entrada 51 (alcance sin especificar), BSH (32) excluido, subida BUH (> 1,5 K) limitada.",
   /* wf.gas.row */ "Comparación con gas",
   /* wf.gas.title */ "Tarifas de gas",
   /* wf.not_configured */ "Sin tarifas",
   /* wf.gas.detail.elec */ "Electricidad",
   /* wf.gas.detail.gas */ "Gas",
-  /* wf.gas.detail.eff */ "Rendimiento (Hs)",
   /* wf.gas.detail.breakeven */ "Umbral de paridad",
-  /* wf.gas.settings_help */ "24 h bomba de calor vs. gas (Hs, sin cuotas fijas).",
+  /* wf.gas.settings_help */ "24 h bomba de calor vs. caldera de gas de condensación moderna fija (88% Hs, agua pura 4,186 kJ/(L·K), sin fijos).",
   /* wf.gas.elec_price */ "Elec. / kWh",
   /* wf.gas.gas_price */ "Gas / kWh",
-  /* wf.gas.efficiency */ "Rendimiento % (Hs)",
-  /* wf.gas.eff_help */ "PCS Hs (50–98%; cond. 82–90%).",
   /* wf.gas.currency */ "Moneda",
-  /* wf.gas.preview */ (b) => `Umbral: ${b} (±20% X10A / ±10% MQTT)`,
+  /* wf.gas.preview */ (b) => `Umbral: ${b} (±20%)`,
   /* wf.gas.preview_empty */ "Introduce precios para ver el umbral.",
-  /* wf.gas.hint */ "Agua pura 4,186 kJ/(L·K), Calefacción + agua caliente, Hs 50–98%, sin fijos. Actualiza 24 h.",
+  /* wf.gas.hint */ "Caldera de gas de condensación moderna fija (88% Hs) y agua pura (4,186 kJ/(L·K)), calefacción + agua caliente, sin fijos. Actualiza 24 h.",
   /* wf.gas.delete */ "Borrar",
   /* wf.gas.deleting */ "Borrando…",
   /* wf.gas.saved */ "Tarifas guardadas",
   /* wf.gas.deleted */ "Tarifas borradas",
   /* wf.gas.err_price */ "0,0001–99,9999.",
-  /* wf.gas.err_eff */ "% entero (50–98).",
-  /* wf.gas.err_currency */ "3 letras mayúsculas (EUR).",
-  /* pm.row */ "Contador eléctrico externo",
-  /* pm.title */ "Contador MQTT externo",
-  /* pm.not_configured */ "Ninguno (X10A)",
-  /* pm.broker_hint */ "Configura el bróker MQTT primero; inactivo hasta conectar.",
-  /* pm.detail.power */ "Potencia",
-  /* pm.detail.scope */ "Alcance",
-  /* pm.detail.state */ "Estado",
-  /* pm.detail.error */ "Error",
-  /* pm.settings_help */ "Contador MQTT (±10% vs ±20%). Si falla, no vuelve a X10A.",
-  /* pm.default_name */ "Contador BC",
-  /* pm.power_path */ "Ruta potencia · opc.",
-  /* pm.power_help */ "Ruta con puntos (ej. total_act_power) o vacío.",
-  /* pm.time_path */ "Ruta hora · opc.",
-  /* pm.time_help */ "RFC3339/Unix s (con potencia); vacío = llegada.",
-  /* pm.unit */ "Unidad",
-  /* pm.unit_w */ "W",
-  /* pm.unit_kw */ "kW",
-  /* pm.scope */ "Alcance",
-  /* pm.scope_whole */ "Equipo completo (comp.+bombas+BUH)",
-  /* pm.scope_comp */ "Solo compresor",
-  /* pm.max_age_help */ "Antigüedad máx. 10–300 s.",
-  /* pm.hint */ "Solo lectura; prueba opcional. Sin retorno oculto a X10A.",
-  /* pm.test */ "Probar",
-  /* pm.testing */ "Probando…",
-  /* pm.test_ok */ (w) => `${w} W (en directo)`,
-  /* pm.test_retained */ (w) => `${w} W (retenido; requiere hora)`,
-  /* pm.test_failed */ "Sin valor MQTT reciente",
-  /* pm.saved */ "Contador guardado",
-  /* pm.deleted */ "Contador eliminado",
-  /* pm.err_power_path */ "Ruta con puntos no válida.",
-  /* pm.err_time_path */ "Requiere ruta de potencia y puntos.",
-  /* pm.err_max_age */ "Antigüedad máx. 10–300 s.",
+  /* wf.gas.err_currency */ "Selecciona una moneda compatible.",
 ]);
+const esSg2 = "Marcha recomendada, el estado que gestores como evcc usan como refuerzo. El modo ACS, la 3WV y el caudal muestran por separado si el depósito se está cargando.";
+const esPth = "× ρ·cp (≈ 4,186 kJ/(l·K)) suponiendo agua. Depende de caudal, sensores y fluido; con glicol cambia.";
 INSPECT_I18N.es = inspectValues(
   ["Sin lectura actual:", "el compresor está parado y la unidad exterior solo actualiza sus sensores cuando funciona. Se oculta el valor del último ciclo para no presentarlo como una medición actual.", "No se puede leer la velocidad del compresor; los valores de la unidad exterior pueden ser del último ciclo."],
   [
@@ -1131,9 +1096,9 @@ INSPECT_I18N.es = inspectValues(
       : "Orden externa leída del HomeHub: Libre, Parada forzada, Marcha recomendada o Marcha forzada. No es el modo de calefacción/refrigeración ni demuestra que haya empezado una carga del depósito.", (d) => !d || d.sgMode == null
       ? "No hay un valor Smart Grid actual."
       : d.sgMode === 2 && d.sgSrc === "X10A"
-      ? "Los contactos SG-Ready indican Marcha recomendada, el estado que gestores como evcc usan como refuerzo. El modo ACS, la 3WV y el caudal muestran por separado si el depósito se está cargando."
+      ? `Los contactos SG-Ready indican ${esSg2}`
       : d.sgMode === 2
-      ? "HomeHub indica Marcha recomendada, el estado que gestores como evcc usan como refuerzo. El modo ACS, la 3WV y el caudal muestran por separado si el depósito se está cargando."
+      ? `HomeHub indica ${esSg2}`
       : d.sgMode === 1 ? "El gestor energético informa «parada forzada»."
       : d.sgMode === 3 ? "El gestor energético informa «marcha forzada»."
       : "No hay una solicitud Smart Grid externa; la unidad funciona de forma autónoma."], // sgrequest
@@ -1171,8 +1136,8 @@ INSPECT_I18N.es = inspectValues(
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. En refrigeración activa R1T debe estar por debajo de R4T, por eso la diferencia es negativa.`
       : `${fmt1(d.dt)} K. Un valor positivo indica que el PHE aporta calor al agua.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Potencia de frío estimada" : "Potencia térmica estimada", "Potencia térmica estimada en el PHE", (d) => d && d.pthKind === "cooling"
-      ? "Estimación del calor extraído: caudal/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) suponiendo agua. Depende de caudal, sensores y fluido; con glicol cambia. Solo se muestra con compresor en marcha y diferencia en dirección de refrigeración."
-      : "Estimación del calor entregado: caudal/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) suponiendo agua. Depende de caudal, sensores y fluido; con glicol cambia. BUH está después de R1T y queda fuera de esta cifra.", (d) => d.dtStale
+      ? `Estimación del calor extraído: caudal/60 × (R4T−R1T) ${esPth} Solo se muestra con compresor en marcha y diferencia en dirección de refrigeración.`
+      : `Estimación del calor entregado: caudal/60 × (R1T−R4T) ${esPth} BUH está después de R1T y queda fuera de esta cifra.`, (d) => d.dtStale
       ? d.bsh === true
         ? "No se calcula transferencia en el PHE porque no se demuestra circulación. La resistencia interna aún puede calentar el depósito, pero su calor no cruza R1T/R4T y este bus no puede cuantificarlo."
         : "No se calcula potencia porque no se demuestra movimiento de agua por el PHE. Falta un punto de trabajo; no significa 0 kW."

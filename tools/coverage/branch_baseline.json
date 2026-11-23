@@ -2206,8 +2206,8 @@
         "taken": 1159
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 359,
-        "taken": 359
+        "outcomes": 361,
+        "taken": 361
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 272,
@@ -2218,16 +2218,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 352,
+        "outcomes": 338,
         "taken": 301
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 574,
-        "taken": 383
+        "outcomes": 520,
+        "taken": 351
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 166,
-        "taken": 118
+        "outcomes": 158,
+        "taken": 114
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 26,
@@ -2304,6 +2304,10 @@
       "main/logic/fixed_text.hpp": {
         "outcomes": 16,
         "taken": 12
+      },
+      "main/logic/gas_comparison.hpp": {
+        "outcomes": 20,
+        "taken": 18
       },
       "main/logic/ha_device.hpp": {
         "outcomes": 156,
@@ -2533,10 +2537,6 @@
         "outcomes": 138,
         "taken": 138
       },
-      "main/logic/power_meter_source.hpp": {
-        "outcomes": 92,
-        "taken": 80
-      },
       "main/logic/profile_table_equal.hpp": {
         "outcomes": 36,
         "taken": 36
@@ -2626,8 +2626,8 @@
         "taken": 10
       },
       "main/logic/working_figure.hpp": {
-        "outcomes": 494,
-        "taken": 410
+        "outcomes": 523,
+        "taken": 437
       },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,

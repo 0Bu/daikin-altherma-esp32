@@ -390,6 +390,14 @@ try {
       }
     }
     if(name==="scan-unicode-escape") assert.deepEqual(doc,{networks:[{ssid:"Café \"quoted\"\\line\n",rssi:-42}]});
+    if(name==="status-modbus-diagnostics") {
+      assert.equal(doc.gas_comparison.configured,true);
+      assert.equal(doc.gas_comparison.currency,"CHF");
+      assert.equal(doc.gas_comparison.gas_efficiency_pct,88);
+      assert.equal(doc.working_figure.pel_source,"modbus");
+      assert.equal(doc.working_figure.state,"limited");
+      assert.equal(doc.working_figure.limited_buh,true);
+    }
     wires.push({name,type,hex});
   }
   assert.equal(configCases.size,0,"all plain/redacted stored and absent configuration cases must run");

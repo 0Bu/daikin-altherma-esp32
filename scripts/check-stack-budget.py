@@ -1817,14 +1817,13 @@ def validate_json_recursion(budgets: dict[str, Any], json_source: str,
     if not re.search(adapter, adapter_source):
         raise BudgetError("bounded cJSON adapter must bind JSON_MAX_DEPTH as its fourth argument")
     for owner in ("hp", "mqtt", "board", "env3", "weather", "diagnostics", "circulation",
-                  "gas_comparison", "power_meter"):
+                  "gas_comparison"):
         name = f"httpd_config_{owner}"
         rule = budgets["paths"].get(name)
         if rule is None or rule["multipliers"] != {"cjson_parse_value": 17, "cjson_delete": 17}:
             raise BudgetError(f"path {name}: cJSON parse and simultaneous cleanup need depth + root")
     for name in ("mqtt_reference_parse", "mqtt_circulation_parse",
-                 "mqtt_circulation_probe_parse", "mqtt_power_meter_parse",
-                 "mqtt_power_meter_probe_parse", "weather_task_parse"):
+                 "mqtt_circulation_probe_parse", "weather_task_parse"):
         rule = budgets["paths"].get(name)
         if rule is None or rule["multipliers"] != {"cjson_parse_value": 17, "cjson_delete": 17}:
             raise BudgetError(f"path {name}: bounded shared cJSON recursion and cleanup need depth + root")
@@ -2107,14 +2106,14 @@ def validate_mqtt_discovery_paths(budgets: dict[str, Any], mqtt_source: str,
 
 CONFIG_DOCUMENT_OWNERS = frozenset({
     "config_hp", "config_mqtt", "config_board", "config_env3", "config_weather",
-    "config_diagnostics", "config_circulation", "config_gas_comparison", "config_power_meter",
-    "config_ref_temp", "circulation_parser", "power_meter_parser", "hp_query_probe",
+    "config_diagnostics", "config_circulation", "config_gas_comparison",
+    "config_ref_temp", "circulation_parser", "hp_query_probe",
     "config_wifi", "config_syslog", "config_ntp",
 })
 CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_config_hp", "httpd_config_mqtt", "httpd_config_board", "httpd_config_env3",
     "httpd_config_weather", "httpd_config_diagnostics", "httpd_config_circulation",
-    "httpd_config_gas_comparison", "httpd_config_power_meter",
+    "httpd_config_gas_comparison",
     "httpd_hp_query_probe", "httpd_config_save", "httpd_config_save_link", "httpd_config_board_save",
     "httpd_mqtt_tls",
     "httpd_i2c_read", "httpd_i2c_write", "httpd_i2c_receive",
@@ -2139,7 +2138,7 @@ STAGED_STACK_LIMITS = {"config_document": 48, "http_values_snapshot": 208,
 CONFIG_DOCUMENT_CALLS = {
     "set_wifi": 512, "set_mqtt": 512, "parse_ref_temp_request": 8192,
     "parse_circulation_request": 1280, "set_diagnostics": 128, "set_gas_comparison": 512,
-    "parse_power_meter_request": 1280, "set_weather": 256,
+    "set_weather": 256,
     "set_hp": 2048, "set_syslog": 512, "set_ntp": 256, "set_board": 512,
     "set_env3": 256, "set_ota": 128, "set_lang": 128, "hp_query_probe": 192,
 }
@@ -2349,9 +2348,9 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
             "pattern": "^" + re.escape(INTEGER_TO_CHARS_SYMBOL) + "$", "max_bytes": 48}:
         raise BudgetError("integer formatter path: exact ENTRY48 charconv wrapper rule changed")
     mqtt_depth = r"json_payload_depth_ok\(std::string_view\(frame\.payload,\s*frame\.payload_len\)\)"
-    if (len(re.findall(mqtt_depth, sources["main/mqtt_ha.cpp"])) != 3
-            or len(re.findall(r"\bjson_payload_depth_ok\s*\(", sources["main/mqtt_ha.cpp"])) != 3
-            or len(re.findall(r"\bcJSON_ParseWithLengthOpts\s*\(", sources["main/mqtt_ha.cpp"])) != 3
+    if (len(re.findall(mqtt_depth, sources["main/mqtt_ha.cpp"])) != 2
+            or len(re.findall(r"\bjson_payload_depth_ok\s*\(", sources["main/mqtt_ha.cpp"])) != 2
+            or len(re.findall(r"\bcJSON_ParseWithLengthOpts\s*\(", sources["main/mqtt_ha.cpp"])) != 2
             or len(re.findall(r"\bcJSON_ParseWithLengthOpts\s*\(", sources["main/weather_forecast.cpp"])) != 1
             or not re.search(r"json_payload_depth_ok\(payload,\s*JSON_MAX_DEPTH\)",
                              sources["main/weather_forecast.cpp"])):
@@ -3214,10 +3213,6 @@ def self_test() -> None:
   1a: 004136          entry a1, 1408
 00000385 <daik::set_gas_comparison(httpd_req*)>:
  385: 004136          entry a1, 1280
-00000386 <daik::set_power_meter(httpd_req*)>:
- 386: 004136          entry a1, 976
-00000387 <daik::parse_power_meter_request(httpd_req*, daik::PowerMeterRequest&)>:
- 387: 004136          entry a1, 1408
 0000001b <daik::hp_query_probe(httpd_req*)>:
   1b: 004136          entry a1, 2720
 0000001c <daik::mcp_parse(char const*, int)>:
@@ -3355,9 +3350,6 @@ def self_test() -> None:
      '_ZN4daikL25service_circulation_frameERKNS_18ReferenceMqttFrameERKNS_6ConfigE$constprop$0': 64,
      '_ZN4daikL31service_circulation_probe_frameERKNS_18ReferenceMqttFrameE$constprop$0': 64,
      '_ZN4daikL24decode_circulation_frameERKNS_18ReferenceMqttFrameERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_$constprop$0': 64,
-     '_ZN4daikL25service_power_meter_frameERKNS_18ReferenceMqttFrameERKNS_6ConfigE$constprop$0': 64,
-     '_ZN4daikL31service_power_meter_probe_frameERKNS_18ReferenceMqttFrameE$constprop$0': 64,
-     '_ZN4daikL24decode_power_meter_frameERKNS_18ReferenceMqttFrameERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_NS_14PowerMeterUnitE$constprop$0': 64,
      'daik::service_reference_subscription(daik::Config const&, unsigned long)': 64,
      'daik::service_circulation_subscription(daik::Config const&, unsigned long)': 64,
      'daik::build_client()': 64,
@@ -5103,8 +5095,7 @@ def self_test() -> None:
         else:
             raise AssertionError(f"self-test accepted {name}")
     for path in ("mqtt_reference_parse", "mqtt_circulation_parse",
-                 "mqtt_circulation_probe_parse", "mqtt_power_meter_parse",
-                 "mqtt_power_meter_probe_parse", "weather_task_parse"):
+                 "mqtt_circulation_probe_parse", "weather_task_parse"):
         changed_budgets = json.loads(json.dumps(budgets))
         changed_budgets["paths"][path]["multipliers"]["cjson_delete"] = 16
         try:
