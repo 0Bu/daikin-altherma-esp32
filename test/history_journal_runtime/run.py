@@ -159,7 +159,7 @@ phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
 cases = ["commit_rejected", "core_ahead", "nor_contract", "restore_before_pending_bucket",
          "poll_during_shutdown_claim", "cycling_reset_before_last_page",
          "cycling_reset_before_trend_restore", "cycling_reset_after_trace_restore",
-         "cycling_reset_before_time_sync",
+         "cycling_reset_before_time_sync", "dhw_shutdown_checkpoint_after_barrier",
          "read_admission", "sequence_rejections",
          "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error",
          "forget_before_start", "forget_during_lookup", "forget_during_scan",
@@ -181,6 +181,9 @@ for case in cases:
         raise RuntimeError("Unexpected semantic outcome: " + case)
 transport_evidence = []
 pending_cases = ["checkup_pending_healthy", "checkup_pending_forget"]
+dhw_cases = ["seed_dhw_journal", "verify_dhw_incompatible_journal",
+             "restore_dhw_journal", "verify_dhw_barrier_journal",
+             "verify_dhw_damaged_barrier_journal"]
 if not args.expect_red or args.expect_red_case == "late-correction":
     transport = OUT / "late-correction.synthetic-nor.bin"
     paired_cases = ["seed_late_correction", "restore_late_correction"]
@@ -243,12 +246,26 @@ if not args.expect_red:
     transport_evidence.append({"path": str(fault_transport), "sha256": digest(fault_transport),
                                "bytes": fault_transport.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
+    dhw_transport = OUT / "dhw-trace.synthetic-nor.bin"
+    for case in dhw_cases:
+        result = execute(baseline, case, case, [dhw_transport])
+        expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+        results.append({"case": case, "exit_code": result.returncode,
+                        "stdout": result.stdout, "stderr": result.stderr, "pass": expected})
+        print(result.stdout, end="", flush=True)
+        if not expected:
+            (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+            raise RuntimeError("Unexpected tank-cooling journal outcome: " + case)
+    transport_evidence.append({"path": str(dhw_transport), "sha256": digest(dhw_transport),
+                               "bytes": dhw_transport.stat().st_size,
+                               "only_cross_process_state": "synthetic NOR partition bytes"})
 unknowns = []
 for case in ["unknown_case", "data_unknown", "barrier_unknown",
              "seed_late_correction", "restore_late_correction",
              "seed_modbus_checkup_journal", "restore_modbus_checkup_journal",
              "verify_modbus_barrier_journal",
-             "seed_fault_journal", "restore_fault_journal", "verify_fault_barrier_journal"]:
+             "seed_fault_journal", "restore_fault_journal", "verify_fault_barrier_journal",
+             *dhw_cases]:
     result = execute(baseline, case, case)
     ok = oracle_failed(result, case, "unknown_case")
     unknowns.append({"case": case, "pass": ok})
@@ -299,6 +316,13 @@ if not args.expect_red:
         ("reject_reset_before_time_sync", "if (!s_flash_restore_done || !time_synced()) {",
          "if (!time_synced()) return 0;\n    if (!s_flash_restore_done) {",
          ["cycling_reset_before_time_sync"], "shutdown_commits_undated_reset_without_observations"),
+        ("skip_dhw_checkpoint_after_shutdown_barrier", "const size_t dhw_budget = max_records ? 2 : 1;",
+         "const size_t dhw_budget = 1;", ["dhw_shutdown_checkpoint_after_barrier"],
+         "tank_cooling_shutdown_commits_replacement_after_barrier"),
+        ("ack_dhw_checkpoint_at_damaged_barrier_sequence",
+         "!restore_done || s_flash_next_sequence <= ds.fence", "!restore_done",
+         ["verify_dhw_damaged_barrier_journal"],
+         "tank_cooling_writer_refuses_to_acknowledge_data_at_damaged_barrier_sequence"),
         ("anchor_at_late_fold",
          "return wall_bucket_of_instant_locked(logic::history_raster_boundary_us(commit_us));",
          "return wall_bucket_of_instant_locked(commit_us);",
@@ -350,8 +374,14 @@ if not args.expect_red:
         source.write_text(text.replace(before, after, 1))
         binary = build(source, name)
         for case in controls:
+            if case in pending_cases:
+                control_inputs = [transport]
+            elif case in dhw_cases:
+                control_inputs = [dhw_transport]
+            else:
+                control_inputs = []
             result = execute(binary, case, name + "-" + case,
-                             [transport] if case in pending_cases else [])
+                             control_inputs)
             ok = oracle_failed(result, case, oracle)
             mutants.append({"mutation": name, "case": case, "compiled": True,
                             "oracle": oracle, "stdout": result.stdout,

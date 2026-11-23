@@ -134,6 +134,12 @@ both histories untouched. Safe mode and pre-opt-in states (`diagnostics_generati
 old hours, while booting while paused retains the active generation's compatible flash records for
 resumption; unidentified-source empty samples advance time without booking observations.
 
+Exact completed tank-cooling windows persist independently of hourly diagnosis totals. The
+timed journal restores compatible saved records within the last 24 hours after clock and source
+confirmation. It requires the matching circulation identity and diagnostics generation. A
+power loss can lose windows that had not yet been committed. Restored bars report historical
+observations. Freshness still requires complete inputs from the current boot.
+
 A software restart can also carry each source's ongoing tank-loss filter through a separately sealed
 **one-shot handoff**. Adoption requires confirmation of that source and circulation scope, enabled
 diagnostics and no pending reset. The handoff preserves the hourly cooling candidate and settling

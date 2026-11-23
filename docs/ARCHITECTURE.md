@@ -293,12 +293,12 @@ X10A, Modbus, and circulation epochs remain independent. Same-boot journal creat
 restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
 
-Exact completed tank-cooling windows use separate ordinary static RAM per source
-([`dhw_loss_trace.hpp`](../main/logic/dhw_loss_trace.hpp)), not `.noinit` or the history journal.
-The recorder copies accepted results without changing diagnostic rules or the `CheckupReport` layout.
-Existing persisted structs, fingerprints, journal payloads and NVS remain unchanged. The
-[timeline API](API.md#dhw-cooling-timeline) defines retention, collection resets and client
-invalidation.
+Exact completed tank-cooling windows use bounded static RAM per source and a separate
+single-page checkpoint in the history journal. That page records endpoint ages, duration, rate,
+readable time, and both markers. It binds source and profile, circulation identity, and consent.
+The existing append, CRC, and commit checks protect the page. Reset barriers withdraw older
+checkpoints. The core hourly payload and NVS layout stay compatible. The
+[timeline API](API.md#dhw-cooling-timeline) defines retention and client invalidation.
 
 A run completion is booked to its retained start hour. If the journal cursor has reached that
 hour, the writer schedules a replay from it through later live hours. The boot index keeps each

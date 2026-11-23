@@ -64,7 +64,10 @@ class Node {
 const host = new Node();
 const item = host.add(new Node({}, ["vitem", "open"]));
 const panel = item.add(new Node({}, ["checkup-dhw-detail"]));
-const slot = panel.add(new Node({ checkupDhw: "", dhwScope: "" }));
+const timedEvidence = panel.add(new Node({ dhwEvidence: "" }));
+const timelineDisclosure = panel.add(new Node({ dhwDisclosure: "timeline" }));
+timelineDisclosure.open = false;
+const slot = timelineDisclosure.add(new Node({ checkupDhw: "", dhwScope: "" }));
 const slotText = Object.getOwnPropertyDescriptor(Node.prototype, "textContent");
 Object.defineProperty(slot, "textContent", {
   get() { return slotText.get.call(this); },
@@ -84,7 +87,7 @@ function makeChart(trace, scope) {
       lane.add(new Node({ dhwMarker: String(w.end_s) }));
   }
   if (trace.windows.length) {
-    for (const key of ["rate", "time", "coverage", "markers"]) chart.add(new Node({ dhwReadout: key }));
+    for (const key of ["rate", "time", "coverage", "context"]) chart.add(new Node({ dhwReadout: key }));
     for (const key of ["previous", "next"]) chart.add(new Node({ dhwAction: key }));
   }
   return chart;
@@ -129,7 +132,7 @@ ui.patchText(textWitness, "new relative time");
 assert.equal(retainedText.nodeValue, "new relative time");
 
 // Intentionally unlike the maximum and counts of the aggregate diagnosis. All fixture values
-// stay in tests; production bars must have actual same-boot completions and paired markers.
+// stay in tests; production bars require actual completions and paired markers.
 const trace = { epoch: 3, window_end_s: 100000, since_s: 0, observed_end_s: 99998,
   unix_s: 1795262400, live: true, windows: [
     { start_s: 11015, end_s: 14630, rate_k_h: 1.7, observed_s: 3600, pump_marker: false, draw_marker: false },
@@ -148,6 +151,19 @@ const timeline = () => c().timeline;
 assert.equal(ui.parse(c()), timeline());
 assert.equal(ui.parse({ ...check, windows: 0 }), check.timeline,
   "the timed record count is independent from aggregate expiry and journal restoration");
+// Restored endpoints are coordinates in the backend's stable frame, even when
+// their original boot differed. They can arrive before a current complete sample.
+const restored = { epoch: 9, window_end_s: 90093, since_s: 85000, observed_end_s: null,
+  unix_s: trace.unix_s, live: false, windows: [{ ...trace.windows[3], start_s: 85000, end_s: 88600 }] };
+const postBootCheck = { ...check, timeline: restored };
+assert.equal(ui.parse(postBootCheck), restored);
+const restoredChart = ui.chart(restored, ui.scope(restored));
+assert.match(restoredChart, /data-start-s="85000" data-end-s="88600"/);
+assert.equal((restoredChart.match(/data-dhw-marker="88600"/g) || []).length, 2);
+assert.equal(ui.parse({ ...postBootCheck, timeline: { ...restored, live: true } }), null,
+  "restored samples alone cannot establish current freshness");
+assert.equal(ui.parse({ ...postBootCheck, timeline: { ...restored, window_end_s: 175000 } }), null,
+  "a restored measurement expires using its actual completion time");
 const quantizedEdge = { ...trace, windows: [{ ...trace.windows[0], end_s: 14646 }] };
 assert.equal(ui.parse({ ...check, timeline: quantizedEdge }), quantizedEdge,
   "separately floored endpoints can span 3631 s at the unchanged 3630 s evaluator limit");
@@ -177,7 +193,7 @@ const boundedCopy = {
   en: [/maximum and counts.*saved hourly evidence.*not just plotted/i,
     /no completed timed window available.*not zero cooling.*presence, not duration/i],
   de: [/Höchstwert und Zähler.*gespeicherten Stundenwerten.*nicht nur.*gezeichneten Fenstern/,
-    /kein abgeschlossenes Fenster mit Zeitangaben verfügbar.*nicht null.*Merkmale, keine Laufzeiten/],
+    /Schraffiert.*ohne abgeschlossene Messstunde.*Balken zeigt eine Messstunde mit 0 K\/h.*Merkmale ohne Angabe der Dauer/],
   es: [/máximo y los recuentos.*datos horarios guardados.*no solo.*ventanas del gráfico/,
     /ninguna ventana completa con tiempos disponible.*no enfriamiento cero.*presencia, no duración/],
   fr: [/maximum et les décomptes.*données horaires sauvegardées.*pas seulement.*fenêtres tracées/,
@@ -211,13 +227,15 @@ for (const lang of locales) {
   assertBoundedCopy(lang, ui.text("check.dhw.timed_scope", 4), ui.text("check.dhw.blank"));
   const detail = ui.detail(c(), false, S.status.health);
   assert.match(detail, /checkup-dhw-value num has-rate/);
-  assert.match(detail, /4[,.]5<span class="checkup-dhw-unit">K\/h<\/span>/);
+  assert.match(detail, /4[,.]5<span class="checkup-dhw-unit">/);
+  assert.ok(detail.includes(ui.text("check.dhw.hour_unit")));
   assert.match(detail, /data-checkup-dhw/);
   assert.doesNotMatch(detail, /data-dhw-window=|data-dhw-timeline=/,
     `${lang}: scalar detail must not eagerly construct the closed chart`);
-  for (const key of ["basis", "energy"]) assert.ok(detail.includes(`data-dhw-disclosure="${key}"><summary>`),
+  for (const key of ["timeline", "basis", "energy"]) assert.ok(detail.includes(`data-dhw-disclosure="${key}"><summary>`),
     `${lang}: ${key} starts collapsed`);
-  assert.ok(detail.includes(ui.text("check.dhw.measurement")));
+  assert.ok(detail.includes(ui.text("check.dhw.context_missing")));
+  assert.ok(!detail.includes("data-dhw-evidence"));
   assert.ok(detail.includes(ui.text("check.dhw.limit")));
   assert.ok(!detail.includes(ui.text("check.dhw.hint")), `${lang}: marked maximum alone is not a finding`);
   assert.doesNotMatch(detail, /check\.dhw\.|undefined|NaN|Infinity/);
@@ -226,6 +244,8 @@ for (const lang of locales) {
   assert.match(html, /checkup-dhw-window is-zero[\s\S]*data-rate="0"/);
   assert.equal((html.match(/data-dhw-marker=/g) || []).length, 4, `${lang}: paired presence, not a duration band`);
   assert.ok(html.includes(ui.text("check.dhw.blank")));
+  assert.match(html, /class="checkup-dhw-caption checkup-dhw-gap-caption"/,
+    `${lang}: the legend identifies the hatched intervals`);
   assert.ok(html.includes(ui.text("check.dhw.timed_scope", 4)));
   assert.doesNotMatch(html, /4[,.]5|200 l|COP|kWh|threshold/,
     `${lang}: no scalar maximum, energy assumptions or browser threshold in the plot`);
@@ -233,8 +253,40 @@ for (const lang of locales) {
   assert.ok(ui.chart({ ...trace, windows: [] }, "empty").includes(ui.text("check.dhw.timeline_empty")));
 }
 ui.lang("en");
+const compact = check => ui.detail(check, false, S.status.health).split('data-dhw-disclosure="timeline"')[0];
+for (const [window, keys] of [
+  [trace.windows[0], ["quiet"]], [trace.windows[1], ["pump"]],
+  [trace.windows[2], ["draw"]], [trace.windows[3], ["pump", "draw"]],
+]) {
+  const body = compact({ ...check, max_k_h: window.rate_k_h });
+  assert.ok(body.includes(ui.text("check.dhw.context_hour")));
+  assert.equal(body.includes(ui.text("check.dhw.context_title")), window.rate_k_h > 0);
+  assert.equal(body.includes("checkup-dhw-arrow"), window.rate_k_h > 0);
+  for (const key of ["quiet", "pump", "draw", "missing"])
+    assert.equal(body.includes(ui.text(`check.dhw.context_${key}`)), keys.includes(key),
+      "the compact card describes only the markers of an hour with the same rate");
+}
+const ties = { ...trace, unix_s: undefined, windows: [
+  ...trace.windows.slice(0, -1), { ...trace.windows.at(-1), rate_k_h: 1.7 },
+] };
+const tied = compact({ ...check, max_k_h: 1.7, timeline: ties });
+assert.ok(tied.includes(ui.text("check.dhw.context_draw")), "ties use the newest timed hour");
+assert.ok(!tied.includes(ui.text("check.dhw.context_quiet")));
+assert.match(tied, /before snapshot/);
+assert.doesNotMatch(tied, /GMT|UTC/);
+const priorTimezone = process.env.TZ;
+try {
+  process.env.TZ = "Europe/Berlin";
+  const end = Date.parse("2026-10-25T01:30:00Z") / 1000;
+  const repeatedHour = { ...trace, unix_s: end + trace.window_end_s - trace.windows.at(-1).end_s };
+  const body = compact({ ...check, max_k_h: 2.7, timeline: repeatedHour });
+  assert.match(body, /02:30:00 GMT\+2.*02:30:00 GMT\+1/,
+    "an elapsed hour across the autumn clock change retains both offsets");
+} finally {
+  if (priorTimezone == null) delete process.env.TZ; else process.env.TZ = priorTimezone;
+}
 assert.throws(() => assertBoundedCopy("en",
-  "Timed windows since restart/reset: 4, up to 24 h. Diagnosis totals can also include saved windows.",
+  "Completed hours in the chart: 4 (last 24 h). Diagnosis totals can also include saved windows.",
   ui.text("check.dhw.blank")), /maximum\/counts provenance/,
   "the old totals-only copy must fail its named maximum-provenance assertion");
 assert.throws(() => assertBoundedCopy("en", ui.text("check.dhw.timed_scope", 4),
@@ -250,12 +302,23 @@ S.stage = "settings"; ui.sync(card);
 S.stage = "dashboard"; S.scrub = "other-chart"; ui.sync(card);
 S.scrub = null; ui.sync({ ...card, dataset: { dashboardCard: "model" } });
 assert.equal(ui.builds(), initialBuilds, "hidden/inactive/settings/gesture states do no chart work");
+const findSlot = host.querySelector;
+host.querySelector = () => null;
+timeline().live = false;
+ui.retire();
+assert.equal(host.getAttribute("data-dhw-stale"), "true", "the first stale status is labelled before a chart slot exists");
+timeline().live = true;
+host.querySelector = findSlot;
 ui.sync(card);
+assert.equal(ui.builds(), initialBuilds, "expanding the value row leaves its timed history unmounted");
+timelineDisclosure.open = true;
+item.fire("toggle", timelineDisclosure);
 assert.equal(ui.builds(), initialBuilds + 1);
+assert.ok(S.descOpen.has("dhw:timeline"));
 let chart = slot.children[0];
 assert.equal(chart.dataset.dhwClock, "wall");
 assert.equal(ui.selection().end, 96607, "latest actual window is initially selected");
-const buttons = chart.querySelectorAll("[data-dhw-window]");
+let buttons = chart.querySelectorAll("[data-dhw-window]");
 const percent = node => Number.parseFloat(node.style.left);
 const width = node => Number.parseFloat(node.style.width);
 assert.equal(percent(buttons[0]), 0, "actual crossing hour is clipped at the rolling left edge");
@@ -269,11 +332,15 @@ for (const w of trace.windows) for (const marker of chart.querySelectorAll(`[dat
 }
 assert.equal(host.getAttribute("data-dhw-stale"), "false");
 assert.match(chart.querySelector('[data-dhw-readout="rate"]').textContent, /^2.7 K\/h$/);
-assert.match(chart.querySelector('[data-dhw-readout="markers"]').textContent, /Internal pump: recorded · Draw-like drop: recorded/);
+assert.equal(chart.querySelector('[data-dhw-readout="context"]').textContent,
+  ["pump", "draw", "selected"].map(key => ui.text(`check.dhw.context_${key}`)).join(" "));
+assert.match(buttons[3].getAttribute("aria-label"), /Internal pump: recorded · Draw-like drop: recorded/);
 chart.fire("click", buttons[1]);
 assert.equal(ui.selection().end, 23617);
 assert.match(chart.querySelector('[data-dhw-readout="rate"]').textContent, /^0 K\/h$/);
-assert.match(chart.querySelector('[data-dhw-readout="markers"]').textContent, /Internal pump: recorded · Draw-like drop: not recorded/);
+assert.equal(chart.querySelector('[data-dhw-readout="context"]').textContent,
+  ui.text("check.dhw.context_pump"));
+assert.match(buttons[1].getAttribute("aria-label"), /Internal pump: recorded · Draw-like drop: not recorded/);
 let event = chart.fire("keydown", buttons[1], { key: "ArrowLeft" });
 assert.ok(event.prevented && event.stopped);
 assert.equal(ui.selection().end, 14630);
@@ -317,6 +384,19 @@ assert.ok(S.descOpen.has("dhw:basis"));
 assert.ok(ui.detail(c(), false, S.status.health).includes('data-dhw-disclosure="basis" open>'));
 disclosure.open = false; item.fire("toggle", disclosure);
 assert.ok(!S.descOpen.has("dhw:basis"));
+timelineDisclosure.open = false;
+item.fire("toggle", timelineDisclosure);
+assert.ok(!S.descOpen.has("dhw:timeline"));
+assert.equal(slot.children.length, 0, "folding the timeline releases chart nodes");
+assert.equal(S.cancelDhwDrag, null, "the detached chart is not held by the gesture callback");
+ui.sync(card);
+assert.equal(ui.builds(), buildsBeforePolls, "folded timelines stay unmounted when status is rendered");
+timelineDisclosure.open = true;
+item.fire("toggle", timelineDisclosure);
+chart = slot.children[0];
+buttons = chart.querySelectorAll("[data-dhw-window]");
+const buildsAfterReopen = ui.builds();
+assert.equal(ui.selection().end, 44631, "reopening keeps the same-scope timed selection");
 
 // Pointer dragging selects only an actual observed window; crossing a blank cannot invent a
 // zero or claim a gap cause. Vertical scrolling, cancellation and the watchdog release the hold.
@@ -345,7 +425,7 @@ ui.sync(card);
 assert.equal(chart.dataset.dhwClock, "relative");
 assert.match(chart.querySelector('[data-dhw-readout="time"]').textContent, /before snapshot/);
 assert.doesNotMatch(chart.querySelector('[data-dhw-readout="time"]').textContent, /2026|GMT|UTC|Nov/);
-assert.equal(ui.builds(), buildsBeforePolls, "clock anchoring changes also retain the chart DOM");
+assert.equal(ui.builds(), buildsAfterReopen, "clock anchoring changes also retain the chart DOM");
 assert.equal(chart.querySelector('[data-dhw-axis="24"]').textContent, "Snapshot");
 
 // Freshness is a monotonic upper-bound lease; no delayed timer may turn stale data fresh.
@@ -440,8 +520,12 @@ assert.match(slot._html, /No completed timed windows available in this 24 h view
 // The status request can succeed with a fresh source while omitting the optional chart.
 // Withdraw old windows without inventing a current-input failure while values are held.
 S.statusRequestedAt = now;
+timedEvidence.hidden = false;
+context._html.valueGroups = ui.detail(c(), false, S.status.health);
 delete c().timeline;
 ui.retire();
+assert.equal(timedEvidence.hidden, true, "status adoption retires paired hero evidence before a held render");
+assert.equal(context._html.valueGroups, undefined, "restored identical markup must repair retired context");
 assert.equal(host.getAttribute("data-dhw-stale"), "false",
   "omitting optional timed evidence does not establish stale current readings at status adoption");
 ui.sync(card);
@@ -482,7 +566,7 @@ assert.equal(host.getAttribute("data-dhw-stale"), "true",
 assert.equal(slot.children[0].querySelectorAll("[data-dhw-window]").length, 0);
 assert.equal(ui.selection().end, null);
 assert.match(ui.detail(c(), false, S.status.health), /has-rate/,
-  "empty current-boot timed history cannot erase a valid persisted aggregate maximum");
+  "empty timed history cannot erase a valid persisted aggregate maximum");
 ui.render(slot, false);
 assert.equal(slot.children.length, 0);
 assert.equal(panel.inert, true, "a closed outer accordion has no focusable inner controls");
@@ -500,6 +584,7 @@ class IslandNode {
     for (const [key, value] of Object.entries(attributes)) this.setAttribute(key, value);
   }
   get attributes() { return [...this._attrs].map(([name, value]) => ({ name, value })); }
+  get open() { return this.hasAttribute("open"); }
   get parentElement() { return this.parentNode?.nodeType === 1 ? this.parentNode : null; }
   get firstChild() { return this.childNodes[0] || null; }
   get nextSibling() { return this.parentNode?.childNodes[this.parentNode.childNodes.indexOf(this) + 1] || null; }
@@ -551,7 +636,10 @@ function islandTransitions(requireAncestors = true) {
     const hero = panel.add(new IslandNode("DIV", { class: "checkup-dhw-hero" }));
     if (hasRate) hero.add(new IslandNode("DIV", { class: "checkup-dhw-heading" }));
     hero.add(new IslandNode("DIV", { class: hasRate ? "has-rate" : "no-rate" }));
-    panel.add(new IslandNode("DIV", { "data-checkup-dhw": "", "data-dhw-scope": scope }));
+    const disclosure = panel.add(new IslandNode("DETAILS", { "data-dhw-disclosure": "timeline", open: "" }));
+    disclosure.add(new IslandNode("SUMMARY"));
+    const chartBody = disclosure.add(new IslandNode("DIV", { class: "checkup-dhw-disclosure-body" }));
+    chartBody.add(new IslandNode("DIV", { "data-checkup-dhw": "", "data-dhw-scope": scope }));
     panel.add(new IslandNode("DETAILS", { "data-dhw-disclosure": "basis", open: "" }));
     if (html.includes('data-dhw-disclosure="energy"'))
       panel.add(new IslandNode("DETAILS", { "data-dhw-disclosure": "energy" }));

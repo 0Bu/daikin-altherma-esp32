@@ -2383,6 +2383,26 @@
       },
       "test_source_sha256": "92ff30d5f5f6424bfaa50fa0a0bbee8a9a1cef35f7db23449ee6a0abc7a78103",
       "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 CI confirmation remains separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, x86_64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
+      },
+      "runner": "scripts/run-mock-tests.sh --coverage compiler flags and gcov invocation, with isolated outputs",
+      "scope": "Exercise exact DHW flash page encoding and validation, monotonic restore, overlap and expiry, and retirement of restored windows under clock correction.",
+      "sources": {
+        "main/logic/dhw_loss_persist.hpp": "350a101f64801311ecbeeb20482bb3abb2d451a77bcf9c5b35dfe8851cb76894",
+        "main/logic/dhw_loss_trace.hpp": "85364cfcd7827b122cde4fbf04d69813d67149823d6d8015d4db984776dc28f2",
+        "main/logic/history_persist.hpp": "94c9a36c4f22d4a53a31fdbbdd2e1f9a325f03047ac3cd883c889f312b68c555"
+      },
+      "test_source_sha256": "c40442d421b0b6e47bb6e7040f9af3a959e905523b760ddab1dc2a82fe6e4aee",
+      "measurement_limits": [
+        "The optional GCC 15 aarch64 full-profile check reports the previously pending MQTT inventory mismatch. mqtt_publish_gate.hpp measured 39/40 against 35/36."
+      ],
+      "validation_boundary": "Four local compiler-profile measurements, including the Ubuntu 26.04 x86-64 release-coverage container as the hosted candidate. Hosted confirmation and physical restart acceptance remain separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2492,9 +2512,13 @@
         "outcomes": 30,
         "taken": 29
       },
+      "main/logic/dhw_loss_persist.hpp": {
+        "outcomes": 90,
+        "taken": 77
+      },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 76,
-        "taken": 76
+        "outcomes": 96,
+        "taken": 96
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 184,
@@ -2978,9 +3002,13 @@
         "outcomes": 32,
         "taken": 31
       },
+      "main/logic/dhw_loss_persist.hpp": {
+        "outcomes": 106,
+        "taken": 89
+      },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 78,
-        "taken": 78
+        "outcomes": 98,
+        "taken": 98
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,
@@ -3464,9 +3492,13 @@
         "outcomes": 32,
         "taken": 31
       },
+      "main/logic/dhw_loss_persist.hpp": {
+        "outcomes": 106,
+        "taken": 89
+      },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 78,
-        "taken": 78
+        "outcomes": 98,
+        "taken": 98
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,
@@ -3950,9 +3982,13 @@
         "outcomes": 32,
         "taken": 31
       },
+      "main/logic/dhw_loss_persist.hpp": {
+        "outcomes": 106,
+        "taken": 89
+      },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 78,
-        "taken": 78
+        "outcomes": 98,
+        "taken": 98
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,

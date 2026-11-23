@@ -974,7 +974,8 @@ void dhw_trace_case(const std::string& name) {
                 name == "dhw_trace_source_reset" || name == "dhw_trace_circulation_reset" ||
                 name == "dhw_trace_forget" || name == "dhw_trace_forget_before_start" ||
                 name == "dhw_trace_forget_during_snapshot" ||
-                name == "dhw_trace_reset_during_snapshot" || name == "dhw_trace_unavailable",
+                name == "dhw_trace_reset_during_snapshot" || name == "dhw_trace_unavailable" ||
+                name == "dhw_trace_restore_forward" || name == "dhw_trace_restore_backward",
             "unknown_case");
     auto take = [](DiagnosticsSource source, DhwLossTimeline& out) {
         return checkup_report(nullptr, nullptr, nullptr, source, nullptr, &out);
@@ -986,7 +987,7 @@ void dhw_trace_case(const std::string& name) {
         take(DiagnosticsSource::X10a, x);
         require(!x.epoch && !x.count, "dhw_trace_absent_mutex_clears_output");
     }
-    if (name == "dhw_trace_forget_before_start") checkup_cycling_forget();
+    if (name == "dhw_trace_forget_before_start") checkup_dhw_trace_forget();
     boot();
     checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x11223344U);
     const auto cov  = coverage();
@@ -1052,6 +1053,51 @@ void dhw_trace_case(const std::string& name) {
         take(DiagnosticsSource::X10a, x);
         require(x.epoch == xepoch && !x.count && !x.live,
                 "dhw_trace_stopped_producer_expires_at_exact_cutoff");
+    } else if (name == "dhw_trace_restore_forward" || name == "dhw_trace_restore_backward") {
+        constexpr auto source = DiagnosticsSource::X10a;
+        using Result          = CheckupFlashRestoreResult;
+        DhwLossTracePage saved{};
+        saved.model_fp               = s_x10a.model_fp;
+        saved.source_fp              = s_x10a.source_fp;
+        saved.dhw_source_fp          = s_x10a.dhw_source_fp;
+        saved.diagnostics_generation = 23;
+        saved.unix_s                 = static_cast<uint32_t>(adapter::unix_origin - 30);
+        saved.count                  = 1;
+        require(dhw_loss_trace_pack(saved.records[0], {1, 3601, 21, 3591, true, true}, 3601),
+                "dhw_restore_exact_record_encodes");
+        require(checkup_dhw_trace_restore(saved, 0, DiagnosticsSource::Modbus) == Result::Ignored,
+                "dhw_restore_other_bus_rejected");
+        adapter::clock_synced = false;
+        require(checkup_dhw_trace_restore(saved, 0, source) == Result::Deferred,
+                "dhw_restore_waits_for_clock");
+        adapter::clock_synced = true;
+        require(checkup_dhw_trace_restore(saved, 0, source) == Result::Restored,
+                "dhw_restore_admits_matching_scope");
+        take(source, x);
+        require(x.count == 2 && x.unix_s - (x.window_end_s - x.windows[0].end_s) == saved.unix_s &&
+                    x.windows[0].observed_s == 3591 && x.windows[0].pump_marker &&
+                    x.windows[0].draw_marker && x.observed_end_s == x.window_end_s && x.live,
+                "dhw_restore_preserves_window_and_current_freshness");
+        DhwLossTracePage checkpoint{};
+        uint32_t         token = 0;
+        require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) && token &&
+                    checkpoint.count == 2,
+                "dhw_checkpoint_includes_valid_restored_prefix");
+        checkup_dhw_trace_checkpoint_appended(token, source);
+        adapter::unix_origin += name == "dhw_trace_restore_forward" ? 120 : -120;
+        take(source, x);
+        require(x.count == 1 && x.windows[0].rate_tenths == 0 && x.live,
+                "dhw_clock_step_only_withdraws_restored_prefix");
+        require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) && token &&
+                    dhw_loss_trace_page_valid(checkpoint, true),
+                "dhw_clock_step_commits_barrier_before_recheckpoint");
+        checkup_dhw_trace_checkpoint_appended(token, source);
+        require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) && checkpoint.count == 1,
+                "dhw_clock_step_recheckpoints_live_only");
+        DhwLossTrace rebooted;
+        require(dhw_loss_trace_restore(rebooted, checkpoint, 1, checkpoint.unix_s + 30) &&
+                    rebooted.snapshot(x, 1000000, CHECKUP_MAX_GAP_S) && x.count == 1 && !x.live,
+                "dhw_second_boot_does_not_restore_withdrawn_window");
     } else if (name == "dhw_trace_pause") {
         checkup_set_diagnostics(false, 23);
         take(DiagnosticsSource::X10a, x);
@@ -1148,7 +1194,7 @@ void dhw_trace_case(const std::string& name) {
     } else if (name == "dhw_trace_forget_during_snapshot" ||
                name == "dhw_trace_reset_during_snapshot") {
         adapter::on_time  = name == "dhw_trace_forget_during_snapshot"
-                                ? +[] { checkup_cycling_forget(); }
+                                ? +[] { checkup_dhw_trace_forget(); }
                                 : +[] { checkup_dhw_reset(); };
         const auto during = take(DiagnosticsSource::X10a, x);
         take(DiagnosticsSource::Modbus, m);
@@ -1162,7 +1208,7 @@ void dhw_trace_case(const std::string& name) {
         require(!x.epoch && !m.epoch && !x.count && !m.count,
                 "dhw_trace_withdrawal_during_clock_read_clears_captured_output");
     } else if (name == "dhw_trace_forget") {
-        checkup_cycling_forget();
+        checkup_dhw_trace_forget();
         const int64_t prior_end = s_x10a.dhw_trace.last_us;
         sample(7211, rows, cov);
         mb_sample(7211);

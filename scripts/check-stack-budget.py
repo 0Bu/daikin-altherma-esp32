@@ -928,12 +928,15 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "defrost_start_generation": ["defrost_start_copy", "defrost_poll_generation"],
         "checkup_fault_flags": ["fault_saved_flags", "fault_saved_window_flags"],
         "checkup_fault_flags_clock": ["fault_saved_flags", "room_time_now"],
-        # Optional DHW output is caller-owned heap storage. Snapshot expiry, both monotonic
-        # reads, the libc clock and final withdrawal loads are sequential siblings.
-        # The DHW wall projection is inlined into the measured copy frame.
+        # Optional DHW output is caller-owned heap storage. The clock and monotonic reads
+        # retain the projected-wall helper and its bracket. Clock-step invalidation retains
+        # only the projected-wall helper because the bracket has already returned.
         "dhw_trace_expire": ["dhw_trace_copy", "dhw_trace_expire"],
-        "dhw_trace_clock": ["dhw_trace_copy", "room_time_now"],
-        "dhw_trace_monotonic": ["dhw_trace_copy", "dhw_trace_monotonic"],
+        "dhw_trace_clock": ["dhw_trace_copy", "dhw_trace_wall_locked", "dhw_trace_wall",
+                            "room_time_now"],
+        "dhw_trace_monotonic": ["dhw_trace_copy", "dhw_trace_wall_locked", "dhw_trace_wall",
+                                "dhw_trace_monotonic"],
+        "dhw_trace_wall_step": ["dhw_trace_copy", "dhw_trace_wall_locked", "dhw_trace_barrier"],
         "dhw_trace_guard": ["dhw_trace_copy", "stop_atomic_bool_load"],
     }
     report_paths = {

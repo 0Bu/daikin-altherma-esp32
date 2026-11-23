@@ -21,7 +21,14 @@ INLINED_INDEX_HELPERS = (
 INLINED_SUPPRESSION_HELPERS = ('stop_context_unavailable_report',)
 DHW_TRACE_HELPERS = ('copy_dhw_trace_locked', 'dhw_loss_step_traced', 'dhw_loss_step',
                      'apply_dhw_reset_locked', 'slot_start', 'slot_set_diagnostics',
-                     'checkup_cycling_end_unix_s', 'dhw_loss_wall_anchor_s', 'mb_record_poll_gap')
+                     'checkup_cycling_end_unix_s', 'dhw_loss_wall_anchor_s', 'mb_record_poll_gap',
+                     'dhw_trace_wall_s', 'dhw_trace_wall_locked', 'arm_dhw_trace_barrier_locked',
+                     'retire_dhw_trace_locked', 'checkup_dhw_trace_checkpoint',
+                     'checkup_dhw_trace_restore', 'checkup_dhw_trace_forget',
+                     'checkup_dhw_trace_reset_pending', 'checkup_dhw_trace_checkpoint_appended',
+                     'flash_build_next_dhw', 'history_restore_dhw_flash', 'flash_index_dhw_page',
+                     'flash_dhw_owned', 'flash_dhw_appended', 'flash_note_barrier_fence',
+                     'flash_record_physically_valid', 'time_synced', 'checkup_modbus_reset')
 INDEX_POST_VALIDATION_FENCE = (
     '    if (s_forgotten.load(std::memory_order_acquire)) return;\n'
     '    observation_index_add('
@@ -247,7 +254,13 @@ def validate_dhw_trace_sources(sources, error):
     compact = normalized(checkup)
     report = normalized(body(checkup, 'checkup_report', error))
     copy = normalized(body(checkup, 'copy_dhw_trace_locked', error))
+    clock = normalized(body(checkup, 'dhw_trace_wall_s', error))
+    anchor = normalized(body(checkup, 'dhw_trace_wall_locked', error))
     if ('logic::DhwLossTracedhw_trace{};std::atomic<bool>dhw_trace_forgotten{false};'
+            'booldhw_trace_restore_allowed=false;uint32_tdhw_trace_restore_anchor_s=0;'
+            'std::atomic<uint32_t>dhw_trace_barrier{0};'
+            'std::atomic<uint32_t>dhw_trace_barrier_acked{0};'
+            'std::atomic<uint32_t>dhw_trace_saved_end_s{0};'
             'CheckupSlot(' not in compact):
         raise error('stop observation DHW detail: appended slot storage/offset contract changed')
     signature = ('static__attribute__((noinline))voidcopy_dhw_trace_locked('
@@ -270,19 +283,23 @@ def validate_dhw_trace_sources(sources, error):
         raise error('stop observation DHW detail: one post-clock pending reset must fence all DHW fields')
     admission = ('if(dhw_trace&&slot.source_confirmed&&!slot.dhw_reset_requested.load()&&'
                  '!slot.dhw_trace_forgotten.load(std::memory_order_acquire)&&slot.cov.r5t&&'
-                 'slot.cov.valve&&slot.cov.pump&&slot.cov.bsh&&'
-                 'slot.dhw_trace.snapshot(*dhw_trace,now_us,logic::CHECKUP_MAX_GAP_S)){')
-    clock = ('dhw_trace->live=dhw_trace->live&&source_fresh;int64_tunix_s=-1;int32_tms=0;'
-             'constint64_tbefore_us=esp_timer_get_time();time_now(unix_s,ms);'
-             'constint64_tafter_us=esp_timer_get_time();'
-             'dhw_trace->unix_s=logic::dhw_loss_wall_anchor_s('
-             'dhw_trace->window_end_s,before_us,after_us,unix_s,ms);')
+                 'slot.cov.valve&&slot.cov.pump&&slot.cov.bsh&&slot.dhw_trace.begun){'
+                 'constuint32_tunix_s=dhw_trace_wall_locked(slot,static_cast<uint32_t>(now_us/1000000));'
+                 'if(slot.dhw_trace.snapshot(*dhw_trace,now_us,logic::CHECKUP_MAX_GAP_S)){'
+                 'dhw_trace->live=dhw_trace->live&&source_fresh;dhw_trace->unix_s=unix_s;}}')
+    bracket = ('constint64_tbefore_us=esp_timer_get_time();int64_tunix_s=-1;int32_tms=0;'
+               'time_now(unix_s,ms);returnlogic::dhw_loss_wall_anchor_s('
+               'uptime_s,before_us,esp_timer_get_time(),unix_s,ms);')
+    roll = ('slot.dhw_trace.discard_restored();slot.dhw_trace_restore_anchor_s=0;'
+            'slot.dhw_trace_saved_end_s.store(0,std::memory_order_release);'
+            'arm_dhw_trace_barrier_locked(slot);returnnow;')
     withdrawn = ('if(dhw_trace&&slot.dhw_trace_forgotten.load(std::memory_order_acquire))'
                  'dhw_trace->clear();')
-    if (not copy.startswith(admission) or clock not in copy or not copy.endswith(withdrawn)
-            or copy.count('time_now(') != 1 or copy.count('esp_timer_get_time(') != 2
-            or copy.count('slot.dhw_trace.snapshot(') != 1):
-        raise error('stop observation DHW detail: admission/sibling clocks/post-clock withdrawal changed')
+    if (copy != admission + withdrawn or clock != bracket or not anchor.endswith(roll)
+            or '[[gnu::noinline]]staticuint32_tdhw_trace_wall_s(uint32_tuptime_s)' not in compact
+            or '[[gnu::noinline]]staticuint32_tdhw_trace_wall_locked(CheckupSlot&slot,uint32_tuptime_s)'
+            not in compact):
+        raise error('stop observation DHW detail: admission/clock bracket/post-clock withdrawal changed')
     logic = normalized(sources['main/logic/checkup.hpp'])
     pure = ('[[gnu::noinline]]inlinevoiddhw_loss_step(DhwLossState&st,DhwLossBucket&b,'
             'constCheckupSample&s,int64_tnow_us)')
@@ -359,6 +376,7 @@ def validate_sources(budgets, sources, error):
                                              'stop_observation_forget();'
                                              'hydronic_observation_forget();'
                                              'checkup_cycling_forget();'
+                                             'checkup_dhw_trace_forget();'
                                              'bump_history_epoch();'
                                              'if(!s_flash_forget_ready.load(std::memory_order_acquire))returnfalse;')
             or 's_flash_scan_ok=flash_journal_scan();' not in flash_start
@@ -414,6 +432,9 @@ def validate_sources(budgets, sources, error):
 
 def validate_inlining(disassembly, error):
     exact = {re.sub(r'\\(.)', r'\1', rule['pattern'][1:-1]) for rule in SYMBOLS.values()}
+    # history_journal_header_matches is overloaded. Monitor only the four-argument
+    # structural matcher reached from the DHW schema wrapper.
+    dhw_header = re.sub(r'\\(.)', r'\1', SYMBOLS['dhw_trace_header_shape']['pattern'][1:-1])
     for name in re.findall(r'^\s*[0-9a-fA-F]+\s+<(.+)>:\s*$', disassembly, re.M):
         if (re.search(r'\bdhw_loss_step_impl(?:<[^;]*>)?\(', name)
                 or re.match(r'^_Z.*18dhw_loss_step_impl', name)):
@@ -422,6 +443,8 @@ def validate_inlining(disassembly, error):
                or re.match(r'^_ZNK?4daik5logic(?:12DhwLossTrace|15DhwLossTimeline)', name)
                or re.match(r'^daik::logic::dhw_loss_trace_', name)
                or re.match(r'^_Z.*\d+dhw_loss_trace_', name)
+               or name.startswith(dhw_header)
+               or re.match(r'^_ZN4daik5logic30history_journal_header_matchesERKNS0_20HistoryJournalHeaderEmtm', name)
                or re.match(r'^_Z.*12persist_wipeERNS0_11CheckupSlotE', name)
                or 'persist_wipe(daik::(anonymous namespace)::CheckupSlot&' in name
                or any(re.search(r'\b' + helper + r'\(', name) or
@@ -644,10 +667,16 @@ def self_test(budgets, sources, error):
          'slot.cov.valve && slot.cov.pump && slot.cov.bsh', 'true'),
         ('main/checkup.cpp', 'copy_dhw_trace_locked',
          'dhw_trace->live && source_fresh', 'dhw_trace->live'),
-        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'time_now(unix_s, ms);', ''),
-        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'esp_timer_get_time()', 'now_us'),
-        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'before_us, after_us', 'before_us, before_us'),
-        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'logic::dhw_loss_wall_anchor_s(', 'other_anchor('),
+        ('main/checkup.cpp', 'dhw_trace_wall_s', 'time_now(unix_s, ms);', ''),
+        ('main/checkup.cpp', 'dhw_trace_wall_s', '= esp_timer_get_time()', '= uptime_s'),
+        ('main/checkup.cpp', 'dhw_trace_wall_s',
+         'before_us, esp_timer_get_time()', 'before_us, before_us'),
+        ('main/checkup.cpp', 'dhw_trace_wall_s', 'logic::dhw_loss_wall_anchor_s(', 'other_anchor('),
+        ('main/checkup.cpp', 'dhw_trace_wall_locked', 'slot.dhw_trace.discard_restored();', ''),
+        ('main/checkup.cpp', 'dhw_trace_wall_locked', 'arm_dhw_trace_barrier_locked(slot);', ''),
+        ('main/history.cpp', 'history_restore_dhw_flash',
+         '*new (s_flash_sector + sizeof(r)) logic::DhwLossTracePage', 'unreviewed_page'),
+        ('main/history.cpp', 'history_flash_forget', 'checkup_dhw_trace_forget();', ''),
         ('main/checkup.cpp', 'copy_dhw_trace_locked',
          'if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire))', 'if (dhw_trace)'),
         ('main/hp_modbus.cpp', 'mb_task',

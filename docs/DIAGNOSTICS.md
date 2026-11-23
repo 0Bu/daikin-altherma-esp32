@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 335265e8c5809c8e5828027b6d062274c223bf76e14409bb8cd828d9a3474053 -->
+<!-- user-docs-contract: 764dbac68b2f0215b156df2d53babb290f3b235649096b551d65bb48a03f1dde -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -87,23 +87,21 @@ fixed. No generic normal target is shown for faults.
 <!-- user-docs: health_dhw_loss -->
 ### Domestic-hot-water tank cooling
 
-**In plain language:** After at least one completed one-hour window, the board shows the largest
-net temperature drop at tank sensor R5T in **K/h** (one kelvin of cooling equals one degree
-Celsius). When timed detail is available, the expanded row plots windows completed in the last
-24 hours and after the most recent restart or reset. Tap a window for its time range, rate, readable
-time and markers.
-Separate lanes mark the presence of internal water-pump activity and a draw-like temperature
-pattern. The optional external hot-water circulation uses a separate witness.
+**In plain language:** The expanded row shows the largest measured hourly drop at tank sensor
+R5T in **°C per hour**, equivalent to the **K/h** shown in the row and chart. If an exact
+measurement has the same rate, the card shows the most recent matching hour and its circumstances.
+Internal pump activity and a rapid drop can occur in the same hour. The cause remains open.
 
-Blank intervals mean no completed timed record is available, not zero cooling or a known reason.
-A completed zero-rate window still has a bar. The chart selects the newest retained window when an
-earlier selection expires. It uses relative times if a reliable clock reading is unavailable.
-Bars do not return after a restart, although saved hourly evidence can still inform the maximum
-and totals. Bar counts and hourly totals can differ because they expire differently. If diagnosis
-updates stop or the tank-cooling inputs become stale, the last bars can remain visible as historical.
-A fresh diagnosis update can restore the chart's live state while the current readings panel is
-unavailable. An update without timeline data removes earlier bars. **Data details** explains the
-measurement basis and what the markers count.
+Open **24-hour history** and tap an hour for its time range, rate, readable time, and circumstances.
+Separate lanes mark internal pump activity and drops that resemble hot-water use. The optional
+external circulation uses a separate witness. Hatching shows time without a completed timed
+record. A measured zero has a short bar at the baseline.
+
+Saved bars can return after a restart once the clock synchronizes and the board confirms the
+same source and circulation configuration. Bar counts and diagnosis totals can differ because
+they use separate stores and expiry rules. The chart uses relative times when a reliable clock
+reading is unavailable. Historical bars do not establish that current inputs are fresh.
+**Data details** explains the measurement basis and marker limits.
 
 **Meaning:** **NOTE** needs at least one window at or above the project's **0.8 K/h** threshold
 without either marker. Other completed windows are **MEASURED**, including marked high rates.
