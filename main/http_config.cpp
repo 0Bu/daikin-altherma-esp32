@@ -969,10 +969,8 @@ static esp_err_t set_gas_comparison(httpd_req_t* req) {
         c.tariff_currency == cur_sv) {
         return send_saved_json(req, false);
     }
-    c.elec_price_tenth_mill = elec_tm;
-    c.gas_price_tenth_mill  = gas_tm;
-    if (has_cur) c.tariff_currency = std::move(currency);
-    if (!config_save(c)) return send_write_failed(req);
+    const std::string next_currency = has_cur ? std::move(currency) : c.tariff_currency;
+    if (!config_save_gas_comparison(elec_tm, gas_tm, next_currency)) return send_write_failed(req);
     diag_printf("tariff: gas comparison %s\n", elec_tm == 0 ? "cleared" : "saved");
     return send_saved_json(req, true);
 }

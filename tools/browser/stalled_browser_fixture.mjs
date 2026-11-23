@@ -39,12 +39,13 @@ const server = http.createServer((request, response) => {
   } else if (request.url === "/json/version") {
     record.versionReached = true;
     if (mode === "delayed-page-target") {
+      save();
       response.end(JSON.stringify({ Browser: "Delayed Chromium fixture" }));
     } else {
       stall(response, mode === "version-body" ? "{" : "");
       record.stallReached = mode;
+      save();
     }
-    save();
   }
 });
 server.on("upgrade", (request, socket) => {

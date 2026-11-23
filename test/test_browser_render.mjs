@@ -2010,20 +2010,53 @@ async function assertWorkingFigure(page, context) {
     await page.frame();
     const modbusState = await page.evaluate(`(() => {
       const row = document.querySelector("[data-desc='observation:working_figure']");
-      const bodyText = row?.closest(".vitem")?.querySelector(".vdesc-body")?.innerText || "";
+      const body = row?.closest(".vitem")?.querySelector(".vdesc-body");
+      const factKeys = [...(body?.querySelectorAll(".wf-fact-k") || [])].map((el) => el.textContent);
+      const foot = body?.querySelector(".wf-foot")?.innerText || "";
       return {
         present: !!row,
         hasRefrigerant: !!document.querySelector("[data-desc='observation:refrigerant_service']"),
-        hasModbusDisclosure: bodyText.includes(t("wf.disclosure_modbus")),
+        hasPowerFact: factKeys.includes(t("wf.ctx.power")),
+        hasBaseFoot: foot.includes(t("wf.foot.base")),
       };
     })()`);
     assert.equal(modbusState.present, true,
       `${context}: working figure must render on HomeHub Modbus when /status.working_figure is present`);
     assert.equal(modbusState.hasRefrigerant, false,
       `${context}: refrigerant service stays hidden on Modbus`);
-    assert.equal(modbusState.hasModbusDisclosure, true,
-      `${context}: HomeHub Modbus disclosure must appear on modbus working figure`);
+    assert.equal(modbusState.hasPowerFact, false,
+      `${context}: HomeHub Modbus omits redundant Power fact row`);
+    assert.equal(modbusState.hasBaseFoot, true,
+      `${context}: working figure renders simplified basis footer on modbus`);
     assertLayout(await page.evaluate(layoutAudit), `${context}/modbus`);
+
+    await page.evaluate(`(() => {
+      S.status.working_figure = {
+        ...S.status.working_figure,
+        state: "collecting", az: null, observed_s: 3600, coverage_pct: 4,
+      };
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    const collectingState = await page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='observation:working_figure']");
+      const body = row?.closest(".vitem")?.querySelector(".vdesc-body");
+      const factKeys = [...(body?.querySelectorAll(".wf-fact-k") || [])].map((el) => el.textContent);
+      return {
+        val: row?.querySelector(".vrow-val")?.textContent || "",
+        aria: row?.getAttribute("aria-label") || "",
+        expectedAria: t("wf.label") + ": " + t("wf.state.collecting"),
+        hasProg: !!body?.querySelector(".wf-prog-fill"),
+        hasPeriodFact: factKeys.includes(t("wf.ctx.window")),
+      };
+    })()`);
+    assert.equal(collectingState.val, "", `${context}: collecting state leaves collapsed value blank`);
+    assert.equal(collectingState.aria, collectingState.expectedAria,
+      `${context}: collecting state preserves accessible aria-label`);
+    assert.equal(collectingState.hasProg, true, `${context}: collecting state renders progress bar`);
+    assert.equal(collectingState.hasPeriodFact, false, `${context}: collecting state omits duplicate Period row`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/collecting`);
 
     await page.evaluate(`(() => {
       delete S.status.working_figure;

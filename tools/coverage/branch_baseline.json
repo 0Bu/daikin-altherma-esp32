@@ -2422,7 +2422,7 @@
       },
       "main/logic/checkup.hpp": {
         "outcomes": 1383,
-        "taken": 1312
+        "taken": 1313
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 361,
@@ -2441,12 +2441,12 @@
         "taken": 301
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 520,
-        "taken": 351
+        "outcomes": 542,
+        "taken": 368
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 158,
-        "taken": 114
+        "outcomes": 162,
+        "taken": 117
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 26,
@@ -2873,8 +2873,8 @@
         "taken": 10
       },
       "main/logic/working_figure.hpp": {
-        "outcomes": 523,
-        "taken": 437
+        "outcomes": 525,
+        "taken": 439
       },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,

@@ -457,6 +457,11 @@ public:
         return raw && daik::link_blob_deserialize(raw->data(), raw->size(), out);
     }
 
+    bool load_gas_comparison(daik::GasComparisonBlob& out) const {
+        const auto raw = nvs_.get(daik::CONFIG_KEY_GAS);
+        return raw && daik::gas_comparison_blob_deserialize(raw->data(), raw->size(), out);
+    }
+
 private:
     FakeNvs& nvs_;
 };
@@ -483,6 +488,15 @@ public:
         FakeNvsBlobStore store(nvs_, allocate_late_);
         const auto outcome = daik::config_save_transaction(live_, requested, owns_link, store);
         witness_           = store.witness();
+        return outcome;
+    }
+
+    daik::ConfigSaveOutcome save_gas_comparison(uint32_t elec_tm, uint32_t gas_tm,
+                                                const std::string& currency) {
+        FakeNvsBlobStore store(nvs_, allocate_late_);
+        const auto       outcome = daik::config_save_gas_comparison_transaction(
+            live_, daik::GasComparisonBlob{elec_tm, gas_tm, currency}, store);
+        witness_ = store.witness();
         return outcome;
     }
 

@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 335265e8c5809c8e5828027b6d062274c223bf76e14409bb8cd828d9a3474053 -->
+<!-- user-docs-contract: 7236899308f600826bcd91556fff74ebc8107655e04f4366a48d433a5d54ea0d -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -352,13 +352,13 @@ collected history.
 
 | Row status | Meaning |
 |---|---|
-| **Collecting** | Fewer than 2 hours (`7200 s`) of valid paired observations have been collected on the active bus. |
+| **Collecting** | Fewer than 2 hours (`7200 s`) of valid paired observations have been collected on the active bus. The collapsed row stays blank while the expanded panel shows elapsed progress toward 2 hours. |
 | **Standby** | At least 2 hours observed, but net heat is below `1.0 kWh` or electricity is below `0.2 kWh`. |
 | **Partial** (*prov.*) | Energy thresholds met, while span is under 24 hours or usable coverage is below 90% (`77760 s`). |
 | **Limited** (*lim.*) | Full 24-hour window reached, with tank booster (`BSH`) intervals excluded, mismatched backup-heater (`BUH`) electricity/heat boundaries on X10A, or a `> 1.5 K` post-BUH rise (`41 − 40`) during active flow on HomeHub Modbus. |
 | **Measured** | Full unlimited 24-hour window without configured tariffs; shows heat, electricity and ratio without a cost verdict. |
 | **Cheaper than gas** / **Like gas** / **Costlier than gas** | Full unlimited 24-hour window evaluated against break-even ratio with a uniform `±20%` neutral band across onboard X10A and HomeHub Modbus estimates. |
-| **Not supported** | Active X10A profile lacks required flow, water-temperature, valve/mode or electrical-power signals (or CT clamps were detected unwired with no inverter-current fallback), or Modbus runs native Altherma 4 (whose Input `49` flow scaling is unverified). |
+| **Not supported** | Active X10A profile lacks required flow, water-temperature, valve/mode or electrical-power signals (or CT clamps were detected unwired with no inverter-current fallback), or Modbus runs native `Altherma4`, `Probing`, or `Fallback` sweeps (whose Input `49` flow scaling is unverified). |
 
 On **X10A**, electrical input comes either from X10A CT current sensors (`0x63/14–16`, `0.5 A` steps
 assuming `~230 V`, whole-unit scope) or, when unavailable or latched unwired, X10A inverter primary

@@ -442,21 +442,24 @@ a command, not measured valve position.
 A separate neutral **Performance factor** (`Arbeitszahl` in German) observation row presents rolling
 24-hour heating/DHW energy and optional break-even gas comparison when `working_figure` is
 emitted (Plant diagnostics on, active display source either `X10A` with valid boot profile
-fingerprint or configured `Modbus`; omitted on older firmware). Like **Refrigerant (heating)**, it
-contributes no badge count or `/status.health` verdict. Collapsed rows show the computed working
-figure (prefixed with `~` for onboard X10A and HomeHub Modbus estimates) or state (`Collecting`,
-`Standby`, `Partial` / *prov.*, `Limited` / *lim.*, `Measured`, `Cheaper than gas`, `Like gas`,
-`Costlier than gas`, `Not supported`, which also appears on native Altherma 4 Modbus). Expanded
-panels show 24-hour thermal/electrical kWh, outdoor context when present, electrical source
-(`X10A clamp (est., whole)`, `X10A inv. (est., comp. only)`, or `HomeHub Modbus (est.)`) and
-scope (`whole unit`, `comp. only`, or `Modbus est.`), a horizontal break-even scale combining color
-zones (`±20%` neutral band) with accessible words-only `ariaValue` (`estimated <value>` without
-`~`, plus verdict text), cost figures formatted to `0` decimals for `JPY` and `2` decimals for all
-other currencies (`88%` $H_s$ modern condensing gas boiler baseline, pure water `4.186 kJ/(L·K)`,
-fixed utility charges excluded), a HomeHub Modbus boundary disclosure (`LWT PHE (40) − RWT (42)`,
-Input `51` power, BSH `32` excluded, `> 1.5 K` BUH rise flagged limited) when `pel_source === "modbus"`,
-tariff setup/edit buttons (`Set tariffs` / `Edit tariffs`) when metrics are present, and explicit
-limits (excluded cooling/BSH, uncalibrated sensors).
+fingerprint or affirmatively confirmed HomeHub `Modbus`; omitted on older firmware). Like
+**Refrigerant (heating)**, it contributes no badge count or `/status.health` verdict. Collapsed rows
+leave the value blank while `Collecting` (retaining `Performance factor: Collecting` in `aria-label`
+for screen readers), show dimmed `Standby` or `Not supported` (including native Altherma 4 or
+unconfirmed `Probing`/`Fallback` Modbus sweeps) without a figure, or show the computed working
+figure (`~` prefix for estimates, with `prov.`/`lim.` tags and `ok`/`warn` tones). Expanded panels
+are grouped into three concise zones without repeating the active card bus or collecting time:
+1. Primary KPI tiles (`Performance factor`, `Heat pump`, `Gas · 88%`, `Delta` plus the horizontal
+   `±20%` Break-Even scale bar with words-only `ariaValue` and `0`/`2`-decimal currency formatting
+   when tariffs are configured; or deduplicated `Performance factor` + `24 h heat` with `Set
+   tariffs` when unconfigured; or a single status line with a 2-hour progress bar during `Collecting`).
+2. Conditional warning banners (`stale` source, `limited`/`unpaired` BUH, excluded `BSH`, `CT 0 A`
+   unwired) followed by structured `.wf-facts` key/value pairs showing only applicable items (`Period`
+   when a metric is present, X10A `Power` sensor omitted on `Modbus` because the card title already
+   names Modbus, `Outdoor` avg/min when available, and non-zero `Defrost`, `Backup heater`
+   `included` when safe, and excluded `Cooling`).
+3. One short basis footer (`24 h heating & hot water · pure water · estimate.`, adding `gas 88%
+   condensing boiler, no fixed fees` when tariffs are configured) and `Edit tariffs`.
 
 Value groups show the exact supported profile rows, units and qualified values. Binary metadata
 renders flags as ON/OFF, known selector bits as Space heating/DHW and Smart Grid as its four-state

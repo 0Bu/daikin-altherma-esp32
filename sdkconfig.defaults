@@ -106,11 +106,6 @@ CONFIG_LWIP_IPV6=n
 # IPv4 reassembly is already disabled; omit outgoing IPv4 packet fragmentation.
 CONFIG_LWIP_IP4_FRAG=n
 
-# Disable IPv6: all firmware networking paths (HTTP server/client, MQTT, HomeHub Modbus, syslog,
-# SNTP, OTA and Weather) use IPv4 (AF_INET), and espressif/mdns builds IPv4-only cleanly under
-# #ifdef CONFIG_LWIP_IPV6, recovering flash headroom without affecting runtime features.
-CONFIG_LWIP_IPV6=n
-
 # Stack sizes — a comfortable main task stack for NVS + HTTP + the poll engine.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=7168
 

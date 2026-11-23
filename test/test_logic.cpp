@@ -2123,6 +2123,7 @@ static LinkBlob config_tx_durable_link(const ConfigTxStore& s) {
 static void test_config_transaction() {
     CHECK(std::string(CONFIG_KEY_SERVICE) == "cfg"); // config_load reads these exact keys
     CHECK(std::string(CONFIG_KEY_LINK) == "link");
+    CHECK(std::string(CONFIG_KEY_GAS) == "gas");
 
     // The revision after one commit never lands on zero, the "no revision" a failed commit reports.
     CHECK(config_next_revision(0) == 1);
@@ -2186,9 +2187,6 @@ static void test_config_transaction() {
         c.mb_port                        = 1502;
         c.mb_unit_id                     = 9;
         c.mb_discovery_done              = true;
-        c.elec_price_tenth_mill          = 3500;
-        c.gas_price_tenth_mill           = 1100;
-        c.tariff_currency                = "USD";
         const ConfigBlob b               = config_blob_from(c);
         CHECK(b.wifi_ssid == "ExampleNet" && b.wifi_pass == "pass");
         CHECK(b.wifi_ssid_backup == "ssid-bak" && b.wifi_pass_backup == "pass-bak");
@@ -2218,13 +2216,57 @@ static void test_config_transaction() {
         CHECK(b.ui_lang == ui_lang_to_int(UiLang::De));
         CHECK(b.mb_host == "hub" && b.mb_port == 1502 && b.mb_unit_id == 9);
         CHECK(b.mb_discovery_done);
-        CHECK(b.has_gas_comparison && b.elec_price_tenth_mill == 3500 &&
-              b.gas_price_tenth_mill == 1100 && b.tariff_currency == "USD");
         // Serialized and decoded, the mapped blob reads back as the same settings.
         const std::vector<uint8_t> raw = config_blob_serialize(b);
         ConfigBlob                 back;
         CHECK(config_blob_deserialize(raw.data(), raw.size(), back));
         CHECK(back.wifi_ssid == "ExampleNet" && back.mb_host == "hub" && back.env3_scl == 8);
+    }
+
+    // Gas-comparison save: writes ONLY the independent "gas" NVS key ("cfg" stays v21, "link"
+    // stays untouched), rejects >512 B currencies cleanly, and rolls back nothing on NVS error.
+    {
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        const auto cfg_before  = store.durable.at(CONFIG_KEY_SERVICE);
+        const auto link_before = store.durable.at(CONFIG_KEY_LINK);
+
+        const ConfigSaveOutcome ok = config_save_gas_comparison_transaction(
+            live, GasComparisonBlob{3500, 1100, "USD"}, store);
+        CHECK(ok.result == ConfigSaveResult::Saved && ok.failed == ConfigSaveStep::None &&
+              ok.store_error == 0);
+        CHECK(config_tx_attempts_are(store, {"gas"}));
+        CHECK(store.durable.at(CONFIG_KEY_SERVICE) == cfg_before);
+        CHECK(store.durable.at(CONFIG_KEY_LINK) == link_before);
+        GasComparisonBlob gas_rt;
+        const auto&       gas_raw = store.durable.at(CONFIG_KEY_GAS);
+        CHECK(gas_comparison_blob_deserialize(gas_raw.data(), gas_raw.size(), gas_rt));
+        CHECK(gas_rt.elec_price_tenth_mill == 3500 && gas_rt.gas_price_tenth_mill == 1100 &&
+              gas_rt.tariff_currency == "USD");
+        CHECK(live.elec_price_tenth_mill == 3500 && live.gas_price_tenth_mill == 1100 &&
+              live.tariff_currency == "USD" && live.runtime_revision == 6);
+
+        store.attempts.clear();
+        const std::string       over(CONFIG_BLOB_MAX_STR + 1, 'x');
+        const ConfigSaveOutcome too_long = config_save_gas_comparison_transaction(
+            live, GasComparisonBlob{3600, 1200, over}, store);
+        CHECK(too_long.result == ConfigSaveResult::Failed &&
+              too_long.failed == ConfigSaveStep::FieldTooLong && store.attempts.empty());
+        CHECK(live.tariff_currency == "USD" && live.runtime_revision == 6);
+
+        store.attempts.clear();
+        store.fail_with["gas"]          = 0x105;
+        const ConfigSaveOutcome io_fail = config_save_gas_comparison_transaction(
+            live, GasComparisonBlob{3600, 1200, "CHF"}, store);
+        CHECK(io_fail.result == ConfigSaveResult::Failed &&
+              io_fail.failed == ConfigSaveStep::GasWrite && io_fail.store_error == 0x105);
+        CHECK(config_tx_attempts_are(store, {"gas"}));
+        CHECK(live.elec_price_tenth_mill == 3500 && live.tariff_currency == "USD" &&
+              live.runtime_revision == 6);
+        CHECK(gas_comparison_blob_deserialize(store.durable.at(CONFIG_KEY_GAS).data(),
+                                              store.durable.at(CONFIG_KEY_GAS).size(), gas_rt) &&
+              gas_rt.tariff_currency == "USD");
     }
 
     // Service save of a current snapshot: "cfg" then "link", RAM published with the next revision.
@@ -11954,17 +11996,15 @@ static void test_config_store() {
     // older-version suffix rather than folded into the literals, so a new blob version is one edit
     // here instead of fifteen scattered ones — and each literal still reads as the blocks v<N>
     // predates.
-    const size_t base_suffix_bytes                   = 2;
-    const size_t ref_multi_suffix_bytes              = 2 + 2 + 4;
-    const size_t discovery_suffix_bytes              = 1;
-    const size_t diagnostics_suffix_bytes            = 1 + 4;
-    const size_t room_generation_suffix_bytes        = 4;
-    const size_t diagnostics_source_suffix_bytes     = 1;
-    const size_t gas_comparison_default_suffix_bytes = 4 + 4 + 5;
+    const size_t base_suffix_bytes               = 2;
+    const size_t ref_multi_suffix_bytes          = 2 + 2 + 4;
+    const size_t discovery_suffix_bytes          = 1;
+    const size_t diagnostics_suffix_bytes        = 1 + 4;
+    const size_t room_generation_suffix_bytes    = 4;
+    const size_t diagnostics_source_suffix_bytes = 1;
     const size_t current_suffix_bytes =
         base_suffix_bytes + ref_multi_suffix_bytes + discovery_suffix_bytes +
-        diagnostics_suffix_bytes + room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
-        gas_comparison_default_suffix_bytes;
+        diagnostics_suffix_bytes + room_generation_suffix_bytes + diagnostics_source_suffix_bytes;
     const size_t circ_suffix_bytes =
         2 + circ.circulation_name.size() + 2 + circ.circulation_topic.size() + 2 +
         circ.circulation_power_path.size() + 2 + circ.circulation_time_path.size() + 16;
@@ -12004,7 +12044,7 @@ static void test_config_store() {
     board.board_preset_id   = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set    = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 22);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 21);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -12100,8 +12140,7 @@ static void test_config_store() {
     std::vector<uint8_t> v17 = base_buf;
     v17.erase(v17.end() - 4 -
                   (discovery_suffix_bytes + diagnostics_suffix_bytes +
-                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
-                   gas_comparison_default_suffix_bytes),
+                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
               v17.end() - 4);
     v17[4] = 17;
     restamp(v17);
@@ -12112,8 +12151,7 @@ static void test_config_store() {
     std::vector<uint8_t> v16 = base_buf;
     v16.erase(v16.end() - 4 -
                   (ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
-                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
-                   gas_comparison_default_suffix_bytes),
+                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
               v16.end() - 4);
     v16[4] = 16;
     restamp(v16);
@@ -12127,8 +12165,7 @@ static void test_config_store() {
     std::vector<uint8_t> v15 = base_buf;
     v15.erase(v15.end() - 4 -
                   (16 + ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
-                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
-                   gas_comparison_default_suffix_bytes),
+                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
               v15.end() - 4);
     v15[4] = 15;
     restamp(v15);
@@ -12142,7 +12179,7 @@ static void test_config_store() {
     std::vector<uint8_t> v18 = base_buf;
     v18.erase(v18.end() - 4 -
                   (diagnostics_suffix_bytes + room_generation_suffix_bytes +
-                   diagnostics_source_suffix_bytes + gas_comparison_default_suffix_bytes),
+                   diagnostics_source_suffix_bytes),
               v18.end() - 4);
     v18[4] = 18;
     restamp(v18);
@@ -12158,9 +12195,7 @@ static void test_config_store() {
     // v20 adds only the durable room-source generation. A real v19 remains readable with zero;
     // claiming v20 without the whole four-byte suffix is rejected even with a valid CRC.
     std::vector<uint8_t> v19 = base_buf;
-    v19.erase(v19.end() - 4 -
-                  (room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
-                   gas_comparison_default_suffix_bytes),
+    v19.erase(v19.end() - 4 - (room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
               v19.end() - 4);
     v19[4] = 19;
     restamp(v19);
@@ -12175,9 +12210,7 @@ static void test_config_store() {
     // v21 adds only the 1-byte diagnostics display source preference. A real v20 remains readable
     // and defaults to X10A (0); claiming v21 without that byte fails closed.
     std::vector<uint8_t> v20 = base_buf;
-    v20.erase(v20.end() - 4 -
-                  (diagnostics_source_suffix_bytes + gas_comparison_default_suffix_bytes),
-              v20.end() - 4);
+    v20.erase(v20.end() - 4 - diagnostics_source_suffix_bytes, v20.end() - 4);
     v20[4] = 20;
     restamp(v20);
     ConfigBlob v20_rt;
@@ -12198,39 +12231,49 @@ static void test_config_store() {
     CHECK(room_generation_rt.ref_temp_generation == UINT32_MAX &&
           room_generation_rt.has_diagnostics_source &&
           room_generation_rt.diagnostics_source == static_cast<uint8_t>(DiagnosticsSource::Modbus));
-    // v22 adds gas comparison tariffs. A real v21 blob remains readable with default 0 tariffs and
-    // "EUR"; claiming v22 without the full 13-byte suffix fails closed.
-    std::vector<uint8_t> v21 = base_buf;
-    v21.erase(v21.end() - 4 - gas_comparison_default_suffix_bytes, v21.end() - 4);
-    v21[4] = 21;
-    restamp(v21);
-    ConfigBlob v21_rt;
-    CHECK(config_blob_deserialize(v21.data(), v21.size(), v21_rt));
-    CHECK(v21_rt.has_diagnostics_source && !v21_rt.has_gas_comparison);
-    CHECK(v21_rt.elec_price_tenth_mill == 0 && v21_rt.gas_price_tenth_mill == 0 &&
-          v21_rt.tariff_currency == "EUR");
-    std::vector<uint8_t> v22_short = v21;
-    v22_short[4]                   = 22;
-    restamp(v22_short);
-    CHECK(!config_blob_deserialize(v22_short.data(), v22_short.size(), out));
-
-    ConfigBlob energy_blob;
-    energy_blob.wifi_ssid                 = "net";
-    energy_blob.elec_price_tenth_mill     = 3421;
-    energy_blob.gas_price_tenth_mill      = 1095;
-    energy_blob.tariff_currency           = "USD";
-    const std::vector<uint8_t> energy_buf = config_blob_serialize(energy_blob);
-    ConfigBlob                 energy_rt;
-    CHECK(config_blob_deserialize(energy_buf.data(), energy_buf.size(), energy_rt));
-    CHECK(energy_rt.has_gas_comparison);
-    CHECK(energy_rt.elec_price_tenth_mill == 3421 && energy_rt.gas_price_tenth_mill == 1095 &&
-          energy_rt.tariff_currency == "USD");
-    for (size_t cut = 1; cut <= gas_comparison_default_suffix_bytes; ++cut) {
-        std::vector<uint8_t> v22_mid = energy_buf;
-        v22_mid.erase(v22_mid.end() - 4 - static_cast<ptrdiff_t>(cut), v22_mid.end() - 4);
-        restamp(v22_mid);
-        CHECK(!config_blob_deserialize(v22_mid.data(), v22_mid.size(), out));
+    // Independent "gas" blob (DKG1 v1): keeps "cfg" at v21 while storing tariffs atomically.
+    GasComparisonBlob gas_in{3421, 1095, "USD"};
+    CHECK(gas_comparison_blob_strings_fit(gas_in));
+    const std::vector<uint8_t> gas_buf = gas_comparison_blob_serialize(gas_in);
+    GasComparisonBlob          gas_rt;
+    CHECK(!gas_comparison_blob_deserialize(nullptr, ::rt(gas_buf.size()), gas_rt));
+    CHECK(!gas_comparison_blob_deserialize(gas_buf.data(), ::rt(size_t{18}), gas_rt));
+    for (size_t i = 0; i < 4; ++i) {
+        std::vector<uint8_t> bad_magic = gas_buf;
+        bad_magic[i]                   = 'X';
+        CHECK(!gas_comparison_blob_deserialize(bad_magic.data(), bad_magic.size(), gas_rt));
     }
+    for (uint8_t v : {uint8_t{0}, uint8_t{2}}) {
+        std::vector<uint8_t> bad_ver = gas_buf;
+        bad_ver[4]                   = ::rt(v);
+        restamp(bad_ver);
+        CHECK(!gas_comparison_blob_deserialize(bad_ver.data(), bad_ver.size(), gas_rt));
+        CHECK(std::string(stored_blob_reject_reason(bad_ver.data(), bad_ver.size(),
+                                                    GAS_BLOB_MAGIC_TEXT, GAS_BLOB_VERSION,
+                                                    GAS_BLOB_VERSION)) ==
+              (v > GAS_BLOB_VERSION ? "newer layout than this build reads"
+                                    : "unknown older layout"));
+    }
+    {
+        std::vector<uint8_t> bad_crc = gas_buf;
+        bad_crc[5] ^= 0x01;
+        CHECK(!gas_comparison_blob_deserialize(bad_crc.data(), bad_crc.size(), gas_rt));
+    }
+    for (size_t cut = 1; cut <= 3; ++cut) {
+        std::vector<uint8_t> short_gas = gas_buf;
+        short_gas.erase(short_gas.end() - 4 - static_cast<ptrdiff_t>(cut), short_gas.end() - 4);
+        restamp(short_gas);
+        CHECK(!gas_comparison_blob_deserialize(short_gas.data(), short_gas.size(), gas_rt));
+    }
+    {
+        std::vector<uint8_t> trailing_gas = gas_buf;
+        trailing_gas.insert(trailing_gas.end() - 4, 0x00);
+        restamp(trailing_gas);
+        CHECK(!gas_comparison_blob_deserialize(trailing_gas.data(), trailing_gas.size(), gas_rt));
+    }
+    CHECK(gas_comparison_blob_deserialize(gas_buf.data(), gas_buf.size(), gas_rt));
+    CHECK(gas_rt.elec_price_tenth_mill == 3421 && gas_rt.gas_price_tenth_mill == 1095 &&
+          gas_rt.tariff_currency == "USD");
     DiagnosticsSource parsed_src = DiagnosticsSource::X10a;
     CHECK(parse_diagnostics_source("modbus", parsed_src) &&
           parsed_src == DiagnosticsSource::Modbus);
@@ -12322,7 +12365,7 @@ static void test_config_store() {
     mb.mb_unit_id            = 3;
     mb.homehub_enabled       = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 22);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 21);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-example.local");
@@ -12553,13 +12596,13 @@ static void test_config_blob_strings_fit() {
                         max_all.ref_temp_hvac_mode_path         = max_all.circulation_name =
                             max_all.circulation_topic           = max_all.circulation_power_path =
                                 max_all.circulation_time_path   = max_all.ref_temp_setpoint_topic =
-                                    max_all.ref_temp_time_topic = max_all.tariff_currency = at_max;
+                                    max_all.ref_temp_time_topic = at_max;
     CHECK(config_blob_strings_fit(max_all));
     const std::vector<uint8_t> maxbuf = config_blob_serialize(max_all);
     ConfigBlob                 maxrt;
     CHECK(config_blob_deserialize(maxbuf.data(), maxbuf.size(), maxrt));
     CHECK(maxrt.mb_host == at_max && maxrt.wifi_ssid == at_max &&
-          maxrt.circulation_time_path == at_max && maxrt.tariff_currency == at_max);
+          maxrt.circulation_time_path == at_max);
 
     // ONE field over the bound at a time: fit() must refuse it, AND the blob it would have produced
     // must genuinely be unreadable — that second half is what makes fit() a real guard rather than
@@ -12589,9 +12632,8 @@ static void test_config_blob_strings_fit() {
         &ConfigBlob::circulation_time_path,
         &ConfigBlob::ref_temp_setpoint_topic,
         &ConfigBlob::ref_temp_time_topic,
-        &ConfigBlob::tariff_currency,
     };
-    CHECK(sizeof(kStrings) / sizeof(kStrings[0]) == 25);
+    CHECK(sizeof(kStrings) / sizeof(kStrings[0]) == 24);
     for (std::string ConfigBlob::*field : kStrings) {
         ConfigBlob c;
         c.wifi_ssid = "net";
@@ -12603,6 +12645,16 @@ static void test_config_blob_strings_fit() {
         CHECK(!config_blob_deserialize(buf.data(), buf.size(), rt));
         CHECK(rt.wifi_ssid == "sentinel"); // a rejected blob leaves the caller's config untouched
     }
+    GasComparisonBlob gas_max{3000, 1000, at_max};
+    CHECK(gas_comparison_blob_strings_fit(gas_max));
+    const std::vector<uint8_t> gas_max_buf = gas_comparison_blob_serialize(gas_max);
+    GasComparisonBlob          gas_max_rt;
+    CHECK(gas_comparison_blob_deserialize(gas_max_buf.data(), gas_max_buf.size(), gas_max_rt));
+    CHECK(gas_max_rt.tariff_currency == at_max);
+    GasComparisonBlob gas_over{3000, 1000, over};
+    CHECK(!gas_comparison_blob_strings_fit(gas_over));
+    const std::vector<uint8_t> gas_over_buf = gas_comparison_blob_serialize(gas_over);
+    CHECK(!gas_comparison_blob_deserialize(gas_over_buf.data(), gas_over_buf.size(), gas_max_rt));
 
     // The mb_host case reached this through validate(), which now answers 400 instead of letting
     // the save reach config_save's refusal. The other fields cannot: each is bounded before it gets
@@ -34484,12 +34536,17 @@ static void test_working_figure() {
         CHECK(clamp_acc.pending.heat_ws == INT32_MIN);
     }
 
-    // #339 alignment: Modbus working figure requires Affirmative HomeHub basis
-    CHECK(energy_modbus_coverage(ModbusProfile::HomeHub).supported());
-    CHECK(energy_modbus_coverage(ModbusProfile::HomeHub, ModbusProfileBasis::Affirmative).supported());
-    CHECK(!energy_modbus_coverage(ModbusProfile::HomeHub, ModbusProfileBasis::Probing).supported());
-    CHECK(!energy_modbus_coverage(ModbusProfile::HomeHub, ModbusProfileBasis::Fallback).supported());
-    CHECK(!energy_modbus_coverage(ModbusProfile::Altherma4, ModbusProfileBasis::Affirmative).supported());
+    // HomeHub Modbus working-figure coverage requires an Affirmative probe basis
+    CHECK(energy_modbus_coverage(::rt(ModbusProfile::HomeHub)).supported());
+    CHECK(energy_modbus_coverage(::rt(ModbusProfile::HomeHub), ::rt(ModbusProfileBasis::Affirmative))
+              .supported());
+    CHECK(!energy_modbus_coverage(::rt(ModbusProfile::HomeHub), ::rt(ModbusProfileBasis::Probing))
+               .supported());
+    CHECK(!energy_modbus_coverage(::rt(ModbusProfile::HomeHub), ::rt(ModbusProfileBasis::Fallback))
+               .supported());
+    CHECK(
+        !energy_modbus_coverage(::rt(ModbusProfile::Altherma4), ::rt(ModbusProfileBasis::Affirmative))
+             .supported());
 }
 
 namespace hydronic_host_tests {

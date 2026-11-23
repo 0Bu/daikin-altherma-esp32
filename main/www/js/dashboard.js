@@ -3472,11 +3472,15 @@ function workingFigureRowHtml() {
 
   let rightText, tone, verdictWord;
   if (!haveMetrics) {
-    rightText = wf.state === "collecting" ? t("wf.state.collecting")
-              : wf.state === "standby" ? t("wf.state.standby")
-              : t("wf.state.unsupported");
-    tone = "dim";
-    verdictWord = rightText;
+    if (wf.state === "collecting") {
+      rightText = "";
+      tone = "";
+      verdictWord = t("wf.state.collecting");
+    } else {
+      rightText = wf.state === "standby" ? t("wf.state.standby") : t("wf.state.unsupported");
+      tone = "dim";
+      verdictWord = rightText;
+    }
   } else if (wf.state === "partial") {
     rightText = `${azStr} · ${t("wf.short.partial")}`;
     tone = "";
@@ -3504,31 +3508,11 @@ function workingFigureRowHtml() {
   }
   const cls = `checkup-val${tone ? ` ${tone}` : ""}`;
   const ariaAz = (haveMetrics && wf.is_estimate === true) ? t("wf.aria.estimate", azNum) : azNum;
-  const ariaValue = haveMetrics ? `${ariaAz} · ${verdictWord}` : rightText;
+  const ariaValue = haveMetrics ? `${ariaAz} · ${verdictWord}` : verdictWord;
 
   let body = `<div class="wf-wrap">`;
-  const banners = [];
-  if (haveMetrics && (wf.full_window === false || wf.state === "partial")) {
-    const cov = wfNum(wf.coverage_pct) ? Math.round(wf.coverage_pct) : 0;
-    const obs = wfNum(wf.observed_s) ? checkupDuration(wf.observed_s) : "0m";
-    banners.push(`<div class="wf-banner">${esc(t("wf.banner.partial", cov, obs))}</div>`);
-  }
-  if (wf.unpaired_buh === true) {
-    banners.push(`<div class="wf-banner warn">${esc(t("wf.banner.buh_unpaired"))}</div>`);
-  } else if (wf.limited_buh === true) {
-    banners.push(`<div class="wf-banner warn">${esc(t("wf.banner.buh_limited"))}</div>`);
-  } else if (wfNum(wf.buh_s) && wf.buh_s > 0) {
-    banners.push(`<div class="wf-banner">${esc(t("wf.banner.buh_active", checkupDuration(wf.buh_s)))}</div>`);
-  }
-  if (wfNum(wf.bsh_excluded_s) && wf.bsh_excluded_s > 0)
-    banners.push(`<div class="wf-banner warn">${esc(t("wf.banner.bsh_excluded", checkupDuration(wf.bsh_excluded_s)))}</div>`);
-  if (wf.ct_unwired === true)
-    banners.push(`<div class="wf-banner warn">${esc(t("wf.banner.ct_unwired"))}</div>`);
-  body += banners.join("");
-
   const cur = typeof wf.currency === "string" && wf.currency ? wf.currency : "EUR";
   if (haveMetrics && wf.tariffs_configured === true) {
-    const eff = wfNum(wf.gas_efficiency_pct) ? Math.round(wf.gas_efficiency_pct) : 88;
     const deltaCls = wf.state === "cheaper" ? "ok"
                    : wf.state === "more_expensive" ? "warn"
                    : (wf.state === "limited" && wfNum(wf.cost_delta) && wf.cost_delta > 0) ? "warn"
@@ -3545,7 +3529,7 @@ function workingFigureRowHtml() {
         `<div class="wf-kpi-sub num">${esc(`${prefix}${wfFmt(wf.elec_kwh, 1)} kWh`)}</div></div>` +
       `<div class="wf-kpi"><div class="wf-kpi-label">${esc(t("wf.kpi.gas_cost"))}</div>` +
         `<div class="wf-kpi-val num">${esc(prefix + wfMoney(wf.cost_gas, cur))}</div>` +
-        `<div class="wf-kpi-sub num">${esc(t("wf.kpi.gas_sub", wfFmt(wf.gas_equiv_kwh, 1), eff))}</div></div>` +
+        `<div class="wf-kpi-sub num">${esc(`${wfFmt(wf.gas_equiv_kwh, 1)} kWh`)}</div></div>` +
       `<div class="wf-kpi"><div class="wf-kpi-label">${esc(t("wf.kpi.delta"))}</div>` +
         `<div class="wf-kpi-val num${deltaCls ? ` ${deltaCls}` : ""}">${esc(prefix + wfMoney(wf.cost_delta, cur, true))}</div>` +
         `<div class="wf-kpi-sub num">${esc(deltaPctStr)}</div></div>` +
@@ -3554,52 +3538,74 @@ function workingFigureRowHtml() {
                     : (wf.state === "more_expensive" || wf.state === "limited") ? "warn" : "";
     body += workingFigureScaleHtml(wf, azStr, scaleTone);
   } else if (haveMetrics) {
-    const scopeKey = wf.pel_source === "modbus" ? "wf.scope.modbus" : (wf.is_compressor_only ? "wf.scope.comp" : "wf.scope.whole");
+    const scopeKey = wf.is_compressor_only === true ? "wf.scope.comp" : "wf.scope.est";
     body += `<div class="wf-kpis">` +
       `<div class="wf-kpi"><div class="wf-kpi-label">${esc(t("wf.label"))}</div>` +
         `<div class="wf-kpi-val num">${esc(azStr)}</div>` +
         `<div class="wf-kpi-sub">${esc(t(scopeKey))}</div></div>` +
       `<div class="wf-kpi"><div class="wf-kpi-label">${esc(t("wf.kpi.energy"))}</div>` +
         `<div class="wf-kpi-val num">${esc(`${wfFmt(wf.heat_kwh, 1)} kWh`)}</div>` +
-        `<div class="wf-kpi-sub num">${esc(t("wf.kpi.heat_elec", wfFmt(wf.heat_kwh, 1), `${prefix}${wfFmt(wf.elec_kwh, 1)}`))}</div></div>` +
+        `<div class="wf-kpi-sub num">${esc(t("wf.kpi.heat_elec", `${prefix}${wfFmt(wf.elec_kwh, 1)}`))}</div></div>` +
       `</div>` +
       `<div class="wf-actions"><button type="button" class="btn secondary wf-btn" data-act="gas-comparison">${esc(t("wf.cta.tariffs"))}</button></div>`;
   } else if (wf.state === "collecting") {
-    const obs = wfNum(wf.observed_s) ? checkupDuration(wf.observed_s) : "0m";
-    body += descParaHtml(esc(t("wf.desc.collecting", obs)));
+    const obsS = wfNum(wf.observed_s) ? Math.max(0, wf.observed_s) : 0;
+    const obs = checkupDuration(obsS);
+    const pct = Math.max(0, Math.min(100, Math.round((obsS / 7200) * 100)));
+    body += `<div class="wf-status">` +
+      `<div class="wf-status-text">${esc(t("wf.desc.collecting", obs))}</div>` +
+      `<div class="wf-prog" aria-hidden="true"><span class="wf-prog-fill" style="width:${pct}%"></span></div>` +
+      `</div>`;
   } else if (wf.state === "standby") {
     const obs = wfNum(wf.observed_s) ? checkupDuration(wf.observed_s) : "0m";
-    body += descParaHtml(esc(t("wf.desc.standby", obs)));
+    body += `<div class="wf-status"><div class="wf-status-text">${esc(t("wf.desc.standby", obs))}</div></div>`;
   } else {
-    body += descParaHtml(esc(t("wf.desc.unsupported")));
+    body += `<div class="wf-status"><div class="wf-status-text">${esc(t("wf.desc.unsupported"))}</div></div>`;
   }
 
-  const srcKeys = {
-    x10a_ct: "wf.src.x10a_ct",
-    x10a_inv: "wf.src.x10a_inv",
-    modbus: "wf.src.modbus",
-  };
-  let meta = "";
-  if (srcKeys[wf.pel_source]) {
-    let srcText = t(srcKeys[wf.pel_source]);
-    if (wf.source_fresh === false) srcText += ` · ${t("wf.src.stale")}`;
-    meta += descNoteHtml(t("wf.ctx.source"), srcText);
+  const banners = [];
+  if (wf.source_fresh === false)
+    banners.push(`<div class="wf-banner warn">${esc(t("wf.banner.stale"))}</div>`);
+  if (wf.unpaired_buh === true) {
+    banners.push(`<div class="wf-banner warn">${esc(t("wf.banner.buh_unpaired"))}</div>`);
+  } else if (wf.limited_buh === true) {
+    banners.push(`<div class="wf-banner warn">${esc(t("wf.banner.buh_limited"))}</div>`);
   }
-  if (wf.supported === true && wfNum(wf.observed_s)) {
+  if (wfNum(wf.bsh_excluded_s) && wf.bsh_excluded_s > 0)
+    banners.push(`<div class="wf-banner warn">${esc(t("wf.banner.bsh_excluded", checkupDuration(wf.bsh_excluded_s)))}</div>`);
+  if (wf.ct_unwired === true)
+    banners.push(`<div class="wf-banner warn">${esc(t("wf.banner.ct_unwired"))}</div>`);
+  if (banners.length) body += banners.join("");
+
+  const fact = (k, v, num = false) =>
+    `<div class="wf-fact"><span class="wf-fact-k">${esc(k)}</span>` +
+    `<span class="wf-fact-v${num ? " num" : ""}">${esc(v)}</span></div>`;
+  const facts = [];
+  if (haveMetrics && wfNum(wf.observed_s)) {
     const cov = wfNum(wf.coverage_pct) ? Math.round(wf.coverage_pct) : 0;
-    meta += descNoteHtml(t("wf.ctx.window"), `${checkupDuration(wf.observed_s)} / 24h (${cov}%)`);
+    const obs = checkupDuration(wf.observed_s);
+    const winVal = (wf.full_window === false || wf.state === "partial")
+      ? `${obs} / 24 h · ${cov}%`
+      : (cov < 100 ? `24 h · ${cov}%` : "24 h");
+    facts.push(fact(t("wf.ctx.window"), winVal, true));
   }
-  if (wfNum(wf.outdoor_mean_c) && wfNum(wf.outdoor_min_c))
-    meta += descNoteHtml(t("wf.ctx.outdoor"), `${wfFmt(wf.outdoor_mean_c, 1)} °C / ${wfFmt(wf.outdoor_min_c, 1)} °C`);
-  if ((wfNum(wf.defrost_s) && wf.defrost_s > 0) || (wfNum(wf.buh_s) && wf.buh_s > 0))
-    meta += descNoteHtml(t("wf.ctx.defrost_buh"), `${checkupDuration(wf.defrost_s || 0)} / ${checkupDuration(wf.buh_s || 0)}`);
+  if (wf.pel_source === "x10a_ct" || wf.pel_source === "x10a_inv")
+    facts.push(fact(t("wf.ctx.power"), t(`wf.src.${wf.pel_source}`)));
+  if (wfNum(wf.outdoor_mean_c) && wfNum(wf.outdoor_min_c)) {
+    const mean = wfFmt(wf.outdoor_mean_c, 1);
+    const min = wfFmt(wf.outdoor_min_c, 1);
+    facts.push(fact(t("wf.ctx.outdoor"), mean === min ? `${mean} °C` : t("wf.ctx.outdoor_range", mean, min), true));
+  }
+  if (wfNum(wf.defrost_s) && wf.defrost_s > 0)
+    facts.push(fact(t("wf.ctx.defrost"), checkupDuration(wf.defrost_s), true));
+  if (wfNum(wf.buh_s) && wf.buh_s > 0 && wf.limited_buh !== true && wf.unpaired_buh !== true)
+    facts.push(fact(t("wf.ctx.buh"), t("wf.ctx.buh_inc", checkupDuration(wf.buh_s)), true));
   if (wfNum(wf.cooling_excluded_s) && wf.cooling_excluded_s > 0)
-    meta += descNoteHtml(t("wf.ctx.cooling"), checkupDuration(wf.cooling_excluded_s));
-  if (meta) body += `<div class="wf-meta">${meta}</div>`;
+    facts.push(fact(t("wf.ctx.cooling"), t("wf.ctx.excluded", checkupDuration(wf.cooling_excluded_s)), true));
+  if (facts.length) body += `<div class="wf-facts">${facts.join("")}</div>`;
 
-  body += `<div class="vdesc-p">${esc(t("wf.disclosure"))}</div>`;
-  if (wf.pel_source === "modbus")
-    body += `<div class="vdesc-p">${esc(t("wf.disclosure_modbus"))}</div>`;
+  const footKey = (haveMetrics && wf.tariffs_configured === true) ? "wf.foot.gas" : "wf.foot.base";
+  body += `<div class="wf-foot">${esc(t(footKey))}</div>`;
   if (wf.supported === true && haveMetrics && wf.tariffs_configured === true) {
     body += `<div class="wf-actions"><button type="button" class="btn secondary wf-btn" data-act="gas-comparison">${esc(t("wf.cta.edit_tariffs"))}</button></div>`;
   }

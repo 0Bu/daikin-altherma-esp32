@@ -687,7 +687,9 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
     "no detected X10A profile must keep the refrigerant-service row hidden even when Modbus answers");
   const wfHtml = ui.workingFigureRowHtml();
   assert.match(wfHtml, /~4[.,]10/, "HomeHub Modbus working_figure must keep rendering estimated AZ");
-  assert.match(wfHtml, /HomeHub Modbus/, "HomeHub Modbus working_figure must identify its source");
+  assert.doesNotMatch(wfHtml, /<span class="wf-fact-k">Power<\/span>/,
+    "HomeHub Modbus working_figure must omit duplicate Power row when card header states Modbus");
+  assert.match(wfHtml, /class="wf-foot"/);
   checks += 2;
 }
 

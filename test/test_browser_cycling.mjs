@@ -458,6 +458,9 @@ export async function assertCyclingChart(page, server, context) {
         await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left",
           buttons: 0, clickCount: 1, ...beforeClose });
       }
+      // Wait for .vdesc's 220 ms collapse transition to finish so bottom-of-page scroll clamping
+      // cannot shift ROW between point() hit-testing and nativeClick().
+      await page.waitFor(`(() => { const h = document.querySelector(${JSON.stringify(ROW)})?.closest(".vitem")?.querySelector(".vdesc-inner")?.getBoundingClientRect().height; return typeof h === "number" && h < 1; })()`);
       await tap(page, ROW);
       await page.waitFor(`document.querySelector('${CHART}') && !S.clickHold`);
       assert.deepEqual(await pinned(), [], context + ": the old release cannot pin a collapsed chart");

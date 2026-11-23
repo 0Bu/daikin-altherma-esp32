@@ -345,8 +345,9 @@ function baseStatus() {
     "working_figure must render on HomeHub Modbus when /status.working_figure is present");
   assert.doesNotMatch(modbusCard, /observation:refrigerant_service/,
     "refrigerant_service must stay hidden when health.source is modbus");
-  assert.match(modbusCard, /HomeHub Modbus \(est\.\)/);
-  assert.match(modbusCard, /HomeHub Modbus: LWT PHE \(40\) − RWT \(42\), Input 51 power \(unspecified scope\), BSH \(32\) excluded, BUH rise \(&gt; 1\.5 K\) flagged limited\./);
+  assert.doesNotMatch(modbusCard, />Power<\/span>/,
+    "Modbus card header already identifies Modbus so Power fact row must be omitted");
+  assert.match(modbusCard, /24 h heating &amp; hot water · pure water · gas 88% condensing boiler, no fixed fees · estimate\./);
 
   ui.S.status = {
     ...s,
@@ -392,8 +393,8 @@ function baseStatus() {
 // ── 3. All 9 working_figure states: text, ~ estimate prefix, tone, suffix, words-only ariaValue ─
 {
   const stateExpectations = [
-    { state: "collecting", supported: true, est: true, az: 0, text: "Collecting", tone: "dim", aria: "Collecting" },
-    { state: "standby", supported: true, est: true, az: 0, text: "Standby", tone: "dim", aria: "Standby" },
+    { state: "collecting", supported: true, est: true, az: 0, text: "", tone: "", aria: "Collecting", observed_s: 3600 },
+    { state: "standby", supported: true, est: true, az: 0, text: "Standby", tone: "dim", aria: "Standby", observed_s: 10800 },
     { state: "unsupported", supported: false, est: false, az: 0, text: "Not supported", tone: "dim", aria: "Not supported" },
     { state: "measured", supported: true, est: false, az: 3.45, tariffs: false, text: "3.45", tone: "", aria: "3.45 · measured" },
     { state: "measured", supported: true, est: true, az: 3.45, tariffs: false, text: "~3.45", tone: "", aria: "estimated 3.45 · measured" },
@@ -408,7 +409,8 @@ function baseStatus() {
     { state: "limited", supported: true, est: true, az: 3.25, limitedBuh: true, text: "~3.25 · lim.", tone: "warn", aria: "estimated 3.25 · limited" },
   ];
 
-  const disclosure = "24 h Heating + DHW (excl. cooling); pure water (4.186 kJ/(L·K)); fixed 88% Hs modern condensing gas boiler; no fixed fees.";
+  const baseFoot = "24 h heating &amp; hot water · pure water · estimate.";
+  const gasFoot = "24 h heating &amp; hot water · pure water · gas 88% condensing boiler, no fixed fees · estimate.";
   for (const spec of stateExpectations) {
     const s = baseStatus();
     s.working_figure = {
@@ -420,6 +422,7 @@ function baseStatus() {
       full_window: spec.fullWindow ?? true,
       limited_buh: spec.limitedBuh ?? false,
       az: spec.az,
+      observed_s: spec.observed_s ?? s.working_figure.observed_s,
     };
     ui.S.status = s;
     const row = ui.workingFigureRowHtml();
@@ -428,9 +431,18 @@ function baseStatus() {
       `${spec.state} (est=${spec.est}): collapsed value/tone mismatch`);
     assert.ok(row.includes(`aria-label="Performance factor: ${spec.aria}"`),
       `${spec.state} (est=${spec.est}): expected aria-label "Performance factor: ${spec.aria}"`);
-    assert.ok(row.includes(disclosure),
-      `${spec.state}: pure-water / Heating+DHW / Hs disclosure must always be present`);
-    if (spec.state === "unsupported") {
+    const haveMetrics = spec.supported && !["collecting", "standby", "unsupported"].includes(spec.state) && spec.az > 0;
+    const expectedFoot = (haveMetrics && (spec.tariffs ?? true)) ? gasFoot : baseFoot;
+    assert.ok(row.includes(expectedFoot),
+      `${spec.state}: concise pure-water / Heating+DHW footer must be present`);
+    if (spec.state === "collecting") {
+      assert.match(row, /First value after 2 h · 1 h so far/);
+      assert.match(row, /class="wf-prog-fill" style="width:50%"/);
+      assert.doesNotMatch(row, />Period<\/span>/, "collecting card must not repeat duration in a Period fact row");
+    } else if (spec.state === "standby") {
+      assert.match(row, /Too little runtime for a value · 3 h observed/);
+      assert.doesNotMatch(row, />Period<\/span>/, "standby card must not emit a redundant Period fact row");
+    } else if (spec.state === "unsupported") {
       assert.match(row, /Required flow, temperature, or electrical inputs unavailable\./);
       assert.doesNotMatch(row, /data-act="gas-comparison"/,
         "unsupported working_figure must not emit a tariff CTA inside the row body");
@@ -438,9 +450,9 @@ function baseStatus() {
   }
 }
 
-// ── 4. Expanded body: KPIs, scale bar, BUH/BSH/CT banners & context metadata ───────────────────
+// ── 4. Expanded body: KPIs, scale bar, BUH/BSH/CT banners & structured facts ───────────────────
 {
-  // (a) Tariffs configured -> 4 KPI tiles + Break-Even scale bar + ~ prefix on estimates
+  // (a) Tariffs configured -> 4 KPI tiles + Break-Even scale bar + ~ prefix on estimates + structured facts
   const s = baseStatus();
   s.working_figure = {
     ...s.working_figure,
@@ -457,40 +469,57 @@ function baseStatus() {
   let body = ui.workingFigureRowHtml();
   assert.match(body, /class="wf-kpis wf-kpis-4"/, "configured tariffs must render 4 KPI tiles");
   assert.equal((body.match(/class="wf-kpi"/g) || []).length, 4);
+  assert.match(body, /Gas · 88%/);
+  assert.match(body, />46\.6 kWh</);
   assert.match(body, /class="wf-scale"/, "configured tariffs must render Break-Even scale bar");
   assert.match(body, /±20%/, "X10A estimate scale bar must render ±20% neutral band");
   assert.match(body, /~10\.0 kWh/, "estimate flag must prefix electricity kWh with ~");
   assert.match(body, /~3\.20 €/, "estimate flag must prefix heat-pump cost with ~");
-  assert.match(body, /Backup electric heater ran \(30 min\); included\./,
-    "whole-unit buh_s > 0 without limited_buh must render buh_active banner");
-  assert.match(body, /5 min \/ 30 min/, "defrost/BUH context line must appear when either is positive");
-  assert.match(body, /Cooling excl\./, "cooling exclusion metadata must appear when positive");
+  assert.match(body, /<span class="wf-fact-k">Period<\/span><span class="wf-fact-v num">24 h<\/span>/);
+  assert.match(body, /<span class="wf-fact-k">Power<\/span><span class="wf-fact-v">Clamp · whole unit<\/span>/);
+  assert.match(body, /<span class="wf-fact-k">Outdoor<\/span><span class="wf-fact-v num">avg 4\.2 °C · min 1\.1 °C<\/span>/);
+  assert.match(body, /<span class="wf-fact-k">Defrost<\/span><span class="wf-fact-v num">5 min<\/span>/);
+  assert.match(body, /<span class="wf-fact-k">Backup heater<\/span><span class="wf-fact-v num">30 min · included<\/span>/);
+  assert.match(body, /<span class="wf-fact-k">Cooling<\/span><span class="wf-fact-v num">10 min excluded<\/span>/);
   assert.match(body, /data-act="gas-comparison">Edit tariffs</);
 
-  // (b) Tariffs unconfigured on HomeHub Modbus -> 2 KPI tiles + Modbus scope + Set tariffs button, NO scale bar
+  // (b) Tariffs unconfigured on HomeHub Modbus -> 2 KPI tiles (no duplicate heat kWh) + est. + Set tariffs, NO scale/Power fact
   s.working_figure = {
     ...s.working_figure,
-    state: "measured",
+    state: "partial",
+    full_window: false,
+    observed_s: 21600,
+    coverage_pct: 25,
     tariffs_configured: false,
     is_estimate: true,
     is_compressor_only: false,
     pel_source: "modbus",
     buh_s: 0,
+    defrost_s: 0,
+    cooling_excluded_s: 0,
+    outdoor_mean_c: 2.0,
+    outdoor_min_c: 2.0,
   };
   ui.S.status = s;
   body = ui.workingFigureRowHtml();
   assert.doesNotMatch(body, /wf-kpis-4/, "unconfigured tariffs must not render 4 KPI tiles");
   assert.equal((body.match(/class="wf-kpi"/g) || []).length, 2, "unconfigured tariffs must render 2 KPI tiles");
   assert.doesNotMatch(body, /class="wf-scale"/, "unconfigured tariffs must omit Break-Even scale bar");
-  assert.match(body, /Modbus est\./, "HomeHub Modbus scope label must appear in KPI tile");
-  assert.match(body, /HomeHub Modbus: LWT PHE \(40\) − RWT \(42\), Input 51 power \(unspecified scope\), BSH \(32\) excluded, BUH rise \(&gt; 1\.5 K\) flagged limited\./,
-    "HomeHub Modbus working_figure must expose wf.disclosure_modbus");
+  assert.match(body, />24 h heat</);
+  assert.match(body, />el\. ~10\.0 kWh</);
+  assert.match(body, />est\.</);
+  assert.match(body, /<span class="wf-fact-k">Period<\/span><span class="wf-fact-v num">6 h \/ 24 h · 25%<\/span>/);
+  assert.match(body, /<span class="wf-fact-k">Outdoor<\/span><span class="wf-fact-v num">2\.0 °C<\/span>/);
+  assert.doesNotMatch(body, />Power<\/span>|Defrost|Backup heater|Cooling/);
   assert.match(body, /data-act="gas-comparison">Set tariffs</);
 
-  // (c) limited_buh: true -> renders wf.banner.buh_limited warning instead of buh_active even with buh_s > 0
+  // (c) limited_buh: true -> renders wf.banner.buh_limited & suppresses Backup heater included fact; stale banner shown
   s.working_figure = {
     ...s.working_figure,
     state: "limited",
+    full_window: true,
+    observed_s: 86400,
+    coverage_pct: 100,
     tariffs_configured: true,
     limited_buh: true,
     buh_s: 1200,
@@ -502,14 +531,14 @@ function baseStatus() {
   };
   ui.S.status = s;
   body = ui.workingFigureRowHtml();
-  assert.match(body, /<div class="wf-banner warn">Backup\/booster heater active \(unmeasured or excluded load\) — figure may be skewed\.<\/div>/,
+  assert.match(body, /<div class="wf-banner warn">Source signal stale — figure paused\.<\/div>/);
+  assert.match(body, /<div class="wf-banner warn">Backup heater active outside electrical scope — figure limited\.<\/div>/,
     "limited_buh must render buh_limited warning");
-  assert.match(body, /comp\. only/, "compressor-only scope label must appear for x10a_inv");
-  assert.doesNotMatch(body, /Backup electric heater ran/,
-    "limited_buh must suppress whole-unit 1:1 buh_active claim");
-  assert.match(body, /<div class="wf-banner warn">BSH \(15 min\) excluded \(outside circuit\)\.<\/div>/);
-  assert.match(body, /<div class="wf-banner warn">CT 0 A with comp\.; using inverter \(comp\. only\)\.<\/div>/);
-  assert.match(body, /X10A inv\. \(est\., comp\. only\) · stale/, "stale pel source must be marked stale");
+  assert.match(body, /Inverter · comp\. only/);
+  assert.doesNotMatch(body, /<span class="wf-fact-k">Backup heater<\/span>/,
+    "limited_buh must suppress Backup heater included fact row");
+  assert.match(body, /<div class="wf-banner warn">Tank booster 15 min excluded\.<\/div>/);
+  assert.match(body, /<div class="wf-banner warn">Mains clamp at 0 A — using compressor only\.<\/div>/);
 
   // (d) unpaired_buh: true -> renders buh_unpaired warning
   s.working_figure = {
@@ -519,11 +548,12 @@ function baseStatus() {
     buh_s: 600,
     bsh_excluded_s: 0,
     ct_unwired: false,
+    source_fresh: true,
   };
   ui.S.status = s;
   body = ui.workingFigureRowHtml();
-  assert.match(body, /<div class="wf-banner warn">BUH active\/unknown without post-BUH R2T — excluded\.<\/div>/);
-  assert.doesNotMatch(body, /Backup electric heater ran/);
+  assert.match(body, /<div class="wf-banner warn">Backup heater active without outlet sensor — excluded\.<\/div>/);
+  assert.doesNotMatch(body, /<span class="wf-fact-k">Backup heater<\/span>/);
 }
 
 // ── 5. Settings split card (circulationSettingsCardHtml) ───────────────────────────────────────

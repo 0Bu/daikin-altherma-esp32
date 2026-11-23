@@ -1848,8 +1848,7 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
     if (!s_mtx) return;
     if (!v && n) return;
 
-    const logic::CheckupCoverage cov  = logic::checkup_modbus_coverage(profile, basis);
-    const logic::EnergyCoverage  ecov = logic::energy_modbus_coverage(profile, basis);
+    const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile, basis);
     logic::CheckupSample         s;
     int64_t                      unix_s  = -1;
     int32_t                      unix_ms = 0;
@@ -1884,7 +1883,7 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
     const bool discard_energy_sample = apply_energy_reset_locked(s_modbus);
     if (source_confirmed) {
         s_modbus.cov        = cov;
-        s_modbus.energy_cov = ecov;
+        s_modbus.energy_cov = logic::energy_modbus_coverage(profile, basis);
     }
     s_modbus.fault_now    = s.fault;
     s_modbus.pressure_now = -1;

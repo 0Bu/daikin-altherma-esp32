@@ -200,11 +200,6 @@ struct ConfigBlob {
     // upgrade so existing installations keep their active card view.
     uint8_t diagnostics_source     = 0;
     bool    has_diagnostics_source = false;
-    // v22: gas comparison tariffs.
-    uint32_t    elec_price_tenth_mill = 0;
-    uint32_t    gas_price_tenth_mill  = 0;
-    std::string tariff_currency       = "EUR";
-    bool        has_gas_comparison    = false;
 };
 
 inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
@@ -223,16 +218,18 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // independent target/timestamp topics plus the optional fixed target, and v18 appends
 // the one-shot HomeHub discovery decision, and v19 appends the default-off diagnostics consent plus
 // a transition generation; v20 appends the independent room-history generation; v21 appends the
-// preferred plant-diagnostics display source byte (0 = X10A, 1 = Modbus); v22 appends gas
-// comparison tariffs. HomeHub enabled derives solely from whether mb_host is empty;
-// v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
+// preferred plant-diagnostics display source byte (0 = X10A, 1 = Modbus). Gas-comparison tariffs
+// live in their own NVS entry ("gas", DKG1 v1) so older v21 builds still decode "cfg" on
+// downgrade or rollback without losing WiFi/MQTT/HomeHub settings. HomeHub enabled derives solely
+// from whether mb_host is empty; v5-v8 actuation bits decode OFF and every pre-v14 controller mode
+// migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced
 // the field. The fallback path is no substitute: it is the legacy per-key layout, which only a
 // device upgraded from the per-key era still holds (frozen at that era's values — no current build
 // writes or erases those keys), and otherwise the Kconfig defaults.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 22;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 21;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -255,7 +252,7 @@ inline constexpr uint16_t CONFIG_BLOB_MAX_STR = 512;
 // field belongs in this list AND in test_config_blob_strings_fit()'s own field list, which is what
 // proves the invariant this exists for (fit() ⟹ the blob round-trips). Stated precisely because the
 // test cannot discover a member nobody added to it: C++ gives it no way to enumerate the struct, so
-// the `== 25` pin catches a field dropped from the TEST, not one added to the STRUCT and forgotten
+// the `== 24` pin catches a field dropped from the TEST, not one added to the STRUCT and forgotten
 // in both places.
 inline bool config_blob_strings_fit(const ConfigBlob& c) {
     for (const std::string* s : {&c.wifi_ssid,
@@ -281,8 +278,7 @@ inline bool config_blob_strings_fit(const ConfigBlob& c) {
                                  &c.circulation_power_path,
                                  &c.circulation_time_path,
                                  &c.ref_temp_setpoint_topic,
-                                 &c.ref_temp_time_topic,
-                                 &c.tariff_currency})
+                                 &c.ref_temp_time_topic})
         if (s->size() > CONFIG_BLOB_MAX_STR) return false;
     return true;
 }
@@ -349,6 +345,61 @@ inline bool link_blob_deserialize(const uint8_t* d, size_t n, LinkBlob& out) {
     decoded.proto = static_cast<char>(d[13]);
     decoded.identity_fp = get_u32(14);
     out = decoded;
+    return true;
+}
+
+// Independently persisted gas-comparison tariffs under NVS key "gas". Keeping these fields out
+// of the "cfg" blob leaves "cfg" at v21 so a rollback or downgrade to a pre-gas-comparison build
+// still reads the owner's WiFi, MQTT and HomeHub configuration.
+struct GasComparisonBlob {
+    uint32_t    elec_price_tenth_mill = 0;
+    uint32_t    gas_price_tenth_mill  = 0;
+    std::string tariff_currency       = "EUR";
+};
+
+inline constexpr uint8_t GAS_BLOB_VERSION     = 1;
+inline constexpr char    GAS_BLOB_MAGIC_TEXT[] = "DKG1";
+
+inline bool gas_comparison_blob_strings_fit(const GasComparisonBlob& g) {
+    return g.tariff_currency.size() <= CONFIG_BLOB_MAX_STR;
+}
+
+inline std::vector<uint8_t> gas_comparison_blob_serialize(const GasComparisonBlob& g) {
+    std::vector<uint8_t> v;
+    v.push_back('D');
+    v.push_back('K');
+    v.push_back('G');
+    v.push_back('1');
+    v.push_back(GAS_BLOB_VERSION);
+    detail::blob_put_u32(v, g.elec_price_tenth_mill);
+    detail::blob_put_u32(v, g.gas_price_tenth_mill);
+    detail::blob_put_str(v, g.tariff_currency);
+    detail::blob_put_u32(v, config_crc32(v.data(), v.size()));
+    return v;
+}
+
+inline bool gas_comparison_blob_deserialize(const uint8_t* d, size_t n, GasComparisonBlob& out) {
+    // magic(4) + version(1) + elec_tm(4) + gas_tm(4) + cur_len(2) + crc(4) = 19 bytes minimum.
+    if (d == nullptr || n < 5 + 4 + 4 + 2 + 4) return false;
+    if (d[0] != 'D' || d[1] != 'K' || d[2] != 'G' || d[3] != '1') return false;
+    if (d[4] != GAS_BLOB_VERSION) return false;
+    const uint32_t want = static_cast<uint32_t>(d[n - 4]) |
+        (static_cast<uint32_t>(d[n - 3]) << 8) |
+        (static_cast<uint32_t>(d[n - 2]) << 16) |
+        (static_cast<uint32_t>(d[n - 1]) << 24);
+    if (config_crc32(d, n - 4) != want) return false;
+    const size_t body_end = n - 4;
+    const auto   get_u32  = [&](size_t p) {
+        return static_cast<uint32_t>(d[p]) | (static_cast<uint32_t>(d[p + 1]) << 8) |
+               (static_cast<uint32_t>(d[p + 2]) << 16) | (static_cast<uint32_t>(d[p + 3]) << 24);
+    };
+    const uint16_t len = static_cast<uint16_t>(d[13]) | (static_cast<uint16_t>(d[14]) << 8);
+    if (len > CONFIG_BLOB_MAX_STR || 15 + static_cast<size_t>(len) != body_end) return false;
+    GasComparisonBlob decoded;
+    decoded.elec_price_tenth_mill = get_u32(5);
+    decoded.gas_price_tenth_mill  = get_u32(9);
+    decoded.tariff_currency.assign(reinterpret_cast<const char*>(d + 15), len);
+    out = std::move(decoded);
     return true;
 }
 
@@ -434,10 +485,6 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_u32(v, c.ref_temp_generation);
     // v21 block: preferred plant-diagnostics display source (0 = X10A, 1 = Modbus).
     v.push_back(c.diagnostics_source);
-    // v22 block: gas comparison tariffs.
-    detail::blob_put_u32(v, c.elec_price_tenth_mill);
-    detail::blob_put_u32(v, c.gas_price_tenth_mill);
-    detail::blob_put_str(v, c.tariff_currency);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size())); // CRC covers everything before it
     return v;
 }
@@ -592,12 +639,6 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         if (p + 1 > body_end) return false;
         c.diagnostics_source     = d[p++];
         c.has_diagnostics_source = true;
-    }
-    if (version >= 22) {
-        if (!get_u32(c.elec_price_tenth_mill) || !get_u32(c.gas_price_tenth_mill) ||
-            !get_str(c.tariff_currency))
-            return false;
-        c.has_gas_comparison = true;
     }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block

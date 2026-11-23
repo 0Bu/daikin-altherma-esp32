@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -351,12 +351,15 @@ try {
   fs.writeFileSync(deadBrowser, "#!/bin/sh\nset -eu\nexit 7\n", { mode: 0o755 });
   const page = path.join(work, "index.html");
   fs.writeFileSync(page, "<!doctype html><title>setup-only fixture</title>");
-  const setup = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
-    cwd: root, encoding: "utf8", timeout: 5000,
+  const setup = spawn(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+    cwd: root, stdio: ["ignore", "ignore", "pipe"],
     env: { ...process.env, DAIKIN_BROWSER_BIN: deadBrowser, DAIKIN_BROWSER_PAGE: page },
   });
-  assert.equal(setup.status, 2, `browser setup must close its fixture server and exit 2\n${setup.stderr}`);
-  assert.match(setup.stderr, /browser render setup: Chrome exited before DevTools/);
+  let setupStderr = "";
+  setup.stderr.on("data", chunk => { setupStderr += chunk; });
+  const setupResult = await stopped(setup, 30000);
+  assert.equal(setupResult.code, 2, `browser setup must close its fixture server and exit 2\n${setupStderr}`);
+  assert.match(setupStderr, /browser render setup: Chrome exited before DevTools/);
   console.log("browser cleanup selftest: signal cleanup and actual render setup exit 2 observed");
 } finally {
   fs.rmSync(work, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: d5c39a480774e3f42a576bcb063cd648e26e03f5b386f1a2fff91d3075a45c44 -->
+<!-- diagnostic-evidence-contract: bfe64363190b727b45e1e182f741df3f5184788f9cdf0243f35cf2f1c9b81989 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -243,7 +243,10 @@ energy rules.
 Electrical sources select strictly from the active diagnostic bus (`diagnostics.effective_source`):
 1. **HomeHub (`EKRHH`) Modbus (`modbus`):** uses Input `51` (`kw * 1000.0` W). Non-finite,
    negative, or `> 50000 W` (`WORKING_FIGURE_MODBUS_POWER_MAX_W`) readings book `unpairable_s`.
-   Altherma 4 returns `unsupported` from `energy_modbus_coverage()`.
+   `energy_modbus_coverage(profile, basis)` requires `ModbusProfile::HomeHub` with
+   `ModbusProfileBasis::Affirmative` (returning `unsupported` for `Altherma4`, `Probing`, and
+   `Fallback` sweeps), and `checkup_record_modbus` refuses Input `49` when
+   `modbus_flow_scale_unverified` is set.
 2. **X10A CT clamps (`x10a_ct`, `0x63/14–16`, conv `161`):** partial phase reads book `unpairable_s`.
    If all valid CT phases read `0 A` continuously for `>= 30 s` with `rps > 10.0 rps`, `ct_state`
    latches `Unwired` (`ENERGY_F_CT_UNWIRED`), clears only `X10aCt` ring buckets via
@@ -256,7 +259,8 @@ Electrical sources select strictly from the active diagnostic bus (`diagnostics.
 Across the `46` X10A catalog profiles (`def::profiles`), `27` meet `EnergyCoverage::supported()`
 (`22` carry `0x63/14–16` CT clamps), while `17` carry `0x21/0` without `rps` or CT clamps and the
 remaining profiles (including `protocol_s`) lack required flow, water-temperature, or mode/valve
-signals. Separately, HomeHub (`EKRHH`) Modbus is supported via `energy_modbus_coverage()`. When
+signals. Separately, affirmatively confirmed HomeHub (`EKRHH`) Modbus is supported via
+`energy_modbus_coverage(ModbusProfile::HomeHub, ModbusProfileBasis::Affirmative)`. When
 tariffs are configured ([`gas_comparison.hpp`](../main/logic/gas_comparison.hpp): `elec_price > 0`
 and `gas_price > 0` at `1e-4` currency/kWh precision using a currency from the 12-code allowlist
 `EUR`, `CHF`, `GBP`, `USD`, `PLN`, `CZK`, `SEK`, `NOK`, `DKK`, `UAH`, `JPY`, `CNY`),

@@ -34,9 +34,10 @@
 
 namespace fixture {
 daik::Config         current;
-std::vector<uint8_t> service, link;
+std::vector<uint8_t> service, link, gas;
 const char*          oracle = "initial";
-unsigned             checks = 0, saves = 0, service_writes = 0, link_writes = 0, config_reads = 0;
+unsigned checks = 0, saves = 0, service_writes = 0, link_writes = 0, gas_writes = 0,
+         config_reads = 0;
 unsigned             reboots = 0, delays = 0, runtime_changes = 0, env_probes = 0, body_reads = 0;
 unsigned mqtt_inits = 0, mqtt_starts = 0, mqtt_stops = 0, mqtt_destroys = 0, semaphore_deletes = 0;
 unsigned dns_calls = 0, socket_calls = 0, socket_closes = 0, weather_commits = 0;
@@ -95,16 +96,19 @@ struct Store {
     bool detection = false;
     int  write_blob(const char* key, const uint8_t* bytes, size_t size) {
         const bool is_service = std::strcmp(key, "cfg") == 0;
+        const bool is_gas     = std::strcmp(key, "gas") == 0;
         if (detection) {
-            if (is_service) fail("detection wrote the HTTP service domain");
+            if (is_service || is_gas) fail("detection wrote the HTTP service or gas domain");
             ++detection_writes;
         } else if (is_service)
             ++service_writes;
+        else if (is_gas)
+            ++gas_writes;
         else
             ++link_writes;
         if (reset_latched) return ESP_FAIL;
-        if (save_fault == (is_service ? 1U : 2U)) return ESP_FAIL;
-        auto& target = is_service ? service : link;
+        if (save_fault == (is_service ? 1U : is_gas ? 3U : 2U)) return ESP_FAIL;
+        auto& target = is_service ? service : is_gas ? gas : link;
         target.assign(bytes, bytes + size); // capacities were reserved before request execution
         // A detection cache commit is independent of the endpoint's first durable write. Its
         // transaction may publish while HTTP is still staging its own requested successor.
@@ -151,9 +155,17 @@ void reset() {
     service = daik::config_blob_serialize(daik::config_blob_from(current));
     link    = daik::link_blob_serialize({current.rx_pin, current.tx_pin,
                                          static_cast<char>(current.proto), current.x10a_identity_fp});
+#ifndef HTTP_CONFIG_ORIGINAL_CONTROL
+    gas = daik::gas_comparison_blob_serialize(
+        {current.elec_price_tenth_mill, current.gas_price_tenth_mill, current.tariff_currency});
+    gas.reserve(128);
+#else
+    gas.clear();
+#endif
     service.reserve(16384);
     link.reserve(128);
-    saves = service_writes = link_writes = config_reads = reboots = delays = runtime_changes = 0;
+    saves = service_writes = link_writes = gas_writes = config_reads = reboots = delays =
+        runtime_changes = 0;
     env_probes = body_reads = mqtt_inits = mqtt_starts = mqtt_stops = mqtt_destroys = 0;
     semaphore_deletes = dns_calls = socket_calls = socket_closes = weather_commits = 0;
     post_write_allocations = stale_attempts = save_fault = 0;
@@ -387,6 +399,15 @@ ConfigSaveResult config_save_link(const Config& requested) {
     fixture::Store store;
     return config_save_transaction(fixture::current, requested, true, store).result;
 }
+#ifndef HTTP_CONFIG_ORIGINAL_CONTROL
+bool config_save_gas_comparison(uint32_t elec_tm, uint32_t gas_tm, const std::string& currency) {
+    ++fixture::saves;
+    fixture::Store store;
+    fixture::last_save_outcome = daik::config_save_gas_comparison_transaction(
+        fixture::current, daik::GasComparisonBlob{elec_tm, gas_tm, currency}, store);
+    return fixture::last_save_outcome.result == ConfigSaveResult::Saved;
+}
+#endif
 bool nvs_restart_held_by_factory_reset(const char* who) {
     if (std::strcmp(who, "config") != 0) fixture::fail("restart guard has wrong caller identity");
     ++fixture::restart_guard_calls;
@@ -1427,15 +1448,17 @@ void gas_comparison() {
     fail("gas_comparison cannot run against original control");
 #else
     reset();
-    const auto send = [](Handler handler, const std::string& body) {
-        saves = service_writes = link_writes = runtime_changes = weather_commits = 0;
-        durable_started                                                          = false;
+    const auto initial_service = service;
+    const auto initial_link    = link;
+    const auto send            = [](Handler handler, const std::string& body) {
+        saves = service_writes = link_writes = gas_writes = runtime_changes = weather_commits = 0;
+        durable_started                                                       = false;
         return invoke(handler, body);
     };
     const auto persisted = [] {
-        daik::ConfigBlob blob;
-        check(daik::config_blob_deserialize(service.data(), service.size(), blob),
-              "gas comparison service blob must decode");
+        daik::GasComparisonBlob blob;
+        check(daik::gas_comparison_blob_deserialize(gas.data(), gas.size(), blob),
+              "gas comparison blob must decode");
         check(blob.elec_price_tenth_mill == current.elec_price_tenth_mill &&
                   blob.gas_price_tenth_mill == current.gas_price_tenth_mill &&
                   blob.tariff_currency == current.tariff_currency,
@@ -1443,19 +1466,20 @@ void gas_comparison() {
         return blob;
     };
 
-    // Valid save normalizes currency case and ignores legacy/unknown gas_efficiency_pct.
+    // Valid save normalizes currency case, ignores legacy gas_efficiency_pct, and leaves cfg/link intact.
     const auto first =
         send(daik::set_gas_comparison,
              R"({"elec_price":0.32,"gas_price":0.105,"currency":"chf","gas_efficiency_pct":50})");
-    check(first.status == "200 OK" && saves == 1 && service_writes == 1 &&
+    check(first.status == "200 OK" && saves == 1 && gas_writes == 1 && service_writes == 0 &&
+              link_writes == 0 && service == initial_service && link == initial_link &&
               current.elec_price_tenth_mill == 3200 && current.gas_price_tenth_mill == 1050 &&
               current.tariff_currency == "CHF" && persisted().tariff_currency == "CHF" &&
               daik::GAS_EFFICIENCY_PCT == 88,
-          "valid gas comparison save must persist tariffs and ignore gas_efficiency_pct");
+          "valid gas comparison save must persist standalone gas blob and keep cfg at v21");
 
     const auto same =
         send(daik::set_gas_comparison, R"({"elec_price":0.32,"gas_price":0.105,"currency":"CHF"})");
-    check(same.status == "200 OK" && saves == 0 && service_writes == 0 &&
+    check(same.status == "200 OK" && saves == 0 && gas_writes == 0 && service_writes == 0 &&
               same.response == R"({"ok":true,"saved":false,"reboot":false})",
           "omitted gas_efficiency_pct must compare identical and skip redundant NVS writes");
 
@@ -1464,12 +1488,12 @@ void gas_comparison() {
         const std::string body =
             std::string(R"({"elec_price":0.30,"gas_price":0.10,"currency":")") + cur + "\"}";
         const auto ok = send(daik::set_gas_comparison, body);
-        check(ok.status == "200 OK" && current.tariff_currency == cur &&
-                  persisted().tariff_currency == cur,
+        check(ok.status == "200 OK" && gas_writes == 1 && service_writes == 0 &&
+                  current.tariff_currency == cur && persisted().tariff_currency == cur,
               "every curated currency must be accepted by /set_gas_comparison");
     }
 
-    const auto before_service = service;
+    const auto before_gas = gas;
     for (const char* bad :
          {R"({"elec_price":0.32,"gas_price":0.105,"currency":"CAD"})",
           R"({"elec_price":0.32,"gas_price":0.105,"currency":"AUD"})",
@@ -1477,24 +1501,27 @@ void gas_comparison() {
           R"({"elec_price":0.32,"gas_price":0,"currency":"EUR"})",
           R"({"elec_price":100.0,"gas_price":0.10,"currency":"EUR"})", R"({"currency":123})"}) {
         const auto rej = send(daik::set_gas_comparison, bad);
-        check(rej.status == "400 Bad Request" && saves == 0 && service_writes == 0 &&
-                  service == before_service && current.tariff_currency == "CNY",
+        check(rej.status == "400 Bad Request" && saves == 0 && gas_writes == 0 &&
+                  service_writes == 0 && gas == before_gas && service == initial_service &&
+                  current.tariff_currency == "CNY",
               "unsupported 3-letter currency or invalid tariff must reject 400 without mutating");
     }
 
-    save_fault = 1;
+    save_fault = 3;
     const auto fail_save =
         send(daik::set_gas_comparison, R"({"elec_price":0.31,"gas_price":0.11,"currency":"EUR"})");
-    check(fail_save.status == "500 Internal Server Error" && service == before_service &&
-              current.elec_price_tenth_mill == 3000 && current.tariff_currency == "CNY",
+    check(fail_save.status == "500 Internal Server Error" && gas == before_gas &&
+              service == initial_service && current.elec_price_tenth_mill == 3000 &&
+              current.tariff_currency == "CNY",
           "failed gas comparison NVS write must return 500 and leave RAM/durable intact");
     save_fault = 0;
 
     const auto cleared = send(daik::set_gas_comparison, R"({"clear":true})");
-    check(cleared.status == "200 OK" && saves == 1 && current.elec_price_tenth_mill == 0 &&
+    check(cleared.status == "200 OK" && saves == 1 && gas_writes == 1 && service_writes == 0 &&
+              service == initial_service && current.elec_price_tenth_mill == 0 &&
               current.gas_price_tenth_mill == 0 && persisted().elec_price_tenth_mill == 0 &&
               persisted().gas_price_tenth_mill == 0,
-          "clear must zero both tariffs while keeping currency valid");
+          "clear must zero both tariffs while keeping currency valid and cfg untouched");
 #endif
 }
 } // namespace test

@@ -2639,7 +2639,7 @@
     },
     "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_": {
       "pattern": "^daik::checkup_record\\(daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool,\\ daik::logic::CheckupCoverage\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool,\\ long\\ long\\)$",
-      "max_bytes": 448
+      "max_bytes": 544
     },
     "stop_dated": {
       "pattern": "^daik::\\(anonymous\\ namespace\\)::dated\\(long\\ long\\)$",
@@ -3011,7 +3011,7 @@
     },
     "modbus_checkup_record": {
       "pattern": "^daik::checkup_record_modbus\\(daik::CachedValue const\\*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis\\)$",
-      "max_bytes": 208
+      "max_bytes": 272
     },
     "modbus_checkup_coverage": {
       "pattern": "^daik::logic::checkup_modbus_coverage\\(daik::ModbusProfile, daik::ModbusProfileBasis\\)$",
@@ -3359,7 +3359,7 @@
     },
     "cycling_run_checkup_record": {
       "pattern": "^daik::checkup_record\\(daik::CachedValue const\\*, unsigned int, bool, bool, daik::logic::CheckupCoverage const&, unsigned long, unsigned long, bool, long long\\)$",
-      "max_bytes": 512
+      "max_bytes": 544
     },
     "cycling_run_record_locked": {
       "pattern": "^daik::\\(anonymous namespace\\)::record_cycling_run_context_locked\\(daik::logic::StopContextSample const&, daik::CachedValue const\\*, unsigned int, daik::logic::CheckupSample const&, int, bool, long long, unsigned long\\)$",

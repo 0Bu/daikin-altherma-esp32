@@ -11,14 +11,16 @@
 // write-through and atomic per entry and nvs_commit is a no-op, so there is no staged state to lose
 // or roll back — and the store reports failure by return value only, never by throwing.
 //
-// Two durability domains share one config mutex, which the CALLER holds around every call here:
+// Three durability domains share one config mutex, which the CALLER holds around every call here:
 //
-//   "cfg"  — the credential/service blob (logic/config_store.hpp). Its writers are the service
-//            /set_* routes and the boot-time saves that finish before httpd starts (the WiFi
-//            rollback/success commits, the initial HomeHub discovery); a service save requires it.
-//            An X10A /set_hp never writes it.
+//   "cfg"  — the credential/service blob (logic/config_store.hpp, v21). Its writers are the
+//            service /set_* routes and the boot-time saves that finish before httpd starts (the
+//            WiFi rollback/success commits, the initial HomeHub discovery); a service save requires
+//            it. An X10A /set_hp never writes it.
 //   "link" — the X10A link cache (RX/TX pins, protocol, observation identity). Its writers are the
 //            detection commit and an X10A /set_hp; a service save only maintains it.
+//   "gas"  — the optional gas-comparison tariff blob (DKG1 v1, written only by
+//            /set_gas_comparison) so "cfg" stays v21 and downgrades/rollbacks never drop credentials.
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -31,6 +33,7 @@ namespace daik {
 
 inline constexpr const char* CONFIG_KEY_SERVICE = "cfg";
 inline constexpr const char* CONFIG_KEY_LINK    = "link";
+inline constexpr const char* CONFIG_KEY_GAS     = "gas";
 
 // The runtime revision after `current`. Zero is skipped so a wrapped counter never equals the
 // "no revision" value a failed commit reports.
@@ -47,6 +50,7 @@ enum class ConfigSaveStep : uint8_t {
     FieldTooLong, // a service string would not decode again: nothing was written
     ServiceWrite, // the "cfg" write failed: nothing durable changed and "link" was not attempted
     LinkWrite,    // the "link" write failed; ConfigSaveOutcome::result says what that cost
+    GasWrite,     // the "gas" write failed: nothing durable or RAM changed
 };
 
 // At most one write can fail per transaction (a failed "cfg" write ends it), so one step and one
@@ -122,10 +126,6 @@ inline ConfigBlob config_blob_from(const Config& c) {
     b.mb_port                        = c.mb_port;
     b.mb_unit_id                     = c.mb_unit_id;
     b.mb_discovery_done              = c.mb_discovery_done;
-    b.elec_price_tenth_mill          = c.elec_price_tenth_mill;
-    b.gas_price_tenth_mill           = c.gas_price_tenth_mill;
-    b.tariff_currency                = c.tariff_currency;
-    b.has_gas_comparison             = true;
     return b;
 }
 
@@ -281,6 +281,35 @@ inline bool config_commit_detected_model_if_current(Config& live, uint32_t expec
                 std::move(fp_eeprom));
     live.runtime_revision = config_next_revision(live.runtime_revision);
     return true;
+}
+
+// Gas comparison save: writes ONLY the independent "gas" NVS key so "cfg" (v21) and "link" are
+// never rewritten or version-bumped, stages the encoded blob before the NVS write, and publishes
+// to `live` via nothrow move only after success.
+template <class Store>
+ConfigSaveOutcome config_save_gas_comparison_transaction(Config& live, GasComparisonBlob blob,
+                                                         Store& store) {
+    ConfigSaveOutcome out;
+    if (!gas_comparison_blob_strings_fit(blob)) {
+        out.failed = ConfigSaveStep::FieldTooLong;
+        return out;
+    }
+    const std::vector<uint8_t> encoded = gas_comparison_blob_serialize(blob);
+    static_assert(std::is_nothrow_move_assignable_v<std::string>,
+                  "post-NVS gas currency publication must not allocate or throw");
+
+    const int gas_err = store.write_blob(CONFIG_KEY_GAS, encoded.data(), encoded.size());
+    if (gas_err != 0) {
+        out.failed      = ConfigSaveStep::GasWrite;
+        out.store_error = gas_err;
+        return out;
+    }
+    live.elec_price_tenth_mill = blob.elec_price_tenth_mill;
+    live.gas_price_tenth_mill  = blob.gas_price_tenth_mill;
+    live.tariff_currency       = std::move(blob.tariff_currency);
+    live.runtime_revision      = config_next_revision(live.runtime_revision);
+    out.result                 = ConfigSaveResult::Saved;
+    return out;
 }
 
 } // namespace daik

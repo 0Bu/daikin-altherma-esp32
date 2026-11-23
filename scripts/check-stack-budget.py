@@ -33,12 +33,13 @@ SECTION_RE = re.compile(r"^Disassembly of section .+:$")
 STACK_MOVSP_RE = re.compile(r"movsp\s+a1,")
 # Only these reviewed functions may use objdump's packed-word rendering, which appears where the
 # link leaves a body without .xt.prop instruction coverage. A symbol's first instruction must
-# still be at its entry address and contain the Xtensa ENTRY opcode. The four first-party entries
-# from mqtt_ha.cpp, mcp_post and dns_task render this way in some link layouts; the packed word
-# carries the same ENTRY immediate as the decoded `entry` of an unpacked link (32 bytes, 48 for
-# mqtt_enqueue_id, 1264 for mcp_post, 608 for dns_task), and each stays within its separate first-
-# frame budget in tools/stack/budgets.json. A packed body hides any `movsp a1` from
-# validate_dynamic_stack; none of the ten uses alloca or a variable-length array.
+# still be at its entry address and contain the Xtensa ENTRY opcode. First-party entries such
+# as mqtt_ha.cpp, mcp_post, dns_task, and http_deadline.cpp's socket_deadline_watchdog_task
+# (32 bytes, no alloca/VLA in main/http_deadline.cpp:55-98) render this way in some link layouts;
+# the packed word carries the same ENTRY immediate as the decoded `entry` of an unpacked link
+# (32 bytes, 48 for mqtt_enqueue_id, 1264 for mcp_post, 608 for dns_task), and each stays within
+# its separate first-frame budget in tools/stack/budgets.json. A packed body hides any `movsp a1`
+# from validate_dynamic_stack; none of the eleven uses alloca or a variable-length array.
 PACKED_ENTRY_SYMBOLS = frozenset({
     'esp_http_client_open',
     'esp_http_client_connect',
@@ -69,6 +70,7 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'calloc',
     'ccm_auth_crypt',
     'void daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)',
+    'daik::(anonymous namespace)::socket_deadline_watchdog_task(void*)',
     'daik::discovery_owner_block()',
     'daik::do_detect(httpd_req*)',
     'daik::http_send_values_json(httpd_req*, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)',

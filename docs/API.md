@@ -770,15 +770,17 @@ the link blob; it does not migrate or write the service blob.
 
 | NVS item | Purpose |
 |---|---|
-| `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation mappings, gas-comparison tariffs, weather, ENV III, diagnostics consent/generation/source |
+| `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation mappings, weather, ENV III, diagnostics consent/generation/source |
+| `gas` | Standalone gas-comparison tariff blob (`DKG1` v1: `elec_price`, `gas_price`, `currency`), written only by `/set_gas_comparison` so `cfg` remains v21 across downgrades or rollbacks |
 | `link` | Complete RX/TX/protocol/observation-identity cache; failed write preserves the previous complete entry. A rejected entry is reported in `/diag`; only detection (cached pair, build default, their swaps) or `/set_hp` rewrites it |
 | Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
 | `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; which boot or uptime clears which is in [ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) |
 
-The current service layout is v22; it appends gas-comparison tariffs (`elec_price`, `gas_price`,
-`currency`). v21 appended the preferred plant-diagnostics display source byte
-(`0` = X10A, `1` = Modbus; older records default to X10A). v20 appended a room-history generation that
-defaults to zero for
+The current service layout is v21; it appended the preferred plant-diagnostics display source byte
+(`0` = X10A, `1` = Modbus; older records default to X10A). Gas-comparison tariffs (`elec_price`,
+`gas_price`, `currency`) live in their own `gas` NVS blob (`DKG1` v1) so `cfg` stays v21 and
+downgrading or rolling back to a pre-gas-comparison v21 build keeps WiFi, MQTT and HomeHub
+configuration intact. v20 appended a room-history generation that defaults to zero for
 older records and prevents a removed or replaced source from restoring its earlier history.
 Retired v9 actuation and v14 controller-mode bytes keep their
 positions, are written zero and ignored. Pre-v18 HomeHub configurations migrate as already searched

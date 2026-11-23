@@ -280,18 +280,6 @@ void config_load() {
         }
         if (b.has_diagnostics_source)
             c.diagnostics_source = diagnostics_source_from_int(b.diagnostics_source);
-        if (b.has_gas_comparison) {
-            const char* why = nullptr;
-            if (gas_comparison_config_valid(b.elec_price_tenth_mill, b.gas_price_tenth_mill,
-                                            b.tariff_currency, &why)) {
-                c.elec_price_tenth_mill = b.elec_price_tenth_mill;
-                c.gas_price_tenth_mill  = b.gas_price_tenth_mill;
-                c.tariff_currency       = std::move(b.tariff_currency);
-            } else {
-                diag_printf("config: invalid gas comparison config ignored (%s)\n",
-                            why ? why : "invalid config");
-            }
-        }
         if (b.has_circulation && b.circulation_on_tenths_w <= UINT16_MAX &&
             b.circulation_off_tenths_w <= UINT16_MAX && b.circulation_confirm_s <= UINT16_MAX) {
             const uint16_t on_w      = static_cast<uint16_t>(b.circulation_on_tenths_w);
@@ -523,6 +511,31 @@ void config_load() {
     }
     c.proto = parse_protocol(link_blob_loaded ? std::string(1, link_blob.proto)
                                               : nvs_get_str("proto", CONFIG_DAIKIN_PROTOCOL));
+    {
+        // Gas comparison tariffs live in their own NVS key ("gas", DKG1 v1) so older v21
+        // firmware keeps reading "cfg" on downgrade or rollback.
+        std::vector<uint8_t> gas_raw;
+        GasComparisonBlob    gb;
+        const NvsBlobRead    gas_read        = nvs_read_blob("gas", gas_raw);
+        const bool           gas_blob_loaded =
+            gas_read == NvsBlobRead::Ok &&
+            gas_comparison_blob_deserialize(gas_raw.data(), gas_raw.size(), gb);
+        log_blob_load_issue(config_load_verdict(stored_entry_read(gas_read), gas_blob_loaded),
+                            gas_raw, "stored gas comparison", GAS_BLOB_MAGIC_TEXT,
+                            GAS_BLOB_VERSION, GAS_BLOB_VERSION, "defaults in use");
+        if (gas_blob_loaded) {
+            const char* gas_why = nullptr;
+            if (gas_comparison_config_valid(gb.elec_price_tenth_mill, gb.gas_price_tenth_mill,
+                                            gb.tariff_currency, &gas_why)) {
+                c.elec_price_tenth_mill = gb.elec_price_tenth_mill;
+                c.gas_price_tenth_mill  = gb.gas_price_tenth_mill;
+                c.tariff_currency       = std::move(gb.tariff_currency);
+            } else {
+                diag_printf("config: invalid gas comparison config ignored (%s)\n",
+                            gas_why ? gas_why : "invalid config");
+            }
+        }
+    }
     // Old development builds persisted discovery-result keys outside the atomic blob. They remain
     // ignored: v18 owns the one-shot decision atomically beside the host it applies to.
     c.profile      = "auto";
@@ -596,6 +609,8 @@ static ConfigSaveResult save_whole(const Config& requested, bool owns_link,
                         "link remains intact)\n",
                         esp_err_to_name(out.store_error));
         break;
+    case ConfigSaveStep::GasWrite:
+        break;
     }
     return out.result;
 }
@@ -609,6 +624,33 @@ ConfigSaveResult config_save_if_current(const Config& c) {
 }
 
 ConfigSaveResult config_save_link(const Config& c) { return save_whole(c, /*owns_link=*/true); }
+
+bool config_save_gas_comparison(uint32_t elec_price_tenth_mill, uint32_t gas_price_tenth_mill,
+                                const std::string& tariff_currency) {
+    ConfigSaveOutcome out;
+    {
+        Lock         lk(g_mtx);
+        NvsBlobStore store;
+        out = config_save_gas_comparison_transaction(
+            g_cfg, GasComparisonBlob{elec_price_tenth_mill, gas_price_tenth_mill, tariff_currency},
+            store);
+    }
+    switch (out.failed) {
+    case ConfigSaveStep::FieldTooLong:
+        diag_printf("config: refusing to save — gas currency exceeds %u-byte limit\n",
+                    static_cast<unsigned>(CONFIG_BLOB_MAX_STR));
+        break;
+    case ConfigSaveStep::GasWrite:
+        diag_printf("config: NVS blob write failed key=%s err=%s — nothing saved\n", "gas",
+                    esp_err_to_name(out.store_error));
+        break;
+    case ConfigSaveStep::None:
+    case ConfigSaveStep::ServiceWrite:
+    case ConfigSaveStep::LinkWrite:
+        break;
+    }
+    return out.result == ConfigSaveResult::Saved;
+}
 
 bool config_stored_blob_unreadable() {
     return s_cfg_blob_unreadable.load(std::memory_order_acquire);
