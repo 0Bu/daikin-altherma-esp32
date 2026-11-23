@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
@@ -93,6 +94,7 @@
 #include "logic/fixed_text.hpp"
 #include "logic/history.hpp"
 #include "logic/checkup_persist.hpp"
+#include "logic/working_figure.hpp"
 #include "logic/cycling_persist.hpp"
 #include "logic/fault_trace.hpp"
 #include "logic/fault_persist.hpp"
@@ -106,6 +108,7 @@
 #include "logic/mqtt_base.hpp"
 #include "logic/mqtt_uri.hpp"
 #include "logic/reference_temperature.hpp"
+#include "logic/power_meter_source.hpp"
 #include "logic/refrigerant_service.hpp"
 #include "logic/weather_forecast.hpp"
 #include "logic/weather_config.hpp"
@@ -159,6 +162,19 @@ template <typename T> static T rt(T v) {
     volatile T x = v;
     return x;
 }
+
+static size_t g_logic_fail_alloc = 0;
+
+void* operator new(size_t size) {
+    if (g_logic_fail_alloc > 0 && --g_logic_fail_alloc == 0) throw std::bad_alloc();
+    if (void* p = std::malloc(size ? size : 1)) return p;
+    throw std::bad_alloc();
+}
+void* operator new[](size_t size) { return ::operator new(size); }
+void  operator delete(void* p) noexcept { std::free(p); }
+void  operator delete[](void* p) noexcept { std::free(p); }
+void  operator delete(void* p, size_t) noexcept { std::free(p); }
+void  operator delete[](void* p, size_t) noexcept { std::free(p); }
 
 using namespace daik;
 
@@ -1691,6 +1707,28 @@ static void test_config_model() {
     CHECK(validate(c, why));
     c.mb_host = ""; // reset to default for the checks below
 
+    // Validate circulation failure + fixed-target heating-curve arming + std::string short copy.
+    c.circulation_topic = "bad/+/topic";
+    CHECK(!validate(c, why));
+    c.circulation_topic.clear();
+    {
+        uint8_t padded[16]{};
+        wifi_config_field_copy(padded, sizeof(padded), std::string("hi"));
+        CHECK(padded[0] == 'h' && padded[1] == 'i' && padded[2] == '\0' && padded[15] == '\0');
+        wifi_config_field_copy(nullptr, sizeof(padded), std::string("hi"));
+        wifi_config_field_copy(padded, 0, std::string("hi"));
+        Config fixed_hc;
+        fixed_hc.diagnostics_enabled            = true;
+        fixed_hc.mb_host                        = "hub.local";
+        fixed_hc.mqtt_uri                       = "mqtt://broker.local";
+        fixed_hc.ref_temp_topic                 = "room/temp";
+        fixed_hc.ref_temp_path                  = "t";
+        fixed_hc.ref_temp_fixed_setpoint_tenths = 210;
+        CHECK(heating_curve_diagnosis_armed(fixed_hc));
+        fixed_hc.env3_enabled = false;
+        CHECK(config_board_reserved_pins(fixed_hc).claims(fixed_hc.rx_pin));
+    }
+
     // Fresh is the one automatic-search state. A completed empty decision is disabled forever; a
     // non-empty manual or discovered address is the exact polling target and never searches.
     Config m;
@@ -2134,6 +2172,18 @@ static void test_config_transaction() {
         c.mb_port                        = 1502;
         c.mb_unit_id                     = 9;
         c.mb_discovery_done              = true;
+        c.elec_price_tenth_mill          = 3500;
+        c.gas_price_tenth_mill           = 1100;
+        c.gas_efficiency_pct             = 91;
+        c.tariff_currency                = "USD";
+        c.power_meter_name               = "Shelly 3EM";
+        c.power_meter_topic              = "em/status";
+        c.power_meter_power_path         = "total_act_power";
+        c.power_meter_time_path          = "ts";
+        c.power_meter_max_age_s          = 45;
+        c.power_meter_unit               = PowerMeterUnit::Kilowatts;
+        c.power_meter_scope              = PowerMeterScope::CompressorOnly;
+        c.power_meter_generation         = 12;
         const ConfigBlob b               = config_blob_from(c);
         CHECK(b.wifi_ssid == "ExampleNet" && b.wifi_pass == "pass");
         CHECK(b.wifi_ssid_backup == "ssid-bak" && b.wifi_pass_backup == "pass-bak");
@@ -2163,6 +2213,14 @@ static void test_config_transaction() {
         CHECK(b.ui_lang == ui_lang_to_int(UiLang::De));
         CHECK(b.mb_host == "hub" && b.mb_port == 1502 && b.mb_unit_id == 9);
         CHECK(b.mb_discovery_done);
+        CHECK(b.has_gas_comparison && b.elec_price_tenth_mill == 3500 &&
+              b.gas_price_tenth_mill == 1100 && b.gas_efficiency_pct == 91 &&
+              b.tariff_currency == "USD");
+        CHECK(b.has_power_meter && b.power_meter_name == "Shelly 3EM" &&
+              b.power_meter_topic == "em/status" && b.power_meter_power_path == "total_act_power" &&
+              b.power_meter_time_path == "ts" && b.power_meter_max_age_s == 45 &&
+              b.power_meter_unit == 1 && b.power_meter_scope == 1 &&
+              b.power_meter_generation == 12);
         // Serialized and decoded, the mapped blob reads back as the same settings.
         const std::vector<uint8_t> raw = config_blob_serialize(b);
         ConfigBlob                 back;
@@ -2604,6 +2662,50 @@ static void test_config_transaction() {
         CHECK(live.fp_kw_tenths == 60 && live.fp_iu_kw_tenths == 80 && live.fp_eeprom == "1234");
         CHECK(live.runtime_revision == 6);
         CHECK(live.wifi_ssid == "home" && live.rx_pin == 44 && live.tx_pin == 43);
+    }
+
+    // OOM before the first durable write leaves RAM and store untouched and unwinds cleanly.
+    {
+        struct StagingGuardStore {
+            ConfigTxStore& inner;
+            int            write_blob(const char* key, const uint8_t* data, size_t len) {
+                g_logic_fail_alloc = 0;
+                return inner.write_blob(key, data, len);
+            }
+        };
+        Config        live = config_tx_live();
+        ConfigTxStore store;
+        store.seed(live);
+        StagingGuardStore guard{store};
+        const auto        durable_before = store.durable;
+        const auto        live_before    = config_tx_state(live);
+        Config            req            = live;
+        req.wifi_ssid                    = "long-ssid-over-sso-buffer-123456";
+        req.wifi_pass                    = "long-pass-over-sso-buffer-123456";
+        req.mqtt_uri                     = "mqtts://long-broker-over-sso.example.com";
+        req.tariff_currency              = "USD-long-currency-over-sso-buffer";
+        req.power_meter_name             = "long-power-meter-name-over-sso-buf";
+        req.power_meter_topic            = "long/power/meter/topic/over/sso/buf";
+        req.power_meter_power_path       = "long.power.meter.json.path.over.sso";
+        req.power_meter_time_path        = "long.power.meter.time.path.over.sso";
+        size_t oom_caught                = 0;
+        for (size_t k = 1; k <= 64; ++k) {
+            store.attempts.clear();
+            g_logic_fail_alloc = k;
+            bool threw         = false;
+            try {
+                (void)config_save_transaction(live, req, false, guard);
+            } catch (const std::bad_alloc&) {
+                threw = true;
+                oom_caught++;
+            }
+            g_logic_fail_alloc = 0;
+            if (!threw) break;
+            CHECK(store.attempts.empty());
+            CHECK(store.durable == durable_before);
+            CHECK(config_tx_state(live) == live_before);
+        }
+        CHECK(oom_caught >= 8);
     }
 }
 
@@ -11808,15 +11910,17 @@ static void test_config_store() {
     // older-version suffix rather than folded into the literals, so a new blob version is one edit
     // here instead of fifteen scattered ones — and each literal still reads as the blocks v<N>
     // predates.
-    const size_t base_suffix_bytes               = 2;
-    const size_t ref_multi_suffix_bytes          = 2 + 2 + 4;
-    const size_t discovery_suffix_bytes          = 1;
-    const size_t diagnostics_suffix_bytes        = 1 + 4;
-    const size_t room_generation_suffix_bytes    = 4;
-    const size_t diagnostics_source_suffix_bytes = 1;
+    const size_t base_suffix_bytes                = 2;
+    const size_t ref_multi_suffix_bytes           = 2 + 2 + 4;
+    const size_t discovery_suffix_bytes           = 1;
+    const size_t diagnostics_suffix_bytes         = 1 + 4;
+    const size_t room_generation_suffix_bytes     = 4;
+    const size_t diagnostics_source_suffix_bytes  = 1;
+    const size_t power_meter_default_suffix_bytes = 4 + 4 + 1 + 5 + 2 + 2 + 2 + 2 + 4 + 1 + 1 + 4;
     const size_t current_suffix_bytes =
         base_suffix_bytes + ref_multi_suffix_bytes + discovery_suffix_bytes +
-        diagnostics_suffix_bytes + room_generation_suffix_bytes + diagnostics_source_suffix_bytes;
+        diagnostics_suffix_bytes + room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
+        power_meter_default_suffix_bytes;
     const size_t circ_suffix_bytes =
         2 + circ.circulation_name.size() + 2 + circ.circulation_topic.size() + 2 +
         circ.circulation_power_path.size() + 2 + circ.circulation_time_path.size() + 16;
@@ -11856,7 +11960,7 @@ static void test_config_store() {
     board.board_preset_id   = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set    = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 21);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 22);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -11952,7 +12056,8 @@ static void test_config_store() {
     std::vector<uint8_t> v17 = base_buf;
     v17.erase(v17.end() - 4 -
                   (discovery_suffix_bytes + diagnostics_suffix_bytes +
-                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
+                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
+                   power_meter_default_suffix_bytes),
               v17.end() - 4);
     v17[4] = 17;
     restamp(v17);
@@ -11963,7 +12068,8 @@ static void test_config_store() {
     std::vector<uint8_t> v16 = base_buf;
     v16.erase(v16.end() - 4 -
                   (ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
-                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
+                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
+                   power_meter_default_suffix_bytes),
               v16.end() - 4);
     v16[4] = 16;
     restamp(v16);
@@ -11977,7 +12083,8 @@ static void test_config_store() {
     std::vector<uint8_t> v15 = base_buf;
     v15.erase(v15.end() - 4 -
                   (16 + ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
-                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
+                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
+                   power_meter_default_suffix_bytes),
               v15.end() - 4);
     v15[4] = 15;
     restamp(v15);
@@ -11991,7 +12098,7 @@ static void test_config_store() {
     std::vector<uint8_t> v18 = base_buf;
     v18.erase(v18.end() - 4 -
                   (diagnostics_suffix_bytes + room_generation_suffix_bytes +
-                   diagnostics_source_suffix_bytes),
+                   diagnostics_source_suffix_bytes + power_meter_default_suffix_bytes),
               v18.end() - 4);
     v18[4] = 18;
     restamp(v18);
@@ -12007,7 +12114,9 @@ static void test_config_store() {
     // v20 adds only the durable room-source generation. A real v19 remains readable with zero;
     // claiming v20 without the whole four-byte suffix is rejected even with a valid CRC.
     std::vector<uint8_t> v19 = base_buf;
-    v19.erase(v19.end() - 4 - (room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
+    v19.erase(v19.end() - 4 -
+                  (room_generation_suffix_bytes + diagnostics_source_suffix_bytes +
+                   power_meter_default_suffix_bytes),
               v19.end() - 4);
     v19[4] = 19;
     restamp(v19);
@@ -12022,7 +12131,8 @@ static void test_config_store() {
     // v21 adds only the 1-byte diagnostics display source preference. A real v20 remains readable
     // and defaults to X10A (0); claiming v21 without that byte fails closed.
     std::vector<uint8_t> v20 = base_buf;
-    v20.erase(v20.end() - 4 - diagnostics_source_suffix_bytes, v20.end() - 4);
+    v20.erase(v20.end() - 4 - (diagnostics_source_suffix_bytes + power_meter_default_suffix_bytes),
+              v20.end() - 4);
     v20[4] = 20;
     restamp(v20);
     ConfigBlob v20_rt;
@@ -12043,6 +12153,59 @@ static void test_config_store() {
     CHECK(room_generation_rt.ref_temp_generation == UINT32_MAX &&
           room_generation_rt.has_diagnostics_source &&
           room_generation_rt.diagnostics_source == static_cast<uint8_t>(DiagnosticsSource::Modbus));
+    // v22 adds gas comparison tariffs and the independent MQTT electrical power meter.
+    // A real v21 blob remains readable with default 0 tariffs, 88% efficiency, "EUR", and empty
+    // power meter mapping; claiming v22 without the full suffix fails closed.
+    std::vector<uint8_t> v21 = base_buf;
+    v21.erase(v21.end() - 4 - power_meter_default_suffix_bytes, v21.end() - 4);
+    v21[4] = 21;
+    restamp(v21);
+    ConfigBlob v21_rt;
+    CHECK(config_blob_deserialize(v21.data(), v21.size(), v21_rt));
+    CHECK(v21_rt.has_diagnostics_source && !v21_rt.has_gas_comparison && !v21_rt.has_power_meter);
+    CHECK(v21_rt.elec_price_tenth_mill == 0 && v21_rt.gas_price_tenth_mill == 0 &&
+          v21_rt.gas_efficiency_pct == 88 && v21_rt.tariff_currency == "EUR");
+    CHECK(v21_rt.power_meter_name.empty() && v21_rt.power_meter_topic.empty() &&
+          v21_rt.power_meter_power_path.empty() && v21_rt.power_meter_time_path.empty());
+    CHECK(v21_rt.power_meter_max_age_s == 60 && v21_rt.power_meter_unit == 0 &&
+          v21_rt.power_meter_scope == 0 && v21_rt.power_meter_generation == 0);
+    std::vector<uint8_t> v22_short = v21;
+    v22_short[4]                   = 22;
+    restamp(v22_short);
+    CHECK(!config_blob_deserialize(v22_short.data(), v22_short.size(), out));
+
+    ConfigBlob energy_blob;
+    energy_blob.wifi_ssid                 = "net";
+    energy_blob.elec_price_tenth_mill     = 3421;
+    energy_blob.gas_price_tenth_mill      = 1095;
+    energy_blob.gas_efficiency_pct        = 92;
+    energy_blob.tariff_currency           = "USD";
+    energy_blob.power_meter_name          = "Shelly EM";
+    energy_blob.power_meter_topic         = "shellies/em/status";
+    energy_blob.power_meter_power_path    = "total_act_power";
+    energy_blob.power_meter_time_path     = "ts";
+    energy_blob.power_meter_max_age_s     = 45;
+    energy_blob.power_meter_unit          = 1;
+    energy_blob.power_meter_scope         = 1;
+    energy_blob.power_meter_generation    = 77;
+    const std::vector<uint8_t> energy_buf = config_blob_serialize(energy_blob);
+    ConfigBlob                 energy_rt;
+    CHECK(config_blob_deserialize(energy_buf.data(), energy_buf.size(), energy_rt));
+    CHECK(energy_rt.has_gas_comparison && energy_rt.has_power_meter);
+    CHECK(energy_rt.elec_price_tenth_mill == 3421 && energy_rt.gas_price_tenth_mill == 1095 &&
+          energy_rt.gas_efficiency_pct == 92 && energy_rt.tariff_currency == "USD");
+    CHECK(energy_rt.power_meter_name == "Shelly EM" &&
+          energy_rt.power_meter_topic == "shellies/em/status" &&
+          energy_rt.power_meter_power_path == "total_act_power" &&
+          energy_rt.power_meter_time_path == "ts");
+    CHECK(energy_rt.power_meter_max_age_s == 45 && energy_rt.power_meter_unit == 1 &&
+          energy_rt.power_meter_scope == 1 && energy_rt.power_meter_generation == 77);
+    for (size_t cut = 1; cut <= 76; ++cut) {
+        std::vector<uint8_t> v22_mid = energy_buf;
+        v22_mid.erase(v22_mid.end() - 4 - static_cast<ptrdiff_t>(cut), v22_mid.end() - 4);
+        restamp(v22_mid);
+        CHECK(!config_blob_deserialize(v22_mid.data(), v22_mid.size(), out));
+    }
     DiagnosticsSource parsed_src = DiagnosticsSource::X10a;
     CHECK(parse_diagnostics_source("modbus", parsed_src) &&
           parsed_src == DiagnosticsSource::Modbus);
@@ -12134,7 +12297,7 @@ static void test_config_store() {
     mb.mb_unit_id            = 3;
     mb.homehub_enabled       = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 21);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 22);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-example.local");
@@ -12360,18 +12523,22 @@ static void test_config_blob_strings_fit() {
     max_all.wifi_ssid = max_all.wifi_pass = max_all.wifi_ssid_backup = max_all.wifi_pass_backup =
         max_all.mqtt_uri = max_all.mqtt_user = max_all.mqtt_pass = max_all.mqtt_base =
             max_all.syslog_host = max_all.ntp_server = max_all.mb_host = max_all.ref_temp_name =
-                max_all.ref_temp_topic = max_all.ref_temp_path  = max_all.ref_temp_setpoint_path =
-                    max_all.ref_temp_time_path                  = max_all.ref_temp_enabled_path =
-                        max_all.ref_temp_hvac_mode_path         = max_all.circulation_name =
-                            max_all.circulation_topic           = max_all.circulation_power_path =
-                                max_all.circulation_time_path   = max_all.ref_temp_setpoint_topic =
-                                    max_all.ref_temp_time_topic = at_max;
+                max_all.ref_temp_topic = max_all.ref_temp_path   = max_all.ref_temp_setpoint_path =
+                    max_all.ref_temp_time_path                   = max_all.ref_temp_enabled_path =
+                        max_all.ref_temp_hvac_mode_path          = max_all.circulation_name =
+                            max_all.circulation_topic            = max_all.circulation_power_path =
+                                max_all.circulation_time_path    = max_all.ref_temp_setpoint_topic =
+                                    max_all.ref_temp_time_topic  = max_all.tariff_currency =
+                                        max_all.power_meter_name = max_all.power_meter_topic =
+                                            max_all.power_meter_power_path =
+                                                max_all.power_meter_time_path = at_max;
     CHECK(config_blob_strings_fit(max_all));
     const std::vector<uint8_t> maxbuf = config_blob_serialize(max_all);
     ConfigBlob                 maxrt;
     CHECK(config_blob_deserialize(maxbuf.data(), maxbuf.size(), maxrt));
     CHECK(maxrt.mb_host == at_max && maxrt.wifi_ssid == at_max &&
-          maxrt.circulation_time_path == at_max);
+          maxrt.circulation_time_path == at_max && maxrt.tariff_currency == at_max &&
+          maxrt.power_meter_time_path == at_max);
 
     // ONE field over the bound at a time: fit() must refuse it, AND the blob it would have produced
     // must genuinely be unreadable — that second half is what makes fit() a real guard rather than
@@ -12401,8 +12568,13 @@ static void test_config_blob_strings_fit() {
         &ConfigBlob::circulation_time_path,
         &ConfigBlob::ref_temp_setpoint_topic,
         &ConfigBlob::ref_temp_time_topic,
+        &ConfigBlob::tariff_currency,
+        &ConfigBlob::power_meter_name,
+        &ConfigBlob::power_meter_topic,
+        &ConfigBlob::power_meter_power_path,
+        &ConfigBlob::power_meter_time_path,
     };
-    CHECK(sizeof(kStrings) / sizeof(kStrings[0]) == 24);
+    CHECK(sizeof(kStrings) / sizeof(kStrings[0]) == 29);
     for (std::string ConfigBlob::*field : kStrings) {
         ConfigBlob c;
         c.wifi_ssid = "net";
@@ -16479,8 +16651,8 @@ static logic::DhwLossState dhw_past_hold() {
 static void test_checkup_population() {
     using namespace logic;
     CHECK(sizeof(CheckupBucket) == 80 && CHECKUP_BYTES == 1920);
-    CHECK(sizeof(CheckupJournalPayload) == 128);
-    CHECK(sizeof(CheckupJournalRecord) * CHECKUP_COMPLETED_BUCKETS == 3128);
+    CHECK(sizeof(CheckupJournalPayload) == 160);
+    CHECK(sizeof(CheckupJournalRecord) * CHECKUP_COMPLETED_BUCKETS == 3864);
     CHECK(checkup_add_hour_s(3599, 2) == 3600);
     CHECK(checkup_add_hour_s(4095, UINT32_MAX) == 3600);
     CheckupBucket clamped;
@@ -17578,8 +17750,8 @@ static void test_checkup() {
     CHECK(sizeof(DhwLossBucket) == 20 && DHW_LOSS_BYTES == 480);
     // history_restore_checkup_flash() reads up to 23 stored records into the 4 KiB sector scratch
     // and static_asserts that they fit (main/history.cpp).
-    CHECK(sizeof(CheckupJournalRecord) == 136);
-    CHECK(CHECKUP_COMPLETED_BUCKETS * sizeof(CheckupJournalRecord) == 3128);
+    CHECK(sizeof(CheckupJournalRecord) == 168);
+    CHECK(CHECKUP_COMPLETED_BUCKETS * sizeof(CheckupJournalRecord) == 3864);
 
     // --- 24h cycling timeline buckets + JSON streaming ------------------------------------------
     {
@@ -24234,7 +24406,7 @@ static void test_checkup_persist() {
     // refused the adoption following a boot that completed no hour. Retain the integrity-predicate
     // controls below; current startup retires every completed RAM hour and restores only dated
     // flash.
-    CHECK(CHECKUP_PERSIST_VERSION == 4); // v2 images carry no counter and are refused as a whole
+    CHECK(CHECKUP_PERSIST_VERSION == 5); // v2 images carry no counter and are refused as a whole
     CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC, 2,
                                   fp, fp, crc, crc) == CheckupRestore::WrongVersion);
     auto cverdict = [&](uint32_t crc_actual, uint32_t stored_gen, uint32_t boots, bool safe = false,
@@ -24300,7 +24472,7 @@ static void test_checkup_persist() {
     // something else by them. The fingerprint has to be STABLE across calls and SENSITIVE to that.
     CHECK(checkup_layout_fingerprint() == fp);
     CHECK(fp != 0);
-    CHECK(fp == 0xe9d3dae2u); // Moved with CHECKUP_BAR_CRIT_TENTHS (<=0.5 bar critical tier).
+    CHECK(fp == 0x2872c4e5u); // Moved with EnergyBucket/EnergyRing/WORKING_FIGURE_METHOD_VERSION.
 
     // The model identity is separate and is compared at detection. Different profile, different
     // window; the same profile re-detected on a fresh boot is the same unit and keeps its day.
@@ -24324,7 +24496,7 @@ static void test_checkup_persist() {
     dhw_handoff.pending.max_loss_tenths_k_h    = 7;
     const uint32_t model_fp                    = checkup_fixture_model("altherma3_r_erga");
     const uint32_t handoff_fp                  = checkup_dhw_handoff_layout_fingerprint();
-    CHECK(handoff_fp == 0x89c809a1u); // Embeds checkup_layout_fingerprint().
+    CHECK(handoff_fp == 0x9aa34f89u); // Embeds checkup_layout_fingerprint().
     const uint32_t handoff_crc = checkup_dhw_handoff_crc(model_fp, dhw_handoff);
     CHECK(checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
                                     handoff_fp, model_fp, model_fp, handoff_crc, dhw_handoff));
@@ -24353,6 +24525,25 @@ static void test_checkup_persist() {
     restored.observe(5LL * 3600 * 1000000); // plus 5 h in the new boot
     CHECK(restored.span_us() == 25LL * 3600 * 1000000);
     CHECK(restored.full_span());
+
+    // Independent X10A electrical-source identity & journal match predicate.
+    const uint32_t x10a_none = checkup_x10a_pel_source_fingerprint(false, false);
+    const uint32_t x10a_ct   = checkup_x10a_pel_source_fingerprint(true, false);
+    const uint32_t x10a_inv  = checkup_x10a_pel_source_fingerprint(false, true);
+    const uint32_t x10a_both = checkup_x10a_pel_source_fingerprint(true, true);
+    CHECK(x10a_none == 0 && x10a_ct != 0 && x10a_inv != 0 && x10a_both != 0);
+    CHECK(x10a_ct != x10a_inv && x10a_ct != x10a_both && x10a_inv != x10a_both);
+    const uint32_t mqtt_pel_fp =
+        power_meter_source_fingerprint("mqtt://b", "em/status", "p", "", 60, 0, 0, 1);
+    CHECK(mqtt_pel_fp != 0 && mqtt_pel_fp != x10a_ct && mqtt_pel_fp != x10a_inv &&
+          mqtt_pel_fp != x10a_both);
+    CheckupJournalPayload pel_payload{};
+    pel_payload.pel_source_fp = x10a_ct;
+    CHECK(checkup_journal_pel_identity_matches(pel_payload, x10a_ct));
+    CHECK(!checkup_journal_pel_identity_matches(pel_payload, x10a_inv));
+    CHECK(!checkup_journal_pel_identity_matches(pel_payload, 0));
+    pel_payload.pel_source_fp = 0;
+    CHECK(!checkup_journal_pel_identity_matches(pel_payload, 0));
 
     // reset() must clear it too, or an explicit re-detect would hand a brand-new window a lifecycle
     // it never observed — a green verdict bought with the previous unit's uptime.
@@ -24936,19 +25127,22 @@ using namespace logic;
 struct CheckupRestoreCase {
     CheckupRing                       ring;
     DhwLossRing                       dhw;
+    EnergyRing                        energy;
     CheckupJournalSlotTimes           times;
     CheckupJournalLiveSpan            live;
     std::vector<CheckupJournalRecord> stored;
     int64_t                           earliest = 0, latest = 0, now_unix_s = 0, now_us = 0;
-    bool                              confirmed = true, reset = false, dhw_reset = false;
-    uint32_t                          model = 0, source = 0, generation = 0, dhw_fp = 0;
+    bool     confirmed = true, reset = false, dhw_reset = false, energy_reset = false;
+    uint32_t model = 0, source = 0, generation = 0, dhw_fp = 0, pel_fp = 0;
 };
 
 struct CheckupRestoreOut {
     CheckupRing             ring;
     DhwLossRing             dhw;
+    EnergyRing              energy;
     CheckupJournalSlotTimes times;
-    bool                    dhw_retired = false;
+    bool                    dhw_retired    = false;
+    bool                    energy_retired = false;
 };
 
 // Copy this boot's completed hours into records, clear both rings, then push the selected interval
@@ -24962,6 +25156,7 @@ CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
         rec.payload.model_fp               = c.model;
         rec.payload.source_fp              = c.source;
         rec.payload.dhw_source_fp          = c.dhw_fp;
+        rec.payload.pel_source_fp          = c.pel_fp;
         rec.payload.diagnostics_generation = c.generation;
         const int64_t back                 = static_cast<int64_t>(c.live.count - 1 - i);
         const int64_t label                = c.live.newest_label - back;
@@ -24969,19 +25164,23 @@ CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
             c.live.newest_end_unix_s - back * int64_t{CHECKUP_DT_S}, label);
         rec.payload.checkup = c.ring.buf[(oldest_i + i) % kSlots];
         rec.payload.dhw     = c.dhw.buf[(oldest_i + i) % kSlots];
+        rec.payload.energy  = c.energy.buf[(oldest_i + i) % kSlots];
         rec.bucket          = label;
         live.push_back(rec);
     }
     CheckupRestoreOut out;
-    out.ring = c.ring;
-    out.dhw  = c.dhw;
+    out.ring   = c.ring;
+    out.dhw    = c.dhw;
+    out.energy = c.energy;
     out.ring.reset();
     out.dhw.reset();
+    out.energy.reset();
     out.ring.pending = c.ring.pending; // the former restore saved and put back the open hour
     out.dhw.pending  = c.dhw.pending;
     for (int64_t b = c.earliest; b <= c.latest; b++) {
         CheckupBucket cb;
         DhwLossBucket db;
+        EnergyBucket  eb;
         int64_t       expiry     = 0;
         bool          from_flash = false;
         if (const auto* rec = checkup_journal_select_slot(
@@ -24992,6 +25191,10 @@ CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
                 db = rec->payload.dhw;
             else
                 out.dhw_retired = true;
+            if (!c.energy_reset && checkup_journal_pel_identity_matches(rec->payload, c.pel_fp))
+                eb = rec->payload.energy;
+            else
+                out.energy_retired = true;
             if (from_flash) {
                 const int64_t end = rec->payload.end_unix_s;
                 expiry            = checkup_restore_expiry_us(end, c.now_unix_s, c.now_us);
@@ -25005,20 +25208,22 @@ CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
         out.times.expiry_us[out.ring.head] = expiry;
         out.ring.push(cb);
         out.dhw.push(db);
+        out.energy.push(eb);
     }
     return out;
 }
 
 CheckupRestoreOut checkup_restore_in_place(const CheckupRestoreCase& c) {
     CheckupRestoreOut out;
-    out.ring  = c.ring;
-    out.dhw   = c.dhw;
-    out.times = c.times;
+    out.ring   = c.ring;
+    out.dhw    = c.dhw;
+    out.energy = c.energy;
+    out.times  = c.times;
     for (auto& end : out.times.restored_end_unix_s) end = UINT32_MAX;
-    out.dhw_retired = checkup_journal_rebuild(out.ring, out.dhw, out.times, c.live, c.stored.data(),
-                                              c.stored.size(), c.earliest, c.latest, c.now_unix_s,
-                                              c.now_us, c.confirmed, c.model, c.source,
-                                              c.generation, c.reset, c.dhw_fp, c.dhw_reset);
+    out.dhw_retired = checkup_journal_rebuild(
+        out.ring, out.dhw, out.times, c.live, c.stored.data(), c.stored.size(), c.earliest,
+        c.latest, c.now_unix_s, c.now_us, c.confirmed, c.model, c.source, c.generation, c.reset,
+        c.dhw_fp, c.dhw_reset, out.energy, c.pel_fp, c.energy_reset, out.energy_retired);
     return out;
 }
 
@@ -25029,17 +25234,22 @@ uint32_t checkup_restore_marker(const CheckupBucket& b) {
 uint32_t checkup_restore_marker(const DhwLossBucket& b) {
     return b.observed_s | (static_cast<uint32_t>(b.windows) << 16);
 }
+bool checkup_restore_energy_equal(const EnergyBucket& a, const EnergyBucket& b) {
+    return a.observed_s == b.observed_s && a.heat_ws == b.heat_ws && a.elec_ws == b.elec_ws;
+}
 
 // The same physical layout, slot by slot, as a cleared ring refilled in order: geometry, buckets,
-// deadlines and DHW retirement. The two aggregates the report reads must agree as well.
+// deadlines and DHW/energy retirement. The aggregates the reports read must agree as well.
 bool checkup_restore_same(const CheckupRestoreOut& ref, const CheckupRestoreOut& got) {
     if (ref.ring.count != got.ring.count || ref.ring.head != got.ring.head ||
         ref.dhw.count != got.dhw.count || ref.dhw.head != got.dhw.head ||
-        ref.dhw_retired != got.dhw_retired)
+        ref.energy.count != got.energy.count || ref.energy.head != got.energy.head ||
+        ref.dhw_retired != got.dhw_retired || ref.energy_retired != got.energy_retired)
         return false;
     for (size_t s = 0; s < CHECKUP_COMPLETED_BUCKETS; s++)
         if (checkup_restore_marker(ref.ring.buf[s]) != checkup_restore_marker(got.ring.buf[s]) ||
             checkup_restore_marker(ref.dhw.buf[s]) != checkup_restore_marker(got.dhw.buf[s]) ||
+            !checkup_restore_energy_equal(ref.energy.buf[s], got.energy.buf[s]) ||
             ref.times.expiry_us[s] != got.times.expiry_us[s] ||
             ref.times.restored_end_unix_s[s] != got.times.restored_end_unix_s[s])
             return false;
@@ -25205,33 +25415,38 @@ static void test_checkup_journal_rebuild_in_place() {
     CheckupRestoreRng rng{0x9e3779b97f4a7c15ull};
 
     size_t compared = 0, moved = 0, production_shaped = 0, with_live = 0, retired = 0;
-    size_t admitted_live = 0, mismatch = 0;
+    size_t energy_retired_count = 0, admitted_live = 0, mismatch = 0;
     for (int iteration = 0; iteration < 20000; ++iteration) {
         CheckupRestoreCase c;
-        c.model      = rng.chance(97) ? model : 0;
-        c.source     = source;
-        c.generation = generation;
-        c.confirmed  = rng.chance(95);
-        c.reset      = rng.chance(4);
-        c.dhw_fp     = rng.chance(80) ? 0x33u : 0;
-        c.dhw_reset  = rng.chance(10);
-        c.now_unix_s = 480'000 * hour + static_cast<int64_t>(rng.below(hour));
-        c.now_us     = static_cast<int64_t>(rng.below(4)) * 3'600'000'000LL + 1;
+        c.model        = rng.chance(97) ? model : 0;
+        c.source       = source;
+        c.generation   = generation;
+        c.confirmed    = rng.chance(95);
+        c.reset        = rng.chance(4);
+        c.dhw_fp       = rng.chance(80) ? 0x33u : 0;
+        c.dhw_reset    = rng.chance(10);
+        c.pel_fp       = rng.chance(80) ? 0x77u : 0;
+        c.energy_reset = rng.chance(10);
+        c.now_unix_s   = 480'000 * hour + static_cast<int64_t>(rng.below(hour));
+        c.now_us       = static_cast<int64_t>(rng.below(4)) * 3'600'000'000LL + 1;
         for (size_t s = 0; s < kSlots; s++) {
-            c.ring.buf[s].starts      = static_cast<uint8_t>(s + 1);
-            c.ring.buf[s].covered_s   = static_cast<uint16_t>(rng.below(3600));
-            c.ring.buf[s].space_run_s = static_cast<uint32_t>(rng.below(4000));
-            c.dhw.buf[s].observed_s   = static_cast<uint16_t>(s + 1);
-            c.dhw.buf[s].windows      = static_cast<uint8_t>(rng.below(200));
+            c.ring.buf[s].starts       = static_cast<uint8_t>(s + 1);
+            c.ring.buf[s].covered_s    = static_cast<uint16_t>(rng.below(3600));
+            c.ring.buf[s].space_run_s  = static_cast<uint32_t>(rng.below(4000));
+            c.dhw.buf[s].observed_s    = static_cast<uint16_t>(s + 1);
+            c.dhw.buf[s].windows       = static_cast<uint8_t>(rng.below(200));
+            c.energy.buf[s].observed_s = static_cast<uint16_t>(s + 1);
+            c.energy.buf[s].heat_ws    = static_cast<int32_t>(rng.below(50000));
+            c.energy.buf[s].elec_ws    = static_cast<uint32_t>(rng.below(20000));
             if (s % 5 != 0) c.times.expiry_us[s] = c.now_us + static_cast<int64_t>(s) * 1000;
         }
         c.ring.pending.covered_s = static_cast<uint16_t>(rng.below(3600));
         c.dhw.pending.observed_s = static_cast<uint16_t>(rng.below(3600));
-        c.ring.count = c.dhw.count = static_cast<uint8_t>(rng.below(kSlots + 1));
+        c.ring.count = c.dhw.count = c.energy.count = static_cast<uint8_t>(rng.below(kSlots + 1));
         // Production shape: every ring hour completed in this boot, and a ring that is not full
         // has its head at its count. Other shapes check the same layout from any starting point.
         const bool production = rng.chance(50);
-        c.ring.head = c.dhw.head = static_cast<uint8_t>(
+        c.ring.head = c.dhw.head = c.energy.head = static_cast<uint8_t>(
             production && c.ring.count < kSlots ? c.ring.count : rng.below(kSlots));
         const int64_t newest_label =
             checkup_journal_bucket(c.now_unix_s) - 1 - static_cast<int64_t>(rng.below(3));
@@ -25250,12 +25465,16 @@ static void test_checkup_journal_rebuild_in_place() {
             rec.payload.source_fp = rng.chance(95) ? source : 0x55u;
             rec.payload.diagnostics_generation = rng.chance(97) ? generation : generation + 1;
             rec.payload.dhw_source_fp          = rng.chance(85) ? 0x33u : 0x66u;
+            rec.payload.pel_source_fp          = rng.chance(85) ? 0x77u : 0x88u;
             // -1 s: an end that belongs to the previous bucket, so the label is wrong.
             const int64_t into_hour = rng.chance(95) ? static_cast<int64_t>(rng.below(hour)) : -1;
             rec.payload.end_unix_s  = rec.bucket * hour + into_hour;
             rec.payload.checkup.starts      = static_cast<uint8_t>(100 + r);
             rec.payload.checkup.space_run_s = static_cast<uint32_t>(rng.below(4000));
             rec.payload.dhw.observed_s      = static_cast<uint16_t>(100 + r);
+            rec.payload.energy.observed_s   = static_cast<uint16_t>(100 + r);
+            rec.payload.energy.heat_ws      = static_cast<int32_t>(1000 + r);
+            rec.payload.energy.elec_ws      = static_cast<uint32_t>(400 + r);
             c.stored.push_back(rec);
         }
         // The caller's bounds (checkup_flash_restore): admitted stored and live labels, the empty
@@ -25301,6 +25520,7 @@ static void test_checkup_journal_rebuild_in_place() {
         production_shaped += production;
         with_live += c.live.count != 0;
         retired += got.dhw_retired;
+        energy_retired_count += got.energy_retired;
         // A selected live hour whose slot differs from its window position had to move.
         bool any_moved = false;
         for (size_t k = 0; k < c.live.count; k++) {
@@ -25319,6 +25539,88 @@ static void test_checkup_journal_rebuild_in_place() {
     CHECK(with_live > 5000);
     CHECK(moved > 1000); // live hours that cannot stay where a cleared ring would put them
     CHECK(retired > 1000);
+    CHECK(energy_retired_count > 1000);
+
+    // Explicit selective invalidation: changing pel_source_fp resets ONLY energy while checkup
+    // and dhw survive intact; matching pel_source_fp preserves all three.
+    {
+        const uint32_t dhw_fp = 0x33u;
+        const uint32_t pel_a  = checkup_x10a_pel_source_fingerprint(true, true);
+        const uint32_t pel_b =
+            power_meter_source_fingerprint("mqtt://broker", "em/status", "power", "", 60, 0, 0, 1);
+
+        CheckupJournalRecord stored_rec{498, {}};
+        stored_rec.payload.model_fp               = model;
+        stored_rec.payload.source_fp              = source;
+        stored_rec.payload.dhw_source_fp          = dhw_fp;
+        stored_rec.payload.pel_source_fp          = pel_a;
+        stored_rec.payload.diagnostics_generation = generation;
+        stored_rec.payload.end_unix_s             = 498 * hour + 1800;
+        stored_rec.payload.checkup.starts         = 7;
+        stored_rec.payload.checkup.covered_s      = 3600;
+        stored_rec.payload.dhw.observed_s         = 3600;
+        stored_rec.payload.dhw.windows            = 2;
+        stored_rec.payload.energy.observed_s      = 3600;
+        stored_rec.payload.energy.heat_ws         = 14'400'000;
+        stored_rec.payload.energy.elec_ws         = 3'600'000;
+        stored_rec.payload.energy.pel_kind        = static_cast<uint8_t>(EnergyPelKind::X10aCt);
+
+        CheckupRestoreCase same_pel;
+        same_pel.model      = model;
+        same_pel.source     = source;
+        same_pel.generation = generation;
+        same_pel.dhw_fp     = dhw_fp;
+        same_pel.pel_fp     = pel_a;
+        same_pel.now_unix_s = 499 * hour + 60;
+        same_pel.now_us     = 1'000'000;
+        same_pel.earliest   = 498;
+        same_pel.latest     = 498;
+        same_pel.stored.push_back(stored_rec);
+        const auto kept = checkup_restore_in_place(same_pel);
+        CHECK(!kept.dhw_retired && !kept.energy_retired);
+        CHECK(kept.ring.buf[0].starts == 7 && kept.ring.buf[0].covered_s == 3600);
+        CHECK(kept.dhw.buf[0].observed_s == 3600 && kept.dhw.buf[0].windows == 2);
+        CHECK(kept.energy.buf[0].observed_s == 3600 && kept.energy.buf[0].heat_ws == 14'400'000 &&
+              kept.energy.buf[0].elec_ws == 3'600'000);
+
+        CheckupRestoreCase changed_pel = same_pel;
+        changed_pel.pel_fp             = pel_b;
+        const auto selective           = checkup_restore_in_place(changed_pel);
+        CHECK(!selective.dhw_retired && selective.energy_retired);
+        CHECK(selective.ring.buf[0].starts == 7 && selective.ring.buf[0].covered_s == 3600);
+        CHECK(selective.dhw.buf[0].observed_s == 3600 && selective.dhw.buf[0].windows == 2);
+        CHECK(selective.energy.buf[0].observed_s == 0 && selective.energy.buf[0].heat_ws == 0 &&
+              selective.energy.buf[0].elec_ws == 0);
+
+        // Live energy bucket + energy_reset_requested also resets only energy.
+        CheckupRestoreCase live_reset = same_pel;
+        live_reset.latest             = 499;
+        live_reset.live               = {1, 0, 499, 499 * hour + 10};
+        live_reset.ring.count = live_reset.dhw.count = live_reset.energy.count = 1;
+        live_reset.ring.head = live_reset.dhw.head = live_reset.energy.head = 1;
+        live_reset.ring.buf[0].starts                                       = 3;
+        live_reset.dhw.buf[0].observed_s                                    = 1800;
+        live_reset.energy.buf[0].observed_s                                 = 1800;
+        live_reset.energy.buf[0].heat_ws                                    = 7'200'000;
+        live_reset.energy_reset                                             = true;
+        const auto live_out = checkup_restore_in_place(live_reset);
+        CHECK(!live_out.dhw_retired && live_out.energy_retired);
+        CHECK(live_out.ring.buf[0].starts == 7 && live_out.ring.buf[1].starts == 3);
+        CHECK(live_out.dhw.buf[0].observed_s == 3600 && live_out.dhw.buf[1].observed_s == 1800);
+        CHECK(live_out.energy.buf[0].observed_s == 0 && live_out.energy.buf[1].observed_s == 0 &&
+              live_out.energy.buf[1].heat_ws == 0);
+
+        // Backward-compat 17-parameter overload exercises legacy callers without EnergyRing.
+        CheckupRing             compat_ring;
+        DhwLossRing             compat_dhw;
+        CheckupJournalSlotTimes compat_times;
+        const bool              compat_dhw_ret =
+            checkup_journal_rebuild(compat_ring, compat_dhw, compat_times, CheckupJournalLiveSpan{},
+                                    &stored_rec, 1, 498, 498, same_pel.now_unix_s, same_pel.now_us,
+                                    true, model, source, generation, false, dhw_fp, false);
+        CHECK(!compat_dhw_ret && compat_ring.buf[0].starts == 7 &&
+              compat_dhw.buf[0].observed_s == 3600);
+    }
 }
 
 // ── logic/history_persist.hpp ───────────────────────────────────────────────────────────────────
@@ -32695,6 +32997,1084 @@ static void test_fault_trace() {
     }
 }
 
+static void test_power_meter_source() {
+    // Unit & scope enum codecs
+    CHECK(power_meter_unit_from_int(::rt(0)) == PowerMeterUnit::Watts);
+    CHECK(power_meter_unit_from_int(::rt(1)) == PowerMeterUnit::Kilowatts);
+    CHECK(power_meter_unit_from_int(::rt(99)) == PowerMeterUnit::Watts);
+    CHECK(power_meter_unit_to_int(::rt(PowerMeterUnit::Watts)) == 0);
+    CHECK(power_meter_unit_to_int(::rt(PowerMeterUnit::Kilowatts)) == 1);
+    CHECK(std::string(power_meter_unit_name(::rt(PowerMeterUnit::Watts))) == "W");
+    CHECK(std::string(power_meter_unit_name(::rt(PowerMeterUnit::Kilowatts))) == "kW");
+    PowerMeterUnit u = PowerMeterUnit::Kilowatts;
+    CHECK(parse_power_meter_unit("W", u) && u == PowerMeterUnit::Watts);
+    CHECK(parse_power_meter_unit("kW", u) && u == PowerMeterUnit::Kilowatts);
+    CHECK(!parse_power_meter_unit("mW", u) && u == PowerMeterUnit::Kilowatts);
+
+    CHECK(power_meter_scope_from_int(::rt(0)) == PowerMeterScope::WholeUnit);
+    CHECK(power_meter_scope_from_int(::rt(1)) == PowerMeterScope::CompressorOnly);
+    CHECK(power_meter_scope_from_int(::rt(42)) == PowerMeterScope::WholeUnit);
+    CHECK(power_meter_scope_to_int(::rt(PowerMeterScope::WholeUnit)) == 0);
+    CHECK(power_meter_scope_to_int(::rt(PowerMeterScope::CompressorOnly)) == 1);
+    CHECK(std::string(power_meter_scope_name(::rt(PowerMeterScope::WholeUnit))) == "whole_unit");
+    CHECK(std::string(power_meter_scope_name(::rt(PowerMeterScope::CompressorOnly))) ==
+          "compressor_only");
+    PowerMeterScope sc = PowerMeterScope::CompressorOnly;
+    CHECK(parse_power_meter_scope("whole_unit", sc) && sc == PowerMeterScope::WholeUnit);
+    CHECK(parse_power_meter_scope("compressor_only", sc) && sc == PowerMeterScope::CompressorOnly);
+    CHECK(!parse_power_meter_scope("grid", sc) && sc == PowerMeterScope::CompressorOnly);
+
+    // Configuration validation (empty topic disables, plain vs JSON + time path, bounds)
+    const char* why = nullptr;
+    CHECK(power_meter_config_valid("", "", "", "", 999, &why));
+    CHECK(power_meter_config_valid("Shelly", "shelly/em/status", "", "", 60, &why));
+    CHECK(power_meter_config_valid("Shelly", "shelly/em/status", "total_act_power", "", 10, &why));
+    CHECK(power_meter_config_valid("Shelly", "shelly/em/status", "apower", "ts", 300, &why));
+    CHECK(power_meter_config_valid("Shelly", "shelly/em/status", "apower", "ts", 60, nullptr));
+    CHECK(!power_meter_config_valid(std::string(POWER_METER_NAME_MAX + 1, 'x'), "shelly/em/status",
+                                    "apower", "", 60, &why));
+    CHECK(std::string(why) == "Power meter name is too long");
+    CHECK(!power_meter_config_valid("Shelly", "shelly/+/status", "apower", "", 60, &why));
+    CHECK(!power_meter_config_valid("Shelly", "shelly/em/status", "bad\npath", "", 60, &why));
+    CHECK(!power_meter_config_valid("Shelly", "shelly/em/status", "", "ts", 60, &why));
+    CHECK(std::string(why) == "Timestamp path requires a JSON power path");
+    CHECK(!power_meter_config_valid("Shelly", "shelly/em/status", "apower", "bad\nts", 60, &why));
+    CHECK(!power_meter_config_valid("Shelly", "shelly/em/status", "apower", "ts", 9, &why));
+    CHECK(std::string(why) == "Maximum age must be between 10 and 300 seconds");
+    CHECK(!power_meter_config_valid("Shelly", "shelly/em/status", "apower", "ts", 301, &why));
+    CHECK(!power_meter_config_valid("Shelly", "shelly/em/status", "", "ts", 60, nullptr));
+
+    // Power scaling & bounds: rejects negative, non-finite, and > 50000 W
+    double out_w = -1.0;
+    CHECK(power_meter_watts_from_raw(0.0, PowerMeterUnit::Watts, out_w) && out_w == 0.0);
+    CHECK(power_meter_watts_from_raw(1234.5, PowerMeterUnit::Watts, out_w) && out_w == 1234.5);
+    CHECK(power_meter_watts_from_raw(50000.0, PowerMeterUnit::Watts, out_w) && out_w == 50000.0);
+    CHECK(power_meter_watts_from_raw(2.5, PowerMeterUnit::Kilowatts, out_w) && out_w == 2500.0);
+    CHECK(power_meter_watts_from_raw(50.0, PowerMeterUnit::Kilowatts, out_w) && out_w == 50000.0);
+    CHECK(!power_meter_watts_from_raw(-0.01, PowerMeterUnit::Watts, out_w));
+    CHECK(!power_meter_watts_from_raw(-0.001, PowerMeterUnit::Kilowatts, out_w));
+    CHECK(!power_meter_watts_from_raw(50000.1, PowerMeterUnit::Watts, out_w));
+    CHECK(!power_meter_watts_from_raw(50.001, PowerMeterUnit::Kilowatts, out_w));
+    CHECK(!power_meter_watts_from_raw(std::numeric_limits<double>::quiet_NaN(),
+                                      PowerMeterUnit::Watts, out_w));
+    CHECK(!power_meter_watts_from_raw(std::numeric_limits<double>::infinity(),
+                                      PowerMeterUnit::Kilowatts, out_w));
+    CHECK(!power_meter_watts_from_raw(-std::numeric_limits<double>::infinity(),
+                                      PowerMeterUnit::Watts, out_w));
+
+    // Currency & gas comparison validation
+    CHECK(tariff_currency_valid("EUR", &why));
+    CHECK(tariff_currency_valid("USD"));
+    CHECK(!tariff_currency_valid("EU", &why));
+    CHECK(std::string(why) == "Currency must be a 3-letter ISO code");
+    CHECK(!tariff_currency_valid("EURO", nullptr));
+    CHECK(!tariff_currency_valid("eur", &why));
+    CHECK(std::string(why) == "Currency must be 3 uppercase ASCII letters");
+    CHECK(!tariff_currency_valid("EU1", &why));
+    CHECK(!tariff_currency_valid("E[R", nullptr));
+
+    CHECK(gas_comparison_config_valid(0, 0, GAS_EFFICIENCY_DEFAULT_PCT, "EUR", &why));
+    CHECK(gas_comparison_config_valid(3200, 1100, GAS_EFFICIENCY_MIN_PCT, "CHF", &why));
+    CHECK(gas_comparison_config_valid(TARIFF_PRICE_MAX_TENTH_MILL, TARIFF_PRICE_MAX_TENTH_MILL,
+                                      GAS_EFFICIENCY_MAX_PCT, "GBP", &why));
+    CHECK(!gas_comparison_config_valid(TARIFF_PRICE_MAX_TENTH_MILL + 1, 1000, 88, "EUR", &why));
+    CHECK(!gas_comparison_config_valid(3000, TARIFF_PRICE_MAX_TENTH_MILL + 1, 88, "EUR", nullptr));
+    CHECK(!gas_comparison_config_valid(3000, 0, 88, "EUR", &why));
+    CHECK(std::string(why) == "Both electricity and gas tariffs must be configured, or both 0");
+    CHECK(!gas_comparison_config_valid(0, 1000, 88, "EUR", &why));
+    CHECK(!gas_comparison_config_valid(3000, 1000, 49, "EUR", &why));
+    CHECK(std::string(why) == "Gas boiler efficiency must be between 50% and 98%");
+    CHECK(!gas_comparison_config_valid(3000, 1000, 99, "EUR", nullptr));
+    CHECK(!gas_comparison_config_valid(3000, 1000, 88, "eur", &why));
+
+    // Config::validate integration for gas comparison & power meter fields
+    {
+        Config      cfg;
+        std::string reason;
+        CHECK(validate(cfg, reason));
+        cfg.elec_price_tenth_mill = 3000;
+        CHECK(!validate(cfg, reason) && !reason.empty());
+        cfg.gas_price_tenth_mill = 1000;
+        CHECK(validate(cfg, reason));
+        cfg.power_meter_topic     = "shelly/em/status";
+        cfg.power_meter_time_path = "ts"; // requires power_path
+        CHECK(!validate(cfg, reason) && !reason.empty());
+        cfg.power_meter_power_path = "apower";
+        CHECK(validate(cfg, reason));
+    }
+
+    // Freshness contract: mapped timestamp vs unmapped arrival time
+    {
+        // Mapped source timestamp: retained with fresh timestamp passes; retained without timestamp
+        // fails closed.
+        const auto mapped_ok = power_meter_freshness(true, true, true, true, 1000, 0, 1060, 0, 60);
+        CHECK(mapped_ok.fresh && mapped_ok.age_known && mapped_ok.age_s == 60);
+        const auto mapped_missing_ts =
+            power_meter_freshness(true, true, true, false, -1, 1000, 1060, 2000, 60);
+        CHECK(!mapped_missing_ts.fresh &&
+              std::string(mapped_missing_ts.reason) == "missing_source_time");
+        const auto mapped_stale =
+            power_meter_freshness(true, true, false, true, 1000, 0, 1061, 0, 60);
+        CHECK(!mapped_stale.fresh && std::string(mapped_stale.reason) == "stale");
+
+        // Unmapped timestamp: live delivery ages from arrival; retained fails closed.
+        const auto unmapped_live =
+            power_meter_freshness(false, true, false, false, -1, 10'000, -1, 70'000, 60);
+        CHECK(unmapped_live.fresh && unmapped_live.age_known && unmapped_live.age_s == 60);
+        const auto unmapped_ret =
+            power_meter_freshness(false, true, true, false, -1, 10'000, -1, 15'000, 60);
+        CHECK(!unmapped_ret.fresh &&
+              std::string(unmapped_ret.reason) == "retained_without_timestamp");
+        const auto no_val =
+            power_meter_freshness(false, false, false, false, -1, 0, 1000, 1000, 60);
+        CHECK(!no_val.fresh);
+    }
+
+    // Fingerprint invariants: non-zero, null-delimited, sensitive to all fields
+    {
+        const uint32_t null_fp =
+            power_meter_source_fingerprint(nullptr, nullptr, nullptr, nullptr, 60, 0, 0, 0);
+        CHECK(null_fp != 0);
+        const uint32_t base =
+            power_meter_source_fingerprint("mqtt://b", "em/status", "apower", "ts", 60, 0, 0, 1);
+        CHECK(base != 0);
+        CHECK(base != power_meter_source_fingerprint("mqtt://b2", "em/status", "apower", "ts", 60,
+                                                     0, 0, 1));
+        CHECK(base != power_meter_source_fingerprint("mqtt://b", "em/status2", "apower", "ts", 60,
+                                                     0, 0, 1));
+        CHECK(base != power_meter_source_fingerprint("mqtt://b", "em/status", "apower2", "ts", 60,
+                                                     0, 0, 1));
+        CHECK(base != power_meter_source_fingerprint("mqtt://b", "em/status", "apower", "ts2", 60,
+                                                     0, 0, 1));
+        CHECK(base !=
+              power_meter_source_fingerprint("mqtt://b", "em/status", "apower", "ts", 61, 0, 0, 1));
+        CHECK(base !=
+              power_meter_source_fingerprint("mqtt://b", "em/status", "apower", "ts", 60, 1, 0, 1));
+        CHECK(base !=
+              power_meter_source_fingerprint("mqtt://b", "em/status", "apower", "ts", 60, 0, 1, 1));
+        CHECK(base !=
+              power_meter_source_fingerprint("mqtt://b", "em/status", "apower", "ts", 60, 0, 0, 2));
+        // Null-delimited boundary: "a"+"bc" != "ab"+"c"
+        CHECK(power_meter_source_fingerprint("a", "bc", "", "", 60, 0, 0, 1) !=
+              power_meter_source_fingerprint("ab", "c", "", "", 60, 0, 0, 1));
+    }
+}
+
+static void test_working_figure() {
+    using namespace daik::logic;
+    static constexpr int64_t kSec = 1'000'000LL;
+
+    // 1. Enum names, packed bucket size, ring wrap & skip semantics
+    CHECK(sizeof(EnergyBucket) == 32 && alignof(EnergyBucket) == 4);
+    CHECK(std::string(energy_pel_kind_name(::rt(EnergyPelKind::None))) == "none");
+    CHECK(std::string(energy_pel_kind_name(::rt(EnergyPelKind::MqttWholeUnit))) ==
+          "mqtt_whole_unit");
+    CHECK(std::string(energy_pel_kind_name(::rt(EnergyPelKind::MqttCompressor))) ==
+          "mqtt_compressor");
+    CHECK(std::string(energy_pel_kind_name(::rt(EnergyPelKind::X10aCt))) == "x10a_ct");
+    CHECK(std::string(energy_pel_kind_name(::rt(EnergyPelKind::X10aInv))) == "x10a_inv");
+    CHECK(std::string(energy_pel_kind_name(::rt(static_cast<EnergyPelKind>(99)))) == "none");
+
+    CHECK(std::string(working_figure_state_name(::rt(WorkingFigureState::Unsupported))) ==
+          "unsupported");
+    CHECK(std::string(working_figure_state_name(::rt(WorkingFigureState::Collecting))) ==
+          "collecting");
+    CHECK(std::string(working_figure_state_name(::rt(WorkingFigureState::Standby))) == "standby");
+    CHECK(std::string(working_figure_state_name(::rt(WorkingFigureState::Partial))) == "partial");
+    CHECK(std::string(working_figure_state_name(::rt(WorkingFigureState::Limited))) == "limited");
+    CHECK(std::string(working_figure_state_name(::rt(WorkingFigureState::Cheaper))) == "cheaper");
+    CHECK(std::string(working_figure_state_name(::rt(WorkingFigureState::Similar))) == "similar");
+    CHECK(std::string(working_figure_state_name(::rt(WorkingFigureState::MoreExpensive))) ==
+          "more_expensive");
+    CHECK(std::string(working_figure_state_name(::rt(WorkingFigureState::Measured))) == "measured");
+    CHECK(std::string(working_figure_state_name(::rt(static_cast<WorkingFigureState>(99)))) ==
+          "unsupported");
+
+    CHECK(energy_parse_iu_mode(::rt("Heating")) == EnergyIuMode::HeatingOrDhwOrStop);
+    CHECK(energy_parse_iu_mode(::rt("DHW")) == EnergyIuMode::HeatingOrDhwOrStop);
+    CHECK(energy_parse_iu_mode(::rt("Heating + DHW")) == EnergyIuMode::HeatingOrDhwOrStop);
+    CHECK(energy_parse_iu_mode(::rt("Stop")) == EnergyIuMode::HeatingOrDhwOrStop);
+    CHECK(energy_parse_iu_mode(::rt("Cooling")) == EnergyIuMode::CoolingOnly);
+    CHECK(energy_parse_iu_mode(::rt("Cooling + DHW")) == EnergyIuMode::CoolingDhw);
+    CHECK(energy_parse_iu_mode(::rt("Other")) == EnergyIuMode::Unknown);
+    CHECK(energy_parse_iu_mode(::rt<const char*>(nullptr)) == EnergyIuMode::Unknown);
+
+    {
+        EnergyRing ring;
+        CHECK(ring.oldest(0) == nullptr);
+        for (uint16_t i = 1; i <= CHECKUP_COMPLETED_BUCKETS + 2; ++i) {
+            EnergyBucket b{};
+            b.observed_s = i;
+            ring.push(b);
+        }
+        CHECK(ring.count == CHECKUP_COMPLETED_BUCKETS);
+        CHECK(ring.oldest(0) != nullptr && ring.oldest(0)->observed_s == 3);
+        CHECK(ring.oldest(CHECKUP_COMPLETED_BUCKETS - 1)->observed_s ==
+              CHECKUP_COMPLETED_BUCKETS + 2);
+        CHECK(ring.oldest(CHECKUP_COMPLETED_BUCKETS) == nullptr);
+        EnergyBucket pend{};
+        pend.observed_s = 777;
+        ring.commit(pend, 30); // skipped capped to CHECKUP_COMPLETED_BUCKETS empty buckets
+        CHECK(ring.oldest(0)->observed_s == 0);
+        CHECK(ring.oldest(CHECKUP_COMPLETED_BUCKETS - 1)->observed_s == 0);
+        ring.reset();
+        CHECK(ring.count == 0 && ring.head == 0 && ring.oldest(0) == nullptr);
+
+        EnergyAccumulator acc;
+        CHECK(acc.live_span_us() == 0);
+        acc.reset_pending(5, -1);
+        CHECK(acc.have_bucket && acc.bucket == 5 && acc.last_us == -1);
+        acc.reset_pending(6, 100);
+        CHECK(acc.have_bucket && acc.bucket == 6 && acc.last_us == 100);
+        acc.first_sample_us  = 200;
+        acc.latest_sample_us = 100;
+        CHECK(acc.live_span_us() == 0);
+        acc.clear_all(ring);
+        CHECK(!acc.have_bucket && acc.last_us == -1);
+    }
+
+    // 2. Catalog sweep across ALL profiles in def::profiles (def/registry.hpp)
+    {
+        size_t total      = 0;
+        size_t inv_no_rps = 0;
+        size_t with_ct    = 0;
+        size_t sup_no_mq  = 0;
+        size_t sup_mq     = 0;
+        bool   saw_erga   = false;
+        bool   saw_protos = false;
+        for (const auto& p : def::profiles) {
+            total++;
+            const ProfileView view = def::resolved(p);
+            EnergyCoverage    cov;
+            for (size_t i = 0; i < view.count(); ++i) {
+                if (!row_publishable(view[i])) continue;
+                const ValueDef row = adjudicated(view, i);
+                energy_cover_row(cov, row);
+            }
+            if (cov.ct_rows > 0) {
+                with_ct++;
+                CHECK(cov.has_x10a_pel());
+            }
+            if (cov.has_inv && !cov.has_rps && cov.ct_rows == 0) {
+                inv_no_rps++;
+                CHECK(!cov.has_x10a_pel());
+                CHECK(!cov.supported(false));
+            }
+            if (cov.supported(false)) sup_no_mq++;
+            if (cov.supported(true)) sup_mq++;
+
+            if (std::strcmp(p.id, "altherma3_r_erga") == 0) {
+                saw_erga = true;
+                CHECK(cov.ct_rows == 3);
+                CHECK(cov.ct_locs[0].reg == 0x63u && cov.ct_locs[0].off == 14u &&
+                      cov.ct_locs[0].conv == 161);
+                CHECK(cov.ct_locs[1].off == 15u && cov.ct_locs[2].off == 16u);
+                CHECK(cov.has_inv && cov.has_flow && cov.has_rwt && cov.has_lwt &&
+                      cov.has_post_buh && cov.has_outdoor);
+                CHECK(cov.has_x10a_pel());
+            }
+            if (std::strcmp(p.id, "protocol_s") == 0) {
+                saw_protos = true;
+                CHECK(!cov.has_x10a_pel());
+                CHECK(!cov.supported(false));
+                CHECK(!cov.supported(true));
+            }
+        }
+        CHECK(saw_erga && saw_protos);
+        CHECK(total == 46);
+        CHECK(with_ct == 22);
+        CHECK(inv_no_rps == 17);
+        CHECK(sup_no_mq == 27);
+        CHECK(sup_mq == 43);
+
+        // Edge cases in energy_cover_row: duplicate CT, unit filtering, BUH2, non-matching units
+        EnergyCoverage edge;
+        energy_cover_row(edge, 0x63u, 14u, 161, "CT Sensor (L1)", "A");
+        energy_cover_row(edge, 0x63u, 14u, 161, "CT Sensor (L1)", "A"); // duplicate ignored
+        CHECK(edge.ct_rows == 1);
+        energy_cover_row(edge, 0x21u, 0u, 105, "INV primary current (A)", "W"); // non-A rejected
+        CHECK(!edge.has_inv);
+        energy_cover_row(edge, 0x21u, 0u, 105, "INV primary current (A)", "A");
+        CHECK(edge.has_inv);
+        energy_cover_row(edge, 0x62u, 9u, 105, "Flow sensor", "m3/h"); // non L/min rejected
+        CHECK(!edge.has_flow);
+        energy_cover_row(edge, 0x62u, 9u, 105, "Flow sensor", "L/min");
+        CHECK(edge.has_flow);
+        energy_cover_row(edge, CHECKUP_LOC_BUH2.reg, CHECKUP_LOC_BUH2.off, CHECKUP_LOC_BUH2.conv,
+                         "BUH Step2");
+        CHECK(edge.has_buh() && !edge.has_buh1 && edge.has_buh2);
+    }
+
+    auto make_full_cov = [](bool with_ct, bool with_inv_rps, bool with_post_buh = true) {
+        EnergyCoverage cov;
+        if (with_ct) {
+            cov.ct_rows    = 3;
+            cov.ct_locs[0] = {0x63, 14, 161};
+            cov.ct_locs[1] = {0x63, 15, 161};
+            cov.ct_locs[2] = {0x63, 16, 161};
+        }
+        if (with_inv_rps) {
+            cov.has_inv = true;
+            cov.inv_loc = {0x21, 0, 105};
+            cov.has_rps = true;
+        }
+        cov.has_flow      = true;
+        cov.has_lwt       = true;
+        cov.has_rwt       = true;
+        cov.has_post_buh  = with_post_buh;
+        cov.has_buh1      = true;
+        cov.has_bsh       = true;
+        cov.has_defrost   = true;
+        cov.has_valve_dhw = true;
+        cov.has_iu_mode   = true;
+        cov.has_outdoor   = true;
+        return cov;
+    };
+
+    auto make_base_input = []() {
+        EnergyStepInput in;
+        in.source_ok       = true;
+        in.ct_valid_count  = 3;
+        in.ct_sum_tenths   = 50; // 5.0 A -> 1150 W
+        in.inv_known       = true;
+        in.inv_tenths      = 40; // 4.0 A -> 920 W
+        in.rps_known       = true;
+        in.rps_running     = true;
+        in.rps_tenths      = 300; // 30.0 rps
+        in.flow_known      = true;
+        in.flow_tenths     = 150; // 15.0 L/min
+        in.lwt_known       = true;
+        in.lwt_tenths      = 350; // 35.0 C
+        in.post_buh_known  = true;
+        in.post_buh_tenths = 350; // 35.0 C
+        in.rwt_known       = true;
+        in.rwt_tenths      = 300; // 30.0 C (dT = 5.0 K -> 5232.5 W)
+        in.buh_known       = true;
+        in.buh_on          = false;
+        in.bsh_known       = true;
+        in.bsh_on          = false;
+        in.defrost_known   = true;
+        in.defrost_on      = false;
+        in.valve_dhw_known = true;
+        in.valve_dhw_on    = false;
+        in.set_iu_mode(EnergyIuMode::HeatingOrDhwOrStop);
+        in.outdoor_known  = true;
+        in.outdoor_tenths = 50; // 5.0 C
+        return in;
+    };
+
+    // 3. Time continuity, standstill gate (pump sniffer / low flow), signed dT (defrost / valve)
+    {
+        const auto        cov = make_full_cov(true, true);
+        EnergyAccumulator acc;
+        EnergyRing        ring;
+        EnergyStepInput   in = make_base_input();
+
+        in.now_us = -1;
+        working_figure_step(acc, cov, in, &ring);
+        CHECK(!acc.have_bucket);
+
+        in.now_us = 100 * kSec;
+        working_figure_step(acc, cov, in, &ring); // anchor only, dt=0
+        CHECK(acc.have_bucket && acc.pending.observed_s == 0);
+
+        // Backwards jump resets continuity
+        in.now_us = 99 * kSec;
+        working_figure_step(acc, cov, in, &ring);
+        CHECK(acc.last_us == 99 * kSec && acc.pending.observed_s == 0);
+
+        // Gap > CHECKUP_MAX_GAP_S breaks continuity without bridging
+        in.now_us = 99 * kSec + (CHECKUP_MAX_GAP_S + 1) * kSec;
+        working_figure_step(acc, cov, in, &ring);
+        CHECK(acc.pending.observed_s == 0);
+
+        // Standstill gate A: flow <= 0.5 L/min -> P_th = 0, P_el still integrates
+        in.flow_tenths = 5; // 0.5 L/min (boundary)
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in, &ring);
+        CHECK(acc.pending.observed_s == 10 && acc.pending.heat_ws == 0 &&
+              acc.pending.elec_ws == 11500);
+
+        // Standstill gate B: pump sniffer (flow = 12 L/min, +/-2 K delta-T, !rps_running &&
+        // !buh_on)
+        // -> ZERO phantom heat while P_el integrates standby/pump watts!
+        in.flow_tenths     = 120;
+        in.rps_running     = false;
+        in.rps_tenths      = 0;
+        in.ct_sum_tenths   = 2; // 0.2 A -> 46 W pump draw
+        in.post_buh_tenths = 320;
+        in.rwt_tenths      = 300; // +2.0 K
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in, &ring);
+        in.post_buh_tenths = 280; // -2.0 K
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in, &ring);
+        CHECK(acc.pending.observed_s == 30 && acc.pending.heat_ws == 0 &&
+              acc.pending.elec_ws == 11500 + 460 + 460);
+
+        // Defrost withdrawal (dT < 0) and DHW 3-way valve transient keep signed P_th (no clamping)
+        in.rps_running     = true;
+        in.rps_tenths      = 400;
+        in.ct_sum_tenths   = 100; // 2300 W
+        in.flow_tenths     = 150; // 15.0 L/min
+        in.post_buh_tenths = 250; // 25.0 C
+        in.rwt_tenths      = 300; // 30.0 C -> -5.0 K -> -5232.5 W
+        in.defrost_on      = true;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in, &ring);
+        CHECK(acc.pending.heat_ws < -50000 && acc.pending.defrost_s == 10);
+
+        // Profiles WITHOUT RPS witness use >= 150 W threshold (standby < 150 W -> P_th = 0; >= 150
+        // W -> active)
+        EnergyCoverage no_rps = make_full_cov(true, false);
+        no_rps.has_rps        = false;
+        EnergyAccumulator no_rps_acc;
+        EnergyStepInput   no_rps_in = make_base_input();
+        no_rps_in.rps_known         = false;
+        no_rps_in.rps_running       = false;
+        no_rps_in.ct_sum_tenths     = 5; // 115 W < 150 W -> pump only -> P_th = 0
+        no_rps_in.now_us            = 100 * kSec;
+        working_figure_step(no_rps_acc, no_rps, no_rps_in);
+        no_rps_in.now_us = 110 * kSec;
+        working_figure_step(no_rps_acc, no_rps, no_rps_in);
+        CHECK(no_rps_acc.pending.observed_s == 10 && no_rps_acc.pending.heat_ws == 0 &&
+              no_rps_acc.pending.elec_ws == 1150);
+        no_rps_in.ct_sum_tenths = 10; // 230 W >= 150 W -> active thermal generation
+        no_rps_in.now_us        = 120 * kSec;
+        working_figure_step(no_rps_acc, no_rps, no_rps_in);
+        CHECK(no_rps_acc.pending.observed_s == 20 && no_rps_acc.pending.heat_ws > 50000);
+
+        // Source dropped resets continuity
+        in.source_ok = false;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in, &ring);
+        CHECK(acc.last_us == -1);
+    }
+
+    // 4. Explicit IU_MODE filtering (Cooling, Cooling + DHW + valve, DHW, Stop, Unknown)
+    {
+        const auto        cov = make_full_cov(true, true);
+        EnergyAccumulator acc;
+        EnergyStepInput   in = make_base_input();
+        in.now_us            = 100 * kSec;
+        working_figure_step(acc, cov, in);
+
+        // Summer "DHW" & "Stop" ARE included
+        in.set_iu_mode("DHW");
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.observed_s == 10 && acc.pending.cooling_excluded_s == 0);
+
+        in.set_iu_mode("Stop");
+        in.rps_running   = false;
+        in.rps_tenths    = 0;
+        in.ct_sum_tenths = 1; // 23 W
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.observed_s == 20 && acc.pending.cooling_excluded_s == 0);
+
+        // "Cooling" (incl. standby) -> cooling_excluded_s
+        in.set_iu_mode("Cooling");
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.observed_s == 20 && acc.pending.cooling_excluded_s == 10);
+
+        // "Cooling + DHW" with !valve_dhw_on -> cooling_excluded_s
+        in.set_iu_mode("Cooling + DHW");
+        in.valve_dhw_known = true;
+        in.valve_dhw_on    = false;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.cooling_excluded_s == 20);
+
+        // "Cooling + DHW" with valve_dhw_on == true -> INCLUDED
+        in.rps_running   = true;
+        in.rps_tenths    = 300;
+        in.ct_sum_tenths = 50;
+        in.valve_dhw_on  = true;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.observed_s == 30 && acc.pending.cooling_excluded_s == 20);
+
+        // "Cooling + DHW" with !valve_dhw_known -> unpairable_s
+        in.valve_dhw_known = false;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.unpairable_s == 10);
+
+        // Unknown IU_MODE on profile with has_iu_mode -> unpairable_s
+        in.set_iu_mode("UnknownMode");
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.unpairable_s == 20);
+    }
+
+    // 5. INV held-over guard & Latched CT wired/unwired (clearing only X10aCt buckets)
+    {
+        const auto        inv_cov = make_full_cov(false, true);
+        EnergyAccumulator acc;
+        EnergyStepInput   in = make_base_input();
+        in.now_us            = 100 * kSec;
+        working_figure_step(acc, inv_cov, in);
+
+        // !rps_known -> does NOT integrate 0x21/0, records unpairable_s
+        in.rps_known = false;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, inv_cov, in);
+        CHECK(acc.pending.unpairable_s == 10 && acc.pending.elec_ws == 0 &&
+              acc.pending.observed_s == 0);
+
+        // !rps_running -> integrates 0 W (X10aInv), NOT a gap
+        in.rps_known   = true;
+        in.rps_running = false;
+        in.inv_known   = false; // even if inv held-over unknown while stopped
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, inv_cov, in);
+        CHECK(acc.pending.observed_s == 10 && acc.pending.elec_ws == 0 &&
+              acc.pending.heat_ws == 0 &&
+              acc.pending.pel_kind == static_cast<uint8_t>(EnergyPelKind::X10aInv));
+
+        // rps_running with !inv_known or negative inv -> unpairable_s
+        in.rps_running = true;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, inv_cov, in);
+        CHECK(acc.pending.unpairable_s == 20);
+        in.inv_known  = true;
+        in.inv_tenths = -5;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, inv_cov, in);
+        CHECK(acc.pending.unpairable_s == 30);
+
+        // rps_running with valid inv_tenths -> integrates inv_tenths * 23 W
+        in.inv_tenths = 40;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, inv_cov, in);
+        CHECK(acc.pending.observed_s == 20 && acc.pending.elec_ws == 9200);
+    }
+    {
+        // Latched CT wired/unwired + preserving restored X10aInv buckets on CT clear
+        const auto        ct_inv_cov = make_full_cov(true, true);
+        EnergyAccumulator acc;
+        EnergyRing        ring;
+        EnergyBucket      restored_inv{};
+        restored_inv.pel_kind   = static_cast<uint8_t>(EnergyPelKind::X10aInv);
+        restored_inv.observed_s = 3600;
+        restored_inv.heat_ws    = 12'000'000;
+        restored_inv.elec_ws    = 3'000'000;
+        ring.push(restored_inv);
+        EnergyBucket prior_ct{};
+        prior_ct.pel_kind   = static_cast<uint8_t>(EnergyPelKind::X10aCt);
+        prior_ct.observed_s = 1800;
+        prior_ct.heat_ws    = 5'000'000;
+        prior_ct.elec_ws    = 1'200'000;
+        ring.push(prior_ct);
+
+        EnergyStepInput in = make_base_input();
+        in.now_us          = 100 * kSec;
+        working_figure_step(acc, ct_inv_cov, in, &ring);
+
+        // Positive CT sets Wired
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, ct_inv_cov, in, &ring);
+        CHECK(acc.ct_state == CtWireState::Wired &&
+              acc.pending.pel_kind == static_cast<uint8_t>(EnergyPelKind::X10aCt));
+
+        // 0.0 A during standby keeps X10aCt (Wired), does NOT latch Unwired
+        in.ct_sum_tenths = 0;
+        in.rps_running   = false;
+        in.rps_tenths    = 0;
+        for (int s = 0; s < 5; ++s) {
+            in.now_us += 10 * kSec;
+            working_figure_step(acc, ct_inv_cov, in, &ring);
+        }
+        CHECK(acc.ct_state == CtWireState::Wired && acc.ct_zero_run_s == 0 &&
+              !acc.ct_switch_reset_pending);
+
+        // Missing CT phase (e.g., CT-L3 Bit 7 fault -> ct_valid_count < ct_rows) records
+        // unpairable_s
+        in.ct_valid_count = 2;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, ct_inv_cov, in, &ring);
+        CHECK(acc.pending.unpairable_s == 10);
+
+        // 0.0 A at rps > 10.0 for < 30 s keeps Wired; at >= 30 s latches Unwired + switches to
+        // X10aInv
+        in.ct_valid_count = 3;
+        in.ct_sum_tenths  = 0;
+        in.rps_running    = true;
+        in.rps_tenths     = WORKING_FIGURE_CT_UNWIRED_RPS_TENTHS + 1; // 10.1 rps
+        for (int s = 0; s < 2; ++s) {
+            in.now_us += 10 * kSec;
+            working_figure_step(acc, ct_inv_cov, in, &ring);
+        }
+        CHECK(acc.ct_state == CtWireState::Wired && acc.ct_zero_run_s == 20);
+        in.now_us += 10 * kSec; // reaches 30 s -> latches Unwired
+        working_figure_step(acc, ct_inv_cov, in, &ring);
+        CHECK(acc.ct_state == CtWireState::Unwired);
+        CHECK((acc.pending.flags & ENERGY_F_CT_UNWIRED) != 0);
+        CHECK(acc.ct_switch_reset_pending);
+
+        // Acknowledge switch: clears X10aCt ring bucket & pending, preserves restored X10aInv
+        // bucket!
+        CHECK(acc.acknowledge_ct_unwired_switch(ring));
+        CHECK(!acc.ct_switch_reset_pending);
+        CHECK(ring.buf[0].observed_s == 3600 &&
+              ring.buf[0].heat_ws == 12'000'000);                       // X10aInv intact
+        CHECK(ring.buf[1].observed_s == 0 && ring.buf[1].heat_ws == 0); // X10aCt wiped
+        CHECK(!acc.acknowledge_ct_unwired_switch(ring)); // second call has nothing more to clear
+
+        // Next tick uses X10aInv
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, ct_inv_cov, in, &ring);
+        CHECK(acc.pending.pel_kind == static_cast<uint8_t>(EnergyPelKind::X10aInv) &&
+              acc.pending.elec_ws == 9200);
+
+        // CT-only profile (no INV/RPS) latches Unwired -> evaluation reports Unsupported
+        const auto        ct_only = make_full_cov(true, false);
+        EnergyAccumulator ct_only_acc;
+        EnergyRing        ct_only_ring;
+        EnergyStepInput   ct_in = make_base_input();
+        ct_in.now_us            = 100 * kSec;
+        working_figure_step(ct_only_acc, ct_only, ct_in, &ct_only_ring);
+        ct_in.ct_sum_tenths = 0;
+        for (int s = 0; s < 3; ++s) {
+            ct_in.now_us += 10 * kSec;
+            working_figure_step(ct_only_acc, ct_only, ct_in, &ct_only_ring);
+        }
+        CHECK(ct_only_acc.ct_state == CtWireState::Unwired && !ct_only_acc.ct_switch_reset_pending);
+        // Subsequent step hits the no-electrical-source return
+        ct_in.now_us += 10 * kSec;
+        working_figure_step(ct_only_acc, ct_only, ct_in, &ct_only_ring);
+        const auto dead_rep =
+            working_figure_evaluate(ct_only_ring, ct_only_acc, ct_only, WorkingFigureTariffs{},
+                                    false, false, PowerMeterScope::WholeUnit, true, 100);
+        CHECK(!dead_rep.supported && dead_rep.state == WorkingFigureState::Unsupported &&
+              (dead_rep.flags & ENERGY_F_CT_UNWIRED) != 0);
+    }
+
+    // 6. MQTT meter: strict no-fallback, WholeUnit vs CompressorOnly, BSH exclusion & BUH pairing
+    {
+        const auto        cov = make_full_cov(true, true, true);
+        EnergyAccumulator acc;
+        EnergyStepInput   in = make_base_input();
+        in.mqtt_configured   = true;
+        in.mqtt_fresh        = false; // stale/missing MQTT must NOT fall back to X10A CT/INV
+        in.mqtt_power_w      = 1000.0;
+        in.now_us            = 100 * kSec;
+        working_figure_step(acc, cov, in);
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.observed_s == 0 && acc.pending.unpairable_s == 10 &&
+              acc.pending.elec_ws == 0);
+        in.mqtt_fresh   = true;
+        in.mqtt_power_w = -1.0; // invalid power -> unpairable_s, no fallback
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.unpairable_s == 20);
+
+        // WholeUnit pairs with R2T (post_buh_tenths), excludes active/unknown BSH
+        in.mqtt_power_w    = 2000.0;
+        in.mqtt_scope      = PowerMeterScope::WholeUnit;
+        in.lwt_tenths      = 320; // R1T
+        in.post_buh_tenths = 400; // R2T (+10 K vs RWT 30.0 C)
+        in.bsh_on          = true;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.bsh_excluded_s == 10 && acc.pending.observed_s == 0);
+        in.bsh_on    = false;
+        in.bsh_known = false; // unknown BSH on profile with has_bsh also excludes
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.bsh_excluded_s == 20);
+
+        in.bsh_known = true;
+        in.buh_on    = true;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.observed_s == 10 && acc.pending.buh_s == 10);
+        const int32_t expected_r2t_ws =
+            static_cast<int32_t>(std::llround(15.0 * (4186.0 / 60.0) * 10.0 * 10.0));
+        CHECK(acc.pending.heat_ws == expected_r2t_ws &&
+              acc.pending.pel_kind == static_cast<uint8_t>(EnergyPelKind::MqttWholeUnit));
+
+        // CompressorOnly pairs with R1T (lwt_tenths) and marks ENERGY_F_LIMITED_BUH on BUH/BSH
+        EnergyAccumulator comp_acc;
+        EnergyStepInput   cin = in;
+        cin.mqtt_scope        = PowerMeterScope::CompressorOnly;
+        cin.buh_on            = true;
+        cin.bsh_on            = false;
+        cin.now_us            = 100 * kSec;
+        working_figure_step(comp_acc, cov, cin);
+        cin.now_us += 10 * kSec;
+        working_figure_step(comp_acc, cov, cin);
+        const int32_t expected_r1t_ws =
+            static_cast<int32_t>(std::llround(15.0 * (4186.0 / 60.0) * 2.0 * 10.0));
+        CHECK(comp_acc.pending.heat_ws == expected_r1t_ws &&
+              (comp_acc.pending.flags & ENERGY_F_LIMITED_BUH) != 0);
+        cin.buh_on = false;
+        cin.bsh_on = true;
+        cin.now_us += 10 * kSec;
+        working_figure_step(comp_acc, cov, cin);
+        CHECK((comp_acc.pending.flags & ENERGY_F_LIMITED_BUH) != 0);
+
+        // BUH active/unknown without R2T marks ENERGY_F_UNPAIRED_BUH (both has_post_buh=true w/
+        // !post_buh_known, and has_post_buh=false)
+        EnergyAccumulator unpaired_acc;
+        EnergyStepInput   uin = in;
+        uin.post_buh_known    = false;
+        uin.buh_on            = true;
+        uin.now_us            = 100 * kSec;
+        working_figure_step(unpaired_acc, cov, uin);
+        uin.now_us += 10 * kSec;
+        working_figure_step(unpaired_acc, cov, uin);
+        CHECK((unpaired_acc.pending.flags & ENERGY_F_UNPAIRED_BUH) != 0 &&
+              unpaired_acc.pending.unpairable_s == 10);
+
+        const auto        no_pbuh = make_full_cov(true, true, false);
+        EnergyAccumulator no_pbuh_acc;
+        EnergyStepInput   nin = in;
+        nin.now_us            = 100 * kSec;
+        working_figure_step(no_pbuh_acc, no_pbuh, nin);
+        nin.buh_on = false; // known off -> pairs with R1T safely!
+        nin.now_us += 10 * kSec;
+        working_figure_step(no_pbuh_acc, no_pbuh, nin);
+        CHECK(no_pbuh_acc.pending.observed_s == 10 &&
+              (no_pbuh_acc.pending.flags & ENERGY_F_UNPAIRED_BUH) == 0);
+        nin.buh_on = true; // BUH on without R2T -> ENERGY_F_UNPAIRED_BUH
+        nin.now_us += 10 * kSec;
+        working_figure_step(no_pbuh_acc, no_pbuh, nin);
+        CHECK((no_pbuh_acc.pending.flags & ENERGY_F_UNPAIRED_BUH) != 0 &&
+              no_pbuh_acc.pending.unpairable_s == 10);
+
+        // Missing flow/rwt -> unpairable_s; bucket rollover resets dt=0 across hour boundary
+        EnergyAccumulator roll_acc;
+        EnergyRing        roll_ring;
+        EnergyStepInput   rin = in;
+        rin.buh_on            = false;
+        rin.now_us            = 3590 * kSec;
+        working_figure_step(roll_acc, cov, rin, &roll_ring);
+        rin.now_us = 3595 * kSec;
+        working_figure_step(roll_acc, cov, rin, &roll_ring);
+        rin.flow_known = false;
+        rin.now_us     = 3599 * kSec;
+        working_figure_step(roll_acc, cov, rin, &roll_ring);
+        CHECK(roll_acc.pending.observed_s == 5 && roll_acc.pending.unpairable_s == 4);
+        rin.flow_known = true;
+        rin.now_us     = 3605 * kSec; // crosses CHECKUP_DT_S=3600 boundary -> commits previous hour
+        working_figure_step(roll_acc, cov, rin, &roll_ring);
+        CHECK(roll_ring.count == 1 && roll_ring.buf[0].observed_s == 5 &&
+              roll_acc.pending.observed_s == 0);
+    }
+
+    // 7. Energy accumulation saturation & outdoor temperature tracking
+    {
+        const auto        cov = make_full_cov(true, false);
+        EnergyAccumulator acc;
+        EnergyStepInput   in = make_base_input();
+        in.mqtt_configured   = true;
+        in.mqtt_fresh        = true;
+        in.mqtt_power_w      = 50000.0; // max legal watts
+        in.flow_tenths       = 10000;   // 1000 L/min for synthetic overflow guard check
+        in.post_buh_tenths   = 1000;
+        in.rwt_tenths        = 0;
+        in.outdoor_tenths    = 80; // 8.0 C
+        acc.pending.heat_ws  = INT32_MAX - 10;
+        acc.pending.elec_ws  = UINT32_MAX - 10;
+        in.now_us            = 100 * kSec;
+        working_figure_step(acc, cov, in);
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == INT32_MAX && acc.pending.elec_ws == UINT32_MAX);
+        in.post_buh_tenths  = 0;
+        in.rwt_tenths       = 1000;
+        acc.pending.heat_ws = INT32_MIN + 10;
+        in.outdoor_tenths   = -25; // -2.5 C (updates outdoor_min)
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == INT32_MIN);
+        in.outdoor_tenths = 40; // higher than -2.5 C (keeps -2.5 C min)
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.outdoor_samples == 3 && acc.pending.outdoor_min_tenths == -25 &&
+              acc.pending.outdoor_sum_tenths == 95);
+    }
+
+    // 8. Evaluation states, neutral bands (10% MQTT vs 20% X10A), live tariff recalculation & slot
+    // expiry
+    {
+        const auto           cov = make_full_cov(true, true);
+        EnergyCoverage       unsupported_cov;
+        EnergyRing           ring;
+        EnergyAccumulator    acc;
+        WorkingFigureTariffs tariffs{3000, 1000, 90,
+                                     "EUR"}; // break-even AZ = 0.30*0.90/0.10 = 2.70
+
+        // Unsupported
+        CHECK(working_figure_evaluate(ring, acc, unsupported_cov, tariffs, false, false,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S)
+                  .state == WorkingFigureState::Unsupported);
+
+        // Collecting (< 7200 s)
+        acc.pending.observed_s = 7199;
+        acc.pending.heat_ws    = 20'000'000;
+        acc.pending.elec_ws    = 5'000'000;
+        CHECK(working_figure_evaluate(ring, acc, cov, tariffs, true, true,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S)
+                  .state == WorkingFigureState::Collecting);
+
+        // Standby (< 1.0 kWh heat or < 0.2 kWh elec)
+        acc.pending.observed_s = 7200;
+        acc.pending.heat_ws    = 3'599'999; // < 1.0 kWh
+        acc.pending.elec_ws    = 1'000'000;
+        CHECK(working_figure_evaluate(ring, acc, cov, tariffs, true, true,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S)
+                  .state == WorkingFigureState::Standby);
+        acc.pending.heat_ws = 4'000'000;
+        acc.pending.elec_ws = 719'999; // < 0.2 kWh
+        CHECK(working_figure_evaluate(ring, acc, cov, tariffs, true, true,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S)
+                  .state == WorkingFigureState::Standby);
+
+        // Partial (< 24 h span or < 90% observed_s)
+        acc.pending.elec_ws = 1'000'000;
+        CHECK(working_figure_evaluate(ring, acc, cov, tariffs, true, true,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S - 1)
+                  .state == WorkingFigureState::Partial);
+        // Full 24 h span across 22 completed buckets + pending, but < 90% coverage (77760 s)
+        ring.clear();
+        for (int i = 0; i < 21; ++i) {
+            EnergyBucket b{};
+            b.observed_s         = 3600;
+            b.heat_ws            = 3'600'000; // 1.0 kWh/h
+            b.elec_ws            = 1'000'000;
+            b.outdoor_sum_tenths = 50;
+            b.outdoor_samples    = 1;
+            b.outdoor_min_tenths = 50;
+            ring.push(b);
+        }
+        acc.pending            = EnergyBucket{};
+        acc.pending.observed_s = 77759 - 21 * 3600;
+        CHECK(working_figure_evaluate(ring, acc, cov, tariffs, true, true,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S)
+                  .state == WorkingFigureState::Partial);
+
+        // Full window (>= 24 h span and >= 77760 s) -> Limited if bsh_excluded_s or
+        // limited/unpaired flags
+        acc.pending.observed_s     = 77760 - 21 * 3600;
+        acc.pending.bsh_excluded_s = 1;
+        CHECK(working_figure_evaluate(ring, acc, cov, tariffs, true, true,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S)
+                  .state == WorkingFigureState::Limited);
+        acc.pending.bsh_excluded_s = 0;
+        acc.pending.flags          = ENERGY_F_LIMITED_BUH;
+        CHECK(working_figure_evaluate(ring, acc, cov, tariffs, true, true,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S)
+                  .state == WorkingFigureState::Limited);
+
+        // Measured when no tariffs configured (and fallback currency/gas_eff handling)
+        acc.pending.flags = 0;
+        WorkingFigureTariffs no_tariffs{0, 0, 10, "xx"};
+        const auto           measured =
+            working_figure_evaluate(ring, acc, cov, no_tariffs, true, true,
+                                    PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S);
+        CHECK(measured.state == WorkingFigureState::Measured && !measured.tariffs_configured &&
+              measured.gas_efficiency_pct == GAS_EFFICIENCY_DEFAULT_PCT &&
+              std::string(measured.currency) == "EUR" && measured.full_window &&
+              measured.has_outdoor && std::abs(measured.outdoor_mean_c - 5.0) < 1e-6);
+
+        // Neutral band comparison: 10% (MQTT) vs 20% (X10A)
+        // Put total heat = 21 * 3.6e6 = 75.6e6 Ws (21.0 kWh) and elec = 24.336e6 Ws (6.76 kWh)
+        // -> AZ = 75.6 / 24.336 = 3.1065 = break_even_az (2.70) * 1.1505!
+        ring.clear();
+        for (int i = 0; i < 21; ++i) {
+            EnergyBucket b{};
+            b.observed_s = 3600;
+            b.heat_ws    = 3'600'000;
+            b.elec_ws    = 1'158'857;
+            ring.push(b);
+        }
+        acc.pending            = EnergyBucket{};
+        acc.pending.observed_s = 77760 - 21 * 3600;
+
+        // With AZ ~= 3.1065 (+15% above break_even_az 2.70):
+        // MQTT (+/-10%) -> Cheaper; X10A (+/-20%) -> Similar!
+        const auto mqtt_cheaper =
+            working_figure_evaluate(ring, acc, cov, tariffs, true, true, PowerMeterScope::WholeUnit,
+                                    true, CHECKUP_WINDOW_S);
+        const auto x10a_similar =
+            working_figure_evaluate(ring, acc, cov, tariffs, false, false,
+                                    PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S);
+        CHECK(mqtt_cheaper.state == WorkingFigureState::Cheaper && !mqtt_cheaper.is_estimate &&
+              mqtt_cheaper.neutral_band_pct == 10 && mqtt_cheaper.cost_delta < 0.0 &&
+              mqtt_cheaper.cost_delta_pct < 0.0);
+        CHECK(x10a_similar.state == WorkingFigureState::Similar && x10a_similar.is_estimate &&
+              x10a_similar.neutral_band_pct == 20);
+
+        // Live tariff recalculation: raise elec price so break_even_az = 0.38 * 0.90 / 0.10 = 3.42
+        // Now AZ ~= 3.1065 is ~9.2% below 3.42 -> Similar on BOTH MQTT and X10A, with identical
+        // kWh!
+        const WorkingFigureTariffs mid_tariffs{3800, 1000, 90, "CHF"};
+        const auto                 recalc_mid =
+            working_figure_evaluate(ring, acc, cov, mid_tariffs, true, true,
+                                    PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S);
+        CHECK(recalc_mid.state == WorkingFigureState::Similar &&
+              std::string(recalc_mid.currency) == "CHF" &&
+              std::abs(recalc_mid.heat_kwh - mqtt_cheaper.heat_kwh) < 1e-12 &&
+              std::abs(recalc_mid.elec_kwh - mqtt_cheaper.elec_kwh) < 1e-12);
+
+        // Raise elec price further so break_even_az = 0.45 * 0.90 / 0.10 = 4.05 -> AZ is -23.3%
+        // -> MoreExpensive on BOTH MQTT (+/-10%) and X10A (+/-20%)!
+        // And intermediate break_even_az = 3.60 -> AZ is -13.7% -> MoreExpensive on MQTT, Similar
+        // on X10A!
+        const WorkingFigureTariffs border_low{4000, 1000, 90, "EUR"};
+        CHECK(working_figure_evaluate(ring, acc, cov, border_low, true, true,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S)
+                  .state == WorkingFigureState::MoreExpensive);
+        CHECK(working_figure_evaluate(ring, acc, cov, border_low, false, false,
+                                      PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S)
+                  .state == WorkingFigureState::Similar);
+        const WorkingFigureTariffs high_tariffs{4500, 1000, 90, "EUR"};
+        const auto                 more_exp =
+            working_figure_evaluate(ring, acc, cov, high_tariffs, false, false,
+                                    PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S);
+        CHECK(more_exp.state == WorkingFigureState::MoreExpensive && more_exp.cost_delta > 0.0 &&
+              more_exp.cost_delta_pct > 0.0);
+
+        // slot_expiry_us skips expired/negative slots while folding non-expired ones
+        int64_t expiry[CHECKUP_COMPLETED_BUCKETS]{};
+        expiry[0]          = -1;   // invalid slot skipped
+        expiry[1]          = 1000; // expired at now_us = 1000
+        expiry[2]          = 2000; // still active at now_us = 1000
+        const auto exp_rep = working_figure_evaluate(ring, acc, cov, high_tariffs, true, true,
+                                                     PowerMeterScope::CompressorOnly, true,
+                                                     CHECKUP_WINDOW_S, expiry, 1000);
+        CHECK(exp_rep.is_compressor_only && exp_rep.observed_s == 77760 - 2 * 3600);
+
+        // X10aInv evaluation & fallback when CT is unwired on a profile that also has INV+RPS
+        const auto inv_cov = make_full_cov(false, true);
+        const auto inv_rep =
+            working_figure_evaluate(ring, acc, inv_cov, tariffs, false, false,
+                                    PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S);
+        CHECK(inv_rep.supported && inv_rep.pel_kind == EnergyPelKind::X10aInv &&
+              inv_rep.is_estimate && inv_rep.is_compressor_only);
+
+        // Negative/zero heat_kwh with tariffs configured yields 0 cost_gas and 0 cost_delta_pct
+        EnergyRing        neg_ring;
+        EnergyAccumulator neg_acc;
+        neg_acc.pending.observed_s = 7200;
+        neg_acc.pending.heat_ws    = -1000;
+        neg_acc.pending.elec_ws    = 1'000'000;
+        const auto neg_rep =
+            working_figure_evaluate(neg_ring, neg_acc, inv_cov, tariffs, false, false,
+                                    PowerMeterScope::WholeUnit, true, CHECKUP_WINDOW_S);
+        CHECK(neg_rep.state == WorkingFigureState::Standby && neg_rep.cost_gas == 0.0 &&
+              neg_rep.cost_delta_pct == 0.0 && neg_rep.az == 0.0);
+
+        // energy_span_s advances with now_us, handles now_us < first_sample_us, and clamps
+        EnergyAccumulator span_acc;
+        span_acc.first_sample_us  = 10 * kSec;
+        span_acc.latest_sample_us = 20 * kSec;
+        CHECK(energy_span_s(span_acc, -1, 5 * kSec) == 10);
+        CHECK(energy_span_s(span_acc, 5 * kSec, 30 * kSec) == 25);
+        CHECK(energy_span_s(span_acc, int64_t{CHECKUP_WINDOW_S} * kSec, 50 * kSec) ==
+              CHECKUP_WINDOW_S);
+    }
+
+    // 10. Integer thermal accumulation, half-away-from-zero rounding & overflow-clamp guards
+    {
+        const auto        cov = make_full_cov(true, true);
+        EnergyAccumulator acc;
+        EnergyStepInput   in = make_base_input();
+        in.now_us            = 100 * kSec;
+        working_figure_step(acc, cov, in);
+
+        // Positive dT exact half-away-from-zero (100 * 4186 * 15 * 1 / 6000 = 1046.5 -> 1047)
+        in.flow_tenths     = 100;
+        in.post_buh_tenths = 301;
+        in.rwt_tenths      = 300;
+        in.now_us += 15 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == 1047);
+
+        // Positive dT rounding down when remainder < 3000 (6 * 4186 * 1 * 1 / 6000 = 4.186 -> 4)
+        in.flow_tenths = 6;
+        in.now_us += 1 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == 1051);
+
+        // Negative dT half-away-from-zero (-1046.5 -> -1047) & subtraction across zero
+        in.flow_tenths     = 100;
+        in.post_buh_tenths = 299;
+        in.now_us += 15 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == 4);
+
+        in.flow_tenths = 6;
+        in.now_us += 1 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == 0);
+        in.now_us += 1 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == -4);
+
+        // dt_tenths == 0, flow_tenths <= 5, and sub-second dt == 0 add 0 heat_ws
+        const uint32_t elec_before = acc.pending.elec_ws;
+        in.flow_tenths             = 150;
+        in.post_buh_tenths         = 300;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == -4 && acc.pending.elec_ws == elec_before + 11500);
+
+        in.flow_tenths     = 5;
+        in.post_buh_tenths = 350;
+        in.now_us += 10 * kSec;
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == -4 && acc.pending.elec_ws == elec_before + 23000);
+
+        in.flow_tenths = 150;
+        in.now_us += 500'000; // same integer second -> dt == 0
+        working_figure_step(acc, cov, in);
+        CHECK(acc.pending.heat_ws == -4 && acc.pending.elec_ws == elec_before + 23000);
+
+        // Extreme positive/negative int64 overflow guard & int32_t saturation without UB
+        EnergyAccumulator clamp_acc;
+        EnergyStepInput   clamp_in = make_base_input();
+        clamp_in.now_us            = 100 * kSec;
+        working_figure_step(clamp_acc, cov, clamp_in);
+
+        // flow_k = 2e9 * 4186 * 10 > (INT64_MAX - 3000) / 200000
+        clamp_in.flow_tenths     = 2'000'000'000;
+        clamp_in.post_buh_tenths = 200'300;
+        clamp_in.rwt_tenths      = 300;
+        clamp_in.now_us += 10 * kSec;
+        working_figure_step(clamp_acc, cov, clamp_in);
+        CHECK(clamp_acc.pending.heat_ws == INT32_MAX);
+
+        clamp_in.now_us += 10 * kSec;
+        working_figure_step(clamp_acc, cov, clamp_in);
+        CHECK(clamp_acc.pending.heat_ws == INT32_MAX);
+
+        clamp_acc.pending.heat_ws = INT32_MAX - 10;
+        clamp_in.flow_tenths      = 100;
+        clamp_in.post_buh_tenths  = 301;
+        clamp_in.rwt_tenths       = 300;
+        clamp_in.now_us += 15 * kSec;
+        working_figure_step(clamp_acc, cov, clamp_in);
+        CHECK(clamp_acc.pending.heat_ws == INT32_MAX);
+
+        clamp_in.flow_tenths     = 2'000'000'000;
+        clamp_in.post_buh_tenths = 300;
+        clamp_in.rwt_tenths      = 200'300;
+        clamp_in.now_us += 10 * kSec;
+        working_figure_step(clamp_acc, cov, clamp_in);
+        CHECK(clamp_acc.pending.heat_ws == -1);
+
+        clamp_in.now_us += 10 * kSec;
+        working_figure_step(clamp_acc, cov, clamp_in);
+        CHECK(clamp_acc.pending.heat_ws == INT32_MIN);
+    }
+}
+
 int main() {
     test_stop_context();
     test_stop_context_inputs();
@@ -32715,6 +34095,8 @@ int main() {
     test_reference_binding_epochs();
     test_reference_temperature_config();
     test_circulation_source();
+    test_power_meter_source();
+    test_working_figure();
     test_heating_curve_bins();
     test_heating_curve_diagnosis();
     test_weather_config_snapshot();

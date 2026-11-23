@@ -1039,6 +1039,100 @@
     </form>
   </div>
 
+  <!-- ═══ Gas heating comparison tariffs (pure financial baseline; heat-pump only) ═══ -->
+  <div class="modal" id="gasComparisonModal" hidden>
+    <div class="modal-backdrop" id="gasComparisonBackdrop"></div>
+    <form class="modal-card" id="gasComparisonForm" role="dialog" aria-modal="true" aria-labelledby="gasComparisonModalTitle" tabindex="-1">
+      <div class="section-label card-title" id="gasComparisonModalTitle" data-i18n="wf.gas.title">Gas comparison tariffs</div>
+      <div class="pin-grid">
+        <label class="field">
+          <span class="field-label plain" data-i18n="wf.gas.elec_price">Electricity price · per kWh</span>
+          <input class="input num" type="number" id="gcElecPrice" min="0" max="99.9999" step="0.0001" placeholder="0.3200" inputmode="decimal">
+        </label>
+        <label class="field">
+          <span class="field-label plain" data-i18n="wf.gas.gas_price">Gas price · per kWh</span>
+          <input class="input num" type="number" id="gcGasPrice" min="0" max="99.9999" step="0.0001" placeholder="0.1050" inputmode="decimal">
+        </label>
+      </div>
+      <div class="pin-grid">
+        <label class="field">
+          <span class="field-label plain" data-i18n="wf.gas.efficiency">Boiler efficiency · % (Hs)</span>
+          <input class="input num" type="number" id="gcGasEff" min="50" max="98" step="1" value="88" inputmode="numeric" aria-describedby="gcGasEffHelp">
+        </label>
+        <label class="field">
+          <span class="field-label plain" data-i18n="wf.gas.currency">Currency · 3 letters</span>
+          <input class="input mono" id="gcCurrency" maxlength="3" value="EUR" placeholder="EUR" autocomplete="off">
+        </label>
+      </div>
+      <p class="hint wf-eff-help" id="gcGasEffHelp" data-i18n="wf.gas.eff_help">Based on gross calorific value Hs as billed (typical: 82–90% condensing, 72–82% older boiler).</p>
+      <div class="wf-preview" id="gcPreview"></div>
+      <p class="hint" data-i18n="wf.gas.hint">Assumes pure water (4.186 kJ/(L·K)), includes space heating and DHW, excludes cooling and fixed base fees. Recalculates the last 24 h immediately.</p>
+      <p class="hint err" id="gcError" hidden></p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="gcCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn danger" type="button" id="gcDeleteBtn" data-i18n="wf.gas.delete">Clear</button>
+        <button class="btn primary" type="submit" id="gcBtn" data-i18n="btn.save">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ═══ Optional external MQTT electricity meter (read-only) ═══ -->
+  <div class="modal" id="powerMeterModal" hidden>
+    <div class="modal-backdrop" id="powerMeterBackdrop"></div>
+    <form class="modal-card" id="powerMeterForm" role="dialog" aria-modal="true" aria-labelledby="powerMeterModalTitle" tabindex="-1">
+      <div class="section-label card-title" id="powerMeterModalTitle" data-i18n="pm.title">External MQTT electricity meter</div>
+      <p class="hint pm-broker-hint" id="pmBrokerHint" data-i18n="pm.broker_hint" hidden>Configure the MQTT broker first; saved meter settings stay dormant until MQTT connects.</p>
+      <label class="field">
+        <span class="field-label plain" data-i18n="circ.name">Name</span>
+        <input class="input" id="pmName" maxlength="48" placeholder="Heat pump meter" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="circ.topic">MQTT topic</span>
+        <input class="input mono" id="pmTopic" maxlength="192" placeholder="shellypro3em-…/status/em:0" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="pm.power_path">Power JSON path · optional</span>
+        <input class="input mono" id="pmPowerPath" maxlength="128" placeholder="total_act_power" autocomplete="off" aria-describedby="pmPowerHelp">
+        <span class="field-help" id="pmPowerHelp" data-i18n="pm.power_help">Dot path inside JSON (e.g. total_act_power), or leave empty for a bare numeric payload.</span>
+      </label>
+      <label class="field">
+        <span class="field-label plain" data-i18n="pm.time_path">Timestamp JSON path · optional</span>
+        <input class="input mono" id="pmTimePath" maxlength="128" placeholder="ts" autocomplete="off" aria-describedby="pmTimeHelp">
+        <span class="field-help" id="pmTimeHelp" data-i18n="pm.time_help">Optional RFC3339 or Unix seconds path (requires Power JSON path). Empty uses live arrival time; retained values fail closed.</span>
+      </label>
+      <div class="pin-grid">
+        <label class="field">
+          <span class="field-label plain" data-i18n="pm.unit">Unit</span>
+          <select class="input" id="pmUnit">
+            <option value="W" data-i18n="pm.unit_w">Watts (W)</option>
+            <option value="kW" data-i18n="pm.unit_kw">Kilowatts (kW)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label plain" data-i18n="circ.max_age">Maximum age · seconds</span>
+          <input class="input num" type="number" id="pmMaxAge" min="10" max="300" step="1" value="60" inputmode="numeric" aria-describedby="pmMaxAgeHelp">
+        </label>
+      </div>
+      <p class="hint wf-eff-help" id="pmMaxAgeHelp" data-i18n="pm.max_age_help">Maximum permitted age of the reading, from 10 to 300 seconds.</p>
+      <label class="field">
+        <span class="field-label plain" data-i18n="pm.scope">Measurement scope</span>
+        <select class="input" id="pmScope">
+          <option value="whole_unit" data-i18n="pm.scope_whole">Whole unit (compressor + pumps + BUH)</option>
+          <option value="compressor_only" data-i18n="pm.scope_comp">Compressor only</option>
+        </select>
+      </label>
+      <p class="hint pm-test-res" id="pmTestResult" hidden></p>
+      <p class="hint" data-i18n="pm.hint">Read-only subscription. You can test a live reading before saving or save directly; Delete reverts to the X10A estimate.</p>
+      <p class="hint err" id="pmError" hidden></p>
+      <div class="modal-actions pm-actions">
+        <button class="btn secondary" type="button" id="pmCancel" data-i18n="btn.cancel">Cancel</button>
+        <button class="btn danger" type="button" id="pmDeleteBtn" data-i18n="circ.delete">Delete</button>
+        <button class="btn secondary" type="button" id="pmTestBtn" data-i18n="pm.test">Test</button>
+        <button class="btn primary" type="submit" id="pmBtn" data-i18n="btn.save">Save</button>
+      </div>
+    </form>
+  </div>
+
   <!-- Open-Meteo is fetched directly by the ESP32. Empty coordinates = no weather traffic. -->
   <div class="modal" id="weatherModal" hidden>
     <div class="modal-backdrop" id="weatherBackdrop"></div>

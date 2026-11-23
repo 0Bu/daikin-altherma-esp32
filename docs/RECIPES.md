@@ -194,5 +194,10 @@ measurement boundary before diagnosing the plant.
 
 The read-only HomeHub source can supply its own flow and leaving/return temperatures, but keep its
 cadence, units and provenance separate from X10A. Its available map depends on model, MMI firmware
-and Modbus commissioning; see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md). This project does not
-integrate energy on the device or substitute cloud estimates for a physical electricity meter.
+and Modbus commissioning; see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md). When plant diagnostics is
+enabled on X10A, the firmware tracks a rolling 24-hour thermal/electrical
+[performance factor](DIAGNOSTICS.md#working-figure-observation) (`working_figure`) against an
+optional external MQTT electricity meter or onboard X10A current estimates for quick gas-cost
+comparison; long-term seasonal JAZ/SCOP and billing-grade energy accounting remain a Home Assistant
+or Prometheus responsibility, and the device never substitutes cloud estimates for a physical
+electricity meter.

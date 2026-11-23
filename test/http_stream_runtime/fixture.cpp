@@ -343,6 +343,7 @@ logic::HeatingCurveSnapshot heating_curve_status(HeatingCurveBinsReport* out) {
 }
 CirculationSourceStatus     circulation_source_status(const Config&) { return {}; }
 CirculationPumpSample       circulation_pump_sample() { return {}; }
+PowerMeterStatus            power_meter_status(const Config&) { return {}; }
 WeatherForecastStatus       weather_forecast_status() { return {}; }
 bool                        weather_fetch_active() { return fixture::weather; }
 bool                        weather_values_reader_enter() noexcept {
@@ -490,6 +491,7 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     }
     return report;
 }
+logic::WorkingFigureReport checkup_working_figure_status(const Config&, bool) { return {}; }
 CheckupFaultStatus checkup_fault_latest_status(DiagnosticsSource, bool source_fresh) {
     if (fixture::fault_trace_present) {
         CheckupFaultStatus st;

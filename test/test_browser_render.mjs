@@ -1691,6 +1691,130 @@ async function assertPlantDiagnosis(page, context) {
   }
 }
 
+async function assertWorkingFigure(page, context) {
+  await page.evaluate(`(() => {
+    window.__browserWorkingFigureOriginal = {
+      status: S.status, open: new Set(S.descOpen), card: S.dashboardCard,
+      clickHold: S.clickHold,
+    };
+    S.status = structuredClone(S.status);
+    S.status.diagnostics = { ...(S.status.diagnostics || {}), enabled: true, effective_source: "x10a" };
+    S.status.health = {
+      status: "warn", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 2,
+      available: 8, assessable: 1, evaluated: 1,
+      checks: [{ id: "fault", verdict: "warn", evidence: "manufacturer", active: 1, code: "E5" }],
+    };
+    S.status.gas_comparison = {
+      configured: true, elec_price: 0.30, gas_price: 0.10, gas_efficiency_pct: 88,
+      break_even_az: 2.64, currency: "EUR",
+    };
+    S.status.power_meter = {
+      configured: true, name: "Heat pump meter", scope: "whole_unit",
+      has_value: true, fresh: true, power_w: 1100, age_s: 12,
+    };
+    S.status.working_figure = {
+      supported: true, state: "cheaper", pel_source: "mqtt_whole_unit", source_fresh: true,
+      is_estimate: false, is_compressor_only: false, az: 3.45, break_even_az: 2.64,
+      neutral_band_pct: 10, tariffs_configured: true, currency: "EUR", gas_efficiency_pct: 88,
+      heat_kwh: 34.5, elec_kwh: 10.0, gas_equiv_kwh: 39.2, cost_wp: 3.00, cost_gas: 3.92,
+      cost_delta: -0.92, cost_delta_pct: -23.5, full_window: true, coverage_pct: 99,
+      observed_s: 85500, outdoor_mean_c: 4.5, outdoor_min_c: 1.2, defrost_s: 0, buh_s: 0,
+      bsh_excluded_s: 0, limited_buh: false, unpaired_buh: false, ct_unwired: false,
+    };
+    renderApp();
+    return true;
+  })()`);
+  try {
+    await activateDashboardCardForSelector(page, "[data-desc='observation:working_figure']");
+    await assertDiagnosisSummaryRows(page, `${context}/summary`);
+    await clickDisclosure(page, "[data-desc='observation:working_figure']");
+    await page.waitFor("S.clickHold === false");
+    await page.frame();
+    const cheaperState = await page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='observation:working_figure']");
+      const body = row?.closest(".vitem")?.querySelector(".vdesc-body");
+      const badge = document.querySelector("[data-dashboard-card='diagnosis'] .section-badge")?.innerText;
+      return {
+        kpis: body ? body.querySelectorAll(".wf-kpis-4 .wf-kpi").length : 0,
+        hasScale: !!body?.querySelector(".wf-scale"),
+        badge,
+        expectedBadge: t("check.summary.warnings", 1),
+      };
+    })()`);
+    assert.equal(cheaperState.kpis, 4, `${context}: tariffs-configured working figure renders 4 KPI tiles`);
+    assert.equal(cheaperState.hasScale, true, `${context}: Break-Even scale bar renders when tariffs configured`);
+    assert.equal(cheaperState.badge, cheaperState.expectedBadge,
+      `${context}: working figure never alters the checkup summary badge`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/cheaper`);
+    await assertAccessibility(page, `${context}/cheaper`, { nativeTree: true });
+
+    await page.evaluate(`(() => {
+      S.status.gas_comparison = { configured: false };
+      S.status.working_figure = {
+        ...S.status.working_figure,
+        state: "measured", pel_source: "x10a_inv", is_estimate: true, is_compressor_only: true,
+        az: 3.20, break_even_az: null, tariffs_configured: false,
+        cost_wp: null, cost_gas: null, cost_delta: null, cost_delta_pct: null,
+      };
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    const measuredState = await page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='observation:working_figure']");
+      const body = row?.closest(".vitem")?.querySelector(".vdesc-body");
+      return {
+        val: row?.querySelector(".vrow-val")?.innerText || "",
+        kpis: body ? body.querySelectorAll(".wf-kpis .wf-kpi").length : 0,
+        hasScale: !!body?.querySelector(".wf-scale"),
+        hasTariffCta: !!body?.querySelector(".wf-actions [data-act='gas-comparison']"),
+      };
+    })()`);
+    assert.ok(measuredState.val.startsWith("~"), `${context}: estimated inverter mode retains ~ prefix`);
+    assert.equal(measuredState.kpis, 2, `${context}: unconfigured tariffs render 2 KPI tiles`);
+    assert.equal(measuredState.hasScale, false, `${context}: scale bar omitted when tariffs unconfigured`);
+    assert.equal(measuredState.hasTariffCta, true, `${context}: Set-tariffs CTA rendered when unconfigured`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/measured`);
+
+    await page.evaluate(`(() => {
+      S.status.working_figure = {
+        ...S.status.working_figure,
+        state: "limited", pel_source: "x10a_ct", is_estimate: true,
+        limited_buh: true, buh_s: 3600,
+      };
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assert.equal(await page.evaluate(`(() => {
+      const text = document.querySelector("[data-desc='observation:working_figure']")
+        ?.closest(".vitem")?.querySelector(".vdesc-body")?.innerText || "";
+      return text.includes(t("wf.banner.buh_limited"));
+    })()`), true, `${context}: limited BUH warning must appear on backup heater operation`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/limited`);
+
+    await page.evaluate(`(() => {
+      S.status.health = { ...S.status.health, source: "modbus" };
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+    assert.equal(await page.evaluate(`document.querySelector("[data-desc='observation:working_figure']")`), null,
+      `${context}: working figure must remain hidden on Modbus diagnostics source`);
+  } finally {
+    await page.evaluate(`(() => {
+      S.status = window.__browserWorkingFigureOriginal.status;
+      S.descOpen = window.__browserWorkingFigureOriginal.open;
+      S.dashboardCard = window.__browserWorkingFigureOriginal.card;
+      S.clickHold = window.__browserWorkingFigureOriginal.clickHold;
+      delete window.__browserWorkingFigureOriginal;
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+  }
+}
+
 async function assertNativeAltherma4(page, context) {
   try {
     await page.evaluate(`(() => {
@@ -2623,6 +2747,8 @@ try {
     mqttModal: "#connTile [data-edit='mqtt']",
     refTempModal: "#settingsCards [data-act='ref-temp']",
     circulationModal: "#settingsCards [data-act='circulation']",
+    gasComparisonModal: "#settingsCards [data-act='gas-comparison']",
+    powerMeterModal: "#settingsCards [data-act='power-meter']",
     weatherModal: "#settingsCards [data-act='weather']",
     syslogModal: "#connTile [data-edit='syslog']",
     ntpModal: "#connTile [data-edit='ntp']",
@@ -2840,6 +2966,7 @@ try {
       await assertDashboardCardNavigation(page, `${viewport.name}/${locale}/card-navigation`, viewport);
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
+      await assertWorkingFigure(page, `${viewport.name}/${locale}/working-figure`);
       if (!mutation && (locale === "en" || locale === "de")) {
         await assertFaultChart(page, `${viewport.name}/${locale}/fault`, viewport.name);
       }

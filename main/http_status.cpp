@@ -39,8 +39,10 @@
 #include "logic/detect_identity.hpp"
 #include "logic/json.hpp"
 #include "logic/query_flag.hpp"
+#include "logic/power_meter_source.hpp"
 #include "logic/reference_temperature.hpp"
 #include "logic/weather_forecast.hpp"
+#include "logic/working_figure.hpp"
 #include "weather_forecast.hpp"
 #include "logic/redact.hpp"
 #include "logic/heartbeat.hpp"   // append_stack_bytes — ONE never-sampled rendering rule
@@ -756,6 +758,137 @@ append_status_fault_check_json(JsonOut& j, DiagnosticsSource source, bool source
 }
 
 template <typename JsonOut>
+[[gnu::noinline]] static void append_status_bfield(JsonOut& j, const char* prefix, bool v) {
+    j += prefix;
+    j += v ? "true" : "false";
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_status_ufield(JsonOut& j, const char* prefix, uint32_t v) {
+    j += prefix;
+    append_json_uint(j, v);
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_status_qfield(JsonOut& j, const char* prefix,
+                                                   std::string_view v) {
+    j += prefix;
+    json_append_quoted(j, v);
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_status_g6(JsonOut& j, const char* prefix, bool valid,
+                                               double v) {
+    append_status_fmt_double(j, prefix, "%.6g", valid, v);
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_status_power_meter_json(JsonOut& j, const Config& c,
+                                                             const PowerMeterStatus& pm,
+                                                             bool                    redact) {
+    append_status_bfield(j, "},\"power_meter\":{\"configured\":", !c.power_meter_topic.empty());
+    append_status_redacted(j, ",\"name\":", jstr_r(c.power_meter_name, redact));
+    append_status_redacted(j, ",\"topic\":", jstr_r(c.power_meter_topic, redact));
+    append_status_redacted(j, ",\"power_path\":", jstr_r(c.power_meter_power_path, redact));
+    append_status_redacted(j, ",\"timestamp_path\":", jstr_r(c.power_meter_time_path, redact));
+    append_status_qfield(j, ",\"unit\":", power_meter_unit_name(c.power_meter_unit));
+    append_status_qfield(j, ",\"scope\":", power_meter_scope_name(c.power_meter_scope));
+    append_status_ufield(j, ",\"max_age_s\":", c.power_meter_max_age_s);
+    append_status_bfield(j, ",\"subscribed\":", pm.subscribed);
+    append_status_bfield(j, ",\"has_value\":", pm.has_value);
+    append_status_g6(j, ",\"power_w\":", pm.has_value, pm.power_w);
+    const bool has_ts = pm.has_value && pm.has_source_time;
+    append_status_rfc3339(j, ",\"source_at\":", has_ts, pm.source_unix_s);
+    append_status_opt_int(j, ",\"source_unix_s\":", has_ts, pm.source_unix_s);
+    append_status_opt_quoted(j, ",\"timestamp_source\":", pm.has_value, pm.timestamp_source);
+    append_status_opt_uint(j, ",\"age_s\":", pm.age_known, pm.age_s);
+    append_status_bfield(j, ",\"fresh\":", pm.fresh);
+    append_status_qfield(j, ",\"freshness_reason\":", pm.freshness_reason);
+    append_status_bfield(j, ",\"retained\":", pm.has_value && pm.retained);
+    append_status_ufield(j, ",\"messages\":", pm.messages);
+    append_status_ufield(j, ",\"errors\":", pm.errors);
+    append_status_ufield(j, ",\"rejections\":", pm.rejections);
+    if (!pm.error.empty()) append_status_qfield(j, ",\"error\":", pm.error);
+}
+
+[[gnu::noinline]] static double tariff_from_tenth_mill(uint32_t tm) {
+    return static_cast<double>(tm) * 1e-4;
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_status_gas_comparison_json(JsonOut& j, const Config& c) {
+    const uint8_t          gas_eff_pct = (c.gas_efficiency_pct >= GAS_EFFICIENCY_MIN_PCT &&
+                                 c.gas_efficiency_pct <= GAS_EFFICIENCY_MAX_PCT)
+                                             ? c.gas_efficiency_pct
+                                             : GAS_EFFICIENCY_DEFAULT_PCT;
+    const std::string_view cur         = tariff_currency_valid(c.tariff_currency)
+                                             ? std::string_view(c.tariff_currency)
+                                             : std::string_view("EUR");
+    const bool   configured = (c.elec_price_tenth_mill > 0 && c.gas_price_tenth_mill > 0 &&
+                             gas_comparison_config_valid(c.elec_price_tenth_mill,
+                                                           c.gas_price_tenth_mill, gas_eff_pct, cur));
+    const double elec_price = tariff_from_tenth_mill(c.elec_price_tenth_mill);
+    const double gas_price  = tariff_from_tenth_mill(c.gas_price_tenth_mill);
+    const double break_even_az =
+        configured ? (elec_price * (static_cast<double>(gas_eff_pct) / 100.0)) / gas_price : 0.0;
+    append_status_bfield(j, "},\"gas_comparison\":{\"configured\":", configured);
+    append_status_g6(j, ",\"elec_price\":", configured, elec_price);
+    append_status_g6(j, ",\"gas_price\":", configured, gas_price);
+    append_status_ufield(j, ",\"gas_efficiency_pct\":", gas_eff_pct);
+    append_status_qfield(j, ",\"currency\":", cur);
+    append_status_g6(j, ",\"break_even_az\":", configured, break_even_az);
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void
+append_status_working_figure_json(JsonOut& j, const logic::WorkingFigureReport& wf) {
+    const bool have_metrics = wf.supported && wf.state != logic::WorkingFigureState::Collecting &&
+                              wf.state != logic::WorkingFigureState::Standby;
+    const bool have_tariffs = wf.tariffs_configured;
+    const bool have_costs   = have_metrics && have_tariffs;
+
+    j += "\"working_figure\":{\"kind\":\"observation\"";
+    append_status_bfield(j, ",\"supported\":", wf.supported);
+    append_status_qfield(j, ",\"state\":", logic::working_figure_state_name(wf.state));
+    append_status_bfield(j, ",\"tariffs_configured\":", wf.tariffs_configured);
+    append_status_bfield(j, ",\"full_window\":", wf.full_window);
+    append_status_bfield(j, ",\"source_fresh\":", wf.source_fresh);
+    append_status_bfield(j, ",\"is_estimate\":", wf.is_estimate);
+    append_status_bfield(j, ",\"is_compressor_only\":", wf.is_compressor_only);
+    append_status_qfield(j, ",\"pel_source\":", logic::energy_pel_kind_name(wf.pel_kind));
+    append_status_ufield(j, ",\"span_s\":", wf.span_s);
+    append_status_ufield(j, ",\"observed_s\":", wf.observed_s);
+    append_status_ufield(j, ",\"unpairable_s\":", wf.unpairable_s);
+    append_status_ufield(j, ",\"defrost_s\":", wf.defrost_s);
+    append_status_ufield(j, ",\"buh_s\":", wf.buh_s);
+    append_status_ufield(j, ",\"bsh_excluded_s\":", wf.bsh_excluded_s);
+    append_status_ufield(j, ",\"cooling_excluded_s\":", wf.cooling_excluded_s);
+    append_status_ufield(j, ",\"coverage_pct\":", wf.coverage_pct);
+    append_status_ufield(j, ",\"neutral_band_pct\":", wf.neutral_band_pct);
+    append_status_g6(j, ",\"heat_kwh\":", wf.supported, wf.heat_kwh);
+    append_status_g6(j, ",\"elec_kwh\":", wf.supported, wf.elec_kwh);
+    append_status_g6(j, ",\"az\":", have_metrics, wf.az);
+    append_status_ufield(j, ",\"gas_efficiency_pct\":", wf.gas_efficiency_pct);
+    append_status_qfield(j, ",\"currency\":", std::string_view(wf.currency));
+    append_status_g6(j, ",\"elec_price\":", have_tariffs,
+                     tariff_from_tenth_mill(wf.elec_price_tenth_mill));
+    append_status_g6(j, ",\"gas_price\":", have_tariffs,
+                     tariff_from_tenth_mill(wf.gas_price_tenth_mill));
+    append_status_g6(j, ",\"break_even_az\":", have_tariffs, wf.break_even_az);
+    append_status_g6(j, ",\"gas_equiv_kwh\":", have_costs, wf.gas_equiv_kwh);
+    append_status_g6(j, ",\"cost_wp\":", have_costs, wf.cost_wp);
+    append_status_g6(j, ",\"cost_gas\":", have_costs, wf.cost_gas);
+    append_status_g6(j, ",\"cost_delta\":", have_costs, wf.cost_delta);
+    append_status_g6(j, ",\"cost_delta_pct\":", have_costs, wf.cost_delta_pct);
+    append_status_g6(j, ",\"outdoor_mean_c\":", wf.has_outdoor, wf.outdoor_mean_c);
+    append_status_g6(j, ",\"outdoor_min_c\":", wf.has_outdoor, wf.outdoor_min_c);
+    append_status_bfield(j, ",\"limited_buh\":", (wf.flags & logic::ENERGY_F_LIMITED_BUH) != 0);
+    append_status_bfield(j, ",\"unpaired_buh\":", (wf.flags & logic::ENERGY_F_UNPAIRED_BUH) != 0);
+    append_status_bfield(j, ",\"ct_unwired\":", (wf.flags & logic::ENERGY_F_CT_UNWIRED) != 0);
+    j += "},";
+}
+
+template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config&      c              = config();
     const BoardPreset* selected_board = board_selected_preset(c);
@@ -1179,6 +1312,13 @@ static void append_status_json(JsonOut& j, bool redact) {
         ufield(",\"rejections\":", circulation.rejections);
         if (!circulation.error.empty()) qfield(",\"error\":", circulation.error);
     }
+    bool power_meter_fresh = false;
+    {
+        const PowerMeterStatus pm = power_meter_status(c);
+        power_meter_fresh         = pm.fresh;
+        append_status_power_meter_json(j, c, pm, redact);
+    }
+    append_status_gas_comparison_json(j, c);
     // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not
     // expose model-run issue time, so issued_at remains null instead of being fabricated. Failed
     // refreshes retain the last numbers for diagnosis but set available/fresh false.
@@ -1720,6 +1860,10 @@ static void append_status_json(JsonOut& j, bool redact) {
                 j, ",\"low_pressure_bar\":", refrigerant_service.low_pressure);
             j += "}},";
         }
+    }
+    if (c.diagnostics_enabled && diag_effective == DiagnosticsSource::X10a && c.fp_valid) {
+        const logic::WorkingFigureReport wf = checkup_working_figure_status(c, power_meter_fresh);
+        append_status_working_figure_json(j, wf);
     }
 
     // System health: heap headroom + why the device last booted, so both are visible from the LAN

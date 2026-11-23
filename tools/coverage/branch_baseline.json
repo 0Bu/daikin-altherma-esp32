@@ -2203,11 +2203,11 @@
       },
       "main/logic/checkup.hpp": {
         "outcomes": 1231,
-        "taken": 1158
+        "taken": 1159
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 353,
-        "taken": 353
+        "outcomes": 359,
+        "taken": 359
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 272,
@@ -2218,16 +2218,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 328,
-        "taken": 271
+        "outcomes": 352,
+        "taken": 301
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 496,
-        "taken": 322
+        "outcomes": 574,
+        "taken": 383
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 118,
-        "taken": 82
+        "outcomes": 166,
+        "taken": 118
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 26,
@@ -2533,6 +2533,10 @@
         "outcomes": 138,
         "taken": 138
       },
+      "main/logic/power_meter_source.hpp": {
+        "outcomes": 92,
+        "taken": 80
+      },
       "main/logic/profile_table_equal.hpp": {
         "outcomes": 36,
         "taken": 36
@@ -2555,7 +2559,7 @@
       },
       "main/logic/reference_temperature.hpp": {
         "outcomes": 320,
-        "taken": 216
+        "taken": 218
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 256,
@@ -2620,6 +2624,10 @@
       "main/logic/wifi_rollback.hpp": {
         "outcomes": 10,
         "taken": 10
+      },
+      "main/logic/working_figure.hpp": {
+        "outcomes": 494,
+        "taken": 410
       },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,

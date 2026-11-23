@@ -213,6 +213,86 @@ function circulationFormPayload() {
   };
 }
 
+// ── Gas heating comparison tariffs ──────────────────────────────────────
+function updateGasComparisonPreview() {
+  const el = $("gcPreview");
+  if (!el) return;
+  const elec = Number($("gcElecPrice").value);
+  const gas = Number($("gcGasPrice").value);
+  const eff = Number($("gcGasEff").value);
+  if (Number.isFinite(elec) && elec > 0 && Number.isFinite(gas) && gas > 0 &&
+      Number.isFinite(eff) && eff >= 50 && eff <= 98) {
+    const be = (elec * (eff / 100)) / gas;
+    el.textContent = t("wf.gas.preview", be.toLocaleString(LANG, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  } else {
+    el.textContent = t("wf.gas.preview_empty");
+  }
+}
+function fillGasComparison() {
+  const g = S.status?.gas_comparison || {};
+  const configured = !!g.configured;
+  $("gcElecPrice").value = configured && typeof g.elec_price === "number" && Number.isFinite(g.elec_price) ? g.elec_price : "";
+  $("gcGasPrice").value = configured && typeof g.gas_price === "number" && Number.isFinite(g.gas_price) ? g.gas_price : "";
+  $("gcGasEff").value = typeof g.gas_efficiency_pct === "number" && Number.isInteger(g.gas_efficiency_pct) ? g.gas_efficiency_pct : 88;
+  $("gcCurrency").value = typeof g.currency === "string" && g.currency ? g.currency : "EUR";
+  $("gcDeleteBtn").disabled = !configured;
+  updateGasComparisonPreview();
+}
+function openGasComparison() {
+  fillGasComparison();
+  for (const id of ["gcElecPrice", "gcGasPrice", "gcGasEff", "gcCurrency"])
+    $(id).classList.remove("invalid");
+  $("gcError").hidden = true;
+  openPopup("gasComparisonModal");
+}
+function closeGasComparison() { closePopup("gasComparisonModal"); }
+function gasComparisonFormPayload() {
+  return {
+    elec_price: Number($("gcElecPrice").value),
+    gas_price: Number($("gcGasPrice").value),
+    gas_efficiency_pct: Number($("gcGasEff").value),
+    currency: $("gcCurrency").value.trim().toUpperCase(),
+  };
+}
+
+// ── External MQTT electrical power meter ────────────────────────────────
+function fillPowerMeter() {
+  const pm = S.status?.power_meter || {};
+  const mqtt = S.status?.mqtt || {};
+  const configured = !!pm.configured;
+  $("pmBrokerHint").hidden = !!(mqtt.configured || mqtt.broker);
+  $("pmName").value = configured ? (pm.name || "") : t("pm.default_name");
+  $("pmTopic").value = configured ? (pm.topic || "") : "";
+  $("pmPowerPath").value = configured ? (pm.power_path || "") : "";
+  $("pmTimePath").value = configured ? (pm.timestamp_path || "") : "";
+  $("pmUnit").value = pm.unit === "kW" ? "kW" : "W";
+  $("pmScope").value = pm.scope === "compressor_only" ? "compressor_only" : "whole_unit";
+  $("pmMaxAge").value = configured && Number.isInteger(pm.max_age_s) ? pm.max_age_s : 60;
+  $("pmDeleteBtn").disabled = !configured;
+}
+function openPowerMeter() {
+  fillPowerMeter();
+  for (const id of ["pmName", "pmTopic", "pmPowerPath", "pmTimePath", "pmUnit", "pmScope", "pmMaxAge"])
+    $(id).classList.remove("invalid");
+  $("pmError").hidden = true;
+  $("pmTestResult").hidden = true;
+  $("pmTestResult").classList.remove("ok", "warn");
+  openPopup("powerMeterModal");
+}
+function closePowerMeter() { closePopup("powerMeterModal"); }
+function powerMeterFormPayload() {
+  const topic = $("pmTopic").value.trim();
+  return {
+    name: topic ? $("pmName").value.trim() : "",
+    topic,
+    power_path: topic ? $("pmPowerPath").value.trim() : "",
+    timestamp_path: topic ? $("pmTimePath").value.trim() : "",
+    unit: $("pmUnit").value === "kW" ? "kW" : "W",
+    scope: $("pmScope").value === "compressor_only" ? "compressor_only" : "whole_unit",
+    max_age_s: topic ? Number($("pmMaxAge").value) : 60,
+  };
+}
+
 // ── Direct Open-Meteo weather source ──────────────────────────────────────
 function clearWeatherError() {
   $("wxLatitude").classList.remove("invalid");

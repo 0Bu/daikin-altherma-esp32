@@ -85,7 +85,7 @@ for (const file of routeDocs) {
     if (!text.includes(route)) throw new Error(`${file} does not document ${route}`);
   }
 }
-if (!fs.readFileSync("docs/API.md", "utf8").includes("trusted-LAN route count of 40")) {
+if (!fs.readFileSync("docs/API.md", "utf8").includes("trusted-LAN route count of 43")) {
   throw new Error("docs/API.md no longer documents the exact trusted-LAN route budget");
 }
 const credentialWrapperPath = "scripts/gh-with-git-credentials.sh";
@@ -375,6 +375,8 @@ function rejectUnexpectedLiteral(pattern, allowed, message) {
 
 const allowedFixtureSsids = new Set([
   "", "ExampleNet", "fallback", "home", "test-wifi", "net", "new-net", " my wifi ", "sentinel",
+  // Synthetic 32-byte SSO-overflow test literal in test/test_logic.cpp.
+  "long-ssid-over-sso-buffer-123456",
   // Exact synthetic HTTP serializer/ingress fixtures exercise UTF-8, quotes, backslashes and
   // whitespace. Compare the complete raw literal, preserving the existing no-normalization rule.
   String.raw`Café \"quoted\"\\line\n`,

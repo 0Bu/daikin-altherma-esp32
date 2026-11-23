@@ -1097,8 +1097,77 @@ assert.match(historySource, /compare_exchange_weak[\s\S]*?memory_order_release/)
   // Status getters take the caller's Config; a no-argument overload would copy the whole Config per
   // call and invite that churn back into per-cycle paths.
   const mqttHeader = read("main/mqtt_ha.hpp");
-  assert.doesNotMatch(mqttHeader, /\b(reference_temperature_status|circulation_source_status)\(\);/,
-    "room/circulation status getters must not regain a Config-copying no-argument overload");
+  assert.doesNotMatch(mqttHeader, /\b(reference_temperature_status|circulation_source_status|power_meter_status)\(\);/,
+    "room/circulation/power-meter status getters must not regain a Config-copying no-argument overload");
+
+  // The optional MQTT power meter uses power_meter_freshness() from main/logic/power_meter_source.hpp,
+  // preserving mapped-timestamp fail-closed semantics without calling reference_freshness() or
+  // reference_room_freshness() directly in mqtt_ha.cpp.
+  assert.match(mqtt, /#include "logic\/power_meter_source\.hpp"/,
+    "mqtt_ha.cpp must include logic/power_meter_source.hpp for power meter freshness");
+  const pmPowerFreshness = (src) => (src.match(/\bpower_meter_freshness\(/g) || []).length;
+  for (const signature of [
+    "power_meter_frame_freshness(const ReferenceMqttFrame&",
+    "PowerMeterStatus power_meter_status(const Config&",
+    "PowerMeterSample power_meter_sample()",
+  ]) {
+    const fn = bodyOf(mqtt, signature);
+    assert.ok(pmPowerFreshness(fn) >= 1,
+      `${signature} must judge power meter freshness via power_meter_freshness()`);
+    assert.equal(bare(fn), 0,
+      `${signature} must not call reference_freshness() directly for the power meter`);
+    assert.equal(room(fn), 0,
+      `${signature} must not call reference_room_freshness() directly for the power meter`);
+  }
+  for (const call of mqtt.matchAll(/\bpower_meter_freshness\(\s*/g)) {
+    const first = mqtt.slice(call.index + call[0].length, call.index + call[0].length + 40);
+    assert.match(first, /^source_time_mapped,/,
+      `power_meter_freshness() must receive derived source_time_mapped, got ${first}`);
+  }
+}
+
+// Checkup accumulation never copies Config directly via config() and enforces strict no-silent-fallback
+// from a configured MQTT power meter to X10A CT/inverter estimates.
+{
+  const checkupCode = checkup.replace(/\/\/[^\n]*/g, "");
+  assert.doesNotMatch(checkupCode, /\bconfig\s*\(/,
+    "main/checkup.cpp must never call config() directly");
+  const workingFigure = read("main/logic/working_figure.hpp");
+  const wfStep = workingFigure.slice(workingFigure.indexOf("working_figure_step("),
+    workingFigure.indexOf("struct WorkingFigureTariffs"));
+  const wfEval = workingFigure.slice(workingFigure.indexOf("working_figure_evaluate("));
+  assert.match(wfStep,
+    /if\s*\(in\.mqtt_configured\)\s*\{\s*if\s*\(!in\.mqtt_fresh[\s\S]{0,240}?acc\.pending\.unpairable_s\s*=[\s\S]{0,60}?return;\s*\}/,
+    "configured MQTT power meter must reject stale/missing values as unpairable instead of falling back to X10A");
+  assert.match(wfEval,
+    /if\s*\(mqtt_configured\)\s*\{[^}]*r\.pel_kind\s*=[\s\S]{0,260}?\}\s*else\s+if\s*\(cov\.ct_rows\s*>\s*0/,
+    "evaluation pel_kind must never fall back to X10A when an MQTT power meter is configured");
+  assert.match(checkup,
+    /uint32_t\s+effective_pel_source_fp_locked\(const CheckupSlot&\s+slot\)\s*\{[\s\S]{0,240}?if\s*\(mqtt_fp\s*!=\s*0\)\s*return\s+mqtt_fp;/,
+    "configured MQTT power meter identity must win without falling back to X10A identity");
+  assert.match(checkup,
+    /ein\.mqtt_configured\s*=\s*pm\.configured;\s*\n\s*ein\.mqtt_fresh\s*=\s*pm\.fresh;/,
+    "energy_extract_input must forward MQTT meter configuration and freshness separately");
+}
+
+// /status omits working_figure on Modbus or when diagnostics are disabled, while always exposing
+// gas_comparison and power_meter (with source-bound redaction on power_meter identifiers).
+{
+  const appendStatusFn = status.slice(status.indexOf("static void append_status_json("));
+  assert.match(appendStatusFn,
+    /append_status_power_meter_json\(j,\s*c,\s*pm,\s*redact\);[\s\S]{0,120}?append_status_gas_comparison_json\(j,\s*c\);/,
+    "/status must always emit power_meter and gas_comparison even when diagnostics are off or Modbus is active");
+  assert.match(appendStatusFn,
+    /if\s*\(c\.diagnostics_enabled\s*&&\s*diag_effective\s*==\s*DiagnosticsSource::X10a\s*&&\s*c\.fp_valid\)\s*\{[\s\S]{0,180}?append_status_working_figure_json\(j,\s*wf\);\s*\}/,
+    "/status must emit working_figure only when diagnostics are enabled on a confirmed X10A source");
+  assert.equal((appendStatusFn.match(/\bappend_status_working_figure_json\(/g) || []).length, 1,
+    "working_figure must have a single guarded serialization site in append_status_json");
+  const pmStatusFn = status.slice(status.indexOf("append_status_power_meter_json("),
+    status.indexOf("append_status_gas_comparison_json("));
+  for (const field of ["power_meter_name", "power_meter_topic", "power_meter_power_path", "power_meter_time_path"]) {
+    assert.match(pmStatusFn, new RegExp(`jstr_r\\(c\\.${field},\\s*redact\\)`),
+      `/status power_meter.${field} must redact via jstr_r`);
+  }
 }
 
 // Dual-source fault timeline isolation and redaction contracts:

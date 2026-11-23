@@ -108,6 +108,8 @@ uint32_t              hp_poll_generation() { return 7; }
 bool                  hp_poll_generation_matches(uint32_t generation) { return generation == 7; }
 uint32_t              circulation_source_generation() { return 1; }
 CirculationPumpSample circulation_pump_sample() { return {}; }
+uint32_t              power_meter_source_generation() { return 1; }
+PowerMeterSample      power_meter_sample() { return {}; }
 void                  checkup_stop_context_expire(int64_t) { ++journal_sdk::stop_expiry; }
 bool checkup_flash_next(int64_t, int64_t, int64_t& bucket, logic::CheckupJournalPayload& payload,
                         DiagnosticsSource source) {

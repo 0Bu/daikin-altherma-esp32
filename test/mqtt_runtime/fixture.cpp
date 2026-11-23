@@ -251,6 +251,7 @@ void                  history_record_room(bool valid, double temperature, uint32
     if (generation == adapter::room_generation) ++adapter::room_history_accepted;
 }
 void                  checkup_dhw_reset() {}
+void                          checkup_energy_reset() {}
 logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source) {
     return source == DiagnosticsSource::Modbus ? adapter::modbus_cycling : adapter::cycling;
 }
@@ -2388,18 +2389,18 @@ void callback_queue_full() {
                 daik::s_ref_status.temperature_c == 20 && sdk::queue.count == 0,
             "QUEUE_OVERFLOW_PRESERVES_QUEUED_EVIDENCE_AND_NORMAL_DRAIN");
 
-    // Max-size frames fill the static 3,584 B SPSC ring without padding waste; exceeding the ring
+    // Max-size frames fill the static 4,608 B SPSC ring without padding waste; exceeding the ring
     // fails closed and advances s_ref_dropped before wrap-around drain restores full capacity.
     std::string padded = R"({"temperature":22,"time":1700000102,"enabled":true,"pad":")";
     padded.append(daik::REF_TEMP_PAYLOAD_MAX - padded.size() - 2, 'x');
     padded += "\"}";
     require(padded.size() == daik::REF_TEMP_PAYLOAD_MAX, "PADDED_MAX_FRAME_FITS_BOUND");
-    for (int i = 0; i < 3; ++i) feed("room", padded.c_str());
-    require(sdk::queue.count == 3 && daik::s_ref_dropped.load() == 1,
-            "THREE_MAX_FRAMES_FIT_SPSC_RING");
+    for (int i = 0; i < 4; ++i) feed("room", padded.c_str());
+    require(sdk::queue.count == 4 && daik::s_ref_dropped.load() == 1,
+            "FOUR_MAX_FRAMES_FIT_SPSC_RING");
     feed("room", padded.c_str());
-    require(sdk::queue.count == 3 && daik::s_ref_dropped.load() == 2,
-            "RING_FULL_DROPS_FOURTH_MAX_FRAME");
+    require(sdk::queue.count == 4 && daik::s_ref_dropped.load() == 2,
+            "RING_FULL_DROPS_FIFTH_MAX_FRAME");
     daik::service_reference_frames(adapter::cfg);
     require(sdk::queue.count == 0 &&
                 daik::s_ref_ring_consumed.load() == daik::s_ref_ring_produced &&
@@ -2407,7 +2408,7 @@ void callback_queue_full() {
             "RING_DRAIN_RELEASES_ALL_CONSUMED_BYTES");
     feed("room", R"({"temperature":24,"time":1700000103,"enabled":true})");
     daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.messages == daik::REF_QUEUE_DEPTH + 4 &&
+    require(daik::s_ref_status.messages == daik::REF_QUEUE_DEPTH + 5 &&
                 daik::s_ref_status.temperature_c == 24,
             "RING_WRAP_PRESERVES_SUBSEQUENT_FRAME");
 

@@ -401,6 +401,7 @@ size_t       heap_largest_internal_block() { return fixture::largest_block; }
 void         diag_printf(const char*, ...) {}
 void         mqtt_reference_reconfigure() { ++fixture::runtime_changes; }
 void         mqtt_circulation_reconfigure(bool) { ++fixture::runtime_changes; }
+void         mqtt_power_meter_reconfigure(bool, bool) { ++fixture::runtime_changes; }
 void         mqtt_request_weather_cleanup() { ++fixture::runtime_changes; }
 void         mqtt_request_modbus_cleanup() { ++fixture::runtime_changes; }
 void         mqtt_heating_curve_homehub_reset() noexcept { ++fixture::runtime_changes; }
@@ -422,6 +423,7 @@ void history_checkup_reset() { ++fixture::runtime_changes; }
 void history_set_diagnostics(bool) { ++fixture::runtime_changes; }
 void history_circulation_reset() { ++fixture::runtime_changes; }
 void mqtt_circulation_set_diagnostics(bool) { ++fixture::runtime_changes; }
+void mqtt_power_meter_set_diagnostics(bool) {}
 void history_modbus_reset(uint32_t) noexcept { ++fixture::runtime_changes; }
 void history_room_reset(uint32_t identity) noexcept {
     if (fixture::room_history_identity != identity) {
@@ -451,6 +453,7 @@ CirculationSourceTestResult mqtt_circulation_test(const CirculationSourceTestCon
     result.power_w = 5;
     return result;
 }
+PowerMeterTestResult mqtt_power_meter_test(const PowerMeterTestConfig&, uint32_t) { return {}; }
 WeatherSourceChange::WeatherSourceChange(bool configured, bool diagnostics) {
     configured_          = configured;
     diagnostics_enabled_ = diagnostics;

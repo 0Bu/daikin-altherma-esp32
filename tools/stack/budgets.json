@@ -107,7 +107,7 @@
     },
     "config_env3": {
       "pattern": "^daik::set_env3\\(",
-      "max_bytes": 1792
+      "max_bytes": 1856
     },
     "env3_save_preflight": {
       "pattern": "^daik::env3_save_preflight\\(",
@@ -119,15 +119,27 @@
     },
     "config_diagnostics": {
       "pattern": "^daik::set_diagnostics\\(",
-      "max_bytes": 1536
+      "max_bytes": 1584
     },
     "config_circulation": {
       "pattern": "^daik::set_circulation\\(",
-      "max_bytes": 992
+      "max_bytes": 1136
     },
     "circulation_parser": {
       "pattern": "^daik::parse_circulation_request\\(",
       "max_bytes": 1408
+    },
+    "config_gas_comparison": {
+      "pattern": "^daik::set_gas_comparison\\(",
+      "max_bytes": 1536
+    },
+    "config_power_meter": {
+      "pattern": "^daik::set_power_meter\\(",
+      "max_bytes": 1280
+    },
+    "power_meter_parser": {
+      "pattern": "^daik::parse_power_meter_request\\(",
+      "max_bytes": 1600
     },
     "hp_query_probe": {
       "pattern": "^daik::hp_query_probe\\(",
@@ -179,7 +191,7 @@
     },
     "config_transaction": {
       "pattern": "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairEb\\$constprop\\$[0-9]+$",
-      "max_bytes": 1600
+      "max_bytes": 1888
     },
     "config_nvs_blob": {
       "pattern": "^daik::nvs_set_blob\\(",
@@ -211,6 +223,18 @@
     },
     "circulation_decode": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?decode_circulation_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24decode_circulation_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
+    "power_meter_frame": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_power_meter_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?25service_power_meter_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 352
+    },
+    "power_meter_probe": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_power_meter_probe_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?31service_power_meter_probe_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 192
+    },
+    "power_meter_decode": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?decode_power_meter_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24decode_power_meter_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 64
     },
     "reference_subscription": {
@@ -279,11 +303,11 @@
     },
     "poll_task": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?poll_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?9poll_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 1600
+      "max_bytes": 1728
     },
     "poll_detect": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?hp_detect_run\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13hp_detect_run[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 1472
+      "max_bytes": 1616
     },
     "poll_query": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?hp_query_detailed\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?17hp_query_detailed[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -339,11 +363,11 @@
     },
     "checkup_flash_restore": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?checkup_flash_restore\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21checkup_flash_restore[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 224
+      "max_bytes": 256
     },
     "checkup_journal_rebuild": {
       "pattern": "^daik::logic::checkup_journal_rebuild\\(",
-      "max_bytes": 192
+      "max_bytes": 208
     },
     "checkup_journal_choose": {
       "pattern": "^daik::logic::checkup_journal_choose\\(",
@@ -451,7 +475,7 @@
     },
     "http_history": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?h_history\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?9h_history[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 1184
+      "max_bytes": 1248
     },
     "http_diag": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?h_diag\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?6h_diag[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -467,7 +491,7 @@
     },
     "http_values_model": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?h_active_model_values\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21h_active_model_values[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 880
+      "max_bytes": 1024
     },
     "http_board_pins": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?board_pins\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?10board_pins[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -487,7 +511,7 @@
     },
     "boot_sequence": {
       "pattern": "^boot_sequence\\(\\)$",
-      "max_bytes": 800
+      "max_bytes": 944
     },
     "http_coredump_body": {
       "pattern": "^_ZN4daikL10h_coredumpEP9httpd_req\\$part\\$[0-9]+$",
@@ -587,11 +611,11 @@
     },
     "wifi_rollback": {
       "pattern": "^(?:daik::wifi_finish_sta_rollback\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL24wifi_finish_sta_rollback[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 912
+      "max_bytes": 1056
     },
     "wifi_success": {
       "pattern": "^(?:daik::wifi_finish_sta_success\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23wifi_finish_sta_success[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 912
+      "max_bytes": 1056
     },
     "sdk_malloc": {
       "pattern": "^malloc$",
@@ -831,18 +855,6 @@
     },
     "tls_wrap_mbedtls_ssl_write": {
       "pattern": "^__wrap_mbedtls_ssl_write$",
-      "max_bytes": 32
-    },
-    "tls_ssl_check_ctr_renegotiate": {
-      "pattern": "^ssl_check_ctr_renegotiate$",
-      "max_bytes": 48
-    },
-    "tls_mbedtls_ssl_renegotiate": {
-      "pattern": "^mbedtls_ssl_renegotiate$",
-      "max_bytes": 32
-    },
-    "tls_mbedtls_ssl_start_renegotiation": {
-      "pattern": "^mbedtls_ssl_start_renegotiation$",
       "max_bytes": 32
     },
     "tls_mbedtls_ssl_handshake": {
@@ -1707,7 +1719,7 @@
     },
     "mqtt_public_start": {
       "pattern": "^daik::mqtt_ha_start\\(\\)$",
-      "max_bytes": 880
+      "max_bytes": 1024
     },
     "mqtt_retract_stale": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?retract_stale_values\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?20retract_stale_values[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -2303,7 +2315,7 @@
     },
     "cycling_expire": {
       "pattern": "^daik::expire_restored_locked\\(",
-      "max_bytes": 48
+      "max_bytes": 64
     },
     "cycling_seal": {
       "pattern": "^daik::\\(anonymous namespace\\)::checkup_persist_seal\\(",
@@ -2407,7 +2419,7 @@
     },
     "checkup_detect_schema": {
       "pattern": "^daik::checkup_reset_on_detect\\(",
-      "max_bytes": 320
+      "max_bytes": 400
     },
     "checkup_schema": {
       "pattern": "^daik::logic::checkup_model_fingerprint\\(",
@@ -2643,7 +2655,7 @@
     },
     "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_": {
       "pattern": "^daik::checkup_record\\(daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool,\\ daik::logic::CheckupCoverage\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool\\)$",
-      "max_bytes": 448
+      "max_bytes": 576
     },
     "stop_dated": {
       "pattern": "^daik::\\(anonymous\\ namespace\\)::dated\\(long\\ long\\)$",
@@ -3023,7 +3035,7 @@
     },
     "checkup_commit_and_fold": {
       "pattern": "^daik::\\(anonymous namespace\\)::commit_and_fold_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot\\&, daik::logic::CheckupSample const\\&, long long, unsigned long, bool\\)$",
-      "max_bytes": 48
+      "max_bytes": 96
     },
     "checkup_fold_locked": {
       "pattern": "^daik::\\(anonymous namespace\\)::fold_checkup_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot\\&, daik::logic::CheckupSample const\\&, long long\\)$",
@@ -3131,7 +3143,7 @@
     },
     "config_ref_temp": {
       "pattern": "^daik::set_ref_temp\\(httpd_req\\*\\)$",
-      "max_bytes": 1280
+      "max_bytes": 1344
     },
     "modbus_active_profile": {
       "pattern": "^daik::mb_active_profile\\(\\)$",
@@ -3800,6 +3812,39 @@
       "base_bytes": 1536,
       "max_bytes": 8192
     },
+    "httpd_config_gas_comparison": {
+      "symbols": [
+        "config_gas_comparison",
+        "config_document",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_config_power_meter": {
+      "symbols": [
+        "config_power_meter",
+        "config_document",
+        "power_meter_parser",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
     "httpd_hp_query_probe": {
       "symbols": [
         "hp_query_probe",
@@ -3931,6 +3976,42 @@
         "cjson_parse_string",
         "json_guard_reset",
         "json_guard_destroy"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_power_meter_parse": {
+      "symbols": [
+        "mqtt_task",
+        "reference_dispatch",
+        "power_meter_frame",
+        "power_meter_decode",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
+      ],
+      "multipliers": {
+        "cjson_parse_value": 17,
+        "cjson_delete": 17
+      },
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_power_meter_probe_parse": {
+      "symbols": [
+        "mqtt_task",
+        "reference_dispatch",
+        "power_meter_probe",
+        "power_meter_decode",
+        "cjson_parse_length_opts",
+        "cjson_parse_value",
+        "cjson_delete",
+        "cjson_parse_string"
       ],
       "multipliers": {
         "cjson_parse_value": 17,
@@ -4235,7 +4316,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_history_restore": {
       "symbols": [
@@ -4245,7 +4326,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_modbus_discover": {
       "symbols": [
@@ -4255,7 +4336,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_modbus_discover_save": {
       "symbols": [
@@ -4269,7 +4350,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_wifi_config_save": {
       "symbols": [
@@ -4284,7 +4365,7 @@
       ],
       "multipliers": {},
       "base_bytes": 656,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "httpd_values": {
       "symbols": [
@@ -4361,7 +4442,7 @@
       ],
       "multipliers": {},
       "base_bytes": 656,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_wifi_driver": {
       "symbols": [
@@ -4372,7 +4453,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_wifi_wait": {
       "symbols": [
@@ -4383,7 +4464,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "led_diagnostic_format": {
       "symbols": [
@@ -5507,7 +5588,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "mqtt_retirement_legacy_enqueue": {
       "symbols": [
@@ -8039,7 +8120,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_stop_scan": {
       "symbols": [
@@ -8051,7 +8132,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "poll_stop_schema": {
       "symbols": [
@@ -9150,7 +9231,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "poll_stop_restore_fence": {
       "symbols": [
@@ -10735,7 +10816,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_stop_index_reset_suppression": {
       "symbols": [
@@ -10747,7 +10828,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "poll_stop_bind_suppression": {
       "symbols": [
@@ -12043,7 +12124,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_stop_pending_take": {
       "symbols": [
@@ -12063,7 +12144,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_stop_pending_release": {
       "symbols": [
@@ -12084,7 +12165,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "button_stop_forget_flash_take": {
       "symbols": [
@@ -13057,7 +13138,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "httpd_shutdown_wifi_cycling_reset_check": {
       "symbols": [
@@ -13894,7 +13975,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "httpd_shutdown_wifi_cycling_append_shape": {
       "symbols": [
@@ -14374,7 +14455,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "poll_cycling_trend_filter": {
       "symbols": [
@@ -15303,7 +15384,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_fault_scan_shape": {
       "symbols": [
@@ -15315,7 +15396,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "main_fault_scan_owner": {
       "symbols": [
@@ -15327,7 +15408,7 @@
       ],
       "multipliers": {},
       "base_bytes": 1536,
-      "max_bytes": 5120
+      "max_bytes": 6144
     },
     "httpd_shutdown_wifi_checkup_fault_handoff": {
       "symbols": [
@@ -17684,6 +17765,8 @@
         "httpd_config_weather",
         "httpd_config_diagnostics",
         "httpd_config_circulation",
+        "httpd_config_gas_comparison",
+        "httpd_config_power_meter",
         "httpd_hp_query_probe",
         "httpd_mcp_parse",
         "httpd_config_save",
@@ -18071,7 +18154,7 @@
       ]
     },
     "main": {
-      "stack_bytes": 6144,
+      "stack_bytes": 7168,
       "reserve_bytes": 1024,
       "paths": [
         "main_config_load",
@@ -18106,6 +18189,8 @@
         "mqtt_reference_parse",
         "mqtt_circulation_parse",
         "mqtt_circulation_probe_parse",
+        "mqtt_power_meter_parse",
+        "mqtt_power_meter_probe_parse",
         "mqtt_reference_subscribe",
         "mqtt_circulation_subscribe",
         "mqtt_cleanup",
@@ -18753,21 +18838,21 @@
       "esp_http_server/src/httpd_txrx.c": "622df880632b33057dd4c3f2f651baf81536a5b2b5cef872c1ba94d392387b62"
     },
     "config_macros": {
-      "CONFIG_ESP_MAIN_TASK_STACK_SIZE": 6144,
+      "CONFIG_ESP_MAIN_TASK_STACK_SIZE": 7168,
       "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG": 1,
       "CONFIG_LOG_VERSION": 1,
       "CONFIG_LOG_DEFAULT_LEVEL": 3,
       "CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC": 1,
       "CONFIG_MBEDTLS_CUSTOM_MEM_ALLOC": null,
       "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC": null,
-      "CONFIG_MBEDTLS_SSL_RENEGOTIATION": 1,
+      "CONFIG_MBEDTLS_SSL_RENEGOTIATION": null,
       "CONFIG_MBEDTLS_HARDWARE_MPI": 1,
-      "CONFIG_MBEDTLS_LARGE_KEY_SOFTWARE_MPI": 1,
+      "CONFIG_MBEDTLS_LARGE_KEY_SOFTWARE_MPI": null,
       "CONFIG_MBEDTLS_MPI_USE_INTERRUPT": 1,
       "CONFIG_MBEDTLS_MPI_INTERRUPT_LEVEL": 0,
       "CONFIG_MBEDTLS_ECP_C": 1,
       "CONFIG_MBEDTLS_ECP_DP_SECP521R1_ENABLED": 1,
-      "CONFIG_MBEDTLS_ECP_NIST_OPTIM": 1,
+      "CONFIG_MBEDTLS_ECP_NIST_OPTIM": null,
       "CONFIG_MBEDTLS_ECDSA_C": 1,
       "CONFIG_MBEDTLS_SSL_PROTO_TLS1_2": 1,
       "CONFIG_MBEDTLS_SSL_PROTO_TLS1_3": null,
@@ -18792,7 +18877,7 @@
       "CONFIG_MBEDTLS_KEY_EXCHANGE_RSA_PSK": null,
       "CONFIG_MBEDTLS_KEY_EXCHANGE_DHE_RSA": null,
       "CONFIG_MBEDTLS_KEY_EXCHANGE_ECJPAKE": null,
-      "CONFIG_MBEDTLS_KEY_EXCHANGE_RSA": 1,
+      "CONFIG_MBEDTLS_KEY_EXCHANGE_RSA": null,
       "CONFIG_MBEDTLS_KEY_EXCHANGE_ELLIPTIC_CURVE": 1,
       "CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_RSA": 1,
       "CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA": 1,
@@ -18823,11 +18908,11 @@
       "CONFIG_MBEDTLS_SHA512_C": 1,
       "CONFIG_MBEDTLS_HARDWARE_SHA": 1,
       "CONFIG_MBEDTLS_CTR_DRBG_C": 1,
-      "CONFIG_MBEDTLS_HMAC_DRBG_C": 1,
+      "CONFIG_MBEDTLS_HMAC_DRBG_C": null,
       "CONFIG_MBEDTLS_RSA_C": 1,
       "CONFIG_MBEDTLS_PKCS1_V15": 1,
       "CONFIG_MBEDTLS_PKCS1_V21": 1,
-      "CONFIG_MBEDTLS_AES_HW_SMALL_DATA_LEN_OPTIM": 1,
+      "CONFIG_MBEDTLS_AES_HW_SMALL_DATA_LEN_OPTIM": null,
       "CONFIG_MBEDTLS_ECP_DP_SECP192R1_ENABLED": null,
       "CONFIG_MBEDTLS_ECP_DP_SECP224R1_ENABLED": null,
       "CONFIG_MBEDTLS_ECP_DP_SECP192K1_ENABLED": null,
@@ -18862,9 +18947,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -18918,9 +19000,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -18975,9 +19054,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19030,9 +19106,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19088,9 +19161,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19144,9 +19214,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19188,9 +19255,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19240,9 +19304,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19290,9 +19351,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19348,9 +19406,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19397,9 +19452,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19447,9 +19499,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19496,9 +19545,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19536,9 +19582,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19576,9 +19619,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19633,9 +19673,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19678,9 +19715,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19720,9 +19754,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19762,9 +19793,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19833,9 +19861,6 @@
           "tls_esp_mbedtls_read",
           "tls_wrap_mbedtls_ssl_read",
           "tls_mbedtls_ssl_read",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19854,9 +19879,6 @@
           "tls_esp_mbedtls_read",
           "tls_wrap_mbedtls_ssl_read",
           "tls_mbedtls_ssl_read",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19879,9 +19901,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19902,9 +19921,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19923,9 +19939,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -19971,9 +19984,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -20017,9 +20027,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -20064,9 +20071,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -20110,9 +20114,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -20157,9 +20158,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -20197,9 +20195,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",
@@ -20247,9 +20242,6 @@
           "tls_esp_mbedtls_write",
           "tls_wrap_mbedtls_ssl_write",
           "sdk_ssl_write",
-          "tls_ssl_check_ctr_renegotiate",
-          "tls_mbedtls_ssl_renegotiate",
-          "tls_mbedtls_ssl_start_renegotiation",
           "tls_mbedtls_ssl_handshake",
           "tls_mbedtls_ssl_handshake_step",
           "tls_wrap_mbedtls_ssl_handshake_client_step",

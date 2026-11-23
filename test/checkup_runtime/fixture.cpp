@@ -54,6 +54,8 @@ CirculationPumpSample circulation_pump_sample() {
     }
     return adapter::circulation;
 }
+uint32_t         power_meter_source_generation() { return 1; }
+PowerMeterSample power_meter_sample() { return {}; }
 } // namespace daik
 namespace {
 using namespace daik;

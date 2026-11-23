@@ -326,7 +326,7 @@ assert.deepEqual(stackBudgets.paths.main_modbus_discover_save.symbols,
   ["main_task", "boot_sequence", "modbus_discover", "config_save", "config_save_whole",
     "config_transaction", "config_nvs_blob"]);
 assert.equal(stackBudgets.paths.main_modbus_discover_save.base_bytes, 1536);
-assert.equal(stackBudgets.paths.main_modbus_discover_save.max_bytes, 5120);
+assert.equal(stackBudgets.paths.main_modbus_discover_save.max_bytes, 6144);
 assert.deepEqual(stackBudgets.paths.httpd_wifi_scan.symbols, ["http_scan", "wifi_scan"]);
 assert.deepEqual(stackBudgets.paths.httpd_wifi_scan.multipliers, {});
 assert.equal(stackBudgets.paths.httpd_wifi_scan.base_bytes, 1536 + 1024,
@@ -359,9 +359,9 @@ assert.equal(stackBudgets.symbols.cjson_delete.pattern, "^cJSON_Delete$");
 assert.equal(stackBudgets.symbols.cjson_parse_string.pattern, "^parse_string$");
 const namedHttpSymbols = {
   config_hp: ["set_hp", 3200], config_mqtt: ["set_mqtt", 2336],
-  config_board: ["set_board", 2176], config_env3: ["set_env3", 1792],
-  config_weather: ["set_weather", 1776], config_diagnostics: ["set_diagnostics", 1536],
-  config_circulation: ["set_circulation", 992], circulation_parser: ["parse_circulation_request", 1408],
+  config_board: ["set_board", 2176], config_env3: ["set_env3", 1856],
+  config_weather: ["set_weather", 1776], config_diagnostics: ["set_diagnostics", 1584],
+  config_circulation: ["set_circulation", 1136], circulation_parser: ["parse_circulation_request", 1408],
   hp_query_probe: ["hp_query_probe", 2736], mcp_parser: ["mcp_parse", 256],
   config_save: ["config_save", 32], config_save_link: ["config_save_link", 32],
   config_save_if_current: ["config_save_if_current", 32],
@@ -375,7 +375,7 @@ for (const [key, [name, maximum]] of Object.entries(namedHttpSymbols)) {
 }
 assert.equal(stackBudgets.symbols.config_transaction.pattern,
   "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairEb\\$constprop\\$[0-9]+$");
-assert.equal(stackBudgets.symbols.config_transaction.max_bytes, 1600,
+assert.equal(stackBudgets.symbols.config_transaction.max_bytes, 1888,
   "the real NvsBlobStore transaction must have a measured frame independent of the HTTP allowance");
 assert.match(config, /save_whole\([\s\S]*?config_save_transaction\([\s\S]*?config_save\([\s\S]*?save_whole\([\s\S]*?config_save_link\([\s\S]*?save_whole\(/,
   "both HTTP config wrappers must retain the measured shared persistence transaction path");

@@ -122,6 +122,11 @@ constexpr int IPADDR_TYPE_V4 = 0;
 inline int    ipaddr_aton(const char* text, ip_addr_t* ip) {
     return inet_pton(AF_INET, text, &ip->u_addr.ip4.addr);
 }
+#define ip_2_ip4(ipaddr) (&(ipaddr)->u_addr.ip4)
+inline void ip_addr_set_ip4_u32(ip_addr_t* ip, uint32_t val) {
+    ip->type            = IPADDR_TYPE_V4;
+    ip->u_addr.ip4.addr = val;
+}
 struct netif {
     ip_addr_t netmask, ip_addr;
 };

@@ -184,6 +184,8 @@ const POPUP_ROUTES = Object.freeze({
   mqttModal: "mqtt",
   refTempModal: "room-temperature",
   circulationModal: "circulation-pump",
+  gasComparisonModal: "gas-comparison",
+  powerMeterModal: "power-meter",
   weatherModal: "weather",
   syslogModal: "syslog",
   ntpModal: "ntp",
@@ -354,6 +356,8 @@ function openPopupForRoute(id) {
   else if (id === "mqttModal") openMqtt();
   else if (id === "refTempModal") openRefTemp();
   else if (id === "circulationModal") openCirculation();
+  else if (id === "gasComparisonModal") openGasComparison();
+  else if (id === "powerMeterModal") openPowerMeter();
   else if (id === "weatherModal") openWeather();
   else if (id === "syslogModal") openSyslog();
   else if (id === "ntpModal") openNtp();
@@ -367,6 +371,8 @@ function closePopupForRoute(id) {
   else if (id === "mqttModal") closeMqtt();
   else if (id === "refTempModal") closeRefTemp();
   else if (id === "circulationModal") closeCirculation();
+  else if (id === "gasComparisonModal") closeGasComparison();
+  else if (id === "powerMeterModal") closePowerMeter();
   else if (id === "weatherModal") closeWeather();
   else if (id === "syslogModal") closeSyslog();
   else if (id === "ntpModal") closeNtp();

@@ -8,7 +8,7 @@ const parsers = [...config.matchAll(/json_parse_document\(std::string_view\(body
 const consumers = [...config.matchAll(/JsonGuard\s+j\(read_config_document\(req,\s*\d+,\s*parse_error\)\);/g)];
 assert.equal(readers.length, 1, "configuration ingress must share the byte-counted reader");
 assert.equal(parsers.length, 1, "the shared parser must include embedded NULs in its bounded input");
-assert.equal(consumers.length, 14, "all 14 current JSON config bodies must own the shared parsed document");
+assert.equal(consumers.length, 16, "all 16 current JSON config bodies must own the shared parsed document");
 assert.match(config, /if \(length < 0\)\s*\{\s*error = "bad body";\s*return nullptr;/,
   "a failed bounded read must never reach the parser");
 const guard = read("main/json_guard.hpp");
@@ -29,8 +29,8 @@ assert.ok(parser.indexOf("json_payload_strings_ok(payload)") >= 0 &&
   parser.indexOf("json_payload_strings_ok(payload)") < parser.indexOf("cJSON_ParseWithLengthOpts"),
   "Weather must reject unrepresentable strings before recursive parsing");
 const mqtt = read("main/mqtt_ha.cpp");
-assert.equal([...mqtt.matchAll(/!json_payload_strings_ok\(std::string_view\(frame.payload, frame.payload_len\)\)/g)].length, 2,
-  "both MQTT frame consumers must reject unrepresentable strings before parsing");
+assert.equal([...mqtt.matchAll(/!json_payload_strings_ok\(std::string_view\(frame.payload, frame.payload_len\)\)/g)].length, 3,
+  "all three MQTT frame consumers must reject unrepresentable strings before parsing");
 console.log("JSON ingress: every cJSON config body bounded; Weather preflight before parser");
 
 assert.match(config, /std::unique_ptr<char\[\]>\s+body\(new char\[capacity\]\)/,

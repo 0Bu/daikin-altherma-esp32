@@ -1714,3 +1714,96 @@ svg .sc-val.sc-mb .vrow-unit, svg .sc-sub.sc-mb .vrow-unit { fill: var(--src-mb)
    names the mode from the gateway's flags and says the readings are Modbus, which is the same
    statement one line higher and in the place a reader is already looking. Its rules are deleted
    rather than left dormant: unreferenced CSS reads as a feature that is merely switched off.) */
+
+/* ── Performance factor (working figure), Break-Even scale & MQTT power meter ────────────────── */
+.wf-wrap { display: grid; gap: 10px; }
+.wf-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.wf-kpi {
+  min-width: 0; padding: 9px 11px; border: 1px solid var(--line);
+  border-radius: var(--r-input); background: var(--card);
+}
+.wf-kpi-label { font-size: 11.5px; color: var(--muted); line-height: 1.25; overflow-wrap: anywhere; }
+.wf-kpi-val { margin-top: 2px; font-size: 16px; font-weight: 700; color: var(--fg); line-height: 1.25; }
+.wf-kpi-val.ok { color: var(--ok); }
+.wf-kpi-val.warn { color: var(--warn); }
+.wf-kpi-sub { margin-top: 2px; font-size: 11.5px; color: var(--muted); line-height: 1.25; overflow-wrap: anywhere; }
+.wf-scale {
+  padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: var(--r-input); background: var(--card);
+}
+.wf-scale-head {
+  display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
+  gap: 8px; margin-bottom: 6px; font-size: 12px;
+}
+.wf-scale-title { font-weight: 600; color: var(--fg); }
+.wf-scale-band { color: var(--muted); font-size: 11.5px; }
+.wf-scale-stage { position: relative; padding: 24px 0 22px; }
+.wf-tag {
+  position: absolute; top: 0; padding: 1px 6px; border-radius: 6px;
+  font-size: 11.5px; font-weight: 700; white-space: nowrap; color: #fff; background: var(--brand-strong);
+}
+.wf-tag.ok { background: var(--ok); }
+.wf-tag.warn { background: var(--warn); }
+.wf-track {
+  position: relative; height: 10px; border-radius: var(--r-pill); overflow: hidden;
+  background: var(--soft); border: 1px solid var(--line);
+}
+.wf-zone { position: absolute; inset-block: 0; }
+.wf-zone-exp { background: color-mix(in srgb, var(--warn) 24%, transparent); }
+.wf-zone-mid { background: var(--line); }
+.wf-zone-ok { background: color-mix(in srgb, var(--ok) 26%, transparent); }
+.wf-be-tick {
+  position: absolute; top: 21px; width: 2px; height: 16px;
+  transform: translateX(-50%); background: var(--fg);
+}
+.wf-be-lbl {
+  position: absolute; bottom: 0; transform: translateX(-50%);
+  font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--fg);
+}
+.wf-pin {
+  position: absolute; top: 22px; width: 14px; height: 14px; border-radius: 50%;
+  transform: translateX(-50%); border: 2px solid var(--card); background: var(--brand-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .22);
+}
+.wf-pin.ok { background: var(--ok); }
+.wf-pin.warn { background: var(--warn); }
+.wf-scale-ends {
+  display: flex; justify-content: space-between; gap: 8px;
+  margin-top: 2px; font-size: 11px; color: var(--muted);
+}
+.wf-banner {
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-input);
+  background: var(--soft); font-size: 12.5px; color: var(--fg); line-height: 1.4;
+}
+.wf-banner.warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn) 10%, var(--card));
+}
+.wf-meta { display: grid; gap: 4px; }
+.wf-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.wf-btn { flex: 0 1 auto; padding: 7px 12px; font-size: 13px; border-radius: 10px; }
+.wf-eff-help { margin-top: -2px; margin-bottom: 10px; }
+.wf-preview {
+  margin: 4px 0 10px; padding: 9px 11px; border: 1px solid var(--line);
+  border-radius: var(--r-input); background: var(--soft);
+  font-size: 12.5px; color: var(--fg); line-height: 1.4;
+}
+.pm-broker-hint {
+  margin-bottom: 12px; padding: 8px 10px; border: 1px solid var(--warn);
+  border-radius: var(--r-input); color: var(--warn);
+}
+.pm-test-res {
+  padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: var(--r-input); background: var(--soft); color: var(--fg);
+}
+.pm-test-res.ok { border-color: var(--ok); color: var(--ok); }
+.pm-test-res.warn { border-color: var(--warn); color: var(--warn); }
+.pm-actions { flex-wrap: wrap; }
+.pm-actions .btn { flex: 1 1 calc(50% - 5px); }
+@media (min-width: 600px) {
+  .wf-kpis.wf-kpis-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .pm-actions .btn { flex: none; width: 100%; }
+}
+

@@ -99,9 +99,15 @@ CONFIG_LWIP_DHCPS_STATIC_ENTRIES=n
 # per-socket buffers on a device whose contiguous heap is already the binding resource.
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=5760
 CONFIG_LWIP_TCP_WND_DEFAULT=11520
+# IPv4-only LAN networking: HTTP, Modbus TCP, syslog, SNTP, OTA, weather, and MQTT use AF_INET
+# exclusively; drop unused lwIP IPv6/ND6/MLD6/ICMP6 paths.
+CONFIG_LWIP_IPV6=n
+# Outgoing UDP (DHCP, DNS, mDNS, SNTP, syslog, ICMP) stays well below the 1500 B MTU and
+# IPv4 reassembly is already disabled; omit outgoing IPv4 packet fragmentation.
+CONFIG_LWIP_IP4_FRAG=n
 
 # Stack sizes — a comfortable main task stack for NVS + HTTP + the poll engine.
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=7168
 
 # Catch a stack overflow AT THE FIRST WRITE past the limit, with a hardware watchpoint, instead of
 # at the next context switch. IDF's default is the CANARY check, and v1.0.12 is exactly the failure
@@ -118,8 +124,11 @@ CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
 # Logging
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_TAG_LEVEL_IMPL_NONE=y
-# No filesystem directories: certs/keys use CA bundle and NVS, so MBEDTLS_FS_IO is also omitted.
+# No runtime esp_log_level_set() calls exist; omit dynamic runtime log-level tables.
+CONFIG_LOG_DYNAMIC_LEVEL_CONTROL=n
+# No filesystem directories or /dev/null: certs/keys use CA bundle and NVS, so MBEDTLS_FS_IO is also omitted.
 CONFIG_VFS_SUPPORT_DIR=n
+CONFIG_VFS_INITIALIZE_DEV_NULL=n
 CONFIG_ESP_PHY_ENABLE_VERSION_PRINT=n
 
 # WebSockets support: OFF, and stated explicitly rather than left to the Kconfig default, because
@@ -174,6 +183,23 @@ CONFIG_MBEDTLS_X509_CSR_PARSE_C=n
 CONFIG_MBEDTLS_SSL_CACHE_C=n
 CONFIG_MBEDTLS_HARDWARE_RSA_DS_PERIPHERAL=n
 CONFIG_ESP_TLS_USE_DS_PERIPHERAL=n
+# Client-only TLS verification never signs with RFC 6979 ECDSA, accepts TLS renegotiation, parses
+# compressed EC points, or falls back to non-PFS static RSA key exchange (ECDHE_RSA and
+# ECDHE_ECDSA remain enabled). CTR_DRBG supplies the TLS PRNG without HMAC_DRBG; hardware MPI
+# covers RSA up to 4096-bit without >4096-bit software MPI, and general MPI verifies NIST
+# P-256/P-384/P-521 and Curve25519 without unrolled NIST tables.
+CONFIG_MBEDTLS_ECDSA_DETERMINISTIC=n
+CONFIG_MBEDTLS_HMAC_DRBG_C=n
+CONFIG_MBEDTLS_SSL_RENEGOTIATION=n
+CONFIG_MBEDTLS_KEY_EXCHANGE_RSA=n
+CONFIG_MBEDTLS_ECP_NIST_OPTIM=n
+CONFIG_MBEDTLS_LARGE_KEY_SOFTWARE_MPI=n
+CONFIG_MBEDTLS_PK_PARSE_EC_COMPRESSED=n
+# All TLS sites use binary DER esp_crt_bundle_attach (never PEM), omitting PEM/base64 parsing
+# and its software AES fallback; AES runs via the ESP32-S3 hardware peripheral without small-block
+# software-AES fallback.
+CONFIG_MBEDTLS_PEM_PARSE_C=n
+CONFIG_MBEDTLS_AES_HW_SMALL_DATA_LEN_OPTIM=n
 # Keep CA verification for MQTTS, OTA and forecasts, but use ESP-IDF's common-root subset. It
 # retains roughly 99% public-root coverage at about half the flash cost of the full Mozilla set;
 # brokers chained only to a rare excluded root need a certificate chain rooted in this subset.
@@ -193,6 +219,10 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n
 # Silent asserts — keep the abort()/reboot on a failed assertion (so a bad state still
 # reverts via the rollback gate) but drop the assert string tables. ~5 KB.
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+# Drop lwIP assertion branches/format strings (matching silent assertions) and unused SoftAP
+# DHCP client-hostname collection.
+CONFIG_LWIP_ESP_LWIP_ASSERT=n
+CONFIG_LWIP_DHCPS_REPORT_CLIENT_HOSTNAME=n
 # Keep WPA3-SAE + H2E for joined home networks, but omit modes this firmware never enters:
 # provisioning.cpp always creates an open setup AP, and the STA path neither uses OWE nor SAE-PK.
 # These explicit settings keep ESP-IDF 6.1's larger WiFi defaults inside the fixed OTA slot without
@@ -205,6 +235,15 @@ CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT=n
 # WPA2/WPA3-Enterprise network, so the supplicant's enterprise and Suite-B GMAC paths are unreachable.
 CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 CONFIG_ESP_WIFI_GMAC_SUPPORT=n
+# Omit Wi-Fi 7 RSN Override compatibility mode while keeping WPA2 + WPA3-SAE + H2E, and keep the
+# wall-powered controller out of disconnected Wi-Fi modem power-save.
+CONFIG_ESP_WIFI_WPA3_COMPATIBLE_SUPPORT=n
+CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=n
+# Omit unused per-packet esp_netif traffic accounting, hardware flash-encryption R/W (zero eFuses
+# are burned per docs/SECURITY.md), and JTAG/OpenOCD debugger hooks (flash core dumps stay on).
+CONFIG_ESP_NETIF_REPORT_DATA_TRAFFIC=n
+CONFIG_SPI_FLASH_ENABLE_ENCRYPTED_READ_WRITE=n
+CONFIG_ESP_DEBUG_OCDAWARE=n
 
 # The HomeHub lookup uses bounded one-shot mdns_query_ptr calls. It never registers the component's
 # interactive console or continuous mdns_browse_* daemon, so keep those optional 1.12.0 paths out of

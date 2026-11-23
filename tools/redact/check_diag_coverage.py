@@ -84,7 +84,7 @@ SENSITIVE = re.compile(
     # topic through their own broker, and the coordinates of their house. Written as the CONFIG field
     # names because that is how a log line would reach them (c.ref_temp_topic.c_str()); measured, they
     # add no finding today, so the gap they closed was latent rather than live.
-    r"ref_temp_\w+|circulation_\w+|weather_latitude\w*|weather_longitude\w*"
+    r"ref_temp_\w+|circulation_\w+|power_meter_\w+|weather_latitude\w*|weather_longitude\w*"
     r")\b"
 )
 
@@ -157,9 +157,11 @@ def status_unwrapped_config_sites():
     """
     lines = STATUS.read_text().splitlines()
     # The live builder is templated so HTTP can stream while MCP keeps an owning wrapper. Start at
-    # that production serializer, not at the compatibility wrapper below it; otherwise every field
-    # in the real body falls outside this audit and the never-wrapped mutation passes silently.
-    start = next(i for i, line in enumerate(lines) if "static void append_status_json" in line)
+    # the file-static status helpers right above append_status_json, not at the compatibility
+    # wrapper below it; otherwise fields inside append_status_*_json or the real body fall outside
+    # this audit and the never-wrapped mutation passes silently.
+    start = next(i for i, line in enumerate(lines)
+                 if "static void append_status_power_meter_json(" in line)
     end = next(i for i, line in enumerate(lines[start + 1:], start + 1)
                if "struct ValuesSnapshot" in line)
     public = {"c.board_user_set", "c.profile", "c.fp_valid"}

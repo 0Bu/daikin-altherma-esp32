@@ -2627,7 +2627,7 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", p
     ? `<div data-chart="${open && !visible ? 1 : ""}" data-epoch="${S.histEpoch || 0}">${chart}</div>`
     : "";
   const innerBody = chartFirst ? (chartHtml + bodyHtml) : (bodyHtml + chartHtml);
-  const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
+  const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant" || key === "observation:working_figure";
   const aria = ariaValue ? ` aria-label="${esc(`${label}: ${ariaValue}`)}"` : "";
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +

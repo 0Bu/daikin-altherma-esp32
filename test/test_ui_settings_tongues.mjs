@@ -160,6 +160,26 @@ const labels = {
   "circ.detail.state": "Erkannter Zustand",
   "circ.detail.age": "Alter des Messwerts",
   "circ.settings_help": "Nur lesende Pumpendiagnose.",
+  "circ.broker_off": "MQTT-Broker deaktiviert",
+  "env.live": "Live",
+  "wf.not_configured": "Keine Tarife",
+  "wf.gas.title": "Gaspreis-Vergleich",
+  "wf.gas.row": "Gaspreis-Vergleich (Tarife)",
+  "wf.gas.detail.elec": "Strompreis",
+  "wf.gas.detail.gas": "Gaspreis",
+  "wf.gas.detail.eff": "Wirkungsgrad",
+  "wf.gas.detail.breakeven": "Break-even-AZ",
+  "wf.gas.settings_help": "Nur lokale Tarifwerte für die Arbeitszahl-Auswertung.",
+  "pm.title": "Externer Stromzähler",
+  "pm.row": "Externer Stromzähler (MQTT)",
+  "pm.not_configured": "Nicht konfiguriert",
+  "pm.scope_whole": "Gesamtanlage",
+  "pm.scope_comp": "Nur Verdichter",
+  "pm.detail.scope": "Messumfang",
+  "pm.detail.power": "Wirkleistung",
+  "pm.detail.state": "Erkannter Zustand",
+  "pm.detail.error": "Fehler",
+  "pm.settings_help": "Optionaler MQTT-Stromzähler ohne stillen Rückfall.",
 };
 const t = (key, ...args) => (labels[key] || key).replace(/\{(\d+)\}/g, (_, i) => args[Number(i)]);
 const esc = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
@@ -236,6 +256,66 @@ assert.match(circulationButton, /Example circulation pump/,
   "an MQTT outage must not replace the configured pump identity in the row header");
 assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Nicht verfügbar/,
   "an unavailable source without a power sample must still expose its current status inside");
+
+// Gas-comparison and power-meter settings rows share the diagnostics card and split-tongue pattern.
+let gasButton = circulationHtml.match(/<button[^>]*data-act="gas-comparison"[\s\S]*?<\/button>/)?.[0] || "";
+let gasTongue = circulationHtml.match(/id="diagnostics-gas-comparison-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.match(gasButton, /<span>Keine Tarife<\/span>/,
+  "an unconfigured gas comparison must show its compact setup label");
+assert.match(gasButton, /\bdim\b/, "unconfigured tariffs stay subdued");
+assert.match(gasTongue, /Nur lokale Tarifwerte/,
+  "collapsed/unconfigured gas comparison still keeps its settings explanation in the tongue");
+
+S.status.gas_comparison = {
+  configured: true, elec_price: 0.32, gas_price: 0.11, gas_efficiency_pct: 88,
+  break_even_az: 2.56, currency: "EUR",
+};
+S.status.power_meter = {
+  configured: true, name: "Heat pump meter", scope: "whole_unit",
+  has_value: true, fresh: true, power_w: 1240, age_s: 12,
+};
+circulationHtml = sandbox.__renderCirculation();
+gasButton = circulationHtml.match(/<button[^>]*data-act="gas-comparison"[\s\S]*?<\/button>/)?.[0] || "";
+gasTongue = circulationHtml.match(/id="diagnostics-gas-comparison-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.match(gasButton, /<span>2,56 · 88% Hs<\/span>/,
+  "configured tariffs summarize break-even AZ and Hs reference efficiency");
+assert.match(gasButton, /\bok\b/, "configured tariffs carry ok tone");
+assert.match(gasTongue, /<span class="vdesc-n">Strompreis<\/span> 0,3200 EUR\/kWh/);
+assert.match(gasTongue, /<span class="vdesc-n">Gaspreis<\/span> 0,1100 EUR\/kWh/);
+assert.match(gasTongue, /<span class="vdesc-n">Break-even-AZ<\/span> 2,56/);
+
+let pmButton = circulationHtml.match(/<button[^>]*data-act="power-meter"[\s\S]*?<\/button>/)?.[0] || "";
+let pmTongue = circulationHtml.match(/id="diagnostics-power-meter-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.match(pmButton, /<span>Heat pump meter<\/span>/,
+  "power-meter row header must identify the configured external meter");
+assert.doesNotMatch(pmButton.match(/<span>[\s\S]*?<\/span>/)?.[0] || "", /Live|Nicht verfügbar/,
+  "power-meter visible face keeps the meter name rather than the state badge");
+assert.match(pmButton, /aria-label="[^"]*Heat pump meter · Live"/,
+  "power-meter colour-coded face must announce state in its accessible name");
+assert.match(pmTongue, /<span class="vdesc-n">Messumfang<\/span> Gesamtanlage/);
+assert.match(pmTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Live/);
+assert.match(pmTongue, /<span class="vdesc-n">Alter des Messwerts<\/span> &lt;1 min/);
+
+S.status.mqtt = { configured: false, broker: false };
+circulationHtml = sandbox.__renderCirculation();
+pmButton = circulationHtml.match(/<button[^>]*data-act="power-meter"[\s\S]*?<\/button>/)?.[0] || "";
+pmTongue = circulationHtml.match(/id="diagnostics-power-meter-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.match(pmButton, /<span>Heat pump meter<\/span>/,
+  "disabled MQTT broker must preserve configured meter identity");
+assert.match(pmButton, /\berr\b/);
+assert.match(pmButton, /aria-label="[^"]*Heat pump meter · MQTT-Broker deaktiviert"/);
+assert.match(pmTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> MQTT-Broker deaktiviert/);
+
+S.status.mqtt = { configured: true };
+S.status.power_meter = {
+  configured: true, name: "Heat pump meter", scope: "compressor_only",
+  has_value: false, error: "timeout",
+};
+circulationHtml = sandbox.__renderCirculation();
+pmTongue = circulationHtml.match(/id="diagnostics-power-meter-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.match(pmTongue, /<span class="vdesc-n">Messumfang<\/span> Nur Verdichter/);
+assert.match(pmTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Nicht verfügbar/);
+assert.match(pmTongue, /<span class="vdesc-n">Fehler<\/span> timeout/);
 
 let html = sandbox.__renderDynamic();
 assert.doesNotMatch(html, /section-badge|Experimentell/,

@@ -343,6 +343,9 @@ int main(int argc, char** argv) {
                                                                 {"/set_ref_temp", 1},
                                                                 {"/test_circulation", 1},
                                                                 {"/set_circulation", 1},
+                                                                {"/set_gas_comparison", 1},
+                                                                {"/test_power_meter", 1},
+                                                                {"/set_power_meter", 1},
                                                                 {"/set_syslog", 1},
                                                                 {"/set_ntp", 1},
                                                                 {"/set_weather", 1},
@@ -369,7 +372,7 @@ int main(int argc, char** argv) {
             reset();
             start(ap_mode);
             const auto& expected = ap_mode ? setup : lan;
-            check(sdk::routes.size() == expected.size(), "AP5/LAN40 exact route count changed");
+            check(sdk::routes.size() == expected.size(), "AP5/LAN43 exact route count changed");
             for (size_t i = 0; i < expected.size(); ++i) {
                 check(sdk::routes[i].uri == std::string(expected[i].first) &&
                           sdk::routes[i].method == expected[i].second,
@@ -378,7 +381,7 @@ int main(int argc, char** argv) {
                           sdk::routes[i].user_ctx != nullptr,
                       "route bypassed production trampoline");
             }
-            check(sdk::config.max_uri_handlers == 40 && sdk::config.stack_size == 10240 &&
+            check(sdk::config.max_uri_handlers == 43 && sdk::config.stack_size == 10240 &&
                       sdk::config.lru_purge_enable &&
                       sdk::config.uri_match_fn == httpd_uri_match_wildcard,
                   "server capacity/stack/LRU/wildcard configuration changed");
@@ -392,18 +395,18 @@ int main(int argc, char** argv) {
                   sdk::log.find("server start failed") != std::string::npos,
               "server failure must log and stop registration");
         reset();
-        sdk::fail_registration = 39;
+        sdk::fail_registration = 42;
         start();
-        check(sdk::routes.size() == 39 &&
+        check(sdk::routes.size() == 42 &&
                   sdk::log.find("route /* not registered: ESP_ERR_HTTPD_HANDLERS_FULL") !=
                       std::string::npos,
               "catch-all capacity failure went silent");
         reset();
         start();
-        sdk::config.max_uri_handlers = 40;
+        sdk::config.max_uri_handlers = 43;
         daik::http_register(daik::http_server_handle(), "/overflow", HTTP_GET,
                             [](httpd_req_t*) { return ESP_OK; });
-        check(sdk::routes.size() == 40 &&
+        check(sdk::routes.size() == 43 &&
                   sdk::log.find("route /overflow not registered") != std::string::npos,
               "capacity failure changed registration or went silent");
     });

@@ -39,7 +39,7 @@ namespace daik {
 // BSSID) or a missing field.
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The twenty-nine /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// The thirty-three /status values http_status.cpp passes through redact_identifier (via its jstr_r
 // wrapper). This array is the machine-readable source for tools/redact/check_diag_coverage.py
 // (`--list` prints it); the audit also compares docs/REPORTING.md's public table with it:
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  mqtt.base
@@ -51,6 +51,7 @@ inline constexpr const char* REDACTED = "<redacted>";
 //   reference_temperature.hvac_mode (conditional: unknown source text only)
 //   circulation_source.name  circulation_source.topic  circulation_source.power_path
 //   circulation_source.timestamp_path
+//   power_meter.name  power_meter.topic  power_meter.power_path  power_meter.timestamp_path
 //   weather_forecast.latitude  weather_forecast.longitude
 //   syslog.host  ntp.server  modbus.host
 // modbus.host joined the set with the HomeHub transport (legacy-32): it is a LAN address, whether
@@ -98,13 +99,17 @@ inline constexpr std::string_view REDACTED_STATUS_FIELD_NAMES[] = {
     "circulation_source.topic",
     "circulation_source.power_path",
     "circulation_source.timestamp_path",
+    "power_meter.name",
+    "power_meter.topic",
+    "power_meter.power_path",
+    "power_meter.timestamp_path",
     "weather_forecast.latitude",
     "weather_forecast.longitude",
     "syslog.host",
     "ntp.server",
     "modbus.host",
 };
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 29;
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 33;
 static_assert(REDACTED_STATUS_FIELDS ==
               sizeof(REDACTED_STATUS_FIELD_NAMES) / sizeof(REDACTED_STATUS_FIELD_NAMES[0]));
 

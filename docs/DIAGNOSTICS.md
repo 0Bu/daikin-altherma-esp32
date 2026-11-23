@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 5d7c45d6674889bb7be91ae259a41d44ecbe355b0025e17bffbdaa036b4e0fe0 -->
+<!-- user-docs-contract: 726f216e522065ec909f3d2c6b792ece9c5199265af9fa5e823e4779c81f4b20 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -13,7 +13,7 @@ room, forecast and circulation collection, and hides the Diagnostics name and ca
 the default card when available). Re-enabling resumes into the preserved 24 h window without
 bridging the paused interval or carrying an unfinished run/candidate across pausing.
 In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, `flow` on Altherma 4
-Modbus, and passive **Refrigerant (heating)**) are unavailable and omitted from the card.
+Modbus, passive **Refrigerant (heating)**, and **Performance factor**) are unavailable and omitted from the card.
 
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
 Open a row to see what was measured and what the result means. The observation window describes
@@ -277,6 +277,52 @@ A controlled refrigerant test still requires the exact model's service procedure
 instruments.
 
 **Evidence and limits:** [Refrigerant circuit observation](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation)
+
+<a id="working-figure-observation"></a>
+## Performance factor
+
+This expandable row is a rolling 24-hour energy observation inside the X10A card, **not a ninth
+verdict in `/status.health`**; it never changes the eight-row summary badge. It requires Plant
+diagnostics opt-in and a supported X10A profile, and is omitted in **Modbus** mode.
+
+The firmware integrates useful **Heating + DHW** heat using pure water's specific heat capacity
+(`4.186 kJ/(L·K)`) while excluding **Cooling** and passive pump-only standby circulation.
+Water–glycol loops have roughly 6–8% lower heat capacity, so pure water slightly overstates heat
+output on glycol systems. Signed temperature differences during active operation remain signed so
+defrost heat withdrawal and valve transitions stay in the net balance. When tariffs are configured,
+the observed working figure ($\text{AZ} = Q_{\text{th}} / E_{\text{el}}$) is compared against a
+reference gas boiler's break-even ratio:
+
+$$\text{AZ}_{\text{Break-Even}} = \frac{p_{\text{elec}}}{p_{\text{gas}}} \cdot \eta_{\text{Gas}}$$
+
+Efficiency $\eta_{\text{Gas}}$ (`50–98%`, default `88%`) uses the gross calorific value ($H_s$)
+basis shown on residential gas bills, and only **variable per-kWh energy prices** enter the
+comparison (fixed annual chimney sweep, meter rental and base standing charges are excluded).
+Updating tariffs or efficiency recalculates costs and status across existing 24-hour buckets
+immediately without discarding collected history.
+
+| Row status | Meaning |
+|---|---|
+| **Collecting** | Fewer than 2 hours (`7200 s`) of valid paired X10A observations have been collected. |
+| **Standby** | At least 2 hours observed, but net heat is below `1.0 kWh` or electricity is below `0.2 kWh`. |
+| **Partial** (*prov.*) | Energy thresholds met, while span is under 24 hours or usable coverage is below 90% (`77760 s`). |
+| **Limited** (*lim.*) | Full 24-hour window reached, with tank booster (`BSH`) intervals excluded or mismatched backup-heater (`BUH`) electricity/heat boundaries. |
+| **Measured** | Full unlimited 24-hour window without configured tariffs; shows heat, electricity and ratio without a cost verdict. |
+| **Cheaper than gas** / **Like gas** / **Costlier than gas** | Full unlimited 24-hour window evaluated against break-even ratio with a neutral band of `±10%` for an external MQTT meter or `±20%` for onboard X10A current estimates. |
+| **Not supported** | Active X10A profile lacks required flow, water-temperature, valve/mode or electrical-power signals (or CT clamps were detected unwired with no inverter-current fallback). |
+
+Electrical power sources follow strict priority order: (1) configured external MQTT electricity
+meter (`whole_unit` or `compressor_only`), (2) X10A CT current sensors (`0x63/14–16`, `0.5 A` steps
+assuming `~230 V`, whole-unit), and (3) X10A inverter primary current (`0x21/0`, assuming `~230 V`,
+compressor-only, gated by fresh compressor speed). When an external MQTT meter is configured, there
+is **no silent fallback** to X10A current estimates if the MQTT feed becomes stale or unavailable:
+those intervals pause accumulation as unpairable rather than mixing incompatible meters.
+
+**Important limit:** This observation uses uncalibrated flow and water-temperature sensors, does
+not account for glycol heat capacity, fixed utility charges or inverter power factor, and is neither
+a seasonal JAZ/SCOP rating nor a billing meter.
+
+**Evidence and limits:** [Performance factor observation](DIAGNOSTIC_EVIDENCE.md#working-figure-observation)
 
 ## Heating-curve evaluation freshness
 
