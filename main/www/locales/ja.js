@@ -1,4 +1,4 @@
-// translation-source: 3a5add9912946b8cfda4203d0021a3fc68549843dcdf74fe50ee364b268f985c
+// translation-source: a0b77e6154de7503df1d2d35e17a9324cefe13632b5b9c0d926440af9661d87b
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -294,6 +294,8 @@ I18N.ja = localeValues([
   /* check.cycling.e_dhw */ (to, vals) => `${to} 停止：給湯へ切替${vals}。`,
   /* check.cycling.e_norm */ (to, vals) => `終了 ${to}${vals}。`,
   /* check.cycling.e_ongoing */ "最新測定時も運転中。",
+  /* check.cycling.cause_unavailable */ "詳細なし",
+  /* check.cycling.cause_since_boot */ "起動・停止の理由は前回の再起動以降のみ記録されます。",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m}分`,

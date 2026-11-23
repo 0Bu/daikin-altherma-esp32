@@ -1,4 +1,4 @@
-// translation-source: 3a5add9912946b8cfda4203d0021a3fc68549843dcdf74fe50ee364b268f985c
+// translation-source: a0b77e6154de7503df1d2d35e17a9324cefe13632b5b9c0d926440af9661d87b
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -294,6 +294,8 @@ I18N.es = localeValues([
   /* check.cycling.e_dhw */ (to, vals) => `Parada ${to}: cambio a ACS${vals}.`,
   /* check.cycling.e_norm */ (to, vals) => `Fin ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Activo en última lectura.",
+  /* check.cycling.cause_unavailable */ "Sin detalles",
+  /* check.cycling.cause_since_boot */ "Los motivos de arranque y parada se registran a partir del último reinicio.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} mín. ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

@@ -1,4 +1,4 @@
-// translation-source: 3a5add9912946b8cfda4203d0021a3fc68549843dcdf74fe50ee364b268f985c
+// translation-source: a0b77e6154de7503df1d2d35e17a9324cefe13632b5b9c0d926440af9661d87b
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -294,6 +294,8 @@ I18N.fr = localeValues([
   /* check.cycling.e_dhw */ (to, vals) => `Arrêt ${to} : passage en ECS${vals}.`,
   /* check.cycling.e_norm */ (to, vals) => `Fin ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Actif au dernier relevé.",
+  /* check.cycling.cause_unavailable */ "Sans détails",
+  /* check.cycling.cause_since_boot */ "Les causes de démarrage et d'arrêt sont enregistrées à partir du dernier redémarrage.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
