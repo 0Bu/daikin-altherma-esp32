@@ -1157,7 +1157,7 @@ void restore_dhw_journal(const char* nor_path) {
     offer_dhw_window(false, 10, 12);
     require(history_flash_service_journal(1, 0) == 0 && dhw_ports[0].pending == 10,
             "tank_cooling_append_cannot_replace_checkpoint_pending_restore");
-    dhw_ports[0].confirmed = true;
+    dhw_ports[0].confirmed    = true;
     dhw_ports[0].restore_busy = true;
     history_service_flash_restore();
     const auto deferred_reads = journal_sdk::reads;
