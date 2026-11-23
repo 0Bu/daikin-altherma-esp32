@@ -2112,11 +2112,48 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
   const total = readable.length || count
     ? t("check.cycling.timed_starts", checkupCyclingCountPrefix(count) + t("check.starts", count))
     : t("sys.nodata");
+  let gridSvg = "", gridLabels = "";
+  if (count > 0) {
+    const yNum = v => 96 - v * 90 / count;
+    const mag = 10 ** Math.floor(Math.log10(Math.max(1, count / 4)));
+    const steps = [...new Set([0.1, 1, 10].flatMap(e =>
+      [1, 2, 5].map(b => Math.round(b * mag * e))
+    ))].filter(s => s >= 1).sort((a, b) => a - b);
+    let chosen = null;
+    for (const step of steps) {
+      const ticks = [];
+      let spaced = true;
+      for (let v = step; v <= count; v += step) {
+        const py = yNum(v);
+        if (py < 6 || py > 86) continue;
+        if (ticks.length && Math.abs(ticks[ticks.length - 1].py - py) < 17) {
+          spaced = false;
+          break;
+        }
+        ticks.push({ v, py });
+      }
+      if (!spaced || !ticks.length) continue;
+      if (ticks.length >= 3 && ticks.length <= 4) { chosen = ticks; break; }
+      if (!chosen || (ticks.length === 2 && chosen.length !== 2) ||
+          (chosen.length === 1 && ticks.length > 1)) {
+        chosen = ticks;
+      }
+    }
+    if (chosen) {
+      const intFmt = new Intl.NumberFormat(LANG, { maximumFractionDigits: 0 });
+      for (const tick of chosen) {
+        gridSvg += `<line class="vhist-grid" x1="0" y1="${tick.py.toFixed(2)}" x2="2400" y2="${tick.py.toFixed(2)}" vector-effect="non-scaling-stroke"/>`;
+        gridLabels += `<span class="vhist-y-label num" style="top:${(tick.py * 0.96).toFixed(2)}px">${esc(intFmt.format(tick.v))}</span>`;
+      }
+    }
+  }
   return `<div class="vhist checkup-cycling-chart checkup-cycling-timeline" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
     ` data-cycling="${esc(scope)}"${hasContext ? ' data-has-context="true"' : ""}><div class="checkup-chart-total mono num">${esc(total)}</div>` +
-    `<div class="checkup-chart-graph"><svg class="checkup-chart-plot" viewBox="0 0 2400 100" preserveAspectRatio="none" aria-hidden="true"><path d="${path}"/></svg>` +
+    `<div class="checkup-chart-body${gridLabels ? " vhist-has-y" : ""}">` +
+    (gridLabels ? `<div class="vhist-y checkup-chart-y" aria-hidden="true">${gridLabels}</div>` : "") +
+    `<div class="checkup-chart-graph"><svg class="checkup-chart-plot" viewBox="0 0 2400 100" preserveAspectRatio="none" aria-hidden="true">${gridSvg}<path d="${path}"/></svg>` +
     `<div class="checkup-chart-cols">${cols}</div></div><div class="vhist-axis checkup-chart-axis">` +
-    `<div class="checkup-chart-ticks">${axis}</div><span class="checkup-chart-span" aria-live="polite" hidden></span></div>` +
+    `<div class="checkup-chart-ticks">${axis}</div><span class="checkup-chart-span" aria-live="polite" hidden></span></div></div>` +
     `<div class="checkup-chart-legend">${legend}</div><div class="checkup-run-details" hidden></div></div>`;
 }
 

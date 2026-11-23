@@ -1538,4 +1538,35 @@ assert.equal(ui.ready({
     error => error === cleanupOnly, "a lone cleanup failure must not be hidden");
 }
 
+{
+  ui.setLang("en");
+  const timelineHtml = ui.chart({
+    id: "cycling",
+    starts: 5,
+    timeline: {
+      unix_s: 1791900000, window_end_s: 86400, observed_end_s: 86400, boot_s: 86400, live: true,
+      records: [
+        [0, 1], [3600, 5], [3900, 6], [7200, 5], [7500, 6],
+        [10800, 5], [11100, 6], [14400, 5], [14700, 6], [18000, 5], [18300, 6],
+      ].map(([at, kind]) => at * 8 + kind),
+    },
+  });
+  assert.match(timelineHtml, /<line class="vhist-grid"/,
+    "cycling timeline with starts must render dotted integer Y gridlines");
+  assert.match(timelineHtml, /<div class="checkup-chart-body vhist-has-y"><div class="vhist-y checkup-chart-y" aria-hidden="true">/,
+    "cycling timeline with starts must place Y-axis labels in .vhist-y.checkup-chart-y to the left of the graph");
+  assert.match(timelineHtml, /<span class="vhist-y-label num"[^>]*>\d+<\/span>/,
+    "cycling timeline with starts must render integer Y-scale labels");
+  const zeroHtml = ui.chart({
+    id: "cycling",
+    starts: 0,
+    timeline: {
+      unix_s: 1791900000, window_end_s: 86400, observed_end_s: 86400, boot_s: 86400, live: true,
+      records: [0 * 8 + 1],
+    },
+  });
+  assert.doesNotMatch(zeroHtml, /vhist-has-y|vhist-y|vhist-grid|vhist-y-label/,
+    "cycling timeline with zero starts must omit Y gridlines and left Y-axis column");
+}
+
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

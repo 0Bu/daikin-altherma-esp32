@@ -296,9 +296,13 @@ numeric values do not change.
 **History**
 
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
-history card or range picker. Numeric charts share a light area/darker line grammar; gaps break both,
-and a lone sample is a dot. Paired X10A and Modbus series share one chart, axis and cursor, with
-blue/petrol source legends; paired Modbus starts active when available and toggles in the legend.
+history card or range picker. Numeric charts (88 px plot height) share a light area/darker line
+grammar with faint dotted horizontal Y-scale reference lines and a right-aligned unit-bearing Y-axis
+column to the left of the plot (multi-scale outdoor climate follows the first visible series in its
+own colour, and water pressure suppresses ticks colliding with its severity thresholds); gaps break
+both curve and fill, and a lone sample is a dot. Paired X10A and Modbus series share one chart, axis
+and cursor, with blue/petrol source legends; paired Modbus starts active when available and toggles
+in the legend.
 Room temperature can add the configured MQTT source as a third, separately coloured
 series with its name and MQTT attribution, including when no device room sensor is available.
 The device sensor and MQTT source keep distinct current values and explanations. Source replacement
@@ -370,12 +374,14 @@ hour tied to the graph under the pointer until the gesture ends.
 A recorded pin without a boot-relative bucket expires when the plotted series or its alignment
 changes. A forecast pin stays while its timestamp remains selectable on the same chart.
 Closing the inspector preserves a pin for an open
-value row. Collapsing the value panel clears it. Bubbles share one reserved row above the plot, with
-one measurement per line, omitting series without a sample at the selected instant and hiding the
-bubble when no visible series was measured there. The moving bubble paints over the pinned bubble with an opaque surface
-when they overlap. Both selected times
-share the time axis below the plot; the moving time likewise paints over the pinned time. Comparisons
-do not add height or move the plot or pinned time. Phase intervals remain in categorical readouts.
+value row. Collapsing the value panel clears it. Bubbles float directly above the plot without
+reserving vertical space when idle — overlaying header/legend content above — with one measurement
+per line, omitting series without a sample at the selected instant and hiding the bubble when no
+visible series was measured there. The moving bubble paints opaque over the frosted near-opaque
+pinned bubble when they overlap. Both selected times share the single time axis directly below every
+plot, gliding over domain bounds with a surface-matched backdrop so uncovered bounds stay visible
+and moving over the pinned time. Comparisons do not add height or move the plot or pinned time.
+Phase intervals remain in categorical readouts.
 Source legends toggle numeric or paired-state series by source and retain at least one visible series. Choices
 survive polling within the page and apply to both views of the same chart.
 Pointer-loss and a watchdog always release suspended rendering.
@@ -399,10 +405,11 @@ assessment limits. The fault expander shows a hero summary of the latest episode
 24-hour categorical pill bar (`min-width: 3px`, fault-free grey, unmeasured hatch, distinct colors
 per fault code), filter chips and bar tap (`±20 px`) revealing a newest-first episode table on
 demand, and one description paragraph below without a generic Normal target. The compressor-start expander gives the observed start count and completed runs
-by purpose, one short assessment of average heating-run duration, and the 24-hour chart. Keep the
-observed start count available when classification inputs are unsupported. Distinguish unsupported
-inputs from temporarily insufficient readings. Label elapsed time as the observation window and
-reserve event timestamps for recorded events.
+by purpose, one short assessment of average heating-run duration, and the 24-hour chart (showing
+faint dotted horizontal gridlines with a left integer Y-axis column on the cumulative timeline when
+starts are observed). Keep the observed start count available when classification inputs are
+unsupported. Distinguish unsupported inputs from temporarily insufficient readings. Label elapsed
+time as the observation window and reserve event timestamps for recorded events.
 
 The tank-cooling expander shows **Maximum recorded** in K/h when the aggregate has a rate.
 An eligible timeline draws a 24-hour chart. Position each bar by its endpoints and keep zero-rate
