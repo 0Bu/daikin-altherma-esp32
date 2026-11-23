@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from functools import lru_cache
 
 from stop_observation_rules import SYMBOLS, UPDATED_LIMITS, PATHS, BODIES, HEADERS, CALLERS
 
@@ -48,6 +49,7 @@ DEFINITION = re.compile(r'\b([A-Za-z_]\w*)\s*\([^;{}]*?\)\s*(?:const\s*)?(?:noex
 KEYWORDS = {'if', 'for', 'while', 'switch', 'catch', 'sizeof', 'alignof', 'decltype', 'static_assert'}
 
 
+@lru_cache(maxsize=512)
 def masked(source):
     source = TOKEN.sub(lambda m: ' ' * len(m[0]), source)
     return re.sub(r'__attribute__\s*\(\([^()]*\)\)', lambda m: ' ' * len(m[0]), source)
@@ -65,6 +67,7 @@ def normalized(source):
     return ''.join(parts)
 
 
+@lru_cache(maxsize=512)
 def definitions(source):
     code = masked(source)
     spans = []
@@ -78,7 +81,7 @@ def definitions(source):
         if depth:
             raise ValueError('unclosed source function ' + match[1])
         spans.append((match.start(1), match.end(), end, match[1]))
-    return spans
+    return tuple(spans)
 
 
 def body(source, name, error=ValueError):
@@ -127,16 +130,20 @@ def validate_paths(budgets, error):
     if 'history_append_at' in budgets['symbols'] or any(
             'history_append_at' in path['symbols'] for path in budgets['paths'].values()):
         raise error('stop observation inlining: append_at cannot retain an invented outlined frame')
+    tracked_symbols = set(SYMBOLS)
     monitored = {name for name, path in budgets['paths'].items()
                  if name in PATHS or '_stop_' in name or '_dhw_trace_' in name
-                 or set(path['symbols']) & set(SYMBOLS)}
+                 or not tracked_symbols.isdisjoint(path['symbols'])}
     if monitored != set(PATHS):
         raise error('stop observation paths: exact caller/branch inventory changed')
+    owners_by_path = {}
+    for task, spec in budgets['tasks'].items():
+        for name in set(spec['paths']):
+            owners_by_path.setdefault(name, []).append(task)
     for name, (owner, rule) in PATHS.items():
         if budgets['paths'].get(name) != rule:
             raise error('stop observation path: exact members/allowance/cap changed: ' + name)
-        owners = [task for task, spec in budgets['tasks'].items() if name in spec['paths']]
-        if owners != [owner]:
+        if owners_by_path.get(name) != [owner]:
             raise error('stop observation path: exactly one reviewed task owner required: ' + name)
 
 
@@ -374,7 +381,6 @@ def validate_sources(budgets, sources, error):
     if actual != CALLERS:
         changed = [name for name in CALLERS if actual[name] != CALLERS[name]]
         raise error('stop observation caller inventory changed: ' + ', '.join(changed))
-    code = {path: re.sub(r'\s+', ' ', masked(text)) for path, text in sources.items()}
     history = sources['main/history.cpp']
     store = sources['main/stop_observation_store.cpp']
     validate_suppression(sources, error)
@@ -509,6 +515,7 @@ def self_test(budgets, sources, error):
     if 'main/http_handlers.hpp' not in sources:
         raise AssertionError('existing-header caller controls need the real loaded HTTP header')
     count = 0
+    encoded_budget = json.dumps(budgets)
     def reject(changed_budget=budgets, changed_source=sources):
         nonlocal count
         try:
@@ -520,17 +527,17 @@ def self_test(budgets, sources, error):
         else:
             raise AssertionError('accepted stop observation source/path regression')
     for key in SYMBOLS:
-        altered = json.loads(json.dumps(budgets))
+        altered = json.loads(encoded_budget)
         del altered['symbols'][key]
         reject(altered)
         if key.startswith('dhw_trace_') or key in ('dhw_loss_step', 'checkup_cycling_anchor'):
             for field in ('pattern', 'max_bytes'):
-                altered = json.loads(json.dumps(budgets))
+                altered = json.loads(encoded_budget)
                 altered['symbols'][key][field] += '|unreviewed' if field == 'pattern' else 16
                 reject(altered)
     for name, (owner, _) in PATHS.items():
         for field in ('symbols', 'base_bytes', 'max_bytes', 'multipliers', 'owner'):
-            altered = json.loads(json.dumps(budgets))
+            altered = json.loads(encoded_budget)
             rule = altered['paths'][name]
             if field == 'symbols': rule[field] = rule[field][:-1]
             elif field == 'multipliers': rule[field] = {rule['symbols'][0]: 2}
@@ -538,10 +545,10 @@ def self_test(budgets, sources, error):
             else: rule[field] += 16
             reject(altered)
         if '_dhw_trace_' in name:
-            altered = json.loads(json.dumps(budgets))
+            altered = json.loads(encoded_budget)
             del altered['paths'][name]
             reject(altered)
-    altered = json.loads(json.dumps(budgets))
+    altered = json.loads(encoded_budget)
     altered['paths']['poll_dhw_trace_unreviewed'] = {
         'symbols': ['poll_task'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}
     reject(altered)
