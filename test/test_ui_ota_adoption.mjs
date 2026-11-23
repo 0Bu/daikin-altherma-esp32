@@ -28,7 +28,7 @@ function harness(compact) {
     renderApp = () => events.push("paint");
     sysSet = (mode) => events.push(mode);
     otaInline = () => {};
-    otaAlert = () => {};
+    otaAlert = (message) => events.push("alert:" + message);
     otaWatch = (generation) => { events.push("watch:" + generation); return completion; };
     otaPoll = (_states, _tries, _tick, generation) => { events.push("check:" + generation); return completion; };
     otaWaitReboot = () => events.push("wait-reboot");
@@ -39,7 +39,7 @@ function harness(compact) {
   context.completion = completion;
   context.ui.S.status = { version: "same" };
   return { ...context.ui, events, requests, controls, finish,
-    recoverStatus: () => { context.ui.recoveredStatus = { version: "same" }; } };
+    recoverStatus: (frame = { version: "same" }) => { context.ui.recoveredStatus = frame; } };
 }
 
 // Manifest completion releases the OTA lock. Configuration still requires a current full status
@@ -182,4 +182,53 @@ for (const inherited of ["idle", "checking", "error"]) {
   await h.tick({ state: "idle", generation: 80, busy: false });
   assert.equal((await checking).state, "idle");
 }
+
+// 200 OK /status skips /ota/status when idle, and triggers probeRunningOta() when active or error.
+for (const ota of [{ channel: "dev" }, { channel: "dev", busy: false, state: "idle" }]) {
+  const h = harness({ state: "idle", busy: false, generation: 47 });
+  h.recoverStatus({ version: "same", ota });
+  assert.equal(await h.refreshStatus(false), true);
+  await settle();
+  assert.equal(h.requests.filter((request) => request.url === "/ota/status").length, 0,
+    "idle /status must not request /ota/status");
+  assert.equal(h.S.otaBusy, false);
+}
+
+{
+  const h = harness({ state: "checking", busy: true, generation: 47 });
+  h.recoverStatus({ version: "same", ota: { channel: "dev", busy: true, state: "checking" } });
+  assert.equal(await h.refreshStatus(false), true);
+  await settle();
+  assert.equal(h.requests.filter((request) => request.url === "/ota/status").length, 1,
+    "active /status.ota must trigger probeRunningOta()");
+  assert.equal(h.S.otaBusy, true);
+  assert.ok(h.events.includes("check:47"));
+  await h.refreshStatus(false);
+  await settle();
+  assert.equal(h.requests.filter((request) => request.url === "/ota/status").length, 1,
+    "repeated /status while S.otaBusy is true must not duplicate /ota/status probes");
+}
+
+{
+  const h = harness({ state: "error", busy: false, generation: 48, message: "Download failed" });
+  h.recoverStatus({ version: "same", ota: { state: "error" } });
+  assert.equal(await h.refreshStatus(false), true);
+  await settle();
+  assert.equal(h.requests.filter((request) => request.url === "/ota/status").length, 1,
+    "error /status.ota must trigger probeRunningOta()");
+  assert.ok(h.events.includes("alert:Download failed"));
+  await h.refreshStatus(false);
+  await settle();
+  assert.equal(h.requests.filter((request) => request.url === "/ota/status").length, 1,
+    "repeated /status with persistent ota.state === error must not re-probe or re-alert");
+  h.recoverStatus({ version: "same", ota: { busy: false, state: "idle" } });
+  await h.refreshStatus(false);
+  await settle();
+  h.recoverStatus({ version: "same", ota: { busy: false, state: "error" } });
+  await h.refreshStatus(false);
+  await settle();
+  assert.equal(h.requests.filter((request) => request.url === "/ota/status").length, 2,
+    "new ota.state === error after idle must probe once again");
+}
+
 console.log("UI OTA observer real-loop transitions and initiating-check release contract pass");

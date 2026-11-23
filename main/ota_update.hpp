@@ -121,6 +121,12 @@ struct OtaStatus {
 // offer.  Keeping the 512-byte pair out of OtaStatus avoids adding it to every /status/MQTT caller.
 OtaStatus ota_status(OtaFeedUrls* effective_feed = nullptr);
 
+struct OtaStatusBrief {
+    FixedText<16> state; // idle|checking|updating|done|error
+    bool          busy = false;
+};
+OtaStatusBrief ota_status_brief();
+
 // Read the optional, version-bound release notes belonging to one completed /ota/check generation
 // without allocating or copying the complete text onto the HTTP task stack.  The caller streams
 // repeated fixed-size chunks.  False means the generation no longer owns the offer; true with

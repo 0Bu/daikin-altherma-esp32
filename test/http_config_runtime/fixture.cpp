@@ -471,6 +471,7 @@ esp_err_t http_send_json(httpd_req_t* request, const char* body) {
     request->response     = body;
     return ESP_OK;
 }
+void http_set_nodelay(httpd_req_t*, bool) noexcept {}
 int http_read_body(httpd_req_t* request, char* buffer, size_t capacity) {
     ++fixture::body_reads;
     fixture::body_capacity = capacity;

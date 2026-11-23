@@ -9,7 +9,12 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <utility>
+#include <vector>
 #include "http_handlers.hpp"
+#include "http_chunks.hpp"
 #include "stack_watch.hpp"
 
 namespace fixture {
@@ -27,6 +32,8 @@ inline int          shutdown_error                      = 0;
 inline volatile std::sig_atomic_t expected_upload_abort = 0, failed_upload_shutdown = 0,
                                   released_upload_lease = 0, upload_shutdown_attempts = 0;
 inline std::string status_prefix, status_suffix, values_prefix, values_suffix;
+inline std::vector<std::pair<int, int>> nodelay_calls;
+inline int                              last_nodelay_errno = 0;
 [[noreturn]] void  fail(const char* reason) {
     std::fprintf(stderr, "FAIL %s: %s\n", oracle.c_str(), reason);
     std::exit(1);
@@ -55,9 +62,20 @@ int fixture_shutdown(int socket, int how) {
     }
     return ::shutdown(socket, how);
 }
+int fixture_setsockopt(int socket, int level, int option, const void* value, socklen_t len) {
+    errno        = 0;
+    const int rc = ::setsockopt(socket, level, option, value, len);
+    if (level == IPPROTO_TCP && option == TCP_NODELAY && value && len == sizeof(int)) {
+        fixture::last_nodelay_errno = rc == 0 ? 0 : errno;
+        fixture::nodelay_calls.emplace_back(socket, *static_cast<const int*>(value));
+    }
+    return rc;
+}
+#define setsockopt fixture_setsockopt
 #define shutdown fixture_shutdown
 #include HTTP_COMMON_SOURCE
 #undef shutdown
+#undef setsockopt
 #include HTTP_SERVER_SOURCE
 #include MCP_SERVER_SOURCE
 #include ROUTE_GROUP_SOURCE
@@ -94,6 +112,8 @@ void reset() {
     status_suffix.clear();
     values_prefix.clear();
     values_suffix.clear();
+    nodelay_calls.clear();
+    last_nodelay_errno = 0;
     sdk::routes.clear();
     sdk::config            = {};
     sdk::fail_start        = false;
@@ -971,14 +991,45 @@ int main(int argc, char** argv) {
     run("incoming_keepalive_budget", [] {
         start();
         SocketPair pair;
+        check(nodelay_calls.size() == 1 && nodelay_calls[0] == std::pair{pair.fd[1], 1} &&
+                  last_nodelay_errno != 0,
+              "http_open_session did not tolerate AF_UNIX setsockopt(TCP_NODELAY) failure");
         check(pair.byte() == 1, "first request fragment failed");
         auto req   = request();
         req.sockfd = pair.fd[1];
+        nodelay_calls.clear();
         check(dispatch(req, "/status", HTTP_GET) == ESP_OK, "request settlement failed");
+        check(!nodelay_calls.empty() && nodelay_calls.back() == std::pair{pair.fd[1], 1},
+              "handle_then_settle_body did not restore TCP_NODELAY");
         auto* state = static_cast<daik::HttpIngressSession*>(sdk::sessions[pair.fd[1]].context);
         check(state && !state->budget.active, "successful settlement retained old budget");
         sdk::now = 90'000'000LL;
         check(pair.byte() == 1, "idle keepalive time poisoned the next request");
+
+        nodelay_calls.clear();
+        daik::http_set_nodelay(nullptr, false);
+        httpd_req_t no_sock;
+        no_sock.sockfd = -1;
+        daik::http_set_nodelay(&no_sock, false);
+        check(nodelay_calls.empty(), "http_set_nodelay touched invalid socket");
+
+        daik::HttpChunkEmitter emitter{&req};
+        check(emitter("{\"a\":1}", false), "chunk emitter intermediate send failed");
+        check(nodelay_calls.size() == 1 && nodelay_calls.back() == std::pair{pair.fd[1], 0},
+              "HttpChunkEmitter did not disable TCP_NODELAY before intermediate chunk");
+        check(emitter(std::string_view(), true), "chunk emitter final send failed");
+        check(nodelay_calls.size() == 2 && nodelay_calls.back() == std::pair{pair.fd[1], 1},
+              "HttpChunkEmitter did not restore TCP_NODELAY before final chunk");
+
+        auto fail_req       = request(tool_request(true));
+        fail_req.sockfd     = pair.fd[1];
+        fail_req.fail_chunk = 0;
+        nodelay_calls.clear();
+        daik::http_set_nodelay(&fail_req, false);
+        check(dispatch(fail_req, "/mcp", HTTP_POST) == ESP_FAIL,
+              "failed stream did not abort settlement");
+        check(nodelay_calls.size() == 2 && nodelay_calls.back() == std::pair{pair.fd[1], 1},
+              "failed stream left TCP_NODELAY disabled");
     });
     run("incoming_admission_failure", [] {
         start();

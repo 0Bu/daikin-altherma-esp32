@@ -18,6 +18,7 @@ int       http_read_body(httpd_req_t* req, char* buf, size_t max);
 // Install the total receive budget before the SDK starts parsing a new socket's request.
 esp_err_t http_open_session(httpd_handle_t server, int socket);
 void      http_close_session(httpd_handle_t server, int socket);
+void      http_set_nodelay(httpd_req_t* req, bool enable) noexcept;
 void      http_boot_id(char (&out)[17]) noexcept;
 // Private dispatcher sentinel: the async copy owns body settlement and socket shutdown.
 inline constexpr esp_err_t HTTP_ASYNC_ACCEPTED = 0x7f01;

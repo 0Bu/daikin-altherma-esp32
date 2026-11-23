@@ -2023,6 +2023,15 @@ bool ota_busy() {
     return s_busy;
 }
 
+OtaStatusBrief ota_status_brief() {
+    Lock           lk(s_mtx);
+    OtaStatusBrief out{};
+    out.busy = s_busy;
+    out.state =
+        s_status.state.empty() ? std::string_view("idle") : std::string_view(s_status.state);
+    return out;
+}
+
 OtaStatus ota_status(OtaFeedUrls* effective_feed) {
     // The channel is answered from the LIVE config, not from whatever the last check left behind:
     // /ota/status is what the UI reads back after POST /set_ota, and before any check has run there

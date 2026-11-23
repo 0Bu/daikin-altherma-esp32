@@ -215,7 +215,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,37);
+  assert.equal(caseCount,38);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([

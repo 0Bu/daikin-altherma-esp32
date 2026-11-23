@@ -1354,6 +1354,15 @@ function pollSchedule(ms) {
   _pollTimer = setTimeout(pollTick, ms);
 }
 
+let _bootReadyResolve = null;
+let _bootReady = null;
+function finishBootSetup() {
+  const resolve = _bootReadyResolve;
+  _bootReadyResolve = null;
+  _bootReady = null;
+  if (resolve) resolve();
+}
+
 async function pollTick() {
   _pollTimer = null;
   // Nobody is looking. Skip the requests and re-check at the normal cadence — the tick itself is
@@ -1393,6 +1402,9 @@ async function pollTick() {
     // /status just failed => the device is unreachable; a second doomed request per tick only
     // doubles the wait for the timeout that decides the backoff.
     if (ok) ok = await refreshValues(!deferredPaint);
+    // Wait until locale loading, static DOM localization and event wiring complete before the
+    // initial paint, while still overlapping the network /status + /values fetches with /locale.js.
+    if (_bootReady) await _bootReady;
     if (deferredPaint) renderApp();
   } catch (error) {
     ok = false;
@@ -1439,13 +1451,26 @@ function pollStop() {
 }
 
 async function boot() {
-  if (!(await loadLocale(LANG))) LANG = "en";  // device-local asset failure degrades as one language
-  applyStaticI18n();       // localise the static index.html markup (data-i18n) before the first render
-  labelSchematicHits();    // name the clickable schematic parts from the INSPECT table
-  wire();
-  initNavigation();        // restore dashboard / Settings / exact popup from the address + history
-  resumeOta();             // adopt a download already running (reload mid-update / second tab)
-
-  pollStart();             // the live data: /status + /values on a timer (there is no push)
+  if (!_bootReady) _bootReady = new Promise((resolve) => { _bootReadyResolve = resolve; });
+  const bootLang = LANG;
+  try {
+    const localePromise = loadLocale(bootLang);
+    if (typeof pollStart === "function") pollStart();  // overlap /status + /values with /locale.js
+    if (!(await localePromise) && LANG === bootLang) LANG = "en";  // device-local asset failure degrades as one language
+    applyStaticI18n();       // localise the static index.html markup (data-i18n) before the first render
+    labelSchematicHits();    // name the clickable schematic parts from the INSPECT table
+    wire();
+    initNavigation();        // restore dashboard / Settings / exact popup from the address + history
+    let hasOtaCache = false;
+    try {
+      hasOtaCache = typeof otaCacheStorage === "function" &&
+        typeof OTA_RENDER_CACHE_KEY === "string" &&
+        !!otaCacheStorage()?.getItem(OTA_RENDER_CACHE_KEY);
+    } catch { hasOtaCache = false; }
+    if (hasOtaCache && typeof resumeOta === "function")
+      resumeOta();           // adopt a cached in-tab OTA download immediately; idle boots discover via /status
+  } finally {
+    finishBootSetup();
+  }
 }
 boot();

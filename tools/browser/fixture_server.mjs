@@ -15,6 +15,7 @@ const STATUS = Object.freeze({
   mqtt: { configured: true, connected: true, broker: "mqtts://fixture.invalid:8883", has_creds: true,
     base: "daikin-altherma-esp32", base_custom: false },
   syslog: { configured: false },
+  ota: { channel: "dev", busy: false, state: "idle" },
   ntp: { server: "pool.ntp.org", synced: true },
   net: { eth: { present: false } },
   hp: { connected: true, last_poll_ms: 50, rx: 44, tx: 43 },
@@ -66,7 +67,8 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   const icon = fs.readFileSync(path.join(projectRoot, "main/www/heat_pump_icon.png"));
   const favicon = gzipSync(fs.readFileSync(path.join(projectRoot, "main/www/favicon.ico")), { level: 9 });
   const setupWork = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-setup-render-"));
-  let setup, localeBundle;
+  let setup, localeTag;
+  const localePackByCode = new Map();
   try {
     const output = path.join(setupWork, "setup.html.gz");
     const built = spawnSync("python3", [path.join(projectRoot, "tools/web_asset/minify_and_gzip.py"),
@@ -77,12 +79,19 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
     const cmake = fs.readFileSync(path.join(projectRoot, "main/CMakeLists.txt"), "utf8");
     const codes = cmake.match(/set\(UI_LOCALE_CODES ([a-z ]+)\)/)?.[1].trim().split(/\s+/);
     if (!codes?.length) throw new Error("locale build inventory unavailable");
-    const bundleOutput = path.join(setupWork, "locale-bundle.js.gz");
+    const packDir = path.join(setupWork, "locale-packs");
+    const metaFile = path.join(setupWork, "locale-packs.json");
     const bundle = spawnSync("python3", [path.join(projectRoot, "tools/web_asset/build_locale_bundle.py"),
-      "--locale-dir", localeDir, "--locales", ...codes, "--output", bundleOutput],
+      "--locale-dir", localeDir, "--locales", ...codes,
+      "--output-dir", packDir, "--metadata", metaFile],
     { cwd: projectRoot, encoding: "utf8" });
-    if (bundle.status !== 0) throw new Error(bundle.stderr || bundle.stdout || "locale bundle build failed");
-    localeBundle = fs.readFileSync(bundleOutput);
+    if (bundle.status !== 0) throw new Error(bundle.stderr || bundle.stdout || "locale packs build failed");
+    const meta = JSON.parse(fs.readFileSync(metaFile, "utf8"));
+    localeTag = meta.locale_asset_tag;
+    for (const pack of meta.packs) {
+      const data = fs.readFileSync(path.join(packDir, `locale-${pack.name}.js.gz`));
+      for (const code of pack.locales) localePackByCode.set(code, data);
+    }
   } finally { fs.rmSync(setupWork, { recursive: true, force: true }); }
   const setupRequests = [];
   let setupReply = { status: 200, body: { ok: true, reboot: true } };
@@ -117,12 +126,13 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
     if (url.pathname === "/locale.js") {
       const lang = url.searchParams.get("lang") || "";
       if (!/^[a-z]{2}$/.test(lang)) return send(response, 400, "text/plain", "invalid locale");
-      const file = path.join(localeDir, `${lang}.js`);
-      if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile())
-        return send(response, 404, "text/plain", "unknown locale");
+      const pack = localePackByCode.get(lang);
+      if (!pack) return send(response, 404, "text/plain", "unknown locale");
+      const cacheControl = url.searchParams.get("v") === localeTag
+        ? "private, max-age=31536000, immutable" : "no-store";
       response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8",
-        "Content-Encoding": "gzip", "Cache-Control": "no-store" });
-      return response.end(localeBundle);
+        "Content-Encoding": "gzip", "Cache-Control": cacheControl });
+      return response.end(pack);
     }
     if (url.pathname === "/status") {
       if (telemetry.statusUnavailable) return send(response, 500, "text/plain", "fixture status unavailable");

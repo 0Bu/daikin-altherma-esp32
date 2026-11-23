@@ -271,7 +271,7 @@ OTA reload adoption and stable narrow-row interaction.
 | `run-ui-gif-audit.sh` | Recording fingerprint, frame/timing and GIF/stamp currency; stale or unverifiable footage blocks merge |
 
 Localization binds the complete key catalog across thirteen languages, each locale's 32 KiB gzip cap and
-the 283 KiB aggregate guard. Native Altherma 4 limits remain visible in standalone, paired and
+the 290 KiB (296,960-byte) aggregate guard across the five embedded locale packs. Native Altherma 4 limits remain visible in standalone, paired and
 replacement readings, including unchanged values with changed definition metadata. The browser
 matrix performs 390 value disclosures and 104 schematic-inspector pointer clicks across locales and
 both widths; unverified flow/pressure conversions cannot emit numeric agreement/difference.
