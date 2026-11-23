@@ -294,6 +294,7 @@ compatible records restored from flash. It needs unredacted status, enabled diag
 supported source, and an admitted caller-owned snapshot allocation. It shares the cycling chart's
 values/TLS admission guard. New windows can appear without a synchronized clock. Restore requires
 synchronized time, matching diagnostics consent, source, profile, and circulation identity.
+The `window_end_s`, `since_s`, and non-null `observed_end_s` coordinates are uint32 seconds.
 
 | Timeline field | Contract |
 |---|---|

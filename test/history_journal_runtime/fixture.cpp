@@ -56,6 +56,7 @@ struct DhwJournalPort {
     unsigned                      restore_calls = 0;
     bool                          reset_pending = false;
     bool                          confirmed     = true;
+    bool                          restore_busy  = false;
     bool                          scope_matches = true;
 };
 DhwJournalPort     dhw_ports[2];
@@ -331,7 +332,8 @@ CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePag
     ++port.restore_calls;
     if (dhw_forgotten || port.reset_pending || !port.scope_matches)
         return CheckupFlashRestoreResult::Ignored;
-    if (!port.confirmed || !journal_sdk::synced) return CheckupFlashRestoreResult::Deferred;
+    if (!port.confirmed || !journal_sdk::synced || port.restore_busy)
+        return CheckupFlashRestoreResult::Deferred;
     if (page.model_fp != (is_mb ? mb_cycling_model : cycling_model) ||
         page.source_fp != (is_mb ? mb_cycling_source : cycling_source) ||
         page.diagnostics_generation != cycling_generation ||
@@ -1156,6 +1158,16 @@ void restore_dhw_journal(const char* nor_path) {
     require(history_flash_service_journal(1, 0) == 0 && dhw_ports[0].pending == 10,
             "tank_cooling_append_cannot_replace_checkpoint_pending_restore");
     dhw_ports[0].confirmed = true;
+    dhw_ports[0].restore_busy = true;
+    history_service_flash_restore();
+    const auto deferred_reads = journal_sdk::reads;
+    require(dhw_ports[0].restore_calls == 1 && !s_flash_dhw[0].restore_done,
+            "tank_cooling_restore_can_defer_after_read");
+    dhw_ports[0].restore_busy = false;
+    history_service_flash_restore();
+    require(journal_sdk::reads == deferred_reads,
+            "deferred_tank_restore_waits_before_rereading_nor");
+    sdk::now_us += 10 * 1000000LL;
     history_service_flash_restore();
     require_dhw_restored_window(false, 21); // Incomplete newest NOR body was ignored.
 
@@ -1186,30 +1198,25 @@ void verify_dhw_damaged_barrier_journal(const char* nor_path) {
         if (record.header.catalog_fp != dhw_loss_trace_schema(false, true) ||
             record.header.commit != HISTORY_JOURNAL_COMMITTED)
             continue;
-        const uint32_t damaged_crc = record.header.crc ^ 1u;
-        std::memcpy(journal_sdk::flash.data() + offset + offsetof(HistoryJournalHeader, crc),
-                    &damaged_crc, sizeof(damaged_crc));
+        const uint64_t damaged_sequence = record.header.sequence ^ (uint64_t{1} << 63);
+        std::memcpy(journal_sdk::flash.data() + offset + offsetof(HistoryJournalHeader, sequence),
+                    &damaged_sequence, sizeof(damaged_sequence));
         damaged = true;
         break;
     }
-    require(damaged, "tank_cooling_fixture_damages_committed_barrier_crc");
+    require(damaged, "tank_cooling_fixture_damages_committed_barrier_sequence");
     journal_sdk::unix_origin += dhw_seed_uptime_s + dhw_reboot_delay_s;
     boot(false);
-    require(s_flash_dhw[0].fence == s_flash_next_sequence && !dhw_ports[0].restore_calls,
-            "tank_cooling_damaged_barrier_fences_restore_without_advancing_global_sequence");
+    require(s_flash_dhw[0].restore_done && !dhw_ports[0].restore_calls,
+            "tank_cooling_damaged_barrier_withholds_older_restore");
     require_dhw_restored_window(true, 17);
 
     sdk::now_us = dhw_seed_uptime_s * 1000000LL;
     offer_dhw_window(false, 31, 19);
-    require(history_flash_service_journal(1, 0) == 0 && dhw_ports[0].pending == 31,
-            "tank_cooling_writer_refuses_to_acknowledge_data_at_damaged_barrier_sequence");
-    journal_sdk::core_pending = true;
-    journal_sdk::core_bucket  = journal_sdk::unix_origin / 3600;
-    require(history_flash_service_journal(1, 0) == 1 && journal_sdk::core_appended == 1 &&
-                s_flash_next_sequence > s_flash_dhw[0].fence,
-            "ordinary_writer_can_advance_past_damaged_tank_cooling_fence");
-    require(history_flash_service_journal(1, 0) == 1 && dhw_ports[0].ack == 31,
-            "tank_cooling_data_commits_after_shared_sequence_passes_fence");
+    const auto next = s_flash_next_sequence;
+    require(history_flash_service_journal(1, 0) == 1 && dhw_ports[0].ack == 31 &&
+                s_flash_next_sequence == next + 1 && s_flash_dhw[0].fence == 0,
+            "tank_cooling_data_commits_without_trusting_corrupt_barrier_sequence");
 }
 void verify_dhw_incompatible_journal(const char* nor_path) {
     read_nor_file(nor_path);

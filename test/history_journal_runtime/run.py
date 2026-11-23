@@ -247,6 +247,7 @@ if not args.expect_red:
                                "bytes": fault_transport.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
     dhw_transport = OUT / "dhw-trace.synthetic-nor.bin"
+    dhw_before_barrier = OUT / "dhw-before-barrier.synthetic-nor.bin"
     for case in dhw_cases:
         result = execute(baseline, case, case, [dhw_transport])
         expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
@@ -256,8 +257,13 @@ if not args.expect_red:
         if not expected:
             (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
             raise RuntimeError("Unexpected tank-cooling journal outcome: " + case)
+        if case == "seed_dhw_journal":
+            dhw_before_barrier.write_bytes(dhw_transport.read_bytes())
     transport_evidence.append({"path": str(dhw_transport), "sha256": digest(dhw_transport),
                                "bytes": dhw_transport.stat().st_size,
+                               "only_cross_process_state": "synthetic NOR partition bytes"})
+    transport_evidence.append({"path": str(dhw_before_barrier), "sha256": digest(dhw_before_barrier),
+                               "bytes": dhw_before_barrier.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
 unknowns = []
 for case in ["unknown_case", "data_unknown", "barrier_unknown",
@@ -319,10 +325,14 @@ if not args.expect_red:
         ("skip_dhw_checkpoint_after_shutdown_barrier", "const size_t dhw_budget = max_records ? 2 : 1;",
          "const size_t dhw_budget = 1;", ["dhw_shutdown_checkpoint_after_barrier"],
          "tank_cooling_shutdown_commits_replacement_after_barrier"),
-        ("ack_dhw_checkpoint_at_damaged_barrier_sequence",
-         "!restore_done || s_flash_next_sequence <= ds.fence", "!restore_done",
+        ("trust_corrupt_dhw_barrier_sequence",
+         "            ds.restore_done = true;\n        }\n        return;\n    }\n    if (matching",
+         "            ds.restore_done = true;\n            ds.fence = h.sequence;\n"
+         "        }\n        return;\n    }\n    if (matching",
          ["verify_dhw_damaged_barrier_journal"],
-         "tank_cooling_writer_refuses_to_acknowledge_data_at_damaged_barrier_sequence"),
+         "tank_cooling_data_commits_without_trusting_corrupt_barrier_sequence"),
+        ("reread_dhw_while_restore_deferred", "esp_timer_get_time() < ds.restore_retry_us ||",
+         "false ||", ["restore_dhw_journal"], "deferred_tank_restore_waits_before_rereading_nor"),
         ("anchor_at_late_fold",
          "return wall_bucket_of_instant_locked(logic::history_raster_boundary_us(commit_us));",
          "return wall_bucket_of_instant_locked(commit_us);",
@@ -376,6 +386,8 @@ if not args.expect_red:
         for case in controls:
             if case in pending_cases:
                 control_inputs = [transport]
+            elif case == "restore_dhw_journal":
+                control_inputs = [dhw_before_barrier]
             elif case in dhw_cases:
                 control_inputs = [dhw_transport]
             else:

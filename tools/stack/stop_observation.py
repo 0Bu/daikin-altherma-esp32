@@ -19,6 +19,8 @@ INLINED_INDEX_HELPERS = (
     'history_journal_reserve_sequence',
 )
 INLINED_SUPPRESSION_HELPERS = ('stop_context_unavailable_report',)
+INLINED_APPEND_HELPERS = ('flash_append_record_at', 'flash_prepare_next_slot',
+                          'flash_note_append_failure', 'flash_note_append_success')
 DHW_TRACE_HELPERS = ('copy_dhw_trace_locked', 'dhw_loss_step_traced', 'dhw_loss_step',
                      'apply_dhw_reset_locked', 'slot_start', 'slot_set_diagnostics',
                      'checkup_cycling_end_unix_s', 'dhw_loss_wall_anchor_s', 'mb_record_poll_gap',
@@ -29,7 +31,8 @@ DHW_TRACE_HELPERS = ('copy_dhw_trace_locked', 'dhw_loss_step_traced', 'dhw_loss_
                      'checkup_dhw_trace_reset_pending', 'checkup_dhw_trace_checkpoint_appended',
                      'flash_build_next_dhw', 'history_restore_dhw_flash', 'flash_index_dhw_page',
                      'flash_dhw_owned', 'flash_dhw_appended', 'flash_note_barrier_fence',
-                     'flash_record_physically_valid', 'time_synced', 'checkup_modbus_reset')
+                     'flash_region_erased', 'flash_record_physically_valid', 'time_synced',
+                     'checkup_modbus_reset')
 INDEX_POST_VALIDATION_FENCE = (
     '    if (s_forgotten.load(std::memory_order_acquire)) return;\n'
     '    observation_index_add('
@@ -305,10 +308,14 @@ def validate_dhw_trace_sources(sources, error):
     if ('[[gnu::noinline]]boolcheckup_dhw_trace_restore_ready(DiagnosticsSourcesource)' not in compact
             or ready != 'if(!s_mtx)returnfalse;Locklk(s_mtx,0);'
                         'returnlk.acquired()&&slot_for(source).source_confirmed;'
-            or 'if(!wait_ticks&&!checkup_dhw_trace_restore_ready(source))continue;'
+            or not restore.startswith('constexprint64_tretry_us=10*1000000;')
+            or 'if(!wait_ticks&&(esp_timer_get_time()<ds.restore_retry_us||'
+               '!checkup_dhw_trace_restore_ready(source)))continue;'
                'auto&r=*new(s_flash_sector)FlashJournalRecord;'
-               'constesp_err_te=flash_read_record(ds.newest.slot,r);' not in restore):
-        raise error('stop observation DHW restore: nonblocking readiness must precede poll flash read')
+               'constesp_err_te=flash_read_record(ds.newest.slot,r);' not in restore
+            or not restore.endswith('!=CheckupFlashRestoreResult::Deferred;'
+                                    'if(!ds.restore_done)ds.restore_retry_us=esp_timer_get_time()+retry_us;}')):
+        raise error('stop observation DHW restore: poll reads require readiness and deferred backoff')
     logic = normalized(sources['main/logic/checkup.hpp'])
     pure = ('[[gnu::noinline]]inlinevoiddhw_loss_step(DhwLossState&st,DhwLossBucket&b,'
             'constCheckupSample&s,int64_tnow_us)')
@@ -461,9 +468,10 @@ def validate_inlining(disassembly, error):
                       for helper in DHW_TRACE_HELPERS))
         if dhw and name not in exact:
             raise error('stop observation DHW detail: unmeasured outlined helper/clone needs frame/path review: ' + name)
-        if ('flash_append_record_at(' in name or
-                re.match(r'^_Z.*22flash_append_record_at', name)):
-            raise error('stop observation inlining: newly outlined append_at requires frame/path review')
+        if any(re.search(r'\b' + helper + r'\(', name) or
+               re.match(r'^_Z.*' + str(len(helper)) + helper, name)
+               for helper in INLINED_APPEND_HELPERS):
+            raise error('stop observation inlining: newly outlined append helper requires frame/path review')
         if any(re.search(r'\b' + helper + r'\(', name) or
                re.match(r'^_Z.*' + str(len(helper)) + helper, name)
                for helper in INLINED_INDEX_HELPERS + INLINED_SUPPRESSION_HELPERS):
@@ -686,7 +694,11 @@ def self_test(budgets, sources, error):
         ('main/history.cpp', 'history_restore_dhw_flash',
          '*new (s_flash_sector + sizeof(r)) logic::DhwLossTracePage', 'unreviewed_page'),
         ('main/history.cpp', 'history_restore_dhw_flash',
-         'if (!wait_ticks && !checkup_dhw_trace_restore_ready(source)) continue;', ''),
+         '!checkup_dhw_trace_restore_ready(source)', 'false'),
+        ('main/history.cpp', 'history_restore_dhw_flash',
+         'esp_timer_get_time() < ds.restore_retry_us', 'false'),
+        ('main/history.cpp', 'history_restore_dhw_flash',
+         'if (!ds.restore_done) ds.restore_retry_us = esp_timer_get_time() + retry_us;', ''),
         ('main/checkup.cpp', 'checkup_dhw_trace_restore_ready',
          'Lock lk(s_mtx, 0);', 'Lock lk(s_mtx);'),
         ('main/history.cpp', 'history_flash_forget', 'checkup_dhw_trace_forget();', ''),
@@ -736,7 +748,7 @@ def self_test(budgets, sources, error):
         else:
             raise AssertionError('accepted newly outlined append_at')
     for name in [
-            candidate for helper in INLINED_INDEX_HELPERS + INLINED_SUPPRESSION_HELPERS
+            candidate for helper in INLINED_INDEX_HELPERS + INLINED_SUPPRESSION_HELPERS + INLINED_APPEND_HELPERS
             for candidate in ('daik::logic::' + helper + '(x)', '_Z' + str(len(helper)) + helper + 'Eclone')
     ] + [
             'daik::logic::ObservationIndexEntry::' + method + '() const'

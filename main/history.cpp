@@ -1106,9 +1106,10 @@ FaultFlashStream s_flash_fault_modbus{};
 
 struct DhwFlashStream {
     CyclingFinalPage newest{};
-    uint64_t         fence        = 0;
-    uint32_t         token        = 0;
-    bool             restore_done = false;
+    uint64_t         fence            = 0;
+    int64_t          restore_retry_us = 0;
+    uint32_t         token            = 0;
+    bool             restore_done     = false;
 };
 
 DhwFlashStream s_flash_dhw[2]{};
@@ -2687,12 +2688,21 @@ bool flash_decode_fault_page(FaultFlashStream& cs, const CyclingFinalPage& index
 void flash_index_dhw_page(const logic::HistoryJournalHeader& h, uint16_t slot, bool valid) {
     const bool is_modbus = flash_dhw_owned(h, true);
     if (!is_modbus && !flash_dhw_owned(h, false)) return;
-    DhwFlashStream& ds = s_flash_dhw[is_modbus];
-    if (flash_note_barrier_fence(h, logic::dhw_loss_trace_schema(is_modbus, true), ds.fence))
+    DhwFlashStream& ds       = s_flash_dhw[is_modbus];
+    const uint32_t  barrier  = logic::dhw_loss_trace_schema(is_modbus, true);
+    const bool      matching = valid && logic::dhw_loss_trace_header_matches(h, is_modbus);
+    if (h.catalog_fp == barrier) {
+        if (matching) {
+            flash_note_barrier_fence(h, barrier, ds.fence);
+        } else if (h.magic == logic::HISTORY_JOURNAL_MAGIC &&
+                   h.commit == logic::HISTORY_JOURNAL_COMMITTED) {
+            // A damaged committed reset has no trustworthy sequence. Skip replay for this
+            // source during this boot and let its writer use the trusted shared cursor.
+            ds.restore_done = true;
+        }
         return;
-    if (valid && logic::dhw_loss_trace_header_matches(h, is_modbus) &&
-        h.sequence > ds.newest.sequence)
-        ds.newest = {h.sequence, slot};
+    }
+    if (matching && h.sequence > ds.newest.sequence) ds.newest = {h.sequence, slot};
 }
 
 bool flash_read_stop_observation(uint16_t slot, int64_t& bucket, uint64_t& sequence,
@@ -3481,11 +3491,7 @@ void flash_fault_appended(bool is_modbus) {
     auto& page = *new (out.payload) logic::DhwLossTracePage{};
     if (!checkup_dhw_trace_checkpoint(page, ds.token, wait_ticks, source)) return false;
     const bool barrier = page.count == 0;
-    // A recognizable damaged barrier can fence older data while its sequence was excluded from
-    // physical head discovery. Wait for the shared writer to move past that fence before offering
-    // a data page whose next boot would otherwise discard it despite successful readback.
-    if ((!barrier && (!restore_done || s_flash_next_sequence <= ds.fence)) ||
-        !logic::dhw_loss_trace_page_valid(page, barrier))
+    if ((!barrier && !restore_done) || !logic::dhw_loss_trace_page_valid(page, barrier))
         return false;
 
     auto& h       = out.header;
@@ -3892,6 +3898,7 @@ void history_restore_fault_flash(TickType_t wait_ticks) {
 }
 
 [[gnu::noinline]] void history_restore_dhw_flash(TickType_t wait_ticks) {
+    constexpr int64_t retry_us = 10 * 1000000;
     for (bool is_modbus : {false, true}) {
         DhwFlashStream& ds = s_flash_dhw[is_modbus];
         if (ds.restore_done) continue;
@@ -3902,7 +3909,9 @@ void history_restore_fault_flash(TickType_t wait_ticks) {
         const auto source = is_modbus ? DiagnosticsSource::Modbus : DiagnosticsSource::X10a;
         // Regular polls wait for source confirmation before touching flash. The one-off shutdown
         // drain uses the reducer's existing bounded wait without adding a second lock wait.
-        if (!wait_ticks && !checkup_dhw_trace_restore_ready(source)) continue;
+        if (!wait_ticks && (esp_timer_get_time() < ds.restore_retry_us ||
+                            !checkup_dhw_trace_restore_ready(source)))
+            continue;
 
         auto&           r = *new (s_flash_sector) FlashJournalRecord;
         const esp_err_t e = flash_read_record(ds.newest.slot, r);
@@ -3929,6 +3938,7 @@ void history_restore_fault_flash(TickType_t wait_ticks) {
         }
         ds.restore_done = checkup_dhw_trace_restore(page, wait_ticks, source) !=
                           CheckupFlashRestoreResult::Deferred;
+        if (!ds.restore_done) ds.restore_retry_us = esp_timer_get_time() + retry_us;
     }
 }
 
