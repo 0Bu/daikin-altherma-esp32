@@ -222,9 +222,10 @@ that boundary, preserving the order and position of the restored samples.
 
 The journal occupies the upper 4 MiB of the official 8 MiB layout. Dense source records have a CRC
 and a commit word programmed last; a torn slot is skipped without erasing older committed neighbors.
-Erase sectors rotate over the partition. Record geometry grows by powers of two with a compile-time
-minimum retention of 72 hours for all active sources. Old physical records remain wear reserve
-until rotation reaches them.
+Erase sectors rotate over the partition. Record geometry grows by powers of two to cover at least
+72 hours at the compile-time write budgets for all active sources. The tank-cooling budget allows
+one checkpoint and one reset barrier per source per hour. Repeated resets or shutdowns can shorten
+physical retention. Old records remain until rotation reaches them.
 
 Per-source semantic manifests name trend identity, locator, kind, converter and unit, excluding
 labels. They allow unchanged curves to survive added or reordered rows. Duplicate ids, damaged
@@ -279,10 +280,10 @@ The separate Stop journal, DHW restart handoff and trend history retain their ow
 X10A (`s_x10a`, `CHECKUP_PERSIST_MAGIC`) and HomeHub/Altherma 4 Modbus (`s_modbus`,
 `CHECKUP_MODBUS_PERSIST_MAGIC`) use separate `.noinit` stores, separate 24 h `CheckupRing` /
 `DhwLossRing` rings, separate cycling traces, and separate flash-journal sources
-(`kCheckupModbusSource`, `kCyclingModbusTraceSource`). Circulation broker/mapping/interpretation
-identity gates only DHW buckets; changed circulation or HomeHub config must not retire independent
-X10A evidence, and switching the `diagnostics_source` preference (`v21`) only chooses which store
-`/status.health` renders without merging or clearing either history.
+(`kCheckupModbusSource`, `kCyclingModbusTraceSource`). The circulation broker, mapping, and
+interpretation identity gates the affected source's DHW buckets, timeline, and unfinished-window
+handoff. The sources retain independent histories. The `diagnostics_source` preference (`v21`)
+selects which store `/status.health` renders.
 A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage
 to completed checks. The first opt-in draws a durable non-zero generation; pausing diagnostics
 (`enabled: false`) preserves both 24-hour diagnostic stores, closes any open run as censored without

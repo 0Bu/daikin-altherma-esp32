@@ -299,7 +299,7 @@ synchronized time, matching diagnostics consent, source, profile, and circulatio
 |---|---|
 | `epoch` | Nonzero uint32 collection, reset, or coordinate-frame generation for this boot and source. Withdrawing restored windows after a confirmed clock step advances it. |
 | `window_end_s` | Right edge in whole seconds on the timeline's monotonic frame. |
-| `since_s` | Start of collection, extended back to the first restored start if earlier. When a clock step withdraws restored windows, this moves to the first remaining current-boot window's start or to the boot origin on the same timeline frame if none remains. It conveys no continuous coverage. |
+| `since_s` | Start of collection, extended back to the first restored start if earlier. At clock-step withdrawal it moves to the first current-boot window's start if one is still stored at that point, otherwise to the boot origin on the same timeline frame. Subsequent window expiry leaves this coordinate in place. It conveys no continuous coverage. |
 | `observed_end_s` | Coordinate of the last current-boot sample with plausible R5T and readable valve, internal-pump and tank-heater inputs. Null until such a sample arrives. |
 | `unix_s` | Optional synchronized Unix-seconds anchor **at `window_end_s`**. The two monotonic bounds around the clock read must map to the same wall second. |
 | `live` | Boolean freshness of complete DHW inputs and the source, checked against the 15-second limit before rounding timestamps. |
