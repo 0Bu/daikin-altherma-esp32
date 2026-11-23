@@ -294,6 +294,7 @@ compatible records restored from flash. It needs unredacted status, enabled diag
 supported source, and an admitted caller-owned snapshot allocation. It shares the cycling chart's
 values/TLS admission guard. New windows can appear without a synchronized clock. Restore requires
 synchronized time, matching diagnostics consent, source, profile, and circulation identity.
+The field first appears after a live sample starts the trace or a compatible checkpoint restores it.
 The `window_end_s`, `since_s`, and non-null `observed_end_s` coordinates are uint32 seconds.
 
 | Timeline field | Contract |
@@ -320,11 +321,11 @@ including on reads after polling stops. A retained start may precede the left ed
 earlier windows can adopt a new, biased uptime frame so pre-boot endpoints remain unsigned.
 Use endpoint differences for durations. With `unix_s`, map coordinate `s` to
 `unix_s - window_end_s + s`. Without that anchor, use times relative to the snapshot.
-After adoption, retention advances with the monotonic clock. A confirmed wall-clock reading
-within one second of the time predicted by the restore anchor retains that anchor. A larger
-confirmed difference withdraws the restored windows and schedules a journal barrier. Current-boot
-measurements keep their monotonic frame. See [reboot and persistence](PLANT.md#reboot-and-persistence)
-for barrier durability.
+Retention advances with the monotonic clock. Restoration or the first checkpoint sets the wall
+anchor. A confirmed wall-clock reading within one second of the predicted time retains that
+anchor. A larger confirmed difference withdraws restored windows and schedules a journal barrier.
+Current-boot measurements keep their monotonic frame. See
+[reboot and persistence](PLANT.md#reboot-and-persistence) for barrier durability.
 
 `windows:[]` means eligible collection has begun but no accepted timed completion is retained.
 An absent timeline can mean unsupported, reset, disabled, redacted, allocation-denied or unreadable

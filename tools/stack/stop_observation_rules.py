@@ -468,7 +468,7 @@ _DHW_FRAMES = {
     'retire': ('daik::(anonymous namespace)::retire_dhw_trace_locked(daik::(anonymous namespace)::CheckupSlot&)', 32),
     'wall': ('daik::dhw_trace_wall_s(unsigned long)', 64),
     'wall_locked': ('daik::dhw_trace_wall_locked(daik::(anonymous namespace)::CheckupSlot&, unsigned long)', 32),
-    'checkpoint': ('daik::checkup_dhw_trace_checkpoint(daik::logic::DhwLossTracePage&, unsigned long&, unsigned long, daik::DiagnosticsSource)', 80),
+    'checkpoint': ('daik::checkup_dhw_trace_checkpoint(daik::logic::DhwLossTracePage&, unsigned long&, unsigned long, daik::DiagnosticsSource)', 96),
     'ready': ('daik::checkup_dhw_trace_restore_ready(daik::DiagnosticsSource)', 48),
     'adopt': ('daik::checkup_dhw_trace_restore(daik::logic::DhwLossTracePage const&, unsigned long, daik::DiagnosticsSource)', 64),
     'forget': ('daik::checkup_dhw_trace_forget()', 32),
@@ -634,6 +634,7 @@ for _phase, _tail in {
     'header': ['dhw_trace_header', 'dhw_trace_header_shape'],
     'fence': ['dhw_trace_fence'],
     'crc': ['dhw_trace_physical', 'cycling_flash_crc', 'history_config_crc'],
+    'damaged_barrier_crc': ['history_config_crc'],
 }.items():
     _dhw_path('main_dhw_trace_scan_' + _phase, 'main', ['main_task', 'boot_sequence', 'history_start'] + _tail)
 
@@ -663,11 +664,11 @@ BODIES = {
     'main/checkup.cpp': {
         'checkup_dhw_trace_restore_ready': 'ad10b18d3795838c486b2c157ad33a2c1f8f9e6a36de25a0a5964b98eab9c705',
         'arm_dhw_trace_barrier_locked': '18fba84c11e743abe4a666574bcfef7e4c6d3d413a858599d1d958940428f4c8',
-        'retire_dhw_trace_locked': 'f5618607d1597091afc7cca3cf41e35172e1e4f206f8537664ad7e756fef511c',
+        'retire_dhw_trace_locked': '05165d7d154dbe74cf51162f8c056ba03283c054e751ef1a07a8ee5d36621bbf',
         'dhw_trace_wall_s': 'f3d131de9489fbe972287f7008952c138d63c290990b928dbbec8ae28c57f624',
-        'dhw_trace_wall_locked': 'c1a46e2431a10a11a257a69609355d78ae132054cba461064052c2fadcbf1dd8',
-        'checkup_dhw_trace_checkpoint': '0c97a2833546c7491275273235121f943a989d3230e839f9a0a9db073ce23a0b',
-        'checkup_dhw_trace_restore': '6d5c90e4367a58f8771e847acc38fa0412d17977bbf13e0a6c01d9e97e3c2945',
+        'dhw_trace_wall_locked': 'ec44cc7e71ab9e8b095238204962174465abd8b2aaab58040e6389b5da767d8c',
+        'checkup_dhw_trace_checkpoint': '65481cf0f03a9ac552d266a1c0ac657865eaa6387261ea4f3c8790aa332527c0',
+        'checkup_dhw_trace_restore': '352ca569a580ae36ad718c9325f32aec66eefaaa257ed8fca9f5d8584b7caed8',
         'checkup_dhw_trace_forget': 'bf10f2b5dc08c24bed8fa59a54a36649b6094deb5585fc9a9c4e3789618f012a',
         'checkup_dhw_trace_reset_pending': '18b46c0777e737857b5c22cde9f1cd4c28704869e3c978462c1a8702890b1646',
         'checkup_dhw_trace_checkpoint_appended': 'a2b05089141f1a00c3d1acc1e118f183371ca5bc2811d464ebcfc0a71d936b82',
@@ -693,7 +694,7 @@ BODIES = {
         'slot_start': '093f1e4d71c68cdcc56fc8a62634c3043f73493c25728c052664af3a101ece70',
         'slot_set_diagnostics': '366666a68b466b3dc06d426efaa33b4f4502054f67ccfcc60a498e9fd702c304',
     },
-    'main/history.cpp': {'history_flash_forget_ready': '2e5cd836850c755bdb7e35e2e2f05a09eecacfcd7973af03266f548d08133a96', 'history_persist_state': 'd06271f4418ca5cc11c6f1c073a8d2b87eef13b13684c6903d17c85967aaa32e', 'history_checkup_flash_pending': 'f5c12808e894a7183bc10f7f74271282fab5558baa14cb1ee98c0630ece0f8d4', 'persist_wipe': '0544c57474097ef244cefafa9f09b37069720cedfd4db6c6536fee62a6022450', 'persist_seal_locked': '27f95c2faaf3b7d1711e76af89a7bb381277ae02092b63bc965226de272266df', 'history_persist_crc': '4b65e3b908302595cb6674ce14706bf1a6b7bb402b9beb4f95c0717ec3928e94', 'room_wipe_locked': '2c8ffda9b4bf50aff913225d2384a3f87bdc0b95f5da55e351d02df5bcc15ad8', 'room_seal_locked': 'd74305d77fc7cff40166fa05efee9ecda565c0534a0ba50e10ef71f95b63a88c', 'room_crc': '3100b765bf0e51aa216e883eaf2f1a9a6f572626ff07b55d712200b9c7eef6c4', 'flash_manifest_cache_reset': 'd741678b58fb33a6e086ba270d825d82512d86c12d1634086cd76c473555d786', 'forget_adopt_floor': 'b6cfa9296eaf5bf71f95ee18a4fffbb2b5fb2e5341f9669ecf53fcc800872b87', 'flash_read_stop_observation': '75cbf90d8d9f10327834e195f85009b608ecbb226898664b79b8cde7dc25e429', 'flash_journal_scan': 'da7a3bce5a118fa590f51bfcbcfba1146b8937f5dca28f38c6913d31f7205708', 'flash_build_next_stop_observation': 'f6cab877495c59fa36f4327f839117ad58994dd5753688da0a4a628c2776936b', 'flash_append_record_at': 'b555a7d00e4e8c0ab8b2a0c8ba1106865dcbd9f361517c0520fe5c61406ca5af', 'flash_append_record': 'c38a51dd9924abd0f2ac3ec799658ee1723bef40b7ee2d11c7f16e82bf2a7663', 'history_service_flash_restore': '62056a77ca2a13cbac37fd5161e434af79197bc8c79507db487027c1611f664f', 'history_flash_service_journal': 'c3e274c50b377a3e7dc5674a7769fefbc943505776903b9b1d5a362f0330b060', 'history_flash_save': 'c4bebd63b2e41e471139a1c13098df9a36c91afab49b81d7192edf7ce0f42514', 'history_flash_forget': 'cec80827ddfb94ef9029a767e369fba91db5b5340fcc79b50e8b6a67dde49a57', 'history_flash_start': 'd7956a1b227c03a14ff2e89aadd6dc4a6e0b81bfd26bc94b3399e25a64c85729', 'flash_region_erased': 'bd569d6c919373f96e471df99996084f7df6ab8a5841da5d644a14f707383712', 'history_restore_checkup_flash': '3f75cf1423737969ffc77a2f62d8ba603d966a99d231c0b08655302333eb20d2', 'flash_build_for_service': '70e26d28005eb7edeccc11e601742f6da5b4b4628ee2d66abccbfe8f88d53976', 'history_start': '37821bff957d7f8c4f877139bab143d2d30c2ed67b7e4a86cfbc574ead1aa9ac', 'history_record_board': '3e0fed45d656ff87f7369741316b87793f79cab29f042d79137e4656d126de66', 'flash_index_stop_observation_record': 'a4f77b892db7f0883e4fbec0ede6080e571ed2299c5aaabe159ca6e013eda1d8', 'flash_dhw_owned': '1dd9b06d8a8bb7d1986969d6a07bd33ea161cadc4385d275a79c01b290204cc0', 'flash_index_dhw_page': '46008dc6782343b0c27669164274ba036769f540ff73f0589d5732446bce91aa', 'flash_build_next_dhw': 'e8d64985e4f73b22311fc970e4c7840c0eaf34b53be813ac5d8d12e778207536', 'flash_dhw_appended': '866361455e911d687f040161bf509fd922111c5c16b435804a01ab5e124803b1', 'history_restore_dhw_flash': 'd17182025b751f90a6023b94be1eb04c1cdfec16cf52956879e3f096a927f837', 'flash_record_valid': '7aba5d28624ec3cdd554833e9beb4e28ec4360a11d696fb91a5b7dd8a587ea80',
+    'main/history.cpp': {'history_flash_forget_ready': '2e5cd836850c755bdb7e35e2e2f05a09eecacfcd7973af03266f548d08133a96', 'history_persist_state': 'd06271f4418ca5cc11c6f1c073a8d2b87eef13b13684c6903d17c85967aaa32e', 'history_checkup_flash_pending': 'f5c12808e894a7183bc10f7f74271282fab5558baa14cb1ee98c0630ece0f8d4', 'persist_wipe': '0544c57474097ef244cefafa9f09b37069720cedfd4db6c6536fee62a6022450', 'persist_seal_locked': '27f95c2faaf3b7d1711e76af89a7bb381277ae02092b63bc965226de272266df', 'history_persist_crc': '4b65e3b908302595cb6674ce14706bf1a6b7bb402b9beb4f95c0717ec3928e94', 'room_wipe_locked': '2c8ffda9b4bf50aff913225d2384a3f87bdc0b95f5da55e351d02df5bcc15ad8', 'room_seal_locked': 'd74305d77fc7cff40166fa05efee9ecda565c0534a0ba50e10ef71f95b63a88c', 'room_crc': '3100b765bf0e51aa216e883eaf2f1a9a6f572626ff07b55d712200b9c7eef6c4', 'flash_manifest_cache_reset': 'd741678b58fb33a6e086ba270d825d82512d86c12d1634086cd76c473555d786', 'forget_adopt_floor': 'b6cfa9296eaf5bf71f95ee18a4fffbb2b5fb2e5341f9669ecf53fcc800872b87', 'flash_read_stop_observation': '75cbf90d8d9f10327834e195f85009b608ecbb226898664b79b8cde7dc25e429', 'flash_journal_scan': 'da7a3bce5a118fa590f51bfcbcfba1146b8937f5dca28f38c6913d31f7205708', 'flash_build_next_stop_observation': 'f6cab877495c59fa36f4327f839117ad58994dd5753688da0a4a628c2776936b', 'flash_append_record_at': 'b555a7d00e4e8c0ab8b2a0c8ba1106865dcbd9f361517c0520fe5c61406ca5af', 'flash_append_record': 'c38a51dd9924abd0f2ac3ec799658ee1723bef40b7ee2d11c7f16e82bf2a7663', 'history_service_flash_restore': '62056a77ca2a13cbac37fd5161e434af79197bc8c79507db487027c1611f664f', 'history_flash_service_journal': 'c3e274c50b377a3e7dc5674a7769fefbc943505776903b9b1d5a362f0330b060', 'history_flash_save': 'c4bebd63b2e41e471139a1c13098df9a36c91afab49b81d7192edf7ce0f42514', 'history_flash_forget': 'cec80827ddfb94ef9029a767e369fba91db5b5340fcc79b50e8b6a67dde49a57', 'history_flash_start': 'd7956a1b227c03a14ff2e89aadd6dc4a6e0b81bfd26bc94b3399e25a64c85729', 'flash_region_erased': 'bd569d6c919373f96e471df99996084f7df6ab8a5841da5d644a14f707383712', 'history_restore_checkup_flash': '3f75cf1423737969ffc77a2f62d8ba603d966a99d231c0b08655302333eb20d2', 'flash_build_for_service': '70e26d28005eb7edeccc11e601742f6da5b4b4628ee2d66abccbfe8f88d53976', 'history_start': '37821bff957d7f8c4f877139bab143d2d30c2ed67b7e4a86cfbc574ead1aa9ac', 'history_record_board': '3e0fed45d656ff87f7369741316b87793f79cab29f042d79137e4656d126de66', 'flash_index_stop_observation_record': 'a4f77b892db7f0883e4fbec0ede6080e571ed2299c5aaabe159ca6e013eda1d8', 'flash_dhw_owned': '1dd9b06d8a8bb7d1986969d6a07bd33ea161cadc4385d275a79c01b290204cc0', 'flash_index_dhw_page': 'ae43cfd0f878288c21a674175837ea85dc3c9663bd6ebfa3a890690b7f749b48', 'flash_build_next_dhw': '1e21d86dfea545b9e3c687ee8a24832cf5022486c0a80f45d05123f383673425', 'flash_dhw_appended': '866361455e911d687f040161bf509fd922111c5c16b435804a01ab5e124803b1', 'history_restore_dhw_flash': '7039e65876b516f293cb752a284bd35f372195e335678e9afb40fc9785399f57', 'flash_record_valid': '7aba5d28624ec3cdd554833e9beb4e28ec4360a11d696fb91a5b7dd8a587ea80',
         'flash_read_record': '60d252b831d6c27d071c22f3b7431880ee97ca192bb361aaf3e3994ca7a62e7c',
         'flash_prepare_next_slot': '0e95fcde2d497919df4ca42c226aedfa1705dee50ecba485679e7a9c39543b08',
         'flash_record_physically_valid': 'f015edf230e1b23aca3e34d684a07db6f9c9e46a6456f5abad45190039c27999',
@@ -715,7 +716,7 @@ BODIES = {
 }
 
 HEADERS = {
-    'main/logic/dhw_loss_persist.hpp': '5a258a13f09fa2bde6c63bc69bd06c504247799856ad51c4fac4c70e2e8ea7ab',
+    'main/logic/dhw_loss_persist.hpp': '9c828e46543339a7efbc107a3f72a53988076cd14f8fa1de1e4a6c1c7d06f2ab',
     'main/logic/dhw_loss_trace.hpp': '8a5a30646cb51affb43e46031f04a02050349327b8df8a5dcd1817cd092dbeb1',
     'main/logic/defrost_start.hpp': 'c08424fec579d0dcdbfceaf14bb5fee36ab59711c272f2b77a3328651e153b9f',
     'main/rtos_guard.hpp': '53a064d451e42c43f2b883e113db9cc7877b1f1f4814a4431af8b102ee63d5d7',

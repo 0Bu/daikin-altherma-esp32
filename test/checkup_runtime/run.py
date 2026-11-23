@@ -41,6 +41,7 @@ CASES = [
     "hydronic_reader_generation", "hydronic_pause_resume",
     "x10a_cycling_run_contexts",
     "dhw_trace_capture", "dhw_trace_restore_forward", "dhw_trace_restore_backward",
+    "dhw_trace_checkpoint_clock_step",
     "dhw_trace_pause", "dhw_trace_source_reset",
     "dhw_trace_circulation_reset", "dhw_trace_forget", "dhw_trace_forget_before_start",
     "dhw_trace_unavailable", "dhw_trace_forget_during_snapshot", "dhw_trace_reset_during_snapshot",
@@ -442,6 +443,10 @@ for name, needle, replacement, occurrences, case, oracle in [
     ("redate_restored_dhw_after_clock_step",
      "    slot.dhw_trace.discard_restored();\n", "", 1,
      "dhw_trace_restore_forward", "dhw_clock_step_only_withdraws_restored_prefix"),
+    ("omit_clock_anchor_on_current_dhw_checkpoint",
+     "    if (!slot.dhw_trace_clock_anchor_s && unix_s >= uptime_s)\n"
+     "        slot.dhw_trace_clock_anchor_s = unix_s - uptime_s;\n", "", 1,
+     "dhw_trace_checkpoint_clock_step", "fresh_tank_checkpoint_clock_step_commits_barrier"),
     ("omit_dhw_trace_final_withdrawal_guard",
      "if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire))", "if (false)", 1,
      "dhw_trace_forget_during_snapshot", "dhw_trace_withdrawal_during_clock_read_clears_captured_output"),

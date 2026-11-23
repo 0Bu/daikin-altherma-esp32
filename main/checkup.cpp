@@ -183,10 +183,10 @@ struct CheckupSlot {
 
     // Append optional runtime detail so existing field offsets and stack budgets stay unchanged.
     // Exact windows use their own flash page, separate from hourly aggregates.
-    logic::DhwLossTrace dhw_trace{};
-    std::atomic<bool>   dhw_trace_forgotten{false};
-    bool                  dhw_trace_restore_allowed  = false;
-    uint32_t              dhw_trace_restore_anchor_s = 0;
+    logic::DhwLossTrace   dhw_trace{};
+    std::atomic<bool>     dhw_trace_forgotten{false};
+    bool                  dhw_trace_restore_allowed = false;
+    uint32_t              dhw_trace_clock_anchor_s  = 0;
     std::atomic<uint32_t> dhw_trace_barrier{0};
     std::atomic<uint32_t> dhw_trace_barrier_acked{0};
     std::atomic<uint32_t> dhw_trace_saved_end_s{0};
@@ -299,8 +299,8 @@ void arm_dhw_trace_barrier_locked(CheckupSlot& slot) {
 }
 
 void retire_dhw_trace_locked(CheckupSlot& slot) {
-    slot.dhw_trace_restore_allowed  = false;
-    slot.dhw_trace_restore_anchor_s = 0;
+    slot.dhw_trace_restore_allowed = false;
+    slot.dhw_trace_clock_anchor_s  = 0;
     slot.dhw_trace.reset();
     arm_dhw_trace_barrier_locked(slot);
 }
@@ -1817,15 +1817,15 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source)
 
 [[gnu::noinline]] static uint32_t dhw_trace_wall_locked(CheckupSlot& slot, uint32_t uptime_s) {
     const uint32_t now = dhw_trace_wall_s(uptime_s);
-    if (!now || !slot.dhw_trace_restore_anchor_s) return now;
-    const uint64_t anchored = uint64_t{slot.dhw_trace_restore_anchor_s} + uptime_s;
+    if (!now || !slot.dhw_trace_clock_anchor_s) return now;
+    const uint64_t anchored = uint64_t{slot.dhw_trace_clock_anchor_s} + uptime_s;
     if (anchored <= UINT32_MAX && now <= anchored + 1 && anchored <= uint64_t{now} + 1)
         return static_cast<uint32_t>(anchored);
 
     // A clock step must not re-date saved evidence or extend its lifetime on a later reboot.
     // Withdraw the pre-boot prefix, preserving this boot's measurements and monotonic frame.
     slot.dhw_trace.discard_restored();
-    slot.dhw_trace_restore_anchor_s = 0;
+    slot.dhw_trace_clock_anchor_s = 0;
     arm_dhw_trace_barrier_locked(slot);
     return now;
 }
@@ -2234,8 +2234,11 @@ bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage& page, uint32_t& token
                 page.records[i], trace.windows[(trace.head + i) % logic::DHW_LOSS_TRACE_CAPACITY],
                 frame_s))
             return false;
-    return !slot.dhw_trace_forgotten.load(std::memory_order_acquire) &&
-           !slot.dhw_reset_requested.load();
+    if (slot.dhw_trace_forgotten.load(std::memory_order_acquire) || slot.dhw_reset_requested.load())
+        return false;
+    if (!slot.dhw_trace_clock_anchor_s && unix_s >= uptime_s)
+        slot.dhw_trace_clock_anchor_s = unix_s - uptime_s;
+    return true;
 }
 
 [[gnu::noinline]] bool checkup_dhw_trace_restore_ready(DiagnosticsSource source) {
@@ -2267,8 +2270,8 @@ CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePag
     if (!unix_s) return Result::Deferred;
     if (!logic::dhw_loss_trace_restore(slot.dhw_trace, page, uptime_s, unix_s))
         return Result::Ignored;
-    slot.dhw_trace_restore_anchor_s = unix_s - uptime_s;
-    slot.dhw_trace_restore_allowed  = false;
+    slot.dhw_trace_clock_anchor_s  = unix_s - uptime_s;
+    slot.dhw_trace_restore_allowed = false;
     return Result::Restored;
 }
 

@@ -140,11 +140,12 @@ confirmation. It requires the matching circulation identity and diagnostics gene
 power loss can lose windows that had not yet been committed. Restored bars report historical
 observations. Freshness still requires complete inputs from the current boot.
 
-A confirmed clock step withdraws restored windows from memory immediately. This withdrawal is
-durable once the journal barrier commits. If power fails or the barrier write fails before commit,
-the previous checkpoint can still qualify for restoration on the next boot under the usual identity
-and age checks. A recognizable but damaged committed barrier suppresses restoration for its source
-while it remains in flash. New windows continue to be recorded.
+After restoration or the first checkpoint, a confirmed clock step withdraws restored windows
+immediately and queues a barrier so current windows can be saved with the corrected time. If power
+fails or the barrier write fails before commit, the previous checkpoint can still qualify for
+restoration under the usual identity and age checks. A recognizable damaged barrier blocks replay
+of older checkpoints. New checkpoints can be restored after a restart while the damaged barrier
+remains in flash.
 
 A software restart can also carry each source's ongoing tank-loss filter through a separately sealed
 **one-shot handoff**. Adoption requires confirmation of that source and circulation scope, enabled

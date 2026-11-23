@@ -261,7 +261,7 @@ def validate_dhw_trace_sources(sources, error):
     clock = normalized(body(checkup, 'dhw_trace_wall_s', error))
     anchor = normalized(body(checkup, 'dhw_trace_wall_locked', error))
     if ('logic::DhwLossTracedhw_trace{};std::atomic<bool>dhw_trace_forgotten{false};'
-            'booldhw_trace_restore_allowed=false;uint32_tdhw_trace_restore_anchor_s=0;'
+            'booldhw_trace_restore_allowed=false;uint32_tdhw_trace_clock_anchor_s=0;'
             'std::atomic<uint32_t>dhw_trace_barrier{0};'
             'std::atomic<uint32_t>dhw_trace_barrier_acked{0};'
             'std::atomic<uint32_t>dhw_trace_saved_end_s{0};'
@@ -294,7 +294,7 @@ def validate_dhw_trace_sources(sources, error):
     bracket = ('constint64_tbefore_us=esp_timer_get_time();int64_tunix_s=-1;int32_tms=0;'
                'time_now(unix_s,ms);returnlogic::dhw_loss_wall_anchor_s('
                'uptime_s,before_us,esp_timer_get_time(),unix_s,ms);')
-    roll = ('slot.dhw_trace.discard_restored();slot.dhw_trace_restore_anchor_s=0;'
+    roll = ('slot.dhw_trace.discard_restored();slot.dhw_trace_clock_anchor_s=0;'
             'arm_dhw_trace_barrier_locked(slot);returnnow;')
     withdrawn = ('if(dhw_trace&&slot.dhw_trace_forgotten.load(std::memory_order_acquire))'
                  'dhw_trace->clear();')
@@ -303,6 +303,13 @@ def validate_dhw_trace_sources(sources, error):
             or '[[gnu::noinline]]staticuint32_tdhw_trace_wall_locked(CheckupSlot&slot,uint32_tuptime_s)'
             not in compact):
         raise error('stop observation DHW detail: admission/clock bracket/post-clock withdrawal changed')
+    checkpoint = normalized(body(checkup, 'checkup_dhw_trace_checkpoint', error))
+    if not checkpoint.endswith(
+            'if(slot.dhw_trace_forgotten.load(std::memory_order_acquire)||'
+            'slot.dhw_reset_requested.load())returnfalse;'
+            'if(!slot.dhw_trace_clock_anchor_s&&unix_s>=uptime_s)'
+            'slot.dhw_trace_clock_anchor_s=unix_s-uptime_s;returntrue;'):
+        raise error('stop observation DHW checkpoint: fresh data must latch its clock anchor')
     restore = normalized(body(sources['main/history.cpp'], 'history_restore_dhw_flash', error))
     ready = normalized(body(checkup, 'checkup_dhw_trace_restore_ready', error))
     if ('[[gnu::noinline]]boolcheckup_dhw_trace_restore_ready(DiagnosticsSourcesource)' not in compact
@@ -620,8 +627,7 @@ def self_test(budgets, sources, error):
     mutations.extend([
         ('main/checkup.cpp', 'static __attribute__((noinline)) void copy_dhw_trace_locked',
          'static void copy_dhw_trace_locked'),
-        ('main/checkup.cpp', 'logic::DhwLossTrace dhw_trace{};',
-         'logic::DhwLossTrace dhw_trace[2]{};'),
+        ('main/checkup.cpp', 'dhw_trace{};', 'dhw_trace[2]{};'),
         ('main/logic/checkup.hpp', '[[gnu::always_inline]] inline void dhw_loss_step_impl',
          'inline void dhw_loss_step_impl'),
         ('main/logic/checkup.hpp', '[[gnu::noinline]] inline void dhw_loss_step(',
@@ -691,6 +697,8 @@ def self_test(budgets, sources, error):
         ('main/checkup.cpp', 'dhw_trace_wall_s', 'logic::dhw_loss_wall_anchor_s(', 'other_anchor('),
         ('main/checkup.cpp', 'dhw_trace_wall_locked', 'slot.dhw_trace.discard_restored();', ''),
         ('main/checkup.cpp', 'dhw_trace_wall_locked', 'arm_dhw_trace_barrier_locked(slot);', ''),
+        ('main/checkup.cpp', 'checkup_dhw_trace_checkpoint',
+         'slot.dhw_trace_clock_anchor_s = unix_s - uptime_s;', '(void)unix_s;'),
         ('main/history.cpp', 'history_restore_dhw_flash',
          '*new (s_flash_sector + sizeof(r)) logic::DhwLossTracePage', 'unreviewed_page'),
         ('main/history.cpp', 'history_restore_dhw_flash',

@@ -16,11 +16,12 @@ struct DhwLossTracePage {
     uint32_t dhw_source_fp;
     uint32_t diagnostics_generation;
     uint32_t unix_s;
+    uint32_t damaged_barriers_fp; // Writer's view of damaged reset records, data pages only.
     uint8_t  count;
     uint8_t  reserved[3];
     uint8_t  records[DHW_LOSS_TRACE_CAPACITY][6];
 };
-static_assert(sizeof(DhwLossTracePage) == 168 &&
+static_assert(sizeof(DhwLossTracePage) == 172 &&
               sizeof(DhwLossTracePage) <= HISTORY_JOURNAL_PAYLOAD_BYTES &&
               sizeof(DhwLossTracePage) % sizeof(HistorySample) == 0);
 

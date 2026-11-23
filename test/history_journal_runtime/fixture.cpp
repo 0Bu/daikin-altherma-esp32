@@ -1177,6 +1177,13 @@ void restore_dhw_journal(const char* nor_path) {
     history_flash_save();
     require(dhw_ports[0].ack == 11 && !dhw_ports[0].reset_pending && !dhw_ports[1].ack,
             "tank_cooling_shutdown_commits_only_reset_barrier_without_wall_time");
+    // Keep a valid head after the barrier. The damaged-barrier replay needs both records to
+    // survive the next write without the shared cursor erasing their sector.
+    journal_sdk::synced       = true;
+    journal_sdk::core_pending = true;
+    journal_sdk::core_bucket  = journal_sdk::unix_origin / 3600;
+    require(history_flash_service_journal(1, 0) == 1 && journal_sdk::core_appended == 1,
+            "tank_cooling_fixture_keeps_trusted_head_after_barrier");
     write_nor_file(nor_path);
 }
 void verify_dhw_barrier_journal(const char* nor_path) {
@@ -1207,7 +1214,8 @@ void verify_dhw_damaged_barrier_journal(const char* nor_path) {
     require(damaged, "tank_cooling_fixture_damages_committed_barrier_sequence");
     journal_sdk::unix_origin += dhw_seed_uptime_s + dhw_reboot_delay_s;
     boot(false);
-    require(s_flash_dhw[0].restore_done && !dhw_ports[0].restore_calls,
+    require(s_flash_dhw[0].restore_done && s_flash_dhw[0].damaged_barriers_fp &&
+                !dhw_ports[0].restore_calls,
             "tank_cooling_damaged_barrier_withholds_older_restore");
     require_dhw_restored_window(true, 17);
 
@@ -1217,6 +1225,15 @@ void verify_dhw_damaged_barrier_journal(const char* nor_path) {
     require(history_flash_service_journal(1, 0) == 1 && dhw_ports[0].ack == 31 &&
                 s_flash_next_sequence == next + 1 && s_flash_dhw[0].fence == 0,
             "tank_cooling_data_commits_without_trusting_corrupt_barrier_sequence");
+    write_nor_file(nor_path);
+}
+void verify_dhw_recovered_after_damage(const char* nor_path) {
+    read_nor_file(nor_path);
+    journal_sdk::unix_origin += 2 * (dhw_seed_uptime_s + dhw_reboot_delay_s);
+    boot(false);
+    require(s_flash_dhw[0].damaged_barriers_fp && dhw_ports[0].restored.count == 1,
+            "tank_cooling_new_checkpoint_restores_while_damaged_barrier_remains");
+    require_dhw_restored_window(false, 19);
 }
 void verify_dhw_incompatible_journal(const char* nor_path) {
     read_nor_file(nor_path);
@@ -1256,6 +1273,8 @@ int main(int argc, char** argv) {
             verify_dhw_barrier_journal(argv[2]);
         else if (name == "verify_dhw_damaged_barrier_journal" && argc == 3)
             verify_dhw_damaged_barrier_journal(argv[2]);
+        else if (name == "verify_dhw_recovered_after_damage" && argc == 3)
+            verify_dhw_recovered_after_damage(argv[2]);
         else if (name == "verify_dhw_incompatible_journal" && argc == 3)
             verify_dhw_incompatible_journal(argv[2]);
         else if (name == "seed_cycling" && argc == 4)

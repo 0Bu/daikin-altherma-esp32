@@ -1106,10 +1106,11 @@ FaultFlashStream s_flash_fault_modbus{};
 
 struct DhwFlashStream {
     CyclingFinalPage newest{};
-    uint64_t         fence            = 0;
-    int64_t          restore_retry_us = 0;
-    uint32_t         token            = 0;
-    bool             restore_done     = false;
+    uint64_t         fence               = 0;
+    int64_t          restore_retry_us    = 0;
+    uint32_t         damaged_barriers_fp = 0;
+    uint32_t         token               = 0;
+    bool             restore_done        = false;
 };
 
 DhwFlashStream s_flash_dhw[2]{};
@@ -2696,9 +2697,15 @@ void flash_index_dhw_page(const logic::HistoryJournalHeader& h, uint16_t slot, b
             flash_note_barrier_fence(h, barrier, ds.fence);
         } else if (h.magic == logic::HISTORY_JOURNAL_MAGIC &&
                    h.commit == logic::HISTORY_JOURNAL_COMMITTED) {
-            // A damaged committed reset has no trustworthy sequence. Skip replay for this
-            // source during this boot and let its writer use the trusted shared cursor.
-            ds.restore_done = true;
+            // A corrupt sequence cannot order this reset. Only checkpoints written after a
+            // complete scan of this same set of damaged barriers are eligible for replay.
+            const uint32_t seed =
+                ds.damaged_barriers_fp ? ds.damaged_barriers_fp : CONFIG_CRC32_INIT;
+            const auto crc =
+                config_crc32_update(seed, reinterpret_cast<const uint8_t*>(&h), sizeof(h));
+            ds.damaged_barriers_fp =
+                config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&slot), sizeof(slot)) |
+                1u;
         }
         return;
     }
@@ -3491,6 +3498,7 @@ void flash_fault_appended(bool is_modbus) {
     auto& page = *new (out.payload) logic::DhwLossTracePage{};
     if (!checkup_dhw_trace_checkpoint(page, ds.token, wait_ticks, source)) return false;
     const bool barrier = page.count == 0;
+    if (!barrier) page.damaged_barriers_fp = ds.damaged_barriers_fp;
     if ((!barrier && !restore_done) || !logic::dhw_loss_trace_page_valid(page, barrier))
         return false;
 
@@ -3932,6 +3940,7 @@ void history_restore_fault_flash(TickType_t wait_ticks) {
         auto& page = *new (s_flash_sector + sizeof(r)) logic::DhwLossTracePage;
         std::memcpy(&page, r.payload, sizeof(page));
         if (r.header.bucket != page.unix_s / logic::CHECKUP_DT_S ||
+            (ds.damaged_barriers_fp && page.damaged_barriers_fp != ds.damaged_barriers_fp) ||
             !logic::dhw_loss_trace_page_valid(page, false)) {
             ds.restore_done = true;
             continue;

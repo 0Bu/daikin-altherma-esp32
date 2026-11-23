@@ -975,7 +975,8 @@ void dhw_trace_case(const std::string& name) {
                 name == "dhw_trace_forget" || name == "dhw_trace_forget_before_start" ||
                 name == "dhw_trace_forget_during_snapshot" ||
                 name == "dhw_trace_reset_during_snapshot" || name == "dhw_trace_unavailable" ||
-                name == "dhw_trace_restore_forward" || name == "dhw_trace_restore_backward",
+                name == "dhw_trace_restore_forward" || name == "dhw_trace_restore_backward" ||
+                name == "dhw_trace_checkpoint_clock_step",
             "unknown_case");
     auto take = [](DiagnosticsSource source, DhwLossTimeline& out) {
         return checkup_report(nullptr, nullptr, nullptr, source, nullptr, &out);
@@ -1053,6 +1054,22 @@ void dhw_trace_case(const std::string& name) {
         take(DiagnosticsSource::X10a, x);
         require(x.epoch == xepoch && !x.count && !x.live,
                 "dhw_trace_stopped_producer_expires_at_exact_cutoff");
+    } else if (name == "dhw_trace_checkpoint_clock_step") {
+        constexpr auto   source = DiagnosticsSource::X10a;
+        DhwLossTracePage checkpoint{};
+        uint32_t         token = 0;
+        require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) && checkpoint.count == 1,
+                "fresh_tank_checkpoint_carries_completed_window");
+        checkup_dhw_trace_checkpoint_appended(token, source);
+        const auto prior_unix_s = checkpoint.unix_s;
+        adapter::unix_origin += 120;
+        require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) &&
+                    dhw_loss_trace_page_valid(checkpoint, true),
+                "fresh_tank_checkpoint_clock_step_commits_barrier");
+        checkup_dhw_trace_checkpoint_appended(token, source);
+        require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) &&
+                    checkpoint.count == 1 && checkpoint.unix_s == prior_unix_s + 120,
+                "fresh_tank_checkpoint_is_redated_without_new_completion");
     } else if (name == "dhw_trace_restore_forward" || name == "dhw_trace_restore_backward") {
         constexpr auto source = DiagnosticsSource::X10a;
         using Result          = CheckupFlashRestoreResult;
