@@ -943,6 +943,14 @@ try {
       replaceOnce("main/mqtt_ha.cpp",
         "s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrameQueued));",
         "s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrame));")],
+    ["mqtt_ha_start wipes concurrent OTA/Weather transport pause leases", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "    s_ref_ring_produced = 0;\n    s_ref_ring_pos      = 0;",
+        "    s_transport_pause_state.store(0, std::memory_order_release);\n    s_ref_ring_produced = 0;\n    s_ref_ring_pos      = 0;")],
+    ["mqtt_task spawns initial esp-mqtt transport despite active OTA/Weather pause", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "    if (mqtt_initial_start_deferred(transport_pause_requested(), competing_tls_active())) {\n        s_transport_paused.store(true, std::memory_order_release);\n    } else if (!start_current_client()) {",
+        "    if (!start_current_client()) {")],
   ];
 
   let caught = 0;

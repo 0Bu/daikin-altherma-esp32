@@ -1326,6 +1326,12 @@ const resumeCallAt = mqttTask.indexOf("mqtt_transport_resume_step(", activityAt)
 assert.ok(heldCallAt >= 0 && heldContinueAt > heldCallAt && activityAt > heldContinueAt &&
           resumeCallAt > activityAt,
   "mqtt_task must leave a held cycle before constructing publish state and resume via its helper");
+const initialStartAt = mqttTask.indexOf("start_current_client()");
+assert.ok(initialStartAt > 0 && initialStartAt < heldCallAt,
+  "mqtt_task initial transport start must precede the publish loop");
+assert.match(mqttTask.slice(0, initialStartAt),
+  /mqtt_initial_start_deferred\(transport_pause_requested\(\),\s*competing_tls_active\(\)\)[\s\S]{0,160}?s_transport_paused\.store\(true,\s*std::memory_order_release\)/,
+  "mqtt_task must defer initial esp-mqtt startup when OTA/Weather already claimed the network heap");
 const resumeAt = resumeStep.indexOf("s_transport_paused.load(std::memory_order_acquire)");
 const tlsResumeAt = resumeStep.indexOf("mqtt_transport_tls_configured()", resumeAt);
 const freeResumeAt = resumeStep.indexOf("free_internal < kMqttTlsResumeMinFree", tlsResumeAt);
@@ -1403,6 +1409,8 @@ assert.ok(publicStatusStart >= 0 && publicTaskAt >= 0 && publicTaskElseAt > publ
           publicAfterTask[0].line === 'set_status(false, "publish task alloc failed");' &&
           publicAfterTask[0].index < publicTaskElseAt - publicTaskAt,
   "once mqtt_task may run, mqtt_ha_start writes the status only when the task could not start");
+assert.doesNotMatch(publicStatus, /s_transport_pause_state\s*\.\s*store\s*\(/,
+  "mqtt_ha_start must not clear concurrent OTA/Weather transport pause leases");
 // The resume step runs outside mqtt_task's exception boundary and set_status also runs on esp-mqtt's
 // unguarded event task, so the stored reason must stay a literal pointer that cannot allocate, the
 // std::string MqttStatus::error must stay unwritten, and only set_status may write the connected flag.

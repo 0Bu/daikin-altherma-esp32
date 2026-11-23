@@ -29407,6 +29407,11 @@ static void test_mqtt_publish_gate() {
     // queue it in the outbox that the stop then deletes.
     CHECK(!mqtt_pause_withdraws_online(yes, yes, no));
     CHECK(!mqtt_pause_withdraws_online(no, no, no));
+
+    CHECK(!mqtt_initial_start_deferred(no, no));
+    CHECK(mqtt_initial_start_deferred(yes, no));
+    CHECK(mqtt_initial_start_deferred(no, yes));
+    CHECK(mqtt_initial_start_deferred(yes, yes));
 }
 
 static void test_http_deadline() {
