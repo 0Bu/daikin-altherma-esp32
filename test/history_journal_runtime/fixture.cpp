@@ -321,6 +321,9 @@ void checkup_dhw_trace_checkpoint_appended(uint32_t token, DiagnosticsSource sou
         port.reset_pending = false;
     }
 }
+bool checkup_dhw_trace_restore_ready(DiagnosticsSource source) {
+    return dhw_ports[source == DiagnosticsSource::Modbus].confirmed;
+}
 CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePage& page, TickType_t,
                                                     DiagnosticsSource              source) {
     const bool is_mb = source == DiagnosticsSource::Modbus;
@@ -1141,9 +1144,13 @@ void restore_dhw_journal(const char* nor_path) {
     for (unsigned i = 0; i < HISTORY_FLASH_TOTAL_RINGS / 4 + 6; ++i)
         history_service_flash_restore();
     require(s_flash_restore_done && !s_flash_dhw[0].restore_done && s_flash_dhw[1].restore_done &&
-                dhw_ports[0].restore_calls && !dhw_ports[0].restored.count,
+                !dhw_ports[0].restore_calls && !dhw_ports[0].restored.count,
             "tank_cooling_restore_waits_for_each_own_source");
     require_dhw_restored_window(true, 17);
+    const auto reads = journal_sdk::reads;
+    history_service_flash_restore();
+    history_service_flash_restore();
+    require(journal_sdk::reads == reads, "unconfirmed_tank_source_does_not_reread_nor");
     sdk::now_us = dhw_seed_uptime_s * 1000000LL;
     offer_dhw_window(false, 10, 12);
     require(history_flash_service_journal(1, 0) == 0 && dhw_ports[0].pending == 10,

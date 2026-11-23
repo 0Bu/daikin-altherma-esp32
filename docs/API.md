@@ -297,9 +297,9 @@ synchronized time, matching diagnostics consent, source, profile, and circulatio
 
 | Timeline field | Contract |
 |---|---|
-| `epoch` | Nonzero uint32 collection, reset, or coordinate-frame generation for this boot and source. |
+| `epoch` | Nonzero uint32 collection, reset, or coordinate-frame generation for this boot and source. Withdrawing restored windows after a confirmed clock step advances it. |
 | `window_end_s` | Right edge in whole seconds on the timeline's monotonic frame. |
-| `since_s` | Start of the collection lifecycle or, if earlier, the first restored start. It conveys no continuous coverage. |
+| `since_s` | Start of collection, extended back to the first restored start if earlier. When a clock step withdraws restored windows, this moves to the first remaining current-boot window's start or to the boot origin on the same timeline frame if none remains. It conveys no continuous coverage. |
 | `observed_end_s` | Coordinate of the last current-boot sample with plausible R5T and readable valve, internal-pump and tank-heater inputs. Null until such a sample arrives. |
 | `unix_s` | Optional synchronized Unix-seconds anchor **at `window_end_s`**. The two monotonic bounds around the clock read must map to the same wall second. |
 | `live` | Boolean freshness of complete DHW inputs and the source, checked against the 15-second limit before rounding timestamps. |
@@ -321,9 +321,9 @@ Use endpoint differences for durations. With `unix_s`, map coordinate `s` to
 `unix_s - window_end_s + s`. Without that anchor, use times relative to the snapshot.
 After adoption, retention advances with the monotonic clock. A confirmed wall-clock reading
 within one second of the time predicted by the restore anchor retains that anchor. A larger
-confirmed difference
-withdraws the restored windows and schedules a journal barrier. Measurements from this boot
-remain in their monotonic frame.
+confirmed difference withdraws the restored windows and schedules a journal barrier. Current-boot
+measurements keep their monotonic frame. See [reboot and persistence](PLANT.md#reboot-and-persistence)
+for barrier durability.
 
 `windows:[]` means eligible collection has begun but no accepted timed completion is retained.
 An absent timeline can mean unsupported, reset, disabled, redacted, allocation-denied or unreadable

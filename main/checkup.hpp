@@ -44,6 +44,7 @@ bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage& page, uint32_t& token
                                   TickType_t wait_ticks, DiagnosticsSource source);
 bool checkup_dhw_trace_reset_pending(DiagnosticsSource source);
 void checkup_dhw_trace_checkpoint_appended(uint32_t token, DiagnosticsSource source);
+bool checkup_dhw_trace_restore_ready(DiagnosticsSource source);
 CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePage& page,
                                                     TickType_t                     wait_ticks,
                                                     DiagnosticsSource              source);

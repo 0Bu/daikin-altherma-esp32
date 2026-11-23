@@ -1083,11 +1083,13 @@ void dhw_trace_case(const std::string& name) {
         require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) && token &&
                     checkpoint.count == 2,
                 "dhw_checkpoint_includes_valid_restored_prefix");
-        checkup_dhw_trace_checkpoint_appended(token, source);
-        adapter::unix_origin += name == "dhw_trace_restore_forward" ? 120 : -120;
+        const bool step_during_append = name == "dhw_trace_restore_forward";
+        if (!step_during_append) checkup_dhw_trace_checkpoint_appended(token, source);
+        adapter::unix_origin += step_during_append ? 120 : -120;
         take(source, x);
         require(x.count == 1 && x.windows[0].rate_tenths == 0 && x.live,
                 "dhw_clock_step_only_withdraws_restored_prefix");
+        if (step_during_append) checkup_dhw_trace_checkpoint_appended(token, source);
         require(checkup_dhw_trace_checkpoint(checkpoint, token, 0, source) && token &&
                     dhw_loss_trace_page_valid(checkpoint, true),
                 "dhw_clock_step_commits_barrier_before_recheckpoint");

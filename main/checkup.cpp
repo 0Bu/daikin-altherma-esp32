@@ -1826,7 +1826,6 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source)
     // Withdraw the pre-boot prefix, preserving this boot's measurements and monotonic frame.
     slot.dhw_trace.discard_restored();
     slot.dhw_trace_restore_anchor_s = 0;
-    slot.dhw_trace_saved_end_s.store(0, std::memory_order_release);
     arm_dhw_trace_barrier_locked(slot);
     return now;
 }
@@ -2179,10 +2178,14 @@ bool checkup_dhw_trace_reset_pending(DiagnosticsSource source) {
 
 void checkup_dhw_trace_checkpoint_appended(uint32_t token, DiagnosticsSource source) {
     CheckupSlot& slot = slot_for(source);
-    if (token & kDhwTraceBarrierToken)
+    if (token & kDhwTraceBarrierToken) {
+        // The journal serializes writes and acknowledgments. Clear the watermark when the fence
+        // commits so an older in-flight data append cannot reinstate it after a clock step.
+        slot.dhw_trace_saved_end_s.store(0, std::memory_order_relaxed);
         slot.dhw_trace_barrier_acked.store(token, std::memory_order_release);
-    else
+    } else {
         slot.dhw_trace_saved_end_s.store(token, std::memory_order_release);
+    }
 }
 
 void checkup_dhw_trace_forget() {
@@ -2233,6 +2236,12 @@ bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage& page, uint32_t& token
             return false;
     return !slot.dhw_trace_forgotten.load(std::memory_order_acquire) &&
            !slot.dhw_reset_requested.load();
+}
+
+[[gnu::noinline]] bool checkup_dhw_trace_restore_ready(DiagnosticsSource source) {
+    if (!s_mtx) return false;
+    Lock lk(s_mtx, 0);
+    return lk.acquired() && slot_for(source).source_confirmed;
 }
 
 CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePage& page,

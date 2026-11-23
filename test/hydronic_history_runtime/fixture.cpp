@@ -126,6 +126,7 @@ bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage&, uint32_t&, TickType_
 }
 bool                      checkup_dhw_trace_reset_pending(DiagnosticsSource) { return false; }
 void                      checkup_dhw_trace_checkpoint_appended(uint32_t, DiagnosticsSource) {}
+bool                      checkup_dhw_trace_restore_ready(DiagnosticsSource) { return false; }
 CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePage&, TickType_t,
                                                     DiagnosticsSource) {
     return CheckupFlashRestoreResult::Ignored;

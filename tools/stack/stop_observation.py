@@ -24,7 +24,8 @@ DHW_TRACE_HELPERS = ('copy_dhw_trace_locked', 'dhw_loss_step_traced', 'dhw_loss_
                      'checkup_cycling_end_unix_s', 'dhw_loss_wall_anchor_s', 'mb_record_poll_gap',
                      'dhw_trace_wall_s', 'dhw_trace_wall_locked', 'arm_dhw_trace_barrier_locked',
                      'retire_dhw_trace_locked', 'checkup_dhw_trace_checkpoint',
-                     'checkup_dhw_trace_restore', 'checkup_dhw_trace_forget',
+                     'checkup_dhw_trace_restore', 'checkup_dhw_trace_restore_ready',
+                     'checkup_dhw_trace_forget',
                      'checkup_dhw_trace_reset_pending', 'checkup_dhw_trace_checkpoint_appended',
                      'flash_build_next_dhw', 'history_restore_dhw_flash', 'flash_index_dhw_page',
                      'flash_dhw_owned', 'flash_dhw_appended', 'flash_note_barrier_fence',
@@ -291,7 +292,6 @@ def validate_dhw_trace_sources(sources, error):
                'time_now(unix_s,ms);returnlogic::dhw_loss_wall_anchor_s('
                'uptime_s,before_us,esp_timer_get_time(),unix_s,ms);')
     roll = ('slot.dhw_trace.discard_restored();slot.dhw_trace_restore_anchor_s=0;'
-            'slot.dhw_trace_saved_end_s.store(0,std::memory_order_release);'
             'arm_dhw_trace_barrier_locked(slot);returnnow;')
     withdrawn = ('if(dhw_trace&&slot.dhw_trace_forgotten.load(std::memory_order_acquire))'
                  'dhw_trace->clear();')
@@ -300,6 +300,15 @@ def validate_dhw_trace_sources(sources, error):
             or '[[gnu::noinline]]staticuint32_tdhw_trace_wall_locked(CheckupSlot&slot,uint32_tuptime_s)'
             not in compact):
         raise error('stop observation DHW detail: admission/clock bracket/post-clock withdrawal changed')
+    restore = normalized(body(sources['main/history.cpp'], 'history_restore_dhw_flash', error))
+    ready = normalized(body(checkup, 'checkup_dhw_trace_restore_ready', error))
+    if ('[[gnu::noinline]]boolcheckup_dhw_trace_restore_ready(DiagnosticsSourcesource)' not in compact
+            or ready != 'if(!s_mtx)returnfalse;Locklk(s_mtx,0);'
+                        'returnlk.acquired()&&slot_for(source).source_confirmed;'
+            or 'if(!wait_ticks&&!checkup_dhw_trace_restore_ready(source))continue;'
+               'auto&r=*new(s_flash_sector)FlashJournalRecord;'
+               'constesp_err_te=flash_read_record(ds.newest.slot,r);' not in restore):
+        raise error('stop observation DHW restore: nonblocking readiness must precede poll flash read')
     logic = normalized(sources['main/logic/checkup.hpp'])
     pure = ('[[gnu::noinline]]inlinevoiddhw_loss_step(DhwLossState&st,DhwLossBucket&b,'
             'constCheckupSample&s,int64_tnow_us)')
@@ -676,6 +685,10 @@ def self_test(budgets, sources, error):
         ('main/checkup.cpp', 'dhw_trace_wall_locked', 'arm_dhw_trace_barrier_locked(slot);', ''),
         ('main/history.cpp', 'history_restore_dhw_flash',
          '*new (s_flash_sector + sizeof(r)) logic::DhwLossTracePage', 'unreviewed_page'),
+        ('main/history.cpp', 'history_restore_dhw_flash',
+         'if (!wait_ticks && !checkup_dhw_trace_restore_ready(source)) continue;', ''),
+        ('main/checkup.cpp', 'checkup_dhw_trace_restore_ready',
+         'Lock lk(s_mtx, 0);', 'Lock lk(s_mtx);'),
         ('main/history.cpp', 'history_flash_forget', 'checkup_dhw_trace_forget();', ''),
         ('main/checkup.cpp', 'copy_dhw_trace_locked',
          'if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire))', 'if (dhw_trace)'),

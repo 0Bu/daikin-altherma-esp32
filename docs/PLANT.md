@@ -140,6 +140,11 @@ confirmation. It requires the matching circulation identity and diagnostics gene
 power loss can lose windows that had not yet been committed. Restored bars report historical
 observations. Freshness still requires complete inputs from the current boot.
 
+A confirmed clock step withdraws restored windows from memory immediately. This withdrawal is
+durable once the journal barrier commits. If power fails or the barrier write fails before commit,
+the previous checkpoint can still qualify for restoration on the next boot under the usual identity
+and age checks.
+
 A software restart can also carry each source's ongoing tank-loss filter through a separately sealed
 **one-shot handoff**. Adoption requires confirmation of that source and circulation scope, enabled
 diagnostics and no pending reset. The handoff preserves the hourly cooling candidate and settling

@@ -3899,6 +3899,11 @@ void history_restore_fault_flash(TickType_t wait_ticks) {
             ds.restore_done = true;
             continue;
         }
+        const auto source = is_modbus ? DiagnosticsSource::Modbus : DiagnosticsSource::X10a;
+        // Regular polls wait for source confirmation before touching flash. The one-off shutdown
+        // drain uses the reducer's existing bounded wait without adding a second lock wait.
+        if (!wait_ticks && !checkup_dhw_trace_restore_ready(source)) continue;
+
         auto&           r = *new (s_flash_sector) FlashJournalRecord;
         const esp_err_t e = flash_read_record(ds.newest.slot, r);
         if (e != ESP_OK) {
@@ -3922,9 +3927,7 @@ void history_restore_fault_flash(TickType_t wait_ticks) {
             ds.restore_done = true;
             continue;
         }
-        ds.restore_done = checkup_dhw_trace_restore(page, wait_ticks,
-                                                    is_modbus ? DiagnosticsSource::Modbus
-                                                              : DiagnosticsSource::X10a) !=
+        ds.restore_done = checkup_dhw_trace_restore(page, wait_ticks, source) !=
                           CheckupFlashRestoreResult::Deferred;
     }
 }
