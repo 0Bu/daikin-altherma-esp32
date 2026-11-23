@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -170,6 +170,11 @@ I18N.fi = localeValues([
   /* check.defrost */ "Sulatukset",
   /* check.pressure */ "Vedenpaine",
   /* check.flow */ "Alin virtaama",
+  /* check.flow.lowest */ "Pienin mitattu virtaama",
+  /* check.flow.runup */ "Kun pumppu on käynyt yhtäjaksoisesti vähintään 1 min",
+  /* check.flow.assessment */ "Virtaaman riittävyys riippuu mallista ja käyttötilasta.",
+  /* check.flow.measurements */ "Mittaustiedot",
+  /* check.flow.live */ "Nyt",
   /* check.heater */ "Sähkövastukset",
   /* check.retries */ "Suojauslaskurit",
   /* check.status.ok */ "OK",

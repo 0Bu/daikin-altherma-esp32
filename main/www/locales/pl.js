@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -175,6 +175,11 @@ I18N.pl = localeValues([
   /* check.defrost */ "Odszraniania",
   /* check.pressure */ "Ciśnienie wody",
   /* check.flow */ "Min. przepływ",
+  /* check.flow.lowest */ "Najniższy zmierzony przepływ",
+  /* check.flow.runup */ "Po co najmniej 1 min ciągłej pracy pompy",
+  /* check.flow.assessment */ "Wymagany przepływ zależy od modelu i trybu pracy.",
+  /* check.flow.measurements */ "Szczegóły pomiaru",
+  /* check.flow.live */ "Teraz",
   /* check.heater */ "Grzałki",
   /* check.retries */ "Liczniki ochrony",
   /* check.status.ok */ "OK",

@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -170,6 +170,11 @@ I18N.fr = localeValues([
   /* check.defrost */ "Dégivrages",
   /* check.pressure */ "Pression d’eau",
   /* check.flow */ "Débit min.",
+  /* check.flow.lowest */ "Débit mesuré le plus bas",
+  /* check.flow.runup */ "Après au moins 1 min de fonctionnement continu de la pompe",
+  /* check.flow.assessment */ "Le débit nécessaire dépend du modèle et du mode de fonctionnement.",
+  /* check.flow.measurements */ "Détails de mesure",
+  /* check.flow.live */ "Maintenant",
   /* check.heater */ "Résistances",
   /* check.retries */ "Compteurs de protection",
   /* check.status.ok */ "OK",

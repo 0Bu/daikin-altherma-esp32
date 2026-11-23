@@ -159,8 +159,8 @@ function renderCards(hold = true) {
   // Rows catch up when scrubEnd resumes rendering.
   if (S.scrub || (hold && S.clickHold)) return;
   // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows
-  // follow the active diagnostics source (X10A or Modbus). During X10A loss, independent dated
-  // water evidence and passive refrigerant observations keep only those X10A rows visible.
+  // follow the active diagnostics source (X10A or Modbus). Flow observations live in the Flow
+  // inspector. Passive refrigerant observations can remain visible independently of the summary.
   const checkupSourceReady = checkupSourceReadyFor();
   const checkup = S.status?.diagnostics?.enabled === true
     ? checkupCardHtml(checkupSourceReady) : "";
@@ -182,7 +182,8 @@ function recoverOpenHistory() {
   if (S.scrub || S.clickHold || S.histBusy.size) return;
   const dashboard = S.stage === "dashboard";
   const inspector = dashboard && S.insp && INSPECT[S.insp];
-  if (inspector && renderInspectHist(inspector, S.live ? inspCurRow(inspector) : null, "refresh"))
+  if (inspector && renderInspectHist(inspector, S.live ? inspCurRow(inspector) : null, "refresh",
+    S.insp === "flow" ? checkupFlowReport() : null))
     return;
   const host = globalThis.document?.getElementById(dashboard ? "valueGroups" : "settingsCards");
   const rows = dashboard ? ".vgroup:not([hidden]) .vitem.open [data-trend]" : ".vitem.open [data-trend]";
@@ -2573,6 +2574,38 @@ function checkupHydronicKnown(h) {
     h.last_evidence_unix_s <= 8640000000000;
 }
 
+function checkupFlowReport() {
+  if (S.status?.diagnostics?.enabled !== true || S.otaCached || S.transportUnavailable === "status")
+    return null;
+  const health = S.status.health;
+  if (health?.persist === "unknown" || !Array.isArray(health?.checks)) return null;
+  const reported = health.checks.find(c => c?.id === "flow");
+  const source = health.source || S.status.diagnostics.effective_source || "x10a";
+  if (!reported || (source !== "x10a" && source !== "modbus")) return null;
+  const minimum = reported.verdict === "ok" && Number.isFinite(reported.min_l_min) &&
+    reported.min_l_min >= 0 && !(source === "modbus" && modbusFlowScaleUnverified())
+    ? reported.min_l_min : null;
+  // A newer provisional /values frame can invalidate an older accepted /status value.
+  // Keep the brief, reference and expanded evidence in agreement.
+  const check = reported.verdict === "ok" && minimum === null
+    ? { ...reported, verdict: "unavailable", min_l_min: null } : reported;
+  return { check, health, source, minimum };
+}
+
+function checkupFlowBriefHtml({ check, health, source, minimum }) {
+  const measured = minimum !== null;
+  const name = source === "modbus" ? "Modbus" : "X10A";
+  const period = Number.isFinite(health.span_s)
+    ? `${t("check.detail.period_label")} ${checkupDuration(health.span_s)}` : "";
+  const scope = [measured || check.verdict === "collecting" ? t("check.flow.runup") : "", period]
+    .filter(Boolean).join(" · ");
+  const value = measured ? `${checkupFmt1(minimum)} l/min` : checkupStatusText(check);
+  return `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · ${name}</span>` +
+    `<strong class="num">${esc(value)}</strong></div>` +
+    (scope ? `<p>${esc(scope)}</p>` : "") +
+    (measured ? `<p>${esc(t("check.flow.assessment"))}</p>` : "");
+}
+
 function checkupHydronicHtml(c, isModbus = false) {
   const h = !isModbus && c.id === "flow" ? c.hydronic : null;
   if (!h || typeof h !== "object") return ["", ""];
@@ -3346,12 +3379,8 @@ function checkupCardHtml(includeHealth = true) {
                   : t("card.checkup");
   let healthRows = "";
   const unreadable = includeHealth && h?.persist === "unknown";
-  const visibleChecks = Array.isArray(h?.checks)
-    ? h.checks.filter((c) => {
-        if (isModbus && (MODBUS_HIDDEN_CHECKS.has(c.id) || (c.id === "flow" && c.verdict === "unavailable")))
-          return false;
-        return includeHealth || (!isModbus && c.id === "flow" && checkupHydronicKnown(c.hydronic));
-      })
+  const visibleChecks = includeHealth && Array.isArray(h?.checks)
+    ? h.checks.filter(c => c.id !== "flow" && !(isModbus && MODBUS_HIDDEN_CHECKS.has(c.id)))
     : [];
   if (unreadable) healthRows = `<span class="empty">${esc(t("sys.nodata"))}</span>`;
   if (!unreadable && visibleChecks.length) {
