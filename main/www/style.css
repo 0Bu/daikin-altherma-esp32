@@ -942,6 +942,10 @@ button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong);
 .checkup-chart-legend { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 4px; font-size: 11px; }
 .checkup-chart-key { display: inline-flex; align-items: center; gap: 4px; }
 .checkup-chart-key i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.checkup-chart-body { display: grid; grid-template-columns: minmax(0, 1fr); }
+.checkup-chart-body.vhist-has-y { grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; }
+.checkup-chart-body.vhist-has-y .checkup-chart-graph,
+.checkup-chart-body.vhist-has-y .checkup-chart-axis { grid-column: 2; }
 .checkup-chart-graph { position: relative; isolation: isolate; }
 .has-selected-hour .checkup-chart-graph::before {
   content: ""; position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none;
@@ -1020,7 +1024,8 @@ button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong);
    text and is separated by a rule, so the panel reads text-then-evidence rather than as a chart with
    a caption. --brand-sky is the chart/line token (DESIGN.md §2); the plot never uses a semantic
    colour — a trend is not a state. */
-.vhist { margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--line); }
+.vhist { --vhist-surface: var(--card); margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--line); }
+.vdesc-body .vhist, .inspect-card .vhist { --vhist-surface: var(--brand-tint); }
 .vhist.vhist-flat { display: flex; align-items: center; min-height: 20px; }
 .vhist-note { color: var(--muted); font-size: 12.5px; }
 .vhist-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
@@ -1050,7 +1055,6 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-state .vhist-head { margin-bottom: 4px; }
 .vhist-state .vhist-level-legend { align-items: center; gap: 3px 12px; margin: 0 0 4px; }
 .vhist-state button.vhist-source { padding: 1px 0; }
-.vhist-graph.vhist-state-graph { grid-template-rows: auto 9px auto auto; }
 .vhist-state-graph .vhist-tip { white-space: pre-wrap; }
 .vhist-state-graph .vhist-tip-val { white-space: normal; }
 .vhist-plot.vhist-state-plot { height: auto; display: grid; gap: 5px; padding: 0; }
@@ -1106,25 +1110,30 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 }
 .modal-subtitle { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 /* The SVG stretches to the panel width; overflow stays visible so the stroke isn't clipped at the
-   extremes (the geometry deliberately uses the full viewBox height — see HIST_H in app.js). */
-/* One readout row above the plot and one shared time row below it. The moving readout paints over
-   the pin without adding height or shifting the curve when the two overlap. */
+   extremes (the geometry deliberately uses the full viewBox height — see HIST_H in history.js). */
+/* Compact graph layout: plot sits directly under the header/legend and shares row 2 with the time
+   axis and sliding time readouts. Tooltip bubbles float above the plot without reserving vertical
+   space when idle; the moving bubble paints opaque over the frosted pinned bubble. */
 .vhist-graph { position: relative; display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto 12px auto 24px; isolation: isolate;
+  grid-template-rows: auto auto;
+  margin-top: 6px; isolation: isolate;
   /* iOS must be able to start the same horizontal scrub on the bubble/graph as on the plot while a
      vertical gesture remains ordinary page scrolling. */
   touch-action: pan-y; }
-.vhist-plot { position: relative; height: 72px; grid-area: 3 / 1; align-self: start; min-width: 0; }
-.vhist-tips { grid-area: 1 / 1; align-self: start; display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  min-width: 0; width: 100%; pointer-events: none; z-index: 3; }
-.vhist-tip.vhist-reserve { grid-area: 1 / 1; display: grid; visibility: hidden; font-weight: 600; }
-.vhist-reserve > span { grid-area: 1 / 1; }
+.vhist-graph.vhist-has-y { grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; }
+.vhist-graph.vhist-has-y .vhist-plot,
+.vhist-graph.vhist-has-y .vhist-tips,
+.vhist-graph.vhist-has-y .vhist-axis,
+.vhist-graph.vhist-has-y .vhist-time { grid-column: 2; }
+.vhist-plot { position: relative; height: 88px; grid-area: 1 / 1; align-self: start; min-width: 0; }
+.vhist-tips { grid-area: 1 / 1; position: absolute; left: 0; right: 0; bottom: calc(100% + 8px);
+  display: grid; grid-template-columns: minmax(0, 1fr); align-items: end;
+  min-width: 0; pointer-events: none; z-index: 3; }
 .vhist-tip.vhist-live { z-index: 4; background: var(--card); }
 /* pan-y hands VERTICAL gestures back to the page (the user must still be able to scroll past the
    chart) while horizontal movement becomes a scrub. Claiming both axes would trap page scrolling
-   inside a 72 px box. */
+   inside an 88 px box. */
 .vhist-plot { touch-action: pan-y; -webkit-tap-highlight-color: transparent; }
 .vhist-plot:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 3px; }
 .vhist-plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
@@ -1149,13 +1158,13 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   left: calc(var(--tip-p) * 1%); transform: translateX(calc(var(--tip-p) * -1%));
   max-width: 100%; white-space: pre-wrap;
   pointer-events: none; font-size: 12px; color: var(--fg);
-  /* Transparency belongs only to the surface, never to the text. The small blur preserves contrast
-     in both themes while the chart/card remains visibly present behind the readout. */
-  background: color-mix(in srgb, var(--card) 60%, transparent);
-  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  /* Transparency belongs only to the surface, never to the text. Frosted near-opaque backing keeps
+     overlaid legend/header text legible without losing depth. */
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   width: max-content; line-height: 1.35; overflow-wrap: anywhere;
   border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.10); }
+  box-shadow: 0 2px 8px rgba(16,20,28,.12); }
 .vhist-tip-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr);
   gap: 0 1.2ch; text-align: left; }
 .vhist-tip-label, .vhist-tip-val { white-space: nowrap; }
@@ -1223,6 +1232,17 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   font-size: 9.5px; line-height: 1.1; pointer-events: none; opacity: .78; padding: 0 2px; }
 .vhist-thresh-label.low { color: var(--warn); }
 .vhist-thresh-label.crit { color: var(--err); }
+.vhist-grid { fill: none; stroke: color-mix(in srgb, var(--muted) 26%, transparent); stroke-width: 1px;
+  stroke-dasharray: 1 3; pointer-events: none; }
+.vhist-y { grid-area: 1 / 1; position: relative; height: 88px;
+  display: grid; grid-template-rows: 100%; align-items: start; justify-items: end;
+  pointer-events: none; }
+.vhist-y.checkup-chart-y { height: 96px; }
+.vhist-y-label { grid-area: 1 / 1; position: relative; transform: translateY(-50%);
+  white-space: nowrap; font-size: 11.5px; line-height: 1; color: var(--muted); pointer-events: none; }
+.vhist-y-label.env-temperature { color: var(--flow-hot); }
+.vhist-y-label.env-humidity { color: var(--flow-cold); }
+.vhist-y-label.env-pressure { color: var(--env-pressure); }
 .vhist-line.warn { stroke: var(--warn); stroke-width: 1.8px; }
 .vhist-area.warn { fill: var(--warn); opacity: .20; }
 .vhist-pt.warn { fill: var(--warn); }
@@ -1272,21 +1292,21 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
    differs. The card is --brand-tint rather than --card, and the "now" dot separates itself from the
    line with a ring of the BACKGROUND colour, so without this it draws a white halo on a tinted card. */
 .inspect-card .vhist-now { box-shadow: 0 0 0 2.5px var(--brand-tint); }
-.vhist-axis { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px;
+.vhist-axis { display: flex; justify-content: space-between; gap: 10px; margin-top: 5px;
   font-size: 11.5px; color: var(--muted); }
+.vhist-graph .vhist-axis { grid-area: 2 / 1; z-index: 1; min-height: 18px; }
 /* A label's anchor moves from its left to its right edge across the domain, keeping localized
    times inside the card even at the first and last sample. */
-.vhist-time { grid-area: 4 / 1; position: relative; justify-self: start; align-self: start;
-  width: max-content; max-width: 100%;
+.vhist-time { grid-area: 2 / 1; position: relative; justify-self: start; align-self: start;
+  width: max-content; max-width: 100%; box-sizing: border-box;
   font-size: 11.5px; color: var(--fg); pointer-events: none;
-  margin-top: 6px; left: calc(var(--tip-p) * 1%);
+  margin-top: 5px; padding: 0 3px; border-radius: 3px;
+  left: calc(var(--tip-p) * 1%);
   transform: translateX(calc(var(--tip-p) * -1%)); }
-.vhist-time.vhist-pinned { color: var(--brand-strong); font-weight: 600; }
-.vhist-time.vhist-live { z-index: 4; background: var(--brand-tint); }
-.vhist-state-graph .vhist-axis { grid-area: 4 / 1; z-index: 1; margin-top: 5px; }
-.vhist-state-graph .vhist-time { box-sizing: border-box; margin-top: 5px; padding: 0 3px; border-radius: 3px; }
-.vhist-state-graph .vhist-time.vhist-pinned { z-index: 2; background: var(--card); }
-.inspect-card .vhist-state-graph .vhist-time.vhist-pinned { background: var(--brand-tint); }
+.vhist-time.vhist-pinned { z-index: 2; color: var(--brand-strong); font-weight: 600;
+  background: var(--vhist-surface); box-shadow: 0 0 3px 1px var(--vhist-surface); }
+.vhist-time.vhist-live { z-index: 4; background: var(--vhist-surface);
+  box-shadow: 0 0 3px 1px var(--vhist-surface); }
 .vhist-axis.vhist-axis-future { position: relative; min-height: 18px; }
 .vhist-axis-future .vhist-axis-now { position: absolute; left: calc(var(--now-p) * 1%);
   transform: translateX(-50%); color: var(--muted); font-weight: 700; }
