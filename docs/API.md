@@ -429,11 +429,11 @@ include inferred and restored counts. The two totals can differ in either direct
 
 When X10A diagnostics are active and the snapshot carries an unredacted `timeline`, `/status` may
 also include `cycling.run_contexts` (up to 48 live or restored runs on the `timeline` boot-aligned
-`s` coordinate frame) and `cycling.flow_typical_l_min` (median of positive reported flows in
-`L/min` from completed space-heating runs that started in the rolling 24-hour window and
-lasted `>= 600 s`). The median can include eligible fallback readings and is emitted when `> 0`.
-Each `run_contexts[]` entry
-carries `at` (`s`), `mode` (`space`, `dhw`, `cooling`,
+`s` coordinate frame) and `cycling.flow_typical_l_min`. The latter is the median of positive
+reported flows in `L/min` among the retained runs. A run must be complete, be labeled `space`,
+have started within the rolling 24 hours and have lasted `>= 600 s`. Retained runs can include
+heating-to-hot-water handovers and eligible fallback flow readings. The median is emitted when
+`> 0`. Each `run_contexts[]` entry carries `at` (`s`), `mode` (`space`, `dhw`, `cooling`,
 `other`, `unknown`) and `start_kind` (`cooldown_restart`, `request_on`, `target_raised`,
 `after_defrost`, `after_dhw`, `defrost_start`, `dhw_start`, `unknown`), plus optional `stop` (`s`) and
 `stop_kind` (`low_rps_above_target`, `request_withdrawal`, `target_changed`, `defrost`,
