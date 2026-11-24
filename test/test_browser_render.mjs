@@ -1577,6 +1577,7 @@ async function assertPlantDiagnosis(page, context) {
         { id: "defrost", verdict: "ok", evidence: "observation",
           reason: "defrost_events_insufficient", count: 1, paired_count: 1,
           share_pct: null, defrost_s: 30, run_s: 7200,
+          outdoor_source: "x10a", outdoor_min_c: 2, outdoor_mean_c: 3, outdoor_samples: 10,
           last_observed_start: { unix_s: null, route: "dhw_route", outdoor_c: 0 } },
         { id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0.8,
           current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: true,
@@ -1601,6 +1602,9 @@ async function assertPlantDiagnosis(page, context) {
     return true;
   })()`);
   try {
+    assert.equal(await page.evaluate(`!document.getElementById('cardBrowser').hidden &&
+      !!document.querySelector('#valueGroups [data-dashboard-card="group:Operation"] .vrow-val')`), true,
+    `${context}: live value cards render below the schematic with X10A defrost outdoor samples`);
     const selector = "[data-desc^='model:health_']";
     assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 7,
       `${context}: seven remaining diagnosis rows must render`);
@@ -1932,6 +1936,12 @@ async function assertPlantDiagnosis(page, context) {
       return row?.innerText.includes(t("check.defrost.last_start", t("sys.nodata"),
         t("check.defrost.route_dhw"), checkupFmt1(0) + " °C"));
     })()`), true, `${context}: defrost start preserves zero and names the tank route`);
+    assert.equal(await page.evaluate(`(() => {
+      const detail = document.querySelector("[data-desc='model:health_defrost']")
+        .closest('.vitem').querySelector('.vdesc-body');
+      const format = new Intl.NumberFormat(LANG, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      return detail.innerText.includes(t('check.outdoor_range', 'X10A', format.format(2), format.format(3)));
+    })()`), true, `${context}: defrost detail shows sampled X10A temperatures with their source`);
     await captureNativeEvidence(page, `${context}/expanded`);
     for (const id of ["pressure", "dhw_loss", "cycling", "defrost"])
       await captureNativeEvidence(page, `${context}/${id}`,

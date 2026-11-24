@@ -1355,12 +1355,15 @@ const mbDetail = ui.detail(
 assert.ok(mbDetail.includes(ui.text("en", "check.detail.dhw_reason.blind_modbus")));
 assert.ok(mbDetail.includes(ui.text("en", "check.detail.source_stale_modbus")));
 assert.doesNotMatch(mbDetail, /X10A|HomeHub/);
-const mbOutdoorMetric = ui.metric({
-  id: "defrost", verdict: "ok", count: 3, paired_count: 3, share_pct: 5,
-  outdoor_source: "homehub", outdoor_min_c: 2.0, outdoor_mean_c: 3.0, outdoor_samples: 10,
-});
-assert.match(mbOutdoorMetric, /Modbus/);
-assert.doesNotMatch(mbOutdoorMetric, /HomeHub/);
+for (const [source, label] of [["homehub", "Modbus"], ["x10a", "X10A"], ["env3", "ENV III"], ["unknown", "—"]]) {
+  const outdoorMetric = ui.metric({
+    id: "defrost", verdict: "ok", count: 3, paired_count: 3, share_pct: 5,
+    outdoor_source: source, outdoor_min_c: 2, outdoor_mean_c: 3, outdoor_samples: 10,
+  });
+  assert.ok(outdoorMetric.includes(ui.text("en", "check.outdoor_range", label, "2.0", "3.0")),
+    `defrost outdoor context uses the display label for ${source}`);
+  assert.doesNotMatch(outdoorMetric, /HomeHub/);
+}
 assert.equal(ui.ready({
   diagnostics: { enabled: true, effective_source: "x10a" },
   hp: { connected: false }, modbus: { connected: false },
