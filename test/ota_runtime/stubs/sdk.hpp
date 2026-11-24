@@ -133,6 +133,8 @@ enum class Fault {
     ValidationError,
     SelectionError,
     ResumeSuccess,
+    ThreeResumes,
+    ResumeBudgetExhausted,
     WrongRange,
     ChunkedSuccess,
     ShortChunked,
@@ -143,6 +145,8 @@ struct State {
     Fault     fault    = Fault::None;
     bool      injected = false, invalid_release = false, deadline_armed = false;
     bool      reject_new = false, interrupt = false;
+    unsigned  resume_breaks_remaining = 0;
+    size_t    next_resume_break       = 1024;
     bool      fail_task_create = false, health_offline = false;
     Prime     prime             = Prime::Stable;
     bool      defer_worker_boot = false, worker_parked = false, prime_finished = false;

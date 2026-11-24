@@ -45,10 +45,18 @@ function replaceOnce(text, before, after, name) {
 try {
   const baseline = execute(compile(sourcePath, "production"), []);
   assert.equal(baseline.status, 0, `production OTA cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=86\b/);
+  assert.match(baseline.stdout, /PASS total=88\b/);
   console.log(baseline.stdout.trim());
 
   const mutations = [
+    {
+      name: "third-range-resume", scenario: "three_resumes", header: "ota_transport.hpp",
+      before: "OTA_TRANSFER_MAX_RESUMES = 3", after: "OTA_TRANSFER_MAX_RESUMES = 2",
+    },
+    {
+      name: "range-resume-cap", scenario: "resume_budget_exhausted", header: "ota_transport.hpp",
+      before: "OTA_TRANSFER_MAX_RESUMES = 3", after: "OTA_TRANSFER_MAX_RESUMES = 4",
+    },
     {
       name: "worker-null-prime", scenario: "worker_prime_null",
       before: "thread_sem == nullptr || sys_thread_sem_get() != thread_sem",
@@ -295,7 +303,7 @@ try {
       `${mutation.name}: only the specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production OTA runtime: 86 cases, ${mutations.length} negative controls; source sha256=`
+  console.log(`production OTA runtime: 88 cases, ${mutations.length} negative controls; source sha256=`
     + createHash("sha256").update(source).digest("hex"));
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });

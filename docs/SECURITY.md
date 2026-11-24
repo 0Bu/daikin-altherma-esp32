@@ -86,7 +86,7 @@ test capability, not official artifact promotion; see [MAINTENANCE.md](MAINTENAN
   begins only after successful open, covering both headers and body. The boot-static worker performs
   shutdown and joins before socket reuse. Timer/task/lwIP-prime failure disables downloads for the boot.
 - Only allocator-shaped setup failure gets one cleaned-up retry. A validated known-length prefix
-  may resume at most twice inside the same accepted generation/deadline. Each resume needs fresh
+  may resume at most three times inside the same accepted generation/deadline. Each resume needs fresh
   heap admission, HTTP 206, one exact Content-Range and matching remaining Content-Length, and must
   commit new bytes before another reconnect. Chunked/200/416 or ambiguous range metadata aborts.
 - The existing sequential OTA handle and hash bind every byte across a resume. No failed host update

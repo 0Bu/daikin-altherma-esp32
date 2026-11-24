@@ -11,7 +11,8 @@ proves a task handle alone cannot admit work. Early upload refusals after buffer
 failure attempt their first response with new semaphore allocation disabled. Compiling mutations
 must detect a missing primer, premature readiness, unretained semaphore and discarded boot prime.
 Successful original, chunked and resumed streams preserve exact byte order in independent write/hash
-ledgers; a wrong resumed range, premature chunked EOF and body deadline failure cannot select boot.
+ledgers. A known-length stream can resume after three interruptions. A fourth interruption, wrong
+resumed range, premature chunked EOF or body deadline failure cannot select boot.
 Direct-upload cases use the same production worker and activation routine. They cover saved-channel
 admission and handoff checks, fragmented body reads, equal/older versions, project/chip descriptors,
 SHA binding, bounded read/write/hash failures, signature and boot-selection refusal, low validation
