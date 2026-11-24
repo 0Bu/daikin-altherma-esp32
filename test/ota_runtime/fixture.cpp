@@ -232,6 +232,11 @@ int esp_http_client_read(esp_http_client_handle_t c, char* out, int requested) {
         s.interrupt = false;
         return -1;
     }
+    if (!c->manifest && s.resume_breaks_remaining && c->offset >= s.next_resume_break) {
+        --s.resume_breaks_remaining;
+        s.next_resume_break = c->offset + 1024;
+        return -1;
+    }
     if (!c->manifest && c->offset != 0 && s.fault == sdk::Fault::ReadError) return -1;
     if (!c->manifest && c->offset != 0 && s.fault == sdk::Fault::ShortChunked) return 0;
     if (!c->manifest && c->offset != 0 && s.fault == sdk::Fault::BodyTimeout) {
@@ -468,6 +473,13 @@ void reset(sdk::Fault fault) {
     std::strcpy(app.project_name, s.app.project_name);
     std::memcpy(s.image, &header, sizeof(header));
     std::memcpy(s.image + sizeof(header) + sizeof(esp_image_segment_header_t), &app, sizeof(app));
+    if (fault == sdk::Fault::ThreeResumes || fault == sdk::Fault::ResumeBudgetExhausted) {
+        s.resume_breaks_remaining = fault == sdk::Fault::ThreeResumes ? 3 : 4;
+        s.image_size              = 6144;
+        for (size_t i = sizeof(header) + sizeof(esp_image_segment_header_t) + sizeof(app);
+             i < s.image_size; ++i)
+            s.image[i] = static_cast<uint8_t>((i ^ (i >> 8)) & 0xff);
+    }
     daik::s_status = daik::OtaStatus{};
     daik::s_network_active.store(false);
     daik::s_busy         = false;
@@ -586,13 +598,16 @@ void worker(sdk::Fault fault, int stalled_service = 0, bool malformed_manifest =
     REQUIRE(s.hash_setup == s.hash_finished + s.hash_aborted);
     REQUIRE(s.deadline_arms == s.deadline_disarms);
     if ((fault == sdk::Fault::None || fault == sdk::Fault::ResumeSuccess ||
-         fault == sdk::Fault::ChunkedSuccess) &&
+         fault == sdk::Fault::ThreeResumes || fault == sdk::Fault::ChunkedSuccess) &&
         !stalled_service && !malformed_manifest && !mismatched_image) {
         REQUIRE(s.selected == 1 && s.restart == 1 && s.ota_ended == 1 && s.ota_aborted == 0);
         REQUIRE(s_status.state == "done" && s_status.progress == 100);
         if (fault == sdk::Fault::ResumeSuccess)
             REQUIRE(s.firmware_acquired == 2 && s.buffer_acquired == 2 &&
                     s.written == s.image_size);
+        if (fault == sdk::Fault::ThreeResumes)
+            REQUIRE(s.resume_breaks_remaining == 0 && s.firmware_acquired == 4 &&
+                    s.buffer_acquired == 4 && s.written == s.image_size && s.hash_finished == 1);
     } else {
         REQUIRE(s.restart == 0);
         REQUIRE(s.selected == (fault == sdk::Fault::SelectionError ? 1 : 0));
@@ -616,6 +631,11 @@ void worker(sdk::Fault fault, int stalled_service = 0, bool malformed_manifest =
             REQUIRE(s.injected);
         if (fault == sdk::Fault::ResumeException || fault == sdk::Fault::ResumeBufferNull)
             REQUIRE(s.firmware_acquired == 2 && s.buffer_freed == 1);
+        if (fault == sdk::Fault::ResumeBudgetExhausted) {
+            REQUIRE(s.resume_breaks_remaining == 0 && s.firmware_acquired == 4 &&
+                    s.written < s.image_size && s.ota_aborted == 1 && s.hash_aborted == 1);
+            REQUIRE(s_status.message == "Incomplete download");
+        }
     }
 }
 
@@ -1032,6 +1052,8 @@ int main(int argc, char** argv) {
         {"validation_error", sdk::Fault::ValidationError},
         {"selection_error", sdk::Fault::SelectionError},
         {"resume_success", sdk::Fault::ResumeSuccess},
+        {"three_resumes", sdk::Fault::ThreeResumes},
+        {"resume_budget_exhausted", sdk::Fault::ResumeBudgetExhausted},
         {"wrong_range", sdk::Fault::WrongRange},
         {"chunked_success", sdk::Fault::ChunkedSuccess},
         {"short_chunked", sdk::Fault::ShortChunked},
