@@ -6,6 +6,7 @@
 #include "stop_observation_store.hpp" // independent logical hourly source, same physical envelope
 #include "hydronic_observation_store.hpp"
 #include "logic/cycling_persist.hpp"
+#include "logic/cycling_run_persist.hpp"
 #include "logic/dhw_loss_persist.hpp"
 #include "logic/fault_persist.hpp"
 #include "config.hpp"
@@ -997,7 +998,8 @@ constexpr size_t kFaultModbusTraceSource    = kJournalSources + 5;
 constexpr size_t kHydronicObservationSource = kJournalSources + 6;
 constexpr size_t kDhwTraceSource            = kJournalSources + 7;
 constexpr size_t kDhwModbusTraceSource      = kJournalSources + 8;
-constexpr size_t kJournalServiceSources     = kJournalSources + 9;
+constexpr size_t kCyclingRunSource          = kJournalSources + 9;
+constexpr size_t kJournalServiceSources     = kJournalSources + 10;
 constexpr size_t kRestoreRingsPerTick       = 4;
 
 // Flash-owner only. Readers, indexers, builders and readback use it in disjoint transactions;
@@ -1064,6 +1066,31 @@ struct CyclingFlashStream {
 
 CyclingFlashStream s_flash_cycling{};
 CyclingFlashStream s_flash_cycling_modbus{};
+
+// Keep one candidate page per retained run even when each page held only one run.
+constexpr size_t kCyclingRunPages = logic::CYCLING_RUN_CONTEXT_CAP;
+struct CyclingRunFlashStream {
+    CyclingFinalPage pages[kCyclingRunPages]{};
+    size_t           restore_index        = 0;
+    uint32_t         trace_through_boot_s = 0; // verified X10A trace, this boot only
+    uint32_t         trace_boot_unix_s    = 0;
+    uint32_t         committed_stop_s     = 0; // monotonic seconds of the last verified run
+    uint32_t         offered_stop_s       = 0;
+    int64_t          last_commit_us       = 0;
+    bool             restore_read_retried = false;
+
+    void reset_for_scan() {
+        for (auto& page : pages) page = {};
+        restore_index        = 0;
+        trace_through_boot_s = 0;
+        trace_boot_unix_s    = 0;
+        committed_stop_s     = 0;
+        offered_stop_s       = 0;
+        last_commit_us       = 0;
+        restore_read_retried = false;
+    }
+};
+CyclingRunFlashStream s_flash_cycling_runs{};
 
 constexpr size_t         kFaultTracePages = 8;
 logic::CheckupFaultTrace s_flash_fault_trace{};
@@ -2486,8 +2513,14 @@ bool flash_modbus_cycling_owned(const logic::HistoryJournalHeader& h) {
                                         logic::CYCLING_MODBUS_TRACE_BARRIER_SCHEMA);
 }
 
+bool flash_cycling_run_owned(const logic::HistoryJournalHeader& h) {
+    return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) &&
+           h.catalog_fp == logic::CYCLING_RUN_JOURNAL_SCHEMA;
+}
+
 bool flash_cycling_owned(const logic::HistoryJournalHeader& h) {
-    return flash_x10a_cycling_owned(h) || flash_modbus_cycling_owned(h);
+    return flash_x10a_cycling_owned(h) || flash_modbus_cycling_owned(h) ||
+           flash_cycling_run_owned(h);
 }
 
 bool flash_x10a_fault_owned(const logic::HistoryJournalHeader& h) {
@@ -2814,6 +2847,7 @@ bool flash_journal_scan() {
     hydronic_observation_flash_index_reset();
     s_flash_cycling.reset_for_scan();
     s_flash_cycling_modbus.reset_for_scan();
+    s_flash_cycling_runs.reset_for_scan();
     s_flash_fault.reset_for_scan();
     s_flash_fault_modbus.reset_for_scan();
     for (auto& ds : s_flash_dhw) ds = {};
@@ -2853,6 +2887,9 @@ bool flash_journal_scan() {
                 continue;
             }
             valid_records++;
+            if (logic::cycling_run_journal_header_matches(r.header))
+                flash_insert_ranked_slot(s_flash_cycling_runs.pages, kCyclingRunPages,
+                                         r.header.sequence, static_cast<uint16_t>(slot));
             if (flash_is_manifest(r.header)) (void)flash_manifest_cache_add(r);
             if (r.header.sequence > highest_sequence) {
                 highest_sequence = r.header.sequence;
@@ -3383,12 +3420,77 @@ void flash_cycling_appended(uint16_t slot, uint64_t sequence, bool is_modbus) {
         cs.slots[cs.part++] = slot;
         return;
     }
+    if (!is_modbus) {
+        auto& runs = s_flash_cycling_runs;
+        if (cs.reset_token) {
+            runs.trace_through_boot_s = 0;
+            runs.trace_boot_unix_s    = 0;
+        } else if (cs.pending && s_flash_cycling_trace_owner == CyclingTraceOwner::X10a) {
+            // The verified final page makes the captured group's coverage and date mapping durable.
+            // The plotted end is in rolling-window seconds, so remove its lag from uptime.
+            const auto& trace         = s_flash_cycling_trace;
+            runs.trace_through_boot_s = 0;
+            runs.trace_boot_unix_s    = 0;
+            if (trace.live && trace.end_s <= trace.window_end_s && trace.unix_s > trace.boot_s) {
+                const uint32_t lag = trace.window_end_s - trace.end_s;
+                if (trace.boot_s > lag) {
+                    runs.trace_through_boot_s = trace.boot_s - lag;
+                    runs.trace_boot_unix_s    = trace.unix_s - trace.boot_s;
+                }
+            }
+        }
+    }
     cs.pending = false;
     if (s_flash_cycling_trace_owner == cycling_trace_owner_for(is_modbus))
         s_flash_cycling_trace_owner = CyclingTraceOwner::None;
-    if (cs.reset_token)
+    if (cs.reset_token) {
+        cs.fence = sequence;
         checkup_cycling_checkpoint_appended(cs.reset_token, is_modbus ? DiagnosticsSource::Modbus
                                                                       : DiagnosticsSource::X10a);
+    }
+}
+
+[[gnu::noinline]] bool flash_build_next_cycling_runs(FlashJournalRecord& out, TickType_t wait_ticks,
+                                                     bool shutdown) {
+    auto&         stream = s_flash_cycling_runs;
+    const int64_t now_us = esp_timer_get_time();
+    const int64_t min_gap =
+        static_cast<int64_t>(logic::HISTORY_FLASH_CYCLING_RUN_INTERVAL_S) * 1000000;
+    if (!s_flash_restore_done || !s_flash_cycling.restore_done || checkup_cycling_reset_pending() ||
+        stream.trace_through_boot_s <= stream.committed_stop_s ||
+        (!shutdown && stream.committed_stop_s && now_us - stream.last_commit_us < min_gap))
+        return false;
+
+    std::memset(&out, 0xff, sizeof(out));
+    auto&    page        = *new (out.payload) logic::CyclingRunJournalPage{};
+    uint32_t last_stop_s = 0;
+    if (!checkup_cycling_runs_checkpoint(page, stream.committed_stop_s, last_stop_s, wait_ticks,
+                                         stream.trace_through_boot_s, stream.trace_boot_unix_s) ||
+        last_stop_s <= stream.committed_stop_s || last_stop_s > stream.trace_through_boot_s)
+        return false;
+    const size_t count = logic::cycling_run_journal_count(page);
+    if (!count) return false;
+
+    auto& h       = out.header;
+    h.magic       = logic::HISTORY_JOURNAL_MAGIC;
+    h.version     = logic::HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
+    h.flags       = 0;
+    h.catalog_fp  = logic::CYCLING_RUN_JOURNAL_SCHEMA;
+    h.crc         = 0;
+    h.commit      = logic::HISTORY_JOURNAL_ERASED;
+    h.value_count = logic::CYCLING_RUN_JOURNAL_WORDS;
+    h.slot_bytes  = logic::HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = s_flash_next_sequence;
+    h.bucket      = logic::checkup_journal_bucket(page.entries[count - 1].stop_s);
+    h.dt_s        = logic::CHECKUP_DT_S;
+    h.rings[0]    = TREND_COUNT;
+    h.rings[1]    = HOMEHUB_HISTORY_COUNT;
+    h.rings[2]    = ENV3_HISTORY_COUNT;
+    if (!logic::cycling_run_journal_page_valid(h, page)) return false;
+    h.crc                 = logic::history_journal_crc_bytes(h, out.payload, sizeof(page));
+    stream.offered_stop_s = last_stop_s;
+    return true;
 }
 
 [[gnu::noinline]] bool flash_build_next_fault(FlashJournalRecord& out, TickType_t wait_ticks,
@@ -3569,6 +3671,9 @@ esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
                                         static_cast<uint16_t>(slot), payload);
     } else if (logic::hydronic_header_matches(verify.header)) {
         flash_hydronic_appended(verify, static_cast<uint16_t>(slot));
+    } else if (flash_cycling_run_owned(verify.header)) {
+        s_flash_cycling_runs.committed_stop_s = s_flash_cycling_runs.offered_stop_s;
+        s_flash_cycling_runs.last_commit_us   = esp_timer_get_time();
     } else if (flash_cycling_owned(verify.header)) {
         flash_cycling_appended(static_cast<uint16_t>(slot), verify.header.sequence,
                                flash_modbus_cycling_owned(verify.header));
@@ -3745,6 +3850,7 @@ __attribute__((noinline)) void flash_hydronic_appended(const FlashJournalRecord&
                                                            bool       shutdown = false) {
     if (src_i == kStopObservationSource) return flash_build_next_stop_observation(r);
     if (src_i == kHydronicObservationSource) return flash_build_next_hydronic_observation(r);
+    if (src_i == kCyclingRunSource) return flash_build_next_cycling_runs(r, wait_ticks, shutdown);
     if (src_i == kCyclingTraceSource || src_i == kCyclingModbusTraceSource)
         return flash_build_next_cycling(r, wait_ticks, shutdown,
                                         src_i == kCyclingModbusTraceSource);
@@ -3846,8 +3952,8 @@ void history_restore_cycling_flash(TickType_t wait_ticks) {
             if (cs.restore_index < kCyclingFinalPages &&
                 cs.finals[cs.restore_index].sequence > cs.fence) {
                 if (!flash_decode_cycling_group(cs, cs.finals[cs.restore_index], is_modbus)) {
-                    // Bound flash work to one candidate per poll; a broken group does not displace
-                    // the previous complete group. A valid but incompatible group is authoritative.
+                    // Bound flash work to one candidate per poll. A broken group does not displace
+                    // the previous complete group.
                     ++cs.restore_index;
                     continue;
                 }
@@ -3863,10 +3969,63 @@ void history_restore_cycling_flash(TickType_t wait_ticks) {
         const auto result = checkup_cycling_restore(
             s_flash_cycling_trace, cs.identity, unix_s, wait_ticks,
             is_modbus ? DiagnosticsSource::Modbus : DiagnosticsSource::X10a);
-        cs.restore_done   = result != CheckupFlashRestoreResult::Deferred;
+        if (!is_modbus && result == CheckupFlashRestoreResult::TryOlder) {
+            // The same lineage can have a newer group dated beyond the current clock. Try its
+            // predecessor on the next tick. A different lineage still ends restore immediately.
+            ++cs.restore_index;
+            cs.decoded                  = false;
+            s_flash_cycling_trace_owner = CyclingTraceOwner::None;
+            continue;
+        }
+        cs.restore_done = result != CheckupFlashRestoreResult::Deferred;
+        if (!is_modbus && result == CheckupFlashRestoreResult::Ignored)
+            s_flash_cycling_runs.restore_index = kCyclingRunPages;
         if (cs.restore_done && s_flash_cycling_trace_owner == want_owner)
             s_flash_cycling_trace_owner = CyclingTraceOwner::None;
     }
+}
+
+// A run detail can only join a complete compatible X10A trace. Read at most one indexed page
+// per tick, newest first, and recheck its original sequence on the circular flash.
+[[gnu::noinline]] static void history_restore_cycling_runs_flash() {
+    auto& stream = s_flash_cycling_runs;
+    if (!s_flash_cycling.restore_done || stream.restore_index == kCyclingRunPages) return;
+    const auto& indexed = stream.pages[stream.restore_index];
+    if (indexed.sequence <= s_flash_cycling.fence || checkup_cycling_reset_pending()) {
+        stream.restore_index = kCyclingRunPages;
+        return;
+    }
+
+    int64_t unix_s = -1;
+    int32_t ms     = 0;
+    time_now(unix_s, ms);
+    if (unix_s <= 0 || unix_s > UINT32_MAX) return;
+    struct RestoreScratch {
+        FlashJournalRecord           record;
+        logic::CyclingRunJournalPage page;
+    };
+    static_assert(sizeof(RestoreScratch) <= sizeof(s_flash_sector) &&
+                      alignof(RestoreScratch) <= alignof(FlashJournalRecord),
+                  "cycling run restore reuses the flash scratch");
+    auto&           scratch     = *new (s_flash_sector) RestoreScratch;
+    const esp_err_t read_result = flash_read_record(indexed.slot, scratch.record);
+    if (read_result != ESP_OK && !stream.restore_read_retried) {
+        // Keep this candidate for one subsequent tick. A persistently unreadable page must not
+        // block older valid pages, and each tick still issues at most one read.
+        stream.restore_read_retried = true;
+        return;
+    }
+    stream.restore_read_retried = false;
+    if (read_result == ESP_OK && scratch.record.header.sequence == indexed.sequence &&
+        logic::cycling_run_journal_header_matches(scratch.record.header) &&
+        flash_record_physically_valid(scratch.record)) {
+        std::memcpy(&scratch.page, scratch.record.payload, sizeof(scratch.page));
+        if (logic::cycling_run_journal_page_valid(scratch.record.header, scratch.page) &&
+            checkup_cycling_runs_restore(scratch.page, static_cast<uint32_t>(unix_s), 0) ==
+                CheckupFlashRestoreResult::Deferred)
+            return;
+    }
+    ++stream.restore_index;
 }
 
 void history_restore_fault_flash(TickType_t wait_ticks) {
@@ -3969,6 +4128,7 @@ void history_service_flash_restore() {
     hydronic_observation_flash_service(flash_read_hydronic_observation);
     history_restore_checkup_flash();
     history_restore_cycling_flash(0);
+    history_restore_cycling_runs_flash();
     history_restore_fault_flash(0);
     history_restore_dhw_flash(0);
     if (s_flash_restore_done) return;
@@ -4116,7 +4276,8 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
                                           s_flash_fail_last_us))
         return 0;
 
-    size_t             written = 0;
+    const bool         flush_cycling_runs = shutdown && max_records > 0;
+    size_t             written            = 0;
     FlashJournalRecord r;
     if (shutdown) {
         // Finish any group already in flight, then offer a final checkpoint. Leave all of the
@@ -4182,7 +4343,8 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
             const size_t src_i = (s_flash_service_source + try_src) % kJournalServiceSources;
             if ((src_i == kCyclingTraceSource || src_i == kCyclingModbusTraceSource ||
                  src_i == kFaultTraceSource || src_i == kFaultModbusTraceSource ||
-                 src_i == kDhwTraceSource || src_i == kDhwModbusTraceSource) &&
+                 src_i == kDhwTraceSource || src_i == kDhwModbusTraceSource ||
+                 src_i == kCyclingRunSource) &&
                 shutdown)
                 continue;
             // Profile detection can legitimately take minutes while X10A is unavailable. Keep the
@@ -4231,6 +4393,13 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
             break;
         }
         if (!appended) break;
+    }
+    // Runs use their own allowance after the timeline and all existing shutdown writes. A
+    // failed detail append must not leave an older diagnosis or observation fence unwritten.
+    for (size_t run_pages = 0; flush_cycling_runs && run_pages < 2; ++run_pages) {
+        if (!flash_build_for_service(kCyclingRunSource, r, wait_ticks, true)) break;
+        if (flash_append_record(r) != ESP_OK) break;
+        ++written;
     }
     return written;
 }
@@ -4316,6 +4485,7 @@ bool history_flash_forget() {
         s_flash_mb_checkup.restore_done = true;
         s_flash_cycling.reset_after_forget();
         s_flash_cycling_modbus.reset_after_forget();
+        s_flash_cycling_runs.reset_for_scan();
         s_flash_cycling_trace.reset();
         s_flash_cycling_trace.unix_s = 0;
         s_flash_cycling_trace_owner  = CyclingTraceOwner::None;

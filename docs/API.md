@@ -428,22 +428,38 @@ individual starts at or after its cutoff. The diagnosis total expires whole hour
 include inferred and restored counts. The two totals can differ in either direction.
 
 When X10A diagnostics are active and the snapshot carries an unredacted `timeline`, `/status` may
-also include optional RAM-only per-run start/stop telemetry in `cycling.run_contexts` (up to 48
-entries on the `timeline` boot-aligned window `s` coordinate frame) and `cycling.flow_typical_l_min`
-(median settled flow rate in `L/min` across completed `>= 600 s` space-heating runs in RAM, emitted
-when `> 0`). Each `run_contexts[]` entry carries `at` (`s`), `mode` (`space`, `dhw`, `cooling`,
+also include `cycling.run_contexts` (up to 48 live or restored runs on the `timeline` boot-aligned
+`s` coordinate frame) and `cycling.flow_typical_l_min`. The latter is the median of positive
+reported flows in `L/min` among the retained runs. A run must be complete, be labeled `space`,
+have started within the rolling 24 hours and have lasted `>= 600 s`. Retained runs can include
+heating-to-hot-water handovers and eligible fallback flow readings. The median is emitted when
+`> 0`. Each `run_contexts[]` entry carries `at` (`s`), `mode` (`space`, `dhw`, `cooling`,
 `other`, `unknown`) and `start_kind` (`cooldown_restart`, `request_on`, `target_raised`,
 `after_defrost`, `after_dhw`, `defrost_start`, `dhw_start`, `unknown`), plus optional `stop` (`s`) and
 `stop_kind` (`low_rps_above_target`, `request_withdrawal`, `target_changed`, `defrost`,
 `dhw_transition`, `normal`, `unknown`) once stopped, optional endpoint/pre-start temperatures in `°C`
 (`start_lwt_c`, `start_target_c`, `start_target_prev_c`, `lwt_c`, `rwt_c`, `target_c`, `target_prev_c`,
-`outdoor_c`), settled average run flow in `L/min` (`flow_l_min`, `>= 0`, `>= 30 s` warm-up with
-full-run or stop-sample fallback on shorter runs), settled minimum compressor speed in `rps`
-(`min_rps`, `> 0`, `>= 30 s` warm-up with full-run fallback), and `low_rps_above_target:true` when
-active. `stop_kind: "target_changed"` records only target drops, whereas any target change withdraws
-the in-run `low_rps_above_target` flag. `run_contexts` and `flow_typical_l_min` are omitted when
-empty, on Modbus, in redacted reports, during active Weather TLS admission, on allocation failure, or
-after reset/forget; neither field alters completed-run verdicts or persisted journal schemas.
+`outdoor_c`), and run flow in `L/min` (`flow_l_min`, `>= 0`). Temperatures can use the last valid
+reading without an age limit. Missing start water and target temperatures can be filled during
+the first five seconds of a run. The flow average uses positive samples
+after a `30 s` warm-up and falls back to the average of positive samples over the whole run.
+When neither average is available, a valid stop sample can supply the value, including zero.
+The entry also includes settled minimum compressor speed in `rps`
+(`min_rps`, `> 0`, `>= 30 s` warm-up with full-run fallback), and `low_rps_above_target:true` for
+qualifying space-heating evidence in the 30 seconds before the stop. The flag can accompany
+another `stop_kind`. The [diagnostic evidence guide](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
+defines when target changes clear this evidence and how the stop kind is selected.
+A completed run can carry `flow_reference_fixed:true` after post-stop
+refinement and a per-run `flow_typical_l_min` when a positive reference was available at that
+point. A fixed reference without a value means the comparison was unavailable. Consumers can use
+the rolling median for provisional contexts and older reports. `restored:true` marks a saved run
+whose edges matched the restored checkpoint. Saved times use the journal's original mapping.
+Match both pre-boot edges in the emitted `timeline` before attaching the run to a row. Record
+eviction or a clock correction can omit those edges.
+The serializer always omits `run_contexts` and `flow_typical_l_min` for Modbus and in redacted
+reports. Unredacted X10A output can omit the fields when empty, during active Weather TLS admission,
+on allocation failure or after reset/forget. Completed-run verdicts use their independent hourly
+evidence.
 
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed

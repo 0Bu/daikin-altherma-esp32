@@ -51,6 +51,7 @@ for (const key of [
   "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
   "latest", "base_code", "subcode", "ongoing", "stop_unknown", "start_unix_s", "secondary_code",
   "secondary_state", "timeline", "unix_s", "window_end_s", "observed_end_s", "boot_s", "live",
+  "run_contexts", "flow_reference_fixed", "flow_typical_l_min",
   "segments",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
   "draw_windows", "pump_windows", "quiet_high_windows",
@@ -439,12 +440,12 @@ assert.doesNotMatch(evictedRunHtml.split("83600")[0], /Normal stop/);
     ],
   };
   const x10aPreBootNoCtx = ui.periodDetails(preBootTrace, {}, 22, 22, "x10a");
-  assert.match(x10aPreBootNoCtx, /Start and stop details are recorded from the last restart onward\./);
-  assert.doesNotMatch(ui.periodDetails(preBootTrace, {}, 22, 22, "modbus"), /last restart onward/);
+  assert.match(x10aPreBootNoCtx, /No saved start or stop details are available for these older runs\./);
+  assert.doesNotMatch(ui.periodDetails(preBootTrace, {}, 22, 22, "modbus"), /saved start or stop details/);
   const withCtxPreBoot22 = ui.periodDetails(preBootTrace, {
     run_contexts: [{ at: 86000, stop: 86120, mode: "space", start_kind: "request_on", stop_kind: "normal" }],
   }, 22, 22, "x10a");
-  assert.match(withCtxPreBoot22, /Start and stop details are recorded from the last restart onward\./);
+  assert.match(withCtxPreBoot22, /No saved start or stop details are available for these older runs\./);
   assert.match(withCtxPreBoot22, /No cause details/);
   assert.match(withCtxPreBoot22, /Stop unknown/);
   assert.doesNotMatch(withCtxPreBoot22, /data-run-row/);
@@ -456,6 +457,51 @@ assert.doesNotMatch(evictedRunHtml.split("83600")[0], /Normal stop/);
   assert.equal(ui.shortRuns({
     timeline: preBootTrace,
   }), 1, "<=15s intra-boot gap bridges short run while >15s gap stays censored");
+}
+
+// Restored explanations must match both edges and keep the comparison recorded for each run.
+{
+  const timeline = {
+    unix_s: 1794582660, window_end_s: 86400, observed_end_s: 86400,
+    boot_s: 2000, live: true, run_edges: true,
+    records: [
+      [1, 1],
+      [79500, 5], [79500, 3], [79680, 1], [79680, 6],
+      [79800, 5], [79800, 3], [79980, 1], [79980, 6],
+      [80000, 5], [80000, 3], [80180, 1], [80180, 6],
+      [81000, 5], [81000, 3], [81060, 0], [84400, 1],
+    ].map(([at, kind]) => at * 8 + kind),
+  };
+  const ctx = {
+    restored: true, flow_reference_fixed: true, mode: "space",
+    start_kind: "request_on", stop_kind: "low_rps_above_target", min_rps: 18,
+  };
+  const hasReference = { ...ctx, at: 79500, stop: 79680, flow_l_min: 10, flow_typical_l_min: 20 };
+  const lacksReference = { ...ctx, at: 79800, stop: 79980, flow_l_min: 1 };
+  const mismatch = { ...ctx, at: 80000, stop: 80190, stop_kind: "request_withdrawal" };
+  const missingStop = { ...ctx, at: 81000, stop: 81180, stop_kind: "request_withdrawal" };
+  const html = ui.periodDetails(timeline, {
+    flow_typical_l_min: 30, run_contexts: [hasReference, lacksReference, mismatch, missingStop],
+  }, 22, 22, "x10a");
+  assert.match(html, /Short runs, low flow:<\/span>.*10\.0 L\/min.*typ\. ~20\.0 L\/min/);
+  assert.match(html, /Flow temp above target · low flow/);
+  assert.match(html, /Flow temp above target · low speed/);
+  assert.match(html, /No cause details/);
+  assert.match(html, /Stop unknown/);
+  assert.equal([...html.matchAll(/data-run-row=/g)].length, 2, "only matching restored runs are expandable");
+  assert.doesNotMatch(html, /30\.0 L\/min/);
+  const withoutFixedReference = ui.periodDetails(timeline, {
+    flow_typical_l_min: 30,
+    run_contexts: [{ ...hasReference, flow_typical_l_min: undefined }, lacksReference],
+  }, 22, 22, "x10a");
+  assert.match(withoutFixedReference, /Short runs, low speed/);
+  assert.doesNotMatch(withoutFixedReference, /Short runs, low flow|typ\. ~30\.0 L\/min/);
+  const zeroAtStop = ui.periodDetails(timeline, {
+    flow_typical_l_min: 30,
+    run_contexts: [{ ...hasReference, flow_l_min: 0 }, lacksReference],
+  }, 22, 22, "x10a");
+  assert.match(zeroAtStop, /Short runs, low speed/);
+  assert.doesNotMatch(zeroAtStop, /Short runs, low flow|Flow temp above target · low flow/);
 }
 
 const makeRollingCheck = (shift) => ({

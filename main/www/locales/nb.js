@@ -1,4 +1,4 @@
-// translation-source: d49db3661f1d34dea3ed1f6d9bfd64bb4d79036cf8ed10732c6037a4b5479a45
+// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -303,7 +303,7 @@ I18N.nb = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Slutt ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Aktiv ved siste avlesning.",
   /* check.cycling.cause_unavailable */ "Ingen detaljer",
-  /* check.cycling.cause_since_boot */ "Årsaker til start og stopp registreres først fra siste omstart.",
+  /* check.cycling.cause_older_unavailable */ "Lagrede start- og stoppdetaljer er ikke tilgjengelige for disse eldre syklusene.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

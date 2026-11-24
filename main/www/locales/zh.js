@@ -1,4 +1,4 @@
-// translation-source: d49db3661f1d34dea3ed1f6d9bfd64bb4d79036cf8ed10732c6037a4b5479a45
+// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -303,7 +303,7 @@ I18N.zh = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `结束 ${to}${vals}。`,
   /* check.cycling.e_ongoing */ "最近读数时仍在运行。",
   /* check.cycling.cause_unavailable */ "无详情",
-  /* check.cycling.cause_since_boot */ "启停原因仅从上次重启后开始记录。",
+  /* check.cycling.cause_older_unavailable */ "这些较早的运行没有可用的已保存启停详情。",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m} 分钟`,

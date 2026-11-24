@@ -115,7 +115,7 @@ IDs are stable and never reused; gaps identify retired entries. Each feature is 
 | 107 | Bounded MQTT frames/start recovery; circulation mapping proof binds probe generation and original source age | ✅ 🧪 | [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp), [`logic/circulation_source.hpp`](../main/logic/circulation_source.hpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`API.md`](API.md) |
 | 108 | Physical-instrument registry resolves stop-context, hydronic, and secondary-supply inputs per profile; supported, absent, withheld and ambiguous remain distinct | ✅ 🧪 | [`logic/instrument.hpp`](../main/logic/instrument.hpp), [`logic/stop_context_input.hpp`](../main/logic/stop_context_input.hpp), [`logic/hydronic_input.hpp`](../main/logic/hydronic_input.hpp) |
 | 109 | Boot-local heating-curve observations grouped by outdoor temperature and sensor | ✅ 🧪 | [`logic/heating_curve_bins.hpp`](../main/logic/heating_curve_bins.hpp), [`PLANT.md`](PLANT.md#heating-curve-diagnosis) |
-| 110 | RAM-only per-run X10A cycling context (`run_contexts` and `flow_typical_l_min`) and multi-hour episode UI | ✅ 🧪 | [`logic/cycling_run_context.hpp`](../main/logic/cycling_run_context.hpp), [`API.md`](API.md#history-and-24-hour-checks), [`DIAGNOSTIC_EVIDENCE.md`](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling) |
+| 110 | Live and journaled X10A run details for cycling episodes | ✅ 🧪 | [`logic/cycling_run_persist.hpp`](../main/logic/cycling_run_persist.hpp), [`API.md`](API.md#history-and-24-hour-checks) |
 
 The HTTP guard returns 503 before emission and rejects allocation-rich requests during OTA or
 below a 6144 B internal contiguous block. Status, values, history, diagnostic logs and MCP use

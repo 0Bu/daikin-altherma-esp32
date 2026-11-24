@@ -1,4 +1,4 @@
-// translation-source: d49db3661f1d34dea3ed1f6d9bfd64bb4d79036cf8ed10732c6037a4b5479a45
+// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -303,7 +303,7 @@ I18N.ja = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `終了 ${to}${vals}。`,
   /* check.cycling.e_ongoing */ "最新測定時も運転中。",
   /* check.cycling.cause_unavailable */ "詳細なし",
-  /* check.cycling.cause_since_boot */ "起動・停止の理由は前回の再起動以降のみ記録されます。",
+  /* check.cycling.cause_older_unavailable */ "これらの過去の運転については、保存された起動・停止の詳細がありません。",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m}分`,

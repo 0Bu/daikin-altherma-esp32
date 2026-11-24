@@ -85,6 +85,8 @@ checkouts. The compiler and Docker host checks run in sequence within their grou
 container contention. Coverage includes the native test and the Ubuntu GCC 15 x86-64 branch
 profile. For UI-relevant changes, headless Linux Chromium and WebKit start after all three groups
 finish so their work cannot affect the UI timing measurements.
+Set `DAIKIN_RELEASE_BROWSER_DOCKER_CONTEXT` to a context on a separate, trusted Linux Docker
+engine when other workloads share the default engine. Only the browser phase uses that engine.
 See [host tooling and checks](../test/README.md).
 
 To run the gate manually, use

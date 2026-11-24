@@ -10,9 +10,8 @@
 
 namespace daik::logic {
 
-// Per-run diagnostic context retained in RAM alongside CheckupCyclingTrace for X10A runs.
-// Uses the same boot-relative monotonic second frame and provisional observation thresholds as
-// stop_context.hpp without touching persisted flash-journal schemas.
+// Per-run diagnostic context alongside CheckupCyclingTrace for X10A runs. Live rows use
+// boot-relative seconds. Finalized rows restored from flash retain their absolute timestamps.
 constexpr size_t   CYCLING_RUN_CONTEXT_CAP         = 48;
 constexpr int64_t  CYCLING_RUN_AFTER_DEFROST_US    = 600000000LL; // 10 min
 constexpr int64_t  CYCLING_RUN_AFTER_DHW_US        = 900000000LL; // 15 min
@@ -48,6 +47,8 @@ enum class CyclingStopKind : uint8_t {
 
 constexpr uint8_t RUN_CTX_F_STOPPED           = 1u << 0;
 constexpr uint8_t RUN_CTX_F_LOW_RPS_ABOVE_TGT = 1u << 1;
+constexpr uint8_t RUN_CTX_F_FINALIZED         = 1u << 2;
+constexpr uint8_t RUN_CTX_F_RESTORED          = 1u << 3;
 
 constexpr bool cycling_run_tenths_valid(int v) noexcept {
     return v > CHECKUP_ABSENT && v <= INT16_MAX;
@@ -125,11 +126,15 @@ struct CyclingRunContext {
     uint8_t  start_kind            = 0;
     uint8_t  stop_kind             = 0;
     uint8_t  flags                 = 0;
+    int16_t  flow_typical_tenths   = 0;
+    uint16_t reserved              = 0;
 };
-static_assert(sizeof(CyclingRunContext) == 32 &&
+static_assert(sizeof(CyclingRunContext) == 36 &&
+                  offsetof(CyclingRunContext, flow_typical_tenths) == 32 &&
+                  offsetof(CyclingRunContext, reserved) == 34 &&
                   std::is_trivially_copyable<CyclingRunContext>::value &&
                   std::is_standard_layout<CyclingRunContext>::value,
-              "CyclingRunContext must stay 32-byte POD");
+              "CyclingRunContext must stay 36-byte POD");
 
 constexpr CyclingRunContext cycling_run_context_empty() noexcept {
     CyclingRunContext c;
@@ -142,6 +147,7 @@ constexpr CyclingRunContext cycling_run_context_empty() noexcept {
     c.stop_tgt_prev_tenths  = CHECKUP_ABSENT;
     c.flow_tenths           = CHECKUP_ABSENT;
     c.outdoor_tenths        = CHECKUP_ABSENT;
+    c.flow_typical_tenths   = CHECKUP_ABSENT;
     return c;
 }
 
@@ -166,10 +172,22 @@ struct CheckupRunContextTrace {
         return entries[(head + CYCLING_RUN_CONTEXT_CAP - count + i) % CYCLING_RUN_CONTEXT_CAP];
     }
 
+    CyclingRunContext& at(size_t i) noexcept {
+        return entries[(head + CYCLING_RUN_CONTEXT_CAP - count + i) % CYCLING_RUN_CONTEXT_CAP];
+    }
+
     void push(const CyclingRunContext& c) noexcept {
         entries[head] = c;
         head          = static_cast<uint16_t>((head + 1u) % CYCLING_RUN_CONTEXT_CAP);
         if (count < CYCLING_RUN_CONTEXT_CAP) ++count;
+    }
+
+    // Restore visits earlier rows last. Live rows and previously restored newer rows win.
+    bool prepend(const CyclingRunContext& c) noexcept {
+        if (count == CYCLING_RUN_CONTEXT_CAP) return false;
+        ++count;
+        entries[(head + CYCLING_RUN_CONTEXT_CAP - count) % CYCLING_RUN_CONTEXT_CAP] = c;
+        return true;
     }
 
     CyclingRunContext* latest_mut() noexcept {
@@ -676,60 +694,107 @@ inline void cycling_run_context_step(CyclingRunContextTracker& st, CheckupRunCon
     st.last_sample_us = now_us;
 }
 
+constexpr bool cycling_run_context_restored_in_window(const CyclingRunContext& run, uint32_t boot_s,
+                                                      uint32_t unix_s,
+                                                      uint32_t min_restored_unix_s) noexcept {
+    return unix_s > boot_s && run.start_s != 0 && run.stop_s > run.start_s &&
+           run.stop_s < unix_s - boot_s && run.start_s >= min_restored_unix_s &&
+           unix_s - run.start_s <= CHECKUP_WINDOW_S;
+}
+
+inline int16_t cycling_run_context_typical_flow(const CheckupRunContextTrace& trace,
+                                                uint32_t boot_s, uint32_t unix_s,
+                                                uint32_t min_restored_unix_s) noexcept {
+    int16_t flows[CYCLING_RUN_CONTEXT_CAP];
+    size_t  count = 0;
+    for (size_t i = 0; i < trace.count; ++i) {
+        const auto& run = trace.at(i);
+        if (!(run.flags & RUN_CTX_F_STOPPED) ||
+            run.mode != static_cast<uint8_t>(CyclingRunMode::Space) || run.flow_tenths <= 0 ||
+            run.stop_s < run.start_s || run.stop_s - run.start_s < CYCLING_RUN_TYPICAL_MIN_DUR_S)
+            continue;
+        const bool in_window =
+            run.flags & RUN_CTX_F_RESTORED
+                ? cycling_run_context_restored_in_window(run, boot_s, unix_s, min_restored_unix_s)
+                : run.stop_s <= boot_s && boot_s - run.start_s <= CHECKUP_WINDOW_S;
+        if (!in_window) continue;
+        size_t j = count++;
+        while (j > 0 && flows[j - 1] > run.flow_tenths) {
+            flows[j] = flows[j - 1];
+            --j;
+        }
+        flows[j] = run.flow_tenths;
+    }
+    if (!count) return CHECKUP_ABSENT;
+    if (count % 2 == 1) return flows[count / 2];
+    return static_cast<int16_t>((static_cast<int32_t>(flows[count / 2 - 1]) + flows[count / 2]) /
+                                2);
+}
+
+inline void cycling_run_context_finalize(CheckupRunContextTrace& trace, int64_t now_us,
+                                         uint32_t unix_s              = 0,
+                                         uint32_t min_restored_unix_s = 0) noexcept {
+    if (now_us < 0 || now_us / 1000000 > UINT32_MAX) return;
+    const uint32_t boot_s         = static_cast<uint32_t>(now_us / 1000000);
+    int16_t        flow_reference = CHECKUP_ABSENT;
+    bool           have_reference = false;
+    for (size_t i = 0; i < trace.count; ++i) {
+        auto& run = trace.at(i);
+        if (!(run.flags & RUN_CTX_F_STOPPED) ||
+            (run.flags & (RUN_CTX_F_FINALIZED | RUN_CTX_F_RESTORED)) || run.stop_s < run.start_s ||
+            run.stop_s > boot_s)
+            continue;
+        // The stop second is rounded down. Add one second to ensure the exact stop's
+        // post-refinement window has ended, regardless of its fractional part.
+        const int64_t stop_upper_us = (static_cast<int64_t>(run.stop_s) + 1) * 1000000;
+        if (now_us - stop_upper_us < CYCLING_RUN_POST_REFINE_US) continue;
+        if (!have_reference) {
+            flow_reference =
+                cycling_run_context_typical_flow(trace, boot_s, unix_s, min_restored_unix_s);
+            have_reference = true;
+        }
+        run.flow_typical_tenths = flow_reference;
+        run.flags |= RUN_CTX_F_FINALIZED;
+    }
+}
+
 inline void cycling_run_context_snapshot(CheckupRunContextSnapshot&    out,
-                                         const CheckupRunContextTrace& trace,
-                                         uint32_t                      boot_s) noexcept {
+                                         const CheckupRunContextTrace& trace, uint32_t boot_s,
+                                         uint32_t unix_s              = 0,
+                                         uint32_t min_restored_unix_s = 0) noexcept {
     out.reset();
     const int64_t live_offset = static_cast<int64_t>(CHECKUP_WINDOW_S) - boot_s;
-    int16_t       long_flows[CYCLING_RUN_CONTEXT_CAP]{};
-    size_t        flow_count = 0;
+    out.flow_typical_tenths =
+        cycling_run_context_typical_flow(trace, boot_s, unix_s, min_restored_unix_s);
 
     for (size_t i = 0; i < trace.count && out.count < CYCLING_RUN_CONTEXT_CAP; ++i) {
         const CyclingRunContext& src = trace.at(i);
+        if (src.flags & RUN_CTX_F_RESTORED) {
+            if (!cycling_run_context_restored_in_window(src, boot_s, unix_s, min_restored_unix_s))
+                continue;
+            const int64_t saved_offset = static_cast<int64_t>(CHECKUP_WINDOW_S) - unix_s;
+            auto&         dst          = out.entries[out.count++];
+            dst                        = src;
+            dst.start_s                = static_cast<uint32_t>(saved_offset + src.start_s);
+            dst.stop_s                 = static_cast<uint32_t>(saved_offset + src.stop_s);
+            continue;
+        }
         if (src.start_s > boot_s) continue;
         const int64_t win_start = live_offset + static_cast<int64_t>(src.start_s);
         if (win_start < 0 || win_start > CHECKUP_WINDOW_S) continue;
 
-        CyclingRunContext& dst = out.entries[out.count];
-        dst                    = src;
-        dst.start_s            = static_cast<uint32_t>(win_start);
+        auto& dst   = out.entries[out.count++];
+        dst         = src;
+        dst.start_s = static_cast<uint32_t>(win_start);
         if (dst.flags & RUN_CTX_F_STOPPED) {
             if (src.stop_s <= boot_s && src.stop_s >= src.start_s) {
-                const int64_t win_stop = live_offset + static_cast<int64_t>(src.stop_s);
-                dst.stop_s             = win_stop > CHECKUP_WINDOW_S ? CHECKUP_WINDOW_S
-                                                                     : static_cast<uint32_t>(win_stop);
-                if (dst.mode == static_cast<uint8_t>(CyclingRunMode::Space) &&
-                    dst.stop_s >= dst.start_s &&
-                    (dst.stop_s - dst.start_s) >= CYCLING_RUN_TYPICAL_MIN_DUR_S &&
-                    dst.flow_tenths != CHECKUP_ABSENT && dst.flow_tenths > 0) {
-                    long_flows[flow_count++] = dst.flow_tenths;
-                }
+                dst.stop_s = static_cast<uint32_t>(live_offset + src.stop_s);
             } else {
-                dst.flags &= static_cast<uint8_t>(~RUN_CTX_F_STOPPED);
-                dst.stop_s    = 0;
-                dst.stop_kind = 0;
+                dst.flags &= static_cast<uint8_t>(~(RUN_CTX_F_STOPPED | RUN_CTX_F_FINALIZED));
+                dst.stop_s              = 0;
+                dst.stop_kind           = 0;
+                dst.flow_typical_tenths = CHECKUP_ABSENT;
             }
-        }
-        ++out.count;
-    }
-
-    if (flow_count > 0) {
-        for (size_t i = 1; i < flow_count; ++i) {
-            const int16_t key = long_flows[i];
-            size_t        j   = i;
-            while (j > 0 && long_flows[j - 1] > key) {
-                long_flows[j] = long_flows[j - 1];
-                --j;
-            }
-            long_flows[j] = key;
-        }
-        if (flow_count % 2 == 1) {
-            out.flow_typical_tenths = long_flows[flow_count / 2];
-        } else {
-            out.flow_typical_tenths =
-                static_cast<int16_t>((static_cast<int32_t>(long_flows[flow_count / 2 - 1]) +
-                                      static_cast<int32_t>(long_flows[flow_count / 2])) /
-                                     2);
         }
     }
 }

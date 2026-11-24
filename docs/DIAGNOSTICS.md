@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 8c44687b173312c0de2d6be19cb01fa35d927268a942180ffed71375a84d2ae7 -->
+<!-- user-docs-contract: 327a42fe0270d0617f8c501a43b2c64032fdd2f1e89cfb18f67b86a8b16a077b -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -153,13 +153,14 @@ the chart can stay at the last successful update. The list then shows the stop a
 unknown for any run that was still open.
 
 Tap an hourly block, Shift-click, or drag across blocks to select an hour or contiguous multi-hour
-period. When per-run X10A context from the current boot is available, the latest short-cycling
+period. When per-run X10A details are available, the latest short-cycling
 episode (or the latest recorded hour with start/stop details when no episode is present)
-auto-selects when opened and the list shows Start, Duration and why the run stopped alongside
-a one-sentence period summary; tapping a row expands its observed start and stop temperatures, target
-changes and flow rate. When per-run context is unavailable (for example before or right after a
-restart or on Modbus), the list falls back to Start, Stop and Duration, and notes on X10A runs from
-before the restart that start and stop details are recorded only from the last restart onward.
+auto-selects when opened. The list shows **Start**, **Duration** and **Why it stopped**, with a short
+summary of the period. The stop column describes observed clues. Tap a row with details to see
+the recorded temperatures, target changes and flow rate. The board can
+recover saved details for completed runs after a restart. When those details are missing, the
+chart can still show times and durations. Older time records can lack details, and a sudden power
+loss can leave recent runs unsaved.
 If a recent reading still shows the run in progress, the list gives the elapsed time through
 that reading. A brief single-poll interruption within the same boot (up to 15 seconds) keeps the
 run continuous, whereas a longer gap or restart interrupts it and leaves its stop and total duration
