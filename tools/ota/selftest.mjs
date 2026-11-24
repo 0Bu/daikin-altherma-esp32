@@ -321,12 +321,15 @@ try {
       replaceOnce("main/ota_update.cpp",
         "ota_content_range_observe(response->content_range, event->header_value);",
         "response->content_range.valid = true;")],
-    ["the resume budget loses the second bounded reconnect", () =>
-      replaceOnce("main/logic/ota_transport.hpp", "OTA_TRANSFER_MAX_RESUMES = 2",
-        "OTA_TRANSFER_MAX_RESUMES = 1")],
-    ["the resume budget permits a third reconnect", () =>
-      replaceOnce("main/logic/ota_transport.hpp", "OTA_TRANSFER_MAX_RESUMES = 2",
-        "OTA_TRANSFER_MAX_RESUMES = 3")],
+    ["the resume budget loses the third bounded reconnect", () =>
+      replaceOnce("main/logic/ota_transport.hpp", "OTA_TRANSFER_MAX_RESUMES = 3",
+        "OTA_TRANSFER_MAX_RESUMES = 2")],
+    ["the resume budget permits a fourth reconnect", () =>
+      replaceOnce("main/logic/ota_transport.hpp", "OTA_TRANSFER_MAX_RESUMES = 3",
+        "OTA_TRANSFER_MAX_RESUMES = 4")],
+    ["the resume budget accepts a larger number starting with three", () =>
+      replaceOnce("main/logic/ota_transport.hpp", "OTA_TRANSFER_MAX_RESUMES = 3",
+        "OTA_TRANSFER_MAX_RESUMES = 30")],
     ["a resumed stream may fail again without making progress", () =>
       replaceOnce("main/logic/ota_transport.hpp", "stream_started_at < written",
         "stream_started_at <= written")],

@@ -5394,7 +5394,8 @@ static void test_ota_transport() {
 
     CHECK(ota_transfer_resume_allowed(0, 0, 797696, 1839104, false));
     CHECK(ota_transfer_resume_allowed(1, 797696, 1190912, 1839104, false));
-    CHECK(!ota_transfer_resume_allowed(2, 1190912, 1453056, 1839104, false));
+    CHECK(ota_transfer_resume_allowed(2, 1600512, 1616124, 1970176, false));
+    CHECK(!ota_transfer_resume_allowed(3, 1616124, 1700000, 1970176, false));
     CHECK(!ota_transfer_resume_allowed(1, 797696, 797696, 1839104, false));
     CHECK(!ota_transfer_resume_allowed(0, 0, 0, 1839104, false));
     CHECK(!ota_transfer_resume_allowed(0, 0, 1839104, 1839104, false));

@@ -148,7 +148,7 @@ inline bool ota_content_range_matches(const OtaContentRangeState& state,
            state.total == expected_total;
 }
 
-constexpr unsigned OTA_TRANSFER_MAX_RESUMES = 2;
+constexpr unsigned OTA_TRANSFER_MAX_RESUMES = 3;
 
 inline bool ota_transfer_resume_allowed(unsigned resumes, uint64_t stream_started_at,
                                         uint64_t written, uint64_t total,
