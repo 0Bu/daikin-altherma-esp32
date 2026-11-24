@@ -538,6 +538,13 @@ function wireFaultChart(host) {
 
 function wireTrendScrub(gv) {
   gv.addEventListener("click", (e) => {
+    const minimum = e.target.closest("[data-flow-min-show]");
+    if (minimum) {
+      e.stopPropagation();
+      const plot = minimum.closest(".vhist")?.querySelector("[data-hist=flow]");
+      if (plot) selectFlowMinimum(plot);
+      return;
+    }
     const button = e.target.closest("[data-hist-series]");
     if (!button) return;
     e.stopPropagation();
@@ -557,7 +564,7 @@ function wireTrendScrub(gv) {
     const view = scrubView(plot);
     const i = scrubIndex(plot, e.clientX, view);
     if (i < 0 || plot.closest(".vitem:not(.open)")) return;
-    S.trendPointer = { plot, id: e.pointerId };
+    S.trendPointer = { plot, id: e.pointerId, x: e.clientX, y: e.clientY };
     S.scrub = plot.dataset.hist;
     scrubArm(plot);
     try { plot.setPointerCapture(e.pointerId); } catch { /* capture is an optimisation, not a requirement */ }
@@ -593,8 +600,11 @@ function wireTrendScrub(gv) {
       // detached node whose bounding box is all zeroes.
       const label = plot.dataset.hist;
       const i = e.type === "pointerup" && !plot.closest("[hidden], [inert]") ? scrubIndex(plot, e.clientX) : -1;
+      const pointer = S.trendPointer;
+      const low = label === "flow" && i >= 0 && Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) <= 8 &&
+        selectFlowMinimum(plot, e.clientX, e.clientY, e.pointerType === "touch" ? 18 : 4);
       scrubEnd(plot);
-      if (i >= 0) histPinToggle(label, i, plot.dataset.source || "");
+      if (i >= 0 && !low) histPinToggle(label, i, plot.dataset.source || "");
     });
   }
   // Keyboard: the plot is focusable, so arrow keys step through samples and the tooltip is the

@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 4444fd34e1953fbac5f1f2fb583c0b867685238fe107dfea348861f533cbd7c9 -->
+<!-- diagnostic-evidence-contract: 6303646b65ac1b5cf5007c30630ce502bc3d892f036534336cd0b249fb9fea9c -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -531,10 +531,8 @@ and the committed row carries `!cv.modbus_flow_scale_unverified`; `Probing`, `Fa
 Modbus mode leaves `flow.hydronic` unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`,
 null metrics). See CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
 
-After diagnostic opt-in, the **Flow rate** inspector displays the accepted `min_l_min` from the
-`flow` check in `/status.health`. When the matching source has a visible series with samples, the
-horizontal reference uses the same Y-axis as the five-minute trend. The reference leaves the
-trend samples unchanged.
+The 60-second `min_l_min` remains in `/status.health` independently of the heating minimum
+shown in the **Flow rate** inspector.
 
 The independent X10A hydronic population uses the same completed X10A sweep for measured pre-heater
 leaving water, return water, flow and the required operating witnesses. Readable endpoints count
@@ -550,8 +548,14 @@ The first sample after 600 continuous eligible seconds enters the ranges. Qualif
 two qualified endpoints. The signed spread is measured leaving water minus return. Water ranges
 are sample-weighted. Effort is 100 minus a valid, finite 0–100 pump command, with its own sample
 count. Dated hours use the shared journal with independent method, schema, model, source and
-consent identity. Clock loss and incomplete replay are exposed separately. See [the API
-contract](API.md#qualified-water-circuit-observations).
+consent identity. Clock loss and incomplete replay are exposed separately. Each hour also retains
+the five-minute windows containing samples tied at its exact stored flow minimum. The report uses
+only windows from hours tied at the overall minimum. Compatible older hours retain their minimum
+with unknown locations. The timing mask uses type-specific journal header bytes covered by the
+record CRC. The payload and identity stay compatible with firmware that ignores these bytes.
+With X10A active for diagnostics, the inspector shows the qualified minimum when available. Its
+recorded windows can shade the visible, dated X10A trend independently of the plotted values.
+See [the API contract](API.md#qualified-water-circuit-observations).
 
 The optional secondary comparison additionally requires the exact ERRA08–12E + ELSH/X(B) ECH₂O
 profile, an unambiguous publishable EKMIK temperature at `0x65/4` and current main-zone pump
@@ -568,9 +572,11 @@ active-zone controller target is available in current queryable profiles. No 900
 classifier, 9 K alarm or model minimum compressor speed is inferred. The secondary comparison
 keeps zone intent unknown even where multiple setpoints are visible.
 
-**Not established:** The minimum has no retained timestamp or operating-mode context and is not a
-design-flow measurement. It cannot be compared generally with a model manual's commissioning
-minimum or identify a hydraulic restriction. The hydronic ranges do not establish steady operation,
+**Not established:** The 60-second pump minimum has no retained location or operating-mode
+context. The qualified heating minimum mask locates readings at five-minute resolution. It carries
+no per-reading timestamp or duration. The separate first and last accepted timestamps retain
+second resolution. Neither value establishes design flow, a general comparison
+with commissioning limits, or a hydraulic restriction. The hydronic ranges do not establish steady operation,
 emitter output, bypass, restriction, sensor calibration or available pump head. The secondary
 temperature difference alone establishes neither flow through a separator nor heat lost from a
 buffer or extra electricity use.

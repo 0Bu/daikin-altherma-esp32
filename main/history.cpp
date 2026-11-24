@@ -2567,14 +2567,14 @@ HydronicReadResult flash_read_hydronic_observation(uint16_t slot, int64_t& bucke
                                                    logic::HydronicHourlyPayload& payload) {
     auto& record = *new (s_flash_sector) FlashJournalRecord;
     if (flash_read_record(slot, record) != ESP_OK) return HydronicReadResult::Retry;
-    if (!logic::hydronic_header_matches(record.header) ||
-        record.header.crc != logic::history_journal_crc_bytes(record.header, record.payload,
-                                                              logic::HYDRONIC_PAYLOAD_BYTES) ||
-        !logic::hydronic_decode(record.payload, logic::HYDRONIC_PAYLOAD_BYTES, record.header.bucket,
-                                payload))
+    const auto& h = record.header;
+    if (!logic::hydronic_header_matches(h) ||
+        h.crc !=
+            logic::history_journal_crc_bytes(h, record.payload, logic::HYDRONIC_PAYLOAD_BYTES) ||
+        !logic::hydronic_decode(record.payload, logic::HYDRONIC_PAYLOAD_BYTES, h, payload))
         return HydronicReadResult::Invalid;
-    bucket   = record.header.bucket;
-    sequence = record.header.sequence;
+    bucket   = h.bucket;
+    sequence = h.sequence;
     return HydronicReadResult::Valid;
 }
 
@@ -2585,7 +2585,7 @@ void flash_index_hydronic_observation_record(const FlashJournalRecord& record, u
     if (!logic::hydronic_header_matches(h) ||
         h.crc !=
             logic::history_journal_crc_bytes(h, record.payload, logic::HYDRONIC_PAYLOAD_BYTES) ||
-        !logic::hydronic_decode(record.payload, logic::HYDRONIC_PAYLOAD_BYTES, h.bucket, payload)) {
+        !logic::hydronic_decode(record.payload, logic::HYDRONIC_PAYLOAD_BYTES, h, payload)) {
         // A recognizable damaged record could be a reset fence. An empty restored population
         // cannot be certified until a complete physical reindex resolves this uncertainty.
         hydronic_observation_flash_index_incomplete();
@@ -3088,7 +3088,7 @@ bool flash_build_next_hydronic_observation(FlashJournalRecord& out) {
     h.rings[1]    = HOMEHUB_HISTORY_COUNT;
     h.rings[2]    = ENV3_HISTORY_COUNT;
     h.reserved    = 0xffff;
-    logic::hydronic_encode(payload, out.payload);
+    logic::hydronic_encode(payload, out.payload, h);
     h.crc = logic::history_journal_crc_bytes(h, out.payload, logic::HYDRONIC_PAYLOAD_BYTES);
     return true;
 }
@@ -3595,7 +3595,7 @@ void flash_note_restore_ahead(size_t src_i, int64_t newest, int64_t wall_bucket)
 __attribute__((noinline)) void flash_hydronic_appended(const FlashJournalRecord& verify,
                                                        uint16_t                  slot) {
     auto& payload = s_hydronic_flash_payload;
-    if (logic::hydronic_decode(verify.payload, logic::HYDRONIC_PAYLOAD_BYTES, verify.header.bucket,
+    if (logic::hydronic_decode(verify.payload, logic::HYDRONIC_PAYLOAD_BYTES, verify.header,
                                payload)) {
         hydronic_observation_flash_appended(verify.header.bucket, verify.header.sequence, slot,
                                             payload);

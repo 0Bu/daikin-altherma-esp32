@@ -1762,7 +1762,7 @@ function renderInspectHist(e, row, mode = "", flow = null) {
     ? [typeof modbusFlowScaleUnverified === "function" && modbusFlowScaleUnverified(),
        !!S.histHidden?.has(id)].join(":")
     : "";
-  const flowReference = Number.isFinite(flow?.minimum) ? `${flow.source}:${flow.minimum}` : "";
+  const flowReference = flow?.windows ? JSON.stringify([flow.minimum, flow.windows]) : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh),
@@ -1786,27 +1786,6 @@ function renderInspectHist(e, row, mode = "", flow = null) {
   return started;
 }
 
-function renderInspectFlow(isFlow, flow) {
-  const details = $("inspFlowDetails");
-  if (!isFlow && details?.hidden !== false) return;
-  if (details.hidden === isFlow) {
-    details.hidden = !isFlow;
-    if (isFlow) {
-      // Keep the existing live row and description hosts, including their update identity.
-      details.append($("inspRows"), $("inspBody"), $("inspFlowEvidence"));
-    } else {
-      details.open = false;
-      $("inspFlowNotice").before($("inspBody"));
-      details.after($("inspRows"));
-      $("inspFlowNotice").hidden = true;
-    }
-  }
-  $("inspFlowDiagnosis").hidden = !flow;
-  setHtml("inspFlowDiagnosis", flow ? checkupFlowBriefHtml(flow) : "", false);
-  setHtml("inspFlowEvidence", flow ? checkupDetailHtml(flow.check, flow.health.full_span === true,
-    { ...flow.health, source: flow.source }) : "", false);
-}
-
 function renderInspect(mode = "") {
   if (S.stage === "settings") return;
   const e = S.insp ? INSPECT[S.insp] : null;
@@ -1822,13 +1801,14 @@ function renderInspect(mode = "") {
   renderInspectHist(e, S.live && e ? inspCurRow(e) : null, mode, flow);
   // Compare the inspector signature before rendering changed live readings; unchanged polls need
   // no DOM writes and preserve the reader's text selection.
-  const health = flow?.health;
   const sig = inspectSig(e) + (flow ? JSON.stringify([
-    flow.source, flow.minimum, health.span_s, health.full_span, health.source_fresh, health.source_age_s, flow.check,
+    flow.source, flow.minimum, flow.locationsMissing, flow.unsupported,
   ]) : "");
   if (sig === S.inspSig) return;
   S.inspSig = sig;
-  renderInspectFlow(isFlow, flow);
+  if (!flow || flow.minimum === null) S.flowMinSelection = null;
+  $("inspFlowDiagnosis").hidden = !flow;
+  setHtml("inspFlowDiagnosis", flow ? checkupFlowBriefHtml(flow) : "", false);
   // Use the same live-class accordion as the value/Settings tongues. The body stays mounted inside
   // its 0fr clip so the browser has a real closed geometry to transition FROM; toggling `hidden`
   // here painted the full infobox immediately and could never reproduce their pull-out motion.
@@ -1925,15 +1905,11 @@ function renderInspect(mode = "") {
   // A native replacement must retain its source-specific interpretation limits in every locale.
   // Generic inspector copy describes the X10A quantity and cannot override the defining register.
   const preferSourceDesc = fb && desc?.sourceQualified;
-  const what = ownWhat && !preferSourceDesc ? descParaHtml(esc(ownWhat))
+  const what = isFlow && !preferSourceDesc
+    ? descParaHtml(esc(t("check.flow.explain"))) + descNoteHtml(t("normal.label"), t("check.flow.assessment")) +
+      (fb && modbusFlowScaleUnverified() ? descParaHtml(esc(t("hist.modbus_flow_unverified"))) : "")
+    : ownWhat && !preferSourceDesc ? descParaHtml(esc(ownWhat))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value, descriptionCopy(desc)) : "");
-  if (isFlow) {
-    // Preserve the provisional headline's qualification even when its details are closed.
-    const notice = fb && modbusFlowScaleUnverified()
-      ? (desc?.sourceQualified ? what : descParaHtml(esc(t("hist.modbus_flow_unverified")))) : "";
-    $("inspFlowNotice").hidden = !notice;
-    setHtml("inspFlowNotice", notice, false);
-  }
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.
   // The inspector records its signature immediately, so its writes cannot wait for clickHold.
@@ -1947,9 +1923,14 @@ function renderInspect(mode = "") {
     // with nothing saying that they come from different instruments or which is which. A reading is
     // a label and a value; a second reading needs both, not a second number in the first one's slot.
     .map((m) => {
-      const row = m.x10a
-        ? `<div class="inspect-row"><span>${esc(displayReadingLabel(m.x10a.label, m.x10a))}</span>` +
-          `<span>${esc(inspVal(m.x10a, d))}</span></div>`
+      const x = m.x10a;
+      const pump = isFlow && /water pump signal/i.test(x?.label || "");
+      const pressure = isFlow && /^water pressure$/i.test(x?.label || "");
+      const command = pump && x.value != null && String(x.value).trim() && !rowHeldOver(x, d)
+        ? pumpCommandPercent(Number(x.value)) : null;
+      const row = x
+        ? `<div class="inspect-row"><span>${esc(pump ? t("check.flow.pump") : pressure ? t("check.pressure") : displayReadingLabel(x.label, x))}</span>` +
+          `<span>${esc(pump ? (command == null ? "—" : `${fmt1(command)} %`) : inspVal(x, d))}</span></div>`
         : "";
       if (!m.mb) return row;
       const mbUnit = displayUnit(m.mb);
