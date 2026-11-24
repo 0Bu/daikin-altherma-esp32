@@ -157,7 +157,7 @@ period. When per-run X10A details are available, the latest short-cycling
 episode (or the latest recorded hour with start/stop details when no episode is present)
 auto-selects when opened. The list shows **Start**, **Duration** and **Why it stopped**, with a short
 summary of the period. The stop column describes observed clues. Tap a row with details to see
-available temperatures near the start and stop, target changes and flow rate. The board can
+the recorded temperatures, target changes and flow rate. The board can
 recover saved details for completed runs after a restart. When those details are missing, the
 chart can still show times and durations. Older time records can lack details, and a sudden power
 loss can leave recent runs unsaved.

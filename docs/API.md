@@ -439,7 +439,9 @@ heating-to-hot-water handovers and eligible fallback flow readings. The median i
 `stop_kind` (`low_rps_above_target`, `request_withdrawal`, `target_changed`, `defrost`,
 `dhw_transition`, `normal`, `unknown`) once stopped, optional endpoint/pre-start temperatures in `°C`
 (`start_lwt_c`, `start_target_c`, `start_target_prev_c`, `lwt_c`, `rwt_c`, `target_c`, `target_prev_c`,
-`outdoor_c`), and run flow in `L/min` (`flow_l_min`, `>= 0`). The average uses positive samples
+`outdoor_c`), and run flow in `L/min` (`flow_l_min`, `>= 0`). Temperatures can use the last valid
+reading without an age limit. Missing start water and target temperatures can be filled during
+the first five seconds of a run. The flow average uses positive samples
 after a `30 s` warm-up and falls back to the average of positive samples over the whole run.
 When neither average is available, a valid stop sample can supply the value, including zero.
 The entry also includes settled minimum compressor speed in `rps`
