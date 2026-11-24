@@ -1,4 +1,4 @@
-// translation-source: d49db3661f1d34dea3ed1f6d9bfd64bb4d79036cf8ed10732c6037a4b5479a45
+// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -303,7 +303,7 @@ I18N.sv = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Slut ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Aktiv vid senaste mätning.",
   /* check.cycling.cause_unavailable */ "Inga detaljer",
-  /* check.cycling.cause_since_boot */ "Orsaker till start och stopp registreras först från senaste omstarten.",
+  /* check.cycling.cause_older_unavailable */ "Sparade start- och stoppuppgifter saknas för de här äldre körningarna.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

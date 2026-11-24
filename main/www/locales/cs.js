@@ -1,4 +1,4 @@
-// translation-source: d49db3661f1d34dea3ed1f6d9bfd64bb4d79036cf8ed10732c6037a4b5479a45
+// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -303,7 +303,7 @@ I18N.cs = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Konec ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Běžel při posledním odečtu.",
   /* check.cycling.cause_unavailable */ "Bez podrobností",
-  /* check.cycling.cause_since_boot */ "Příčiny spuštění a zastavení se zaznamenávají až od posledního restartu.",
+  /* check.cycling.cause_older_unavailable */ "Pro tyto starší cykly nejsou k dispozici uložené podrobnosti o spuštění a zastavení.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · průměr ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

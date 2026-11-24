@@ -22,6 +22,7 @@
 #include "logic/config_model.hpp"
 #include "logic/cycling_persist.hpp"
 #include "logic/cycling_run_context.hpp"
+#include "logic/cycling_run_persist.hpp"
 #include "logic/dhw_loss_persist.hpp"
 #include "logic/fault_persist.hpp"
 #include "logic/fault_trace.hpp"
@@ -38,7 +39,7 @@ namespace daik {
 // payload's exact end time is what validates age/full-span after a cold boot.
 using CheckupFlashRecord = logic::CheckupJournalRecord;
 
-enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
+enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored, TryOlder };
 
 bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage& page, uint32_t& token,
                                   TickType_t wait_ticks, DiagnosticsSource source);
@@ -58,10 +59,18 @@ bool checkup_cycling_reset_pending(DiagnosticsSource source = DiagnosticsSource:
 void checkup_cycling_checkpoint_appended(uint32_t          reset_token,
                                          DiagnosticsSource source = DiagnosticsSource::X10a);
 CheckupFlashRestoreResult
-                          checkup_cycling_restore(const logic::CheckupCyclingTrace&  trace,
-                                                  const logic::CyclingTraceIdentity& identity, int64_t now_unix_s,
-                                                  TickType_t wait_ticks, DiagnosticsSource source = DiagnosticsSource::X10a);
-void                      checkup_cycling_forget();
+     checkup_cycling_restore(const logic::CheckupCyclingTrace&  trace,
+                             const logic::CyclingTraceIdentity& identity, int64_t now_unix_s,
+                             TickType_t wait_ticks, DiagnosticsSource source = DiagnosticsSource::X10a);
+void checkup_cycling_forget();
+
+// Copy newly finalized run contexts. The journal advances its cursor only after verified
+// append. Restore accepts only contexts also witnessed by the dated X10A cycling trace.
+bool checkup_cycling_runs_checkpoint(logic::CyclingRunJournalPage& page, uint32_t after_boot_stop_s,
+                                     uint32_t& last_boot_stop_s, TickType_t wait_ticks,
+                                     uint32_t trace_through_boot_s, uint32_t trace_boot_unix_s);
+CheckupFlashRestoreResult checkup_cycling_runs_restore(const logic::CyclingRunJournalPage& page,
+                                                       uint32_t now_unix_s, TickType_t wait_ticks);
 
 struct CheckupFaultStatus {
     bool                      diagnostics_enabled = false;
@@ -197,12 +206,14 @@ struct CheckupHydronicReport {
 CheckupHydronicReport checkup_hydronic_report();
 void                  checkup_hydronic_expire(int64_t now_us);
 
-// Return true when volatile X10A cycling run contexts are populated for the current session.
-bool checkup_has_cycling_run_contexts(DiagnosticsSource source = DiagnosticsSource::X10a);
+// Check whether the emitted timeline frame has any live or restored X10A run context.
+bool checkup_has_cycling_run_contexts(DiagnosticsSource source, uint32_t boot_s,
+                                      uint32_t timeline_unix_s);
 
-// Copy recent RAM-only X10A cycling run start/stop contexts projected onto the timeline frame.
+// Copy X10A run contexts in the time frame of the emitted cycling timeline.
 bool checkup_cycling_run_contexts(logic::CheckupRunContextSnapshot& out, uint32_t boot_s,
-                                  DiagnosticsSource source = DiagnosticsSource::X10a);
+                                  DiagnosticsSource source          = DiagnosticsSource::X10a,
+                                  uint32_t          timeline_unix_s = 0);
 
 // Copy the next completed hourly pair after `after_bucket` into a journal payload. `now_unix_s`
 // supplies the wall-clock anchor; no record is produced before time is synced or before one hour

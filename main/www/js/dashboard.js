@@ -200,7 +200,8 @@ function syncDashboardCards() {
   const browser = $("cardBrowser"), nav = $("cardNav"), host = $("valueGroups");
   if (!browser || !nav || !host) return;
   const cards = Array.from(host.querySelectorAll(".vgroup[data-dashboard-card]"));
-  browser.hidden = !cards.length;
+  const hideBrowser = cards.length === 0;
+  if (browser.hidden !== hideBrowser) browser.hidden = hideBrowser;
   const selected = cards.find(card => card.dataset.dashboardCard === S.dashboardCard) || cards[0];
   if (!selected) {
     setHtml("cardNav", "", false);
@@ -208,7 +209,8 @@ function syncDashboardCards() {
     return;
   }
   S.dashboardCard = selected.dataset.dashboardCard;
-  nav.setAttribute("aria-label", t("nav.cards"));
+  const navLabel = t("nav.cards");
+  if (nav.getAttribute("aria-label") !== navLabel) nav.setAttribute("aria-label", navLabel);
   const active = document.activeElement;
   const focused = nav.contains(active) ? active.dataset.card : null;
   setHtml("cardNav", cards.map((card, index) =>
@@ -216,12 +218,18 @@ function syncDashboardCards() {
     `data-card="${esc(card.dataset.dashboardCard)}" aria-pressed="false" aria-controls="valueGroups">` +
     `${dashboardCardIcon(card.dataset.dashboardCard)}` +
     `<span class="dashboard-card-label">${esc(card.dataset.dashboardLabel)}</span></button>`).join(""), false);
-  for (const card of cards) card.hidden = card !== selected;
+  for (const card of cards) {
+    const hidden = card !== selected;
+    if (card.hidden !== hidden) card.hidden = hidden;
+  }
   const buttons = [...nav.querySelectorAll("[data-card]")];
   const chosenButton = buttons.find(button => button.dataset.card === S.dashboardCard);
-  for (const button of buttons)
-    button.setAttribute("aria-pressed", String(button === chosenButton));
-  host.setAttribute("aria-labelledby", chosenButton.id);
+  for (const button of buttons) {
+    const pressed = String(button === chosenButton);
+    if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+  }
+  if (host.getAttribute("aria-labelledby") !== chosenButton.id)
+    host.setAttribute("aria-labelledby", chosenButton.id);
   if (focused && !nav.contains(active))
     (buttons.find(button => button.dataset.card === focused) || chosenButton).focus({ preventScroll: true });
   return selected;
@@ -1303,19 +1311,8 @@ const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 // Both rows are expandable exactly like a value row — same accordion, same chart, same scrub and pin
 // — and attach their series by TREND ID, since the row labels here are translated and there is no
 // catalog label to match on.
-const boardHistoryMarkup = new WeakMap();
 function boardHistoryHtml(id, unit, label) {
-  const ring = S.hist.get(id);
-  if (!ring) return histHtml(id, unit, label, "x10a");
-  const revision = historyRingRevision(ring);
-  const pin = S.histPin.get(id);
-  const cached = boardHistoryMarkup.get(ring);
-  if (cached?.id === id && cached.epoch === S.histEpoch && cached.lang === LANG &&
-      cached.pin === pin && cached.revision === revision)
-    return cached.html;
-  const html = histHtml(id, unit, label, "x10a");
-  boardHistoryMarkup.set(ring, { id, epoch: S.histEpoch, lang: LANG, pin, revision, html });
-  return html;
+  return cachedHistoryHtml(S.hist.get(id), id, unit, label, "x10a");
 }
 
 function memoryRows(sys) {
@@ -1485,6 +1482,14 @@ function checkupDuration(s) {
   return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
 }
 
+function cyclingRunContext(ctxByStart, start, stop, bootStart) {
+  const ctx = ctxByStart.get(start);
+  if (ctx?.restored !== true) return ctx;
+  // A saved explanation only belongs to a run with both observed edges before this boot.
+  return Number.isSafeInteger(stop) && stop === ctx.stop && bootStart != null && stop < bootStart
+    ? ctx : undefined;
+}
+
 function checkupCyclingShortRunCount(c) {
   const rec = c?.timeline?.records;
   if (c?.timeline?.run_edges !== true || !Array.isArray(rec)) return 0;
@@ -1500,10 +1505,13 @@ function checkupCyclingShortRunCount(c) {
     const at = r >>> 3, k = r & 7;
     if (k === 5) {
       gapRun = null;
-      run = { start: at, mode: ctxByStart.get(at)?.mode || null };
+      run = { start: at, mode: null };
     } else if (k === 6) {
       gapRun = null;
-      if (run && run.mode === "space" && at >= run.start && at - run.start < 300) shortN++;
+      if (run && at >= run.start && at - run.start < 300) {
+        const ctx = cyclingRunContext(ctxByStart, run.start, at, bootStart);
+        if ((ctx?.mode || run.mode) === "space") shortN++;
+      }
       run = null;
     } else if (k === 0) {
       if (run) { gapRun = run; gapAt = at; run = null; }
@@ -1515,7 +1523,7 @@ function checkupCyclingShortRunCount(c) {
         run = gapRun;
       }
       gapRun = null;
-      if (run && !ctxByStart.has(run.start)) {
+      if (run) {
         if (k === 3) run.mode = "space";
         else if (k === 2 || k === 4) run.mode = "other";
       }
@@ -1683,9 +1691,18 @@ function cyclingRichText(fn, ...items) {
   return out;
 }
 
+function cyclingFlowReference(ctx, flowTypical) {
+  const reference = ctx?.flow_reference_fixed === true || ctx?.restored === true
+    ? ctx.flow_typical_l_min
+    : flowTypical;
+  return Number.isFinite(reference) && reference > 0 ? reference : null;
+}
+
 function cyclingIsLowFlow(ctx, flowTypical) {
-  return Number.isFinite(ctx?.flow_l_min) && Number.isFinite(flowTypical) &&
-    flowTypical > 0 && ctx.flow_l_min <= flowTypical * 0.65;
+  const reference = cyclingFlowReference(ctx, flowTypical);
+  // Zero can come from the stop sample when no in-run flow was available.
+  return Number.isFinite(ctx?.flow_l_min) && ctx.flow_l_min > 0 &&
+    reference != null && ctx.flow_l_min <= reference * 0.65;
 }
 
 const CYCLING_STOP_KEYS = {
@@ -1710,9 +1727,7 @@ function cyclingStopSummaryText(r, flowTypical) {
 function collectPeriodRuns(model, from, to) {
   const runs = [];
   for (let i = from; i <= to; ++i) {
-    for (const r of model.hours[i].runs) {
-      runs.push({ ...r, ctx: model.runContextByStart.get(r.start) || null });
-    }
+    runs.push(...model.hours[i].runs);
   }
   return runs.sort((a, b) => a.start - b.start);
 }
@@ -1724,7 +1739,7 @@ function cyclingPeriodFindingHtml(model, from, to) {
   if (!runs.length) return esc(t("check.cycling.run_details_unavailable"));
   if (runs.every(r => !r.ctx)) {
     const preBoot = model.source === "x10a" && model.bootStart != null && runs.some(r => r.start < model.bootStart);
-    return esc(t(preBoot ? "check.cycling.cause_since_boot" : "check.cycling.cause_unavailable"));
+    return esc(t(preBoot ? "check.cycling.cause_older_unavailable" : "check.cycling.cause_unavailable"));
   }
 
   const heating = runs.filter(r => (r.ctx?.mode || r.mode) === "space");
@@ -1751,8 +1766,13 @@ function cyclingPeriodFindingHtml(model, from, to) {
   const flowVals = completedHeat.map(r => r.ctx?.flow_l_min).filter(v => Number.isFinite(v) && v > 0);
   const minFlow = flowVals.length ? Math.min(...flowVals) : null;
   const meanFlow = flowVals.length ? flowVals.reduce((a, b) => a + b, 0) / flowVals.length : null;
-  const typ = model.flowTypical;
-  const lowFlow = minFlow != null && typ != null && typ > 0 && minFlow <= typ * 0.65;
+  let lowestFlowStop = null;
+  for (const { ctx } of completedHeat) {
+    if (ctx?.stop_kind === "low_rps_above_target" && cyclingIsLowFlow(ctx, model.flowTypical) &&
+        (lowestFlowStop == null || ctx.flow_l_min < lowestFlowStop.flow_l_min)) {
+      lowestFlowStop = ctx;
+    }
+  }
 
   const fmtFind = (key, ...args) => {
     const raw = String(t(key, ...args));
@@ -1763,9 +1783,10 @@ function cyclingPeriodFindingHtml(model, from, to) {
     return esc(raw);
   };
 
-  if (isCycling && lowRps >= 2 && lowFlow) {
+  if (isCycling && lowRps >= 2 && lowestFlowStop) {
+    const typ = cyclingFlowReference(lowestFlowStop, model.flowTypical);
     const typTag = typ != null ? t("check.cycling.typ_tag", `~${histFmt1(typ)} L/min`) : "";
-    return fmtFind("check.cycling.find_low_flow", `${histFmt1(minFlow)} L/min`, typTag);
+    return fmtFind("check.cycling.find_low_flow", `${histFmt1(lowestFlowStop.flow_l_min)} L/min`, typTag);
   }
   if (isCycling && lowRps >= 2) {
     const flowStr = meanFlow != null ? `${histFmt1(meanFlow)} L/min` : t("check.fault_unknown");
@@ -1792,7 +1813,7 @@ function cyclingRunExplainHtml(r, fromExact, toExact, priorPauseS, flowTypical) 
     : "";
   const lwt = f1(ctx.lwt_c, "°C"), tgt = f1(ctx.target_c, "°C"), rwt = f1(ctx.rwt_c, "°C");
   const flow = f1(ctx.flow_l_min, "L/min");
-  const typ = Number.isFinite(flowTypical) && flowTypical > 0 ? `${histFmt1(flowTypical)} L/min` : null;
+  const typ = f1(cyclingFlowReference(ctx, flowTypical), "L/min");
   const sep = LANG === "ja" ? "、" : LANG === "zh" ? "，" : ", ";
   const startLwt = f1(ctx.start_lwt_c, "°C");
   const startTgt = f1(ctx.start_target_c, "°C") || tgt || null;
@@ -1853,7 +1874,7 @@ function cyclingPeriodDetailsHtml(model, from, to) {
   if (!model.hasContext) {
     if (runs.length) {
       const note = model.source === "x10a" && model.bootStart != null && runs.every(r => r.start < model.bootStart)
-        ? `<p class="vdesc-p checkup-period-finding">${esc(t("check.cycling.cause_since_boot"))}</p>` : "";
+        ? `<p class="vdesc-p checkup-period-finding">${esc(t("check.cycling.cause_older_unavailable"))}</p>` : "";
       return note + checkupCyclingRunsHtml(runs, model.wall);
     }
     const anyObserved = model.runEdges && model.hours.slice(from, to + 1).some(h => h.observed);
@@ -2014,8 +2035,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
   if (run && trace.live !== false && end - observedEnd <= 15) run.latest = observedEnd;
 
   const runContextByStart = new Map();
-  const hasContext = Array.isArray(checkObj?.run_contexts) && checkObj.run_contexts.length > 0;
-  if (hasContext) {
+  if (Array.isArray(checkObj?.run_contexts)) {
     for (const rc of checkObj.run_contexts) runContextByStart.set(rc.at, rc);
   }
   let latestContextHour = null;
@@ -2023,8 +2043,9 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
     const h = hours[i];
     let shortHeating = 0;
     for (const r of h.runs) {
-      const ctx = runContextByStart.get(r.start);
+      const ctx = cyclingRunContext(runContextByStart, r.start, r.stop, bootStart);
       if (ctx) {
+        r.ctx = ctx;
         latestContextHour = i;
         if (Number.isSafeInteger(ctx.stop) && ctx.stop >= r.start && r.stop == null) {
           r.stop = ctx.stop;
@@ -2036,6 +2057,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
     }
     h.isCycling = shortHeating >= 2;
   }
+  const hasContext = latestContextHour != null;
   const episodes = [];
   let openEp = null;
   for (let i = 0; i < 24; ++i) {
@@ -2083,7 +2105,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
   _cyclingModels.clear();
   _cyclingModels.set(scope, {
     hours, wall, clock, offsetStamp, episodes, latestContextHour, bootStart, source,
-    runContextByStart, prevRunByStart, hasContext,
+    prevRunByStart, hasContext,
     runEdges, rev: ++cyclingModelRev,
     flowTypical: Number.isFinite(checkObj?.flow_typical_l_min) ? checkObj.flow_typical_l_min : null,
     outdoorMean: Number.isFinite(checkObj?.outdoor_mean_c) ? checkObj.outdoor_mean_c : null,
@@ -3308,19 +3330,8 @@ function checkupValue(c) {
   return (c.id === "fault" && c.verdict === "collecting") ? st : (checkupMetricValue(c) || st);
 }
 
-const checkupPressureHistoryMarkup = new WeakMap();
 function checkupPressureHistoryHtml(id, unit, label) {
-  const ring = S.hist.get(id);
-  if (!ring) return histHtml(id, unit, label, "x10a", true);
-  const revision = historyRingRevision(ring);
-  const pin = S.histPin.get(id);
-  const cached = checkupPressureHistoryMarkup.get(ring);
-  if (cached?.id === id && cached.label === label && cached.epoch === S.histEpoch &&
-      cached.lang === LANG && cached.pin === pin && cached.revision === revision)
-    return cached.html;
-  const html = histHtml(id, unit, label, "x10a", true);
-  checkupPressureHistoryMarkup.set(ring, { id, label, epoch: S.histEpoch, lang: LANG, pin, revision, html });
-  return html;
+  return cachedHistoryHtml(S.hist.get(id), id, unit, label, "x10a", true);
 }
 
 const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "pressure", "retries"]);

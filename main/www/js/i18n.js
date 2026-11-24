@@ -464,7 +464,7 @@ const I18N = {
     "check.cycling.e_norm": (to, vals) => `Ended ${to}${vals}.`,
     "check.cycling.e_ongoing": "Still running at last sample.",
     "check.cycling.cause_unavailable": "No cause details",
-    "check.cycling.cause_since_boot": "Start and stop details are recorded from the last restart onward.",
+    "check.cycling.cause_older_unavailable": "No saved start or stop details are available for these older runs.",
     "check.outdoor_one": (source, mean) => `${source} ${mean} °C`,
     "check.outdoor_range": (source, min, mean) => `${source} min ${min} °C · mean ${mean} °C`,
     "check.min": (m) => `${m} min`,

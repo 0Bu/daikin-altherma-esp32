@@ -1,4 +1,4 @@
-// translation-source: d49db3661f1d34dea3ed1f6d9bfd64bb4d79036cf8ed10732c6037a4b5479a45
+// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -303,7 +303,7 @@ I18N.uk = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Кінець ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Працював при ост. зчитуванні.",
   /* check.cycling.cause_unavailable */ "Немає деталей",
-  /* check.cycling.cause_since_boot */ "Причини запусків і зупинок фіксуються лише після останнього перезапуску.",
+  /* check.cycling.cause_older_unavailable */ "Для цих попередніх циклів немає збережених відомостей про запуск і зупинку.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} мін. ${min} °C · середнє ${mean} °C`,
   /* check.min */ (m) => `${m} хв`,

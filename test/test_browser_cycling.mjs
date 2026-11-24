@@ -458,6 +458,11 @@ export async function assertCyclingChart(page, server, context) {
         await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left",
           buttons: 0, clickCount: 1, ...beforeClose });
       }
+      // Let the collapse settle before tap calculates a hit point. On a short viewport the
+      // collapsing panel can scroll the row away between native press and release.
+      await page.waitFor("!S.clickHold");
+      assert.equal(await evaluate(page, sel => document.querySelector(sel).getAttribute("aria-expanded"), ROW),
+        "false", context + ": releasing the old pointer cannot reopen the collapsed disclosure");
       await tap(page, ROW);
       await page.waitFor(`document.querySelector('${CHART}') && !S.clickHold`);
       assert.deepEqual(await pinned(), [], context + ": the old release cannot pin a collapsed chart");
@@ -1040,6 +1045,26 @@ export async function assertCyclingChart(page, server, context) {
       context + ": the cached dated trace retains both boots without shifting any recorded clock time");
     assert.equal(await evaluate(page, selector => document.querySelector(selector + " s").dataset.modes.includes("other"), hour(23)), true,
       context + ": the dated trace cannot extend measured data into a temporarily omitted span");
+
+    const restoredOffset = 126;
+    cycling.flow_typical_l_min = 40;
+    cycling.run_contexts = [{
+      at: 86400 - 3630 - restoredOffset, stop: 86400 - 3540 - restoredOffset,
+      restored: true, flow_reference_fixed: true, flow_typical_l_min: 17.6, flow_l_min: 8.2,
+      mode: "space", start_kind: "request_on", stop_kind: "low_rps_above_target",
+      lwt_c: 35.1, target_c: 32.0,
+    }];
+    await datedPoll(restoredOffset, restoredOffset, true, 53, [...secondBoot, [49, 1], [50, 6]]);
+    if (!(await pinned()).includes(22)) await tap(page, hour(22));
+    await page.waitFor("!S.clickHold");
+    await tap(page, ".checkup-run-row[data-run-row]");
+    const savedExplain = await evaluate(page, () =>
+      document.querySelector(".checkup-run-sub:not([hidden]) .checkup-run-explain")?.textContent);
+    assert.match(savedExplain, /flow 35\.1 °C above target 32\.0 °C at 8\.2 L\/min, typ\. ~17\.6 L\/min/,
+      context + ": a restored explanation expands with its saved flow comparison after restart");
+    assert.doesNotMatch(savedExplain, /40\.0 L\/min/,
+      context + ": rolling measurements cannot reinterpret the restored run");
+    await page.waitFor("!S.clickHold");
 
     // Cause-analysis UI: proportional fills, episode auto-selection, 3-col table, expandable explanations.
     status.boot_id = "cycling-cause-analysis";

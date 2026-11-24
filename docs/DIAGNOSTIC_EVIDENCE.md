@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 9eeaccb7f823091c1b9f2bb0df78564e1d2469858dc15090a139586efb53e57c -->
+<!-- diagnostic-evidence-contract: 8b8f80a01127ea529b1856faff7cf4f281147754d8a1acf4cac5f80d4a293ed6 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -296,8 +296,8 @@ a continuous segment. A restart breaks that segment. Completed-run classificatio
 short-gap allowance are independent of the chart.
 When a run completes into its retained start hour after that hour was journaled, the firmware
 requests a revised append ([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
-The completed run survives only if the revision is saved and restored. An earlier saved copy can
-retain the start alone. The project infers that a missed revision tends to remove a long run because
+Its hourly count and duration survive only if the revision is saved and restored. An earlier saved
+copy can retain the start alone. The project infers that a missed revision tends to remove a long run because
 this case requires a run to have crossed an hour boundary. Under
 the count population above a lost run is not detected; it withholds the assessment only by pushing
 either population gate (classified runs or runtime) below 90% or the completed heating runs below
@@ -381,30 +381,31 @@ or continuous weather coverage. A compressor pause around defrost can split an o
 into separate recorded runs. The [production observation below](#diagnosis-defrost) recorded such a
 pause on the hot-water route. Its timing does not establish a space-heating start or stop.
 
-**Per-run RAM context (`run_contexts`):** [`cycling_run_context.hpp`](../main/logic/cycling_run_context.hpp)
-retains up to 48 X10A runs in volatile RAM alongside the timed cycling trace using the same
-provisional rules (`22 rps`, `+2 K` leaving-water-minus-target with `30 s` target stability and
-`30 s` post-stop refinement, `15 s` max sample gap — bridging `<= 15 s` single-poll unreadable-RPS
-interruptions without sampling the blind cycle while resetting `> 15 s` gaps without fabricating a
-stop, aligned with `stop_context.hpp`), optional `Instrument::ReturnWater` capture,
-settled flow (`>= 30 s` pump warm-up, falling back to full-run average or stop-sample flow on shorter
-runs), settled minimum speed (`>= 30 s` warm-up, falling back to full-run minimum speed), and a median
-typical heating flow (`flow_typical_l_min`) across completed `>= 600 s` space-heating runs in RAM. A
-transient `defrost == On` startup tail lasting at most `30 s` from run start reclassifies to Space
-Heating or DHW once `defrost == Off` holds continuously for `>= 15 s` in that mode (promoting
-`DefrostStart` to `DhwStart`, `AfterDefrost` after a defrost within `10 min`, or `Unknown`). Stop
+**Per-run context (`run_contexts`):** [`cycling_run_context.hpp`](../main/logic/cycling_run_context.hpp)
+tracks X10A runs alongside the timed cycling trace. The [API](API.md#history-and-24-hour-checks)
+defines the fields, capacity and measurement fallbacks. The low-speed rule uses `22 rps`, `+2 K`
+leaving-water-minus-target, and `30 s` of target stability. The tracker refines the cause for
+up to `30 s` after the stop or until the next start. An unreadable-RPS interruption of up to
+`15 s` can bridge a run without adding measurements for the gap. A longer gap resets the run tracker.
+A startup tail whose last observed `defrost == On` is within `30 s` of run start can reclassify at
+a heating or DHW sample with `defrost == Off`. This requires at least `15 s` since the first
+`Off` without another sampled `On`. This can promote `DefrostStart` to `DhwStart`,
+`AfterDefrost` after a defrost or Other-mode stop within `10 min`, or `Unknown`. Stop
 precedence orders defrost > DHW transition > target lowered > low speed above target > request withdrawal >
-normal stop (wire tokens and field units are defined in
-[API.md](API.md#history-and-24-hour-checks)); any target change withdraws `low_rps_above_target` even
-though target-changed stop attribution records only target drops. The dashboard flags
-`low_rps_above_target` stops (and short-cycling period summaries with `>= 2` such stops) as low flow
-in its explanatory copy when a run's flow is `<= 0.65 × flow_typical_l_min`. Like `stop_context`, these
-telemetry summaries prove neither minimum modulation, closed valves, an external thermostat,
-oversizing, nor the physical root cause of a stop; display fields (`run_contexts`,
-`flow_typical_l_min`) are omitted in Modbus mode while X10A RAM tracking continues in parallel,
-pausing (`enabled: false`) resets only the active tracker and pending post-stop refinement window, and
-retained trace entries clear on reboot, recovery forgetting, source/generation reset, or ring
-overwrite (`> 48` runs).
+normal stop. A target change during the run clears provisional above-target evidence. A target
+drop after the stop clears `low_rps_above_target` if it takes over stop attribution.
+
+An individual run row shows low flow when `stop_kind` is `low_rps_above_target` and a positive flow
+is `<= 0.65 × flow_typical_l_min`. A zero stop sample cannot satisfy this comparison.
+The dashboard identifies short cycling from a flagged hour or at
+least two completed heating runs shorter than ten minutes in the selection. The low-flow
+explanation additionally requires at least two `low_rps_above_target`
+stops and a completed heating run with that stop kind whose positive flow satisfies the same comparison.
+The summary uses the lowest qualifying flow and its own reference. A finalized run uses its saved
+reference, which can be unavailable. Pausing resets the active tracker and ends pending refinement.
+These summaries cannot establish the physical root cause of a stop, minimum modulation,
+closed valves, an external thermostat or oversizing. See the
+[history persistence contract](ARCHITECTURE.md#history-and-diagnosis-persistence).
 
 <a id="diagnosis-defrost"></a>
 ### 4. Defrost events (`defrost`)

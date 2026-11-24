@@ -234,7 +234,7 @@ vm.createContext(context);
 const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
-  "\nthis.__api = { t, hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, env3HistHtml, scrubText, histReadout, histVisibleSeries," +
+  "\nthis.__api = { t, hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, modbusHistoryHtml, env3HistHtml, scrubText, histReadout, histVisibleSeries," +
   " histTipsHtml, scrubMove, scrubIndex, histPinToggle, histPinIndex, expireLiveHistoryPins, expiredHistSlots, readHistoryJson, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
@@ -2223,12 +2223,29 @@ try {
     const unverifiedFlowHtml = h.histHtml("flow", "L/min", "Volumenstrom", "modbus");
     assert.ok(unverifiedFlowHtml.includes(h.t("hist.modbus_flow_unverified")),
       "unverified Modbus flow 24h chart includes explicit scaling caveat");
+    const cachedFlow = () => h.modbusHistoryHtml("flow", "L/min", "Volumenstrom");
+    const renderFlow = () => h.histHtml("flow", "L/min", "Volumenstrom");
+    assert.equal(cachedFlow(), renderFlow(), "cached chart initially matches the ordinary renderer");
 
     S.status.modbus = { enabled: true, connected: true, profile: "homehub", profile_basis: "affirmative" };
     S._modbus = [{ off: 49, concept: "flow", history: "flow", value: "12.3", unit: "L/min" }];
     const verifiedFlowHtml = h.histHtml("flow", "L/min", "Volumenstrom", "modbus");
     assert.ok(!verifiedFlowHtml.includes(h.t("hist.modbus_flow_unverified")),
       "verified EKRHH Modbus flow 24h chart omits unverified scaling caveat");
+    const cachedVerified = cachedFlow();
+    assert.equal(cachedVerified, renderFlow(), "a scaling change refreshes the cached chart");
+    assert.ok(!cachedVerified.includes(h.t("hist.modbus_flow_unverified")));
+
+    S.hist.set(h.histCacheKey("flow", "modbus"),
+      { at: Date.now(), gen: 2, dt: 300, unit: "L/min", b0: 10, held: [], v: [130, 123] });
+    assert.equal(cachedFlow(), renderFlow(), "a new history ring refreshes the markup");
+    assert.notEqual(cachedFlow(), cachedVerified, "the previous graph is retired with its ring");
+    const unpinnedFlow = cachedFlow();
+    h.histPinToggle("flow", 0);
+    assert.equal(cachedFlow(), renderFlow(), "pinning refreshes the cached chart");
+    assert.notEqual(cachedFlow(), unpinnedFlow, "the pin is visible");
+    h.histPinToggle("flow", 0);
+    assert.equal(cachedFlow(), unpinnedFlow, "unpinning removes the saved readout");
 
     // Compact floating tooltips, shared lower time axis, and dotted Y-scale gridlines/labels.
     assert.doesNotMatch(pairedPumpHtml, /vhist-reserve/,

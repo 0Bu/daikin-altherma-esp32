@@ -204,7 +204,7 @@ if not args.expect_red or args.expect_red_case == "late-correction":
                                "only_cross_process_state": "synthetic NOR partition bytes"})
 if not args.expect_red:
     for phase in ["normal", "shutdown", "torn", "corrupt", "barrier", "barrier_early_shutdown",
-                  "incompatible"]:
+                  "incompatible", "future"]:
         cycling_transport = OUT / f"cycling-{phase}.synthetic-nor.bin"
         for case in ["seed_cycling", "restore_cycling"]:
             label = f"{case}_{phase}"
@@ -218,6 +218,37 @@ if not args.expect_red:
                 raise RuntimeError("Unexpected cycling checkpoint outcome: " + label)
         transport_evidence.append({"path": str(cycling_transport), "sha256": digest(cycling_transport),
                                    "bytes": cycling_transport.stat().st_size,
+                                   "only_cross_process_state": "synthetic NOR partition bytes"})
+    for phase in ["normal", "shutdown", "torn", "barrier", "trace-torn", "read-retry",
+                  "read-persistent"]:
+        run_transport = OUT / f"cycling-runs-{phase}.synthetic-nor.bin"
+        for case in ["seed_cycling_runs", "restore_cycling_runs"]:
+            label = f"{case}_{phase}"
+            result = execute(baseline, case, label, [run_transport, phase])
+            expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+            results.append({"case": label, "exit_code": result.returncode,
+                            "stdout": result.stdout, "stderr": result.stderr, "pass": expected})
+            print(result.stdout, end="", flush=True)
+            if not expected:
+                (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+                raise RuntimeError("Unexpected cycling run detail outcome: " + label)
+        transport_evidence.append({"path": str(run_transport), "sha256": digest(run_transport),
+                                   "bytes": run_transport.stat().st_size,
+                                   "only_cross_process_state": "synthetic NOR partition bytes"})
+    for phase in ["normal", "dhw-fence", "cycling-fence", "shutdown-run-torn"]:
+        combined_transport = OUT / f"combined-diagnostics-{phase}.synthetic-nor.bin"
+        for case in ["seed_combined_diagnostic_journal", "restore_combined_diagnostic_journal"]:
+            label = f"{case}_{phase}"
+            result = execute(baseline, case, label, [combined_transport, phase])
+            expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+            results.append({"case": label, "exit_code": result.returncode,
+                            "stdout": result.stdout, "stderr": result.stderr, "pass": expected})
+            print(result.stdout, end="", flush=True)
+            if not expected:
+                (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+                raise RuntimeError("Unexpected combined diagnostic journal outcome: " + label)
+        transport_evidence.append({"path": str(combined_transport), "sha256": digest(combined_transport),
+                                   "bytes": combined_transport.stat().st_size,
                                    "only_cross_process_state": "synthetic NOR partition bytes"})
     mb_transport = OUT / "modbus-checkup.synthetic-nor.bin"
     for case in ["seed_modbus_checkup_journal", "restore_modbus_checkup_journal",

@@ -851,9 +851,10 @@ append_status_fault_check_json(JsonOut& j, DiagnosticsSource source, bool source
 
 template <typename JsonOut>
 [[gnu::noinline]] static void append_cycling_run_contexts_json(JsonOut& j, uint32_t boot_s,
-                                                               DiagnosticsSource source) {
+                                                               uint32_t timeline_unix_s) {
+    constexpr auto source = DiagnosticsSource::X10a;
     static_assert(std::is_trivially_destructible_v<logic::CheckupRunContextSnapshot>);
-    if (source != DiagnosticsSource::X10a || !checkup_has_cycling_run_contexts(source)) return;
+    if (!checkup_has_cycling_run_contexts(source, boot_s, timeline_unix_s)) return;
     ValuesTlsReader reader;
     reader.admitted = weather_values_reader_enter();
     if (!reader.admitted) return;
@@ -866,7 +867,8 @@ template <typename JsonOut>
         heap_caps_malloc(sizeof(logic::CheckupRunContextSnapshot), MALLOC_CAP_8BIT));
     if (!buf.p) return;
     new (buf.p) logic::CheckupRunContextSnapshot;
-    if (!checkup_cycling_run_contexts(*buf.p, boot_s, source) || !buf.p->count) return;
+    if (!checkup_cycling_run_contexts(*buf.p, boot_s, source, timeline_unix_s) || !buf.p->count)
+        return;
 
     if (buf.p->flow_typical_tenths != logic::CHECKUP_ABSENT && buf.p->flow_typical_tenths > 0) {
         j += ",\"flow_typical_l_min\":";
@@ -917,6 +919,11 @@ template <typename JsonOut>
         if (e.flags & logic::RUN_CTX_F_LOW_RPS_ABOVE_TGT) {
             j += ",\"low_rps_above_target\":true";
         }
+        if (e.flags & logic::RUN_CTX_F_FINALIZED) {
+            j += ",\"flow_reference_fixed\":true";
+            opt_signed("flow_typical_l_min", e.flow_typical_tenths);
+        }
+        if (e.flags & logic::RUN_CTX_F_RESTORED) j += ",\"restored\":true";
         j += "}";
     }
     j += "]";
@@ -1792,6 +1799,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 j += "]";
                 const bool     have_trace   = trace && trace->unix_s != 0;
                 const uint32_t trace_boot_s = have_trace ? trace->boot_s : 0;
+                const uint32_t trace_unix_s = have_trace ? trace->unix_s : 0;
                 if (have_trace) {
                     ufield(",\"timeline\":{\"unix_s\":", trace->unix_s);
                     ufield(",\"window_end_s\":", trace->window_end_s);
@@ -1807,7 +1815,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 }
                 release_trace();
                 if (!redact && have_trace && diag_effective == DiagnosticsSource::X10a) {
-                    append_cycling_run_contexts_json(j, trace_boot_s, diag_effective);
+                    append_cycling_run_contexts_json(j, trace_boot_s, trace_unix_s);
                 }
                 j += ",\"stop_context\":";
                 append_stop_context_json(

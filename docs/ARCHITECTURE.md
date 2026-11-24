@@ -324,16 +324,33 @@ The rolling compressor trace uses the dated journal with a separate payload fing
 can offer an eligible checkpoint at most once every 240 seconds, with up to 192 records in four
 journal slots. The bounded shutdown flush can save a newer trace. Restoration checks a
 bounded set of groups newer than the last committed reset fence, newest first. A damaged or
-incomplete group can fall back to an older candidate. The first structurally complete group
-determines the result. Admission requires synchronized time, a matching model, link and
-diagnostics-consent identity, and observations eligible for the rolling window. An incompatible
-complete group ends the search. A scoped reset withdraws restored evidence immediately. Once the
+incomplete group can fall back to an older candidate. Admission requires synchronized time, a
+matching model, link and diagnostics-consent identity, and observations eligible for the rolling
+window. A complete group with a different identity ends the search. An X10A group with matching
+identity can yield to its predecessor if it is future-dated, outside the rolling window, or overlaps
+the current boot. On Modbus, a complete group with an unusable date ends the search. A scoped reset
+withdraws restored evidence immediately. Once the
 writer sees the pending reset, it drops any unfinished data group and gives the fence the next
 eligible write for this trace. The reset becomes durable when the fence commits. Power loss
 before that commit can leave an earlier compatible group eligible. After the journal scan, an
 orderly shutdown can save the undated fence even before time sync or trend restoration. No
 observations are admitted by that fence-only drain. Restored observations keep
 their saved times and age with a monotonic floor. The journal retains its existing geometry.
+
+Completed X10A compressor-run details use separate versioned pages in the same journal after
+post-stop refinement. Each page adds up to five newly finalized runs and the comparison saved for
+each run. Preparing the first dated X10A checkpoint fixes the calendar mapping for the collection.
+The mapping stays fixed until it differs from the current clock by at least 24 hours. The live
+chart uses the current clock. A checkpoint ends at the last dated observation or earlier if the
+clock moved back. A backward correction can postpone a write that would shorten a checkpoint
+already offered to flash. Both archiving and restoration require the exact start and first matching
+stop in the trace. A gap of up to 15 seconds qualifies if running observations resume before the
+stop. To archive a run, a verified checkpoint on the same clock mapping must cover the stop.
+Verified run commits are at least 240 seconds apart during normal operation. During orderly
+shutdown the writer can attempt up to two additional run pages after the existing diagnostic and
+ordinary journal drains, provided the X10A cycling reset fence is clear.
+Restoration also requires matching model, link and diagnostics consent and a page after the last
+committed reset fence.
 
 Unit-reported fault traces ([`fault_trace.hpp`](../main/logic/fault_trace.hpp),
 [`fault_persist.hpp`](../main/logic/fault_persist.hpp)) record X10A and Modbus fault, warning,

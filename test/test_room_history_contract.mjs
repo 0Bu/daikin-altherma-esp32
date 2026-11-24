@@ -283,6 +283,9 @@ void hydronic_observation_flash_service(HydronicObservationReader reader){
 void history_restore_cycling_flash(uint32_t wait){
  need(flash_depth==1&&history_depth==0&&wait==0,"cycling restore must use the nonblocking flash owner");
 }
+void history_restore_cycling_runs_flash(){
+ need(flash_depth==1&&history_depth==0,"cycling run restore must use the sole flash owner");
+}
 void history_restore_fault_flash(uint32_t wait){
  need(flash_depth==1&&history_depth==0&&wait==0,"fault restore must use the nonblocking flash owner");
 }

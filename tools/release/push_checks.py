@@ -97,8 +97,11 @@ def check_candidate(checkout, offline, build_checkout, build_env, runtime_checko
                 shutil.copyfileobj(phase_log, sys.stdout.buffer)
                 sys.stdout.buffer.flush()
     # Keep all host work out of the browser frame and input measurements.
+    browser_env = dict(offline)
+    if context := browser_env.pop("DAIKIN_RELEASE_BROWSER_DOCKER_CONTEXT", ""):
+        browser_env["DOCKER_CONTEXT"] = context
     run_phase("headless Chromium and WebKit", [*host_checks, "browser", base, head],
-              checkout, offline, timeout=2100)
+              checkout, browser_env, timeout=2100)
 
 
 def run(root, expected_head):
