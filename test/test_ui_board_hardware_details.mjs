@@ -212,8 +212,8 @@ assert.doesNotMatch(rendered, /ENV-III-Messwerte|data-hist="env3_combined"/,
 assert.equal(renderSandbox.__env3Tooltip("de", 2),
   "jetzt\nTemperatur  21,5 °C\nLuftfeuchte  48,0 %\nLuftdruck  1.007,0 hPa",
   "one readable localized tooltip must report time and all three measurements together");
-assert.match(style, /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
-  "the combined chart must use the compact readout row and shared lower time axis");
+assert.match(style, /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto auto;/,
+  "the combined chart must use the compact plot row and shared lower time axis");
 assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
   "the climate chart must use the same reserved layout");
 assert.match(style, /\.vhist-tip\s*\{[^}]*white-space:\s*pre-wrap;/,
