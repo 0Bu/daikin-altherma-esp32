@@ -18,6 +18,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -564,7 +566,7 @@ def function_instructions(disassembly: str) -> dict[str, list[str]]:
 
 
 def validate_dynamic_stack(disassembly: str, frames: dict[str, int],
-                           required: list[re.Pattern[str]]) -> None:
+                           required: tuple[re.Pattern[str], ...]) -> None:
     """Bind libstdc++'s one reviewed alloca caller; never treat ENTRY as its whole frame."""
     blocks = function_instructions(disassembly)
     dynamic = [name for name, instructions in blocks.items()
@@ -777,12 +779,29 @@ def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> 
         raise BudgetError("diagnosis numeric calls: 36 direct serializer calls require review")
 
 
+@lru_cache(maxsize=4)
+def _compiled_frame_patterns(patterns: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
+    return tuple(re.compile(pattern) for pattern in patterns)
+
+
+@lru_cache(maxsize=4)
+def _frame_rule_matcher(patterns: tuple[str, ...]) -> Callable[[str], tuple[int, ...]]:
+    compiled = _compiled_frame_patterns(patterns)
+
+    @lru_cache(maxsize=8192)
+    def match(name: str) -> tuple[int, ...]:
+        # Recorded sizes and frame presence are read from each evaluator input, including mutants.
+        return tuple(index for index, pattern in enumerate(compiled) if pattern.search(name))
+
+    return match
+
+
 def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dict[str, int]:
     validate_poll_inlining(disassembly)
     stop_stack.validate_inlining(disassembly, BudgetError)
     if budgets is None:
         budgets = load_budgets(DEFAULT_BUDGETS)
-    required = [re.compile(rule["pattern"]) for rule in budgets["symbols"].values()]
+    required = _compiled_frame_patterns(tuple(rule["pattern"] for rule in budgets["symbols"].values()))
     frames: dict[str, int] = {}
     current: str | None = None
     symbol_address = 0
@@ -928,12 +947,15 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "defrost_start_generation": ["defrost_start_copy", "defrost_poll_generation"],
         "checkup_fault_flags": ["fault_saved_flags", "fault_saved_window_flags"],
         "checkup_fault_flags_clock": ["fault_saved_flags", "room_time_now"],
-        # Optional DHW output is caller-owned heap storage. Snapshot expiry, both monotonic
-        # reads, the libc clock and final withdrawal loads are sequential siblings.
-        # The DHW wall projection is inlined into the measured copy frame.
+        # Optional DHW output is caller-owned heap storage. The clock and monotonic reads
+        # retain the projected-wall helper and its bracket. Clock-step invalidation retains
+        # only the projected-wall helper because the bracket has already returned.
         "dhw_trace_expire": ["dhw_trace_copy", "dhw_trace_expire"],
-        "dhw_trace_clock": ["dhw_trace_copy", "room_time_now"],
-        "dhw_trace_monotonic": ["dhw_trace_copy", "dhw_trace_monotonic"],
+        "dhw_trace_clock": ["dhw_trace_copy", "dhw_trace_wall_locked", "dhw_trace_wall",
+                            "room_time_now"],
+        "dhw_trace_monotonic": ["dhw_trace_copy", "dhw_trace_wall_locked", "dhw_trace_wall",
+                                "dhw_trace_monotonic"],
+        "dhw_trace_wall_step": ["dhw_trace_copy", "dhw_trace_wall_locked", "dhw_trace_barrier"],
         "dhw_trace_guard": ["dhw_trace_copy", "stop_atomic_bool_load"],
     }
     report_paths = {
@@ -1549,6 +1571,7 @@ def validate_ota_upload_paths(budgets: dict[str, Any], sources: dict[str, str]) 
 
 def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
     expected = shutdown_path_members()
+    reviewed_specs = stop_stack.shutdown_specs()
     modeled = {name for name in budgets["paths"]
                if "_shutdown" in name or name == "poll_board_journal"}
     if modeled != set(expected):
@@ -1557,7 +1580,7 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
         rule = budgets["paths"][name]
         owner = "ota_health" if name.startswith("ota_health_") else name.split("_")[0]
         task = budgets["tasks"][owner]
-        reviewed = stop_stack.shutdown_specs().get(name)
+        reviewed = reviewed_specs.get(name)
         base = 1536 if reviewed is None else reviewed[2]
         maximum = task["stack_bytes"] - task["reserve_bytes"] if reviewed is None else reviewed[3]
         if (reviewed is not None and reviewed[0] != owner
@@ -2578,12 +2601,16 @@ def load_budgets(path: Path) -> dict[str, Any]:
 def evaluate(frames: dict[str, int], budgets: dict[str, Any]) -> dict[str, int]:
     selected: dict[str, int] = {}
     errors: list[str] = []
-    for key, rule in budgets["symbols"].items():
-        pattern = re.compile(rule["pattern"])
+    rules = tuple(budgets["symbols"].items())
+    match = _frame_rule_matcher(tuple(rule["pattern"] for _, rule in rules))
+    matches_by_rule: list[list[tuple[str, int]]] = [[] for _ in rules]
+    for name, frame in frames.items():
+        for index in match(name):
+            matches_by_rule[index].append((name, frame))
+    for (key, rule), matches in zip(rules, matches_by_rule):
         maximum = rule["max_bytes"]
-        matches = [(name, frame) for name, frame in frames.items() if pattern.search(name)]
         if not matches:
-            errors.append(f"symbol {key}: required pattern {pattern.pattern!r} is absent")
+            errors.append(f"symbol {key}: required pattern {rule['pattern']!r} is absent")
             continue
         selected[key] = max(frame for _, frame in matches)
         if selected[key] > maximum:
@@ -4546,9 +4573,10 @@ def self_test() -> None:
                         for path in (REPO / "main").glob("*.cpp")}
     validate_shutdown_paths(budgets, shutdown_sources)
     shutdown_controls = 0
+    encoded_budget = json.dumps(budgets)
     for name, members in shutdown_path_members().items():
         for member in members:
-            changed = json.loads(json.dumps(budgets))
+            changed = json.loads(encoded_budget)
             changed["paths"][name]["symbols"].remove(member)
             try:
                 validate_shutdown_paths(changed, shutdown_sources)
@@ -4557,7 +4585,7 @@ def self_test() -> None:
             else:
                 raise AssertionError(f"self-test accepted omitted {member} from {name}")
             shutdown_controls += 1
-        changed = json.loads(json.dumps(budgets))
+        changed = json.loads(encoded_budget)
         changed["paths"][name]["base_bytes"] = 0
         try:
             validate_shutdown_paths(changed, shutdown_sources)

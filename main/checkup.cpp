@@ -182,9 +182,14 @@ struct CheckupSlot {
     bool                          flash_pending        = false;
 
     // Append optional runtime detail so existing field offsets and stack budgets stay unchanged.
-    // Exact windows never enter PersistedCheckup or its journal layout/fingerprint.
-    logic::DhwLossTrace dhw_trace{};
-    std::atomic<bool>   dhw_trace_forgotten{false};
+    // Exact windows use their own flash page, separate from hourly aggregates.
+    logic::DhwLossTrace   dhw_trace{};
+    std::atomic<bool>     dhw_trace_forgotten{false};
+    bool                  dhw_trace_restore_allowed = false;
+    uint32_t              dhw_trace_clock_anchor_s  = 0;
+    std::atomic<uint32_t> dhw_trace_barrier{0};
+    std::atomic<uint32_t> dhw_trace_barrier_acked{0};
+    std::atomic<uint32_t> dhw_trace_saved_end_s{0};
 
     CheckupSlot(PersistStore* st, uint32_t magic, bool mb)
         : store(st), persist_magic(magic), is_modbus(mb) {}
@@ -283,6 +288,21 @@ void retire_fault_locked(CheckupSlot& slot) {
     slot.fault_trace_dirty    = false;
     const uint32_t next       = slot.fault_reset_token.load(std::memory_order_relaxed) + 1u;
     slot.fault_reset_token.store(next ? next : 1u, std::memory_order_release);
+}
+
+constexpr uint32_t kDhwTraceBarrierToken = uint32_t{1} << 31;
+
+void arm_dhw_trace_barrier_locked(CheckupSlot& slot) {
+    const uint32_t next = (slot.dhw_trace_barrier.load(std::memory_order_relaxed) + 1u) &
+                          (kDhwTraceBarrierToken - 1u);
+    slot.dhw_trace_barrier.store(kDhwTraceBarrierToken | next, std::memory_order_release);
+}
+
+void retire_dhw_trace_locked(CheckupSlot& slot) {
+    slot.dhw_trace_restore_allowed = false;
+    slot.dhw_trace_clock_anchor_s  = 0;
+    slot.dhw_trace.reset();
+    arm_dhw_trace_barrier_locked(slot);
 }
 
 [[gnu::noinline]] bool fault_snapshot_locked(CheckupSlot& slot, logic::CheckupFaultTrace& out,
@@ -544,7 +564,7 @@ bool apply_dhw_reset_locked(CheckupSlot& slot) {
     if (!slot.dhw_reset_requested.exchange(false)) return false;
     slot.boot_handoff_valid = false;
     slot.P().dhw.reset();
-    slot.dhw_trace.reset();
+    retire_dhw_trace_locked(slot);
     // The independent reset retires values, not the shared hourly geometry. Losing head/count
     // would suppress even unrelated journal writes until both rings saturated again.
     slot.P().dhw.head          = slot.P().ring.head;
@@ -834,6 +854,7 @@ void slot_start(CheckupSlot& slot, bool diagnostics_enabled, uint32_t diagnostic
     slot.dhw_source_fp           = dhw_fp;
     slot.cycling_restore_allowed = !safe_mode_active();
     slot.fault_restore_allowed   = !safe_mode_active();
+    slot.dhw_trace_restore_allowed = !safe_mode_active();
     const uint32_t want_fp       = logic::checkup_layout_fingerprint();
     const uint32_t reason        = static_cast<uint32_t>(esp_reset_reason());
     slot.persist_verdict         = logic::checkup_restore_verdict(
@@ -889,6 +910,7 @@ void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_chang
     if (generation_changed) {
         retire_cycling_locked(slot);
         retire_fault_locked(slot);
+        retire_dhw_trace_locked(slot);
         slot.reset_requested.store(false);
         slot.dhw_reset_requested.store(false);
         slot.state     = logic::CheckupState{};
@@ -1044,6 +1066,7 @@ void checkup_reset() {
     if (!lk.acquired()) return;
     retire_cycling_locked(s_x10a);
     retire_fault_locked(s_x10a);
+    retire_dhw_trace_locked(s_x10a);
     s_x10a.boot_handoff_valid       = false;
     s_x10a.fault_boot_handoff_valid = false;
     // An explicit /detect or automatic-profile rewiring withdraws the old confirmation immediately.
@@ -1074,6 +1097,7 @@ void checkup_modbus_reset() {
     if (!lk.acquired()) return;
     retire_cycling_locked(s_modbus);
     retire_fault_locked(s_modbus);
+    retire_dhw_trace_locked(s_modbus);
     s_modbus.boot_handoff_valid       = false;
     s_modbus.fault_boot_handoff_valid = false;
     s_modbus.source_confirmed         = false;
@@ -1179,6 +1203,7 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_x10a.persist_verdict          = logic::CheckupRestore::ModelChanged;
     retire_cycling_locked(s_x10a);
     retire_fault_locked(s_x10a);
+    retire_dhw_trace_locked(s_x10a);
     s_x10a.reset_requested.store(true);
 }
 
@@ -1235,6 +1260,7 @@ void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp) {
     s_modbus.persist_verdict          = logic::CheckupRestore::ModelChanged;
     retire_cycling_locked(s_modbus);
     retire_fault_locked(s_modbus);
+    retire_dhw_trace_locked(s_modbus);
     s_modbus.reset_requested.store(true);
 }
 
@@ -1780,22 +1806,43 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source)
         out = s_defrost_start.snapshot(now_us, hp_poll_generation());
 }
 
-// Keep optional wall-clock locals out of the common report frame. The caller owns the lock/output.
+// Keep the clock bracket out of the common report frame.
+[[gnu::noinline]] static uint32_t dhw_trace_wall_s(uint32_t uptime_s) {
+    const int64_t before_us = esp_timer_get_time();
+    int64_t       unix_s    = -1;
+    int32_t       ms        = 0;
+    time_now(unix_s, ms);
+    return logic::dhw_loss_wall_anchor_s(uptime_s, before_us, esp_timer_get_time(), unix_s, ms);
+}
+
+[[gnu::noinline]] static uint32_t dhw_trace_wall_locked(CheckupSlot& slot, uint32_t uptime_s) {
+    const uint32_t now = dhw_trace_wall_s(uptime_s);
+    if (!now || !slot.dhw_trace_clock_anchor_s) return now;
+    const uint64_t anchored = uint64_t{slot.dhw_trace_clock_anchor_s} + uptime_s;
+    if (anchored <= UINT32_MAX && now <= anchored + 1 && anchored <= uint64_t{now} + 1)
+        return static_cast<uint32_t>(anchored);
+
+    // A clock step must not re-date saved evidence or extend its lifetime on a later reboot.
+    // Withdraw the pre-boot prefix, preserving this boot's measurements and monotonic frame.
+    slot.dhw_trace.discard_restored();
+    slot.dhw_trace_clock_anchor_s = 0;
+    arm_dhw_trace_barrier_locked(slot);
+    return now;
+}
+
+// The caller owns the lock and the optional output.
 static __attribute__((noinline)) void copy_dhw_trace_locked(CheckupSlot&            slot,
                                                             logic::DhwLossTimeline* dhw_trace,
                                                             int64_t now_us, bool source_fresh) {
     if (dhw_trace && slot.source_confirmed && !slot.dhw_reset_requested.load() &&
         !slot.dhw_trace_forgotten.load(std::memory_order_acquire) && slot.cov.r5t &&
-        slot.cov.valve && slot.cov.pump && slot.cov.bsh &&
-        slot.dhw_trace.snapshot(*dhw_trace, now_us, logic::CHECKUP_MAX_GAP_S)) {
-        dhw_trace->live         = dhw_trace->live && source_fresh;
-        int64_t       unix_s    = -1;
-        int32_t       ms        = 0;
-        const int64_t before_us = esp_timer_get_time();
-        time_now(unix_s, ms);
-        const int64_t after_us = esp_timer_get_time();
-        dhw_trace->unix_s =
-            logic::dhw_loss_wall_anchor_s(dhw_trace->window_end_s, before_us, after_us, unix_s, ms);
+        slot.cov.valve && slot.cov.pump && slot.cov.bsh && slot.dhw_trace.begun) {
+        const uint32_t unix_s =
+            dhw_trace_wall_locked(slot, static_cast<uint32_t>(now_us / 1000000));
+        if (slot.dhw_trace.snapshot(*dhw_trace, now_us, logic::CHECKUP_MAX_GAP_S)) {
+            dhw_trace->live   = dhw_trace->live && source_fresh;
+            dhw_trace->unix_s = unix_s;
+        }
     }
     // Forget can latch without this mutex while the clock read is in flight.
     if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire)) dhw_trace->clear();
@@ -2119,11 +2166,115 @@ CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTra
 void checkup_cycling_forget() {
     s_x10a.cycling_forgotten.store(true, std::memory_order_release);
     s_modbus.cycling_forgotten.store(true, std::memory_order_release);
-    // Factory forgetting also withdraws ordinary-RAM DHW detail immediately, without requiring
-    // the producer mutex or allowing the next poll to repopulate it before the scheduled reboot.
+    checkup_fault_forget();
+}
+
+bool checkup_dhw_trace_reset_pending(DiagnosticsSource source) {
+    const CheckupSlot& slot = slot_for(source);
+    return slot.dhw_reset_requested.load() ||
+           slot.dhw_trace_barrier.load(std::memory_order_acquire) !=
+               slot.dhw_trace_barrier_acked.load(std::memory_order_acquire);
+}
+
+void checkup_dhw_trace_checkpoint_appended(uint32_t token, DiagnosticsSource source) {
+    CheckupSlot& slot = slot_for(source);
+    if (token & kDhwTraceBarrierToken) {
+        // The journal serializes writes and acknowledgments. Clear the watermark when the fence
+        // commits so an older in-flight data append cannot reinstate it after a clock step.
+        slot.dhw_trace_saved_end_s.store(0, std::memory_order_relaxed);
+        slot.dhw_trace_barrier_acked.store(token, std::memory_order_release);
+    } else {
+        slot.dhw_trace_saved_end_s.store(token, std::memory_order_release);
+    }
+}
+
+void checkup_dhw_trace_forget() {
     s_x10a.dhw_trace_forgotten.store(true, std::memory_order_release);
     s_modbus.dhw_trace_forgotten.store(true, std::memory_order_release);
-    checkup_fault_forget();
+}
+
+bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage& page, uint32_t& token,
+                                  TickType_t wait_ticks, DiagnosticsSource source) {
+    if (!s_mtx) return false;
+    CheckupSlot& slot = slot_for(source);
+    Lock         lk(s_mtx, wait_ticks);
+    if (!lk.acquired() || slot.dhw_trace_forgotten.load(std::memory_order_acquire)) return false;
+    apply_dhw_reset_locked(slot);
+    const auto     uptime_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
+    const uint32_t unix_s   = (slot.dhw_trace.count || slot.dhw_trace_clock_anchor_s)
+                                  ? dhw_trace_wall_locked(slot, uptime_s)
+                                  : 0;
+    if (slot.dhw_trace_forgotten.load(std::memory_order_acquire)) return false;
+    const uint32_t barrier = slot.dhw_trace_barrier.load(std::memory_order_relaxed);
+    std::memset(&page, 0, sizeof(page));
+    if (barrier != slot.dhw_trace_barrier_acked.load(std::memory_order_acquire)) {
+        token = barrier;
+        return true;
+    }
+    if (!unix_s || slot.reset_requested.load() || !slot.source_confirmed ||
+        s_diagnostics_generation == 0)
+        return false;
+    auto&          trace  = slot.dhw_trace;
+    const uint32_t newest = trace.newest_end_s();
+    if (newest <= trace.frame_offset_s) return false;
+    token = newest - trace.frame_offset_s;
+    if (token & kDhwTraceBarrierToken ||
+        token <= slot.dhw_trace_saved_end_s.load(std::memory_order_acquire))
+        return false;
+    if (uptime_s > UINT32_MAX - trace.frame_offset_s) return false;
+    const uint32_t frame_s = uptime_s + trace.frame_offset_s;
+    trace.expire(frame_s);
+    if (!trace.count) return false;
+    page.unix_s                 = unix_s;
+    page.count                  = trace.count;
+    page.model_fp               = slot.model_fp;
+    page.source_fp              = slot.source_fp;
+    page.dhw_source_fp          = slot.dhw_source_fp;
+    page.diagnostics_generation = s_diagnostics_generation;
+    for (size_t i = 0; i < page.count; ++i)
+        if (!logic::dhw_loss_trace_pack(
+                page.records[i], trace.windows[(trace.head + i) % logic::DHW_LOSS_TRACE_CAPACITY],
+                frame_s))
+            return false;
+    if (slot.dhw_trace_forgotten.load(std::memory_order_acquire) || slot.dhw_reset_requested.load())
+        return false;
+    if (!slot.dhw_trace_clock_anchor_s && unix_s >= uptime_s)
+        slot.dhw_trace_clock_anchor_s = unix_s - uptime_s;
+    return true;
+}
+
+[[gnu::noinline]] bool checkup_dhw_trace_restore_ready(DiagnosticsSource source) {
+    if (!s_mtx) return false;
+    Lock lk(s_mtx, 0);
+    return lk.acquired() && slot_for(source).source_confirmed;
+}
+
+CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePage& page,
+                                                    TickType_t                     wait_ticks,
+                                                    DiagnosticsSource              source) {
+    using Result = CheckupFlashRestoreResult;
+    if (!s_mtx) return Result::Deferred;
+    CheckupSlot& slot = slot_for(source);
+    Lock         lk(s_mtx, wait_ticks);
+    if (!lk.acquired()) return Result::Deferred;
+    if (!slot.dhw_trace_restore_allowed || slot.dhw_trace_forgotten.load() ||
+        slot.reset_requested.load() || slot.dhw_reset_requested.load() ||
+        s_diagnostics_generation == 0)
+        return Result::Ignored;
+    if (!slot.source_confirmed) return Result::Deferred;
+    if (page.model_fp != slot.model_fp || page.source_fp != slot.source_fp ||
+        page.dhw_source_fp != slot.dhw_source_fp ||
+        page.diagnostics_generation != s_diagnostics_generation)
+        return Result::Ignored;
+    const auto     uptime_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
+    const uint32_t unix_s   = dhw_trace_wall_s(uptime_s);
+    if (slot.dhw_trace_forgotten.load() || slot.dhw_reset_requested.load()) return Result::Ignored;
+    if (!unix_s) return Result::Deferred;
+    if (!logic::dhw_loss_trace_restore(slot.dhw_trace, page, uptime_s, unix_s))
+        return Result::Ignored;
+    slot.dhw_trace_clock_anchor_s  = unix_s - uptime_s;
+    slot.dhw_trace_restore_allowed = false;
+    return Result::Restored;
 }
 
 bool checkup_has_cycling_run_contexts(DiagnosticsSource source) {

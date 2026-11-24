@@ -1466,27 +1466,34 @@ async function assertPlantDiagnosis(page, context) {
           const body = document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').querySelector('.vdesc-body');
           const detail = body.querySelector('.checkup-dhw-detail');
           const basis = detail?.querySelector('[data-dhw-disclosure="basis"]');
+          const assessment = detail?.querySelector('.checkup-dhw-assessment');
+          const timeline = detail?.querySelector('[data-checkup-dhw]');
           return { wrapper: body.firstElementChild === detail, heroFirst: detail?.firstElementChild?.classList.contains('checkup-dhw-hero'),
             value: detail?.querySelector('.checkup-dhw-value')?.firstChild?.textContent.trim(),
             unit: detail?.querySelector('.checkup-dhw-unit')?.textContent,
-            assessment: detail?.querySelector('.checkup-dhw-assessment')?.textContent,
+            assessmentTitle: assessment?.querySelector('strong')?.textContent,
+            assessment: assessment?.lastChild?.textContent.trim(),
+            hint: Array.from(detail?.querySelectorAll('.vdesc-p') || [])
+              .some(node => node.textContent === t('check.dhw.hint')),
             disclosures: Array.from(detail?.querySelectorAll('details[data-dhw-disclosure]') || [], node =>
               ({key:node.dataset.dhwDisclosure,tag:node.tagName,open:node.open,named:!!node.querySelector('summary')?.textContent.trim()})),
             normal: basis?.querySelector('.vdesc-n')?.textContent,
-            empty: detail?.querySelector('[data-checkup-dhw] .checkup-dhw-empty')?.textContent,
+            empty: timeline && !timeline.hasChildNodes(),
             fabricated: detail?.querySelectorAll('.checkup-dhw-chart, [data-dhw-window], [data-dhw-lane]').length };
         })()`);
         assert.equal(block.count, 1, `${context}/${block.id}: one dedicated detail wrapper, not the generic three blocks`);
         assert.equal(dhw.wrapper && dhw.heroFirst, true, `${context}/${block.id}: the measurement hero leads the detail`);
         assert.equal(dhw.value, "1", `${context}/${block.id}: hero retains the aggregate sensor rate without timed records`);
-        assert.equal(dhw.unit, "K/h", `${context}/${block.id}: separate cooling-rate unit`);
-        assert.equal(dhw.assessment, await page.evaluate("t('check.dhw.measurement') + ' ' + t('check.dhw.hint')"),
-          `${context}/${block.id}: sensor observation and bounded project hint remain distinct`);
-        assert.deepEqual(dhw.disclosures, ["basis", "energy"].map(key => ({key,tag:"DETAILS",open:false,named:true})),
-          `${context}/${block.id}: supporting basis and energy are named native disclosures, initially collapsed`);
+        assert.equal(dhw.unit, await page.evaluate("t('check.dhw.hour_unit')"),
+          `${context}/${block.id}: separate localized cooling-rate unit`);
+        assert.equal(dhw.assessmentTitle, await page.evaluate("t('check.dhw.context_title')"));
+        assert.equal(dhw.assessment, await page.evaluate("t('check.dhw.context_missing')"),
+          `${context}/${block.id}: aggregate-only firmware has unknown timed context`);
+        assert.equal(dhw.hint, true, `${context}/${block.id}: keep the bounded project hint visible`);
+        assert.deepEqual(dhw.disclosures, ["timeline", "basis", "energy"].map(key => ({key,tag:"DETAILS",open:false,named:true})),
+          `${context}/${block.id}: named native disclosures start collapsed`);
         assert.equal(dhw.normal, normalLabel, `${context}/${block.id}: Normal context is retained inside the basis`);
-        assert.equal(dhw.empty, await page.evaluate("t('check.dhw.timeline_unavailable')"),
-          `${context}/${block.id}: aggregate-only firmware explicitly lacks timed evidence`);
+        assert.equal(dhw.empty, true, `${context}/${block.id}: a closed timeline is not mounted`);
         assert.equal(dhw.fabricated, 0, `${context}/${block.id}: totals cannot fabricate chart bars or marker lanes`);
         continue;
       }

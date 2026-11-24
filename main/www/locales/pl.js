@@ -1,4 +1,4 @@
-// translation-source: a0b77e6154de7503df1d2d35e17a9324cefe13632b5b9c0d926440af9661d87b
+// translation-source: d49db3661f1d34dea3ed1f6d9bfd64bb4d79036cf8ed10732c6037a4b5479a45
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -185,8 +185,16 @@ I18N.pl = localeValues([
   /* check.status.experimental */ "TESTOWO",
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "BRAK OKNA",
-  /* check.dhw.maximum */ "Zarejestrowane maksimum",
-  /* check.dhw.measurement */ "Godzinne chłodzenie netto w punkcie czujnika R5T zasobnika.",
+  /* check.dhw.maximum */ "Największy godzinowy spadek temperatury na czujniku zasobnika",
+  /* check.dhw.hour_unit */ "°C na godzinę",
+  /* check.dhw.timeline */ "Historia z 24 godzin",
+  /* check.dhw.context_title */ "Przyczyna nieznana",
+  /* check.dhw.context_hour */ "Godzina pomiaru z tą wartością",
+  /* check.dhw.context_missing */ "Czas i okoliczności tego pomiaru są niedostępne.",
+  /* check.dhw.context_pump */ "W ciągu tej godziny pracowała wewnętrzna pompa wody pompy ciepła.",
+  /* check.dhw.context_draw */ "Szybki spadek temperatury może wynikać z poboru ciepłej wody albo szybkiego stygnięcia.",
+  /* check.dhw.context_quiet */ "Nie wykryto pracy pompy ani spadku przypominającego pobór wody. Pobór ciepłej wody nadal jest możliwy.",
+  /* check.dhw.context_selected */ "Przyczyna tego spadku pozostaje niejasna.",
   /* check.dhw.hint */ "Godzina bez zarejestrowanych oznak pompy lub poboru osiągnęła próg orientacyjny projektu.",
   /* check.dhw.before_snapshot */ (d) => `${d} przed zapisem stanu`,
   /* check.dhw.marker_yes */ "zarejestrowano",
@@ -198,8 +206,8 @@ I18N.pl = localeValues([
   /* check.dhw.timeline_unavailable */ "Brak okien z czasami. Historia nie jest odtwarzana z sum.",
   /* check.dhw.timeline_empty */ "Brak ukończonych okien z danymi czasowymi w tym widoku 24 h.",
   /* check.dhw.chart_title */ "Chłodzenie w ukończonym oknie",
-  /* check.dhw.timed_scope */ (n) => `Okna z czasami od restartu/wyzerowania: ${n}, do 24 h. Maksimum i liczniki mogą też opierać się na zapisanych danych godzinowych, nie tylko na oknach wykresu.`,
-  /* check.dhw.blank */ "Puste miejsce: brak dostępnego ukończonego okna z danymi czasowymi, nie zerowe chłodzenie. Znaki oznaczają obecność, nie czas trwania.",
+  /* check.dhw.timed_scope */ (n) => `Zmierzone godziny na wykresie: ${n} (ostatnie 24 h). Maksimum i liczniki mogą też opierać się na zapisanych danych godzinowych, nie tylko na oknach wykresu.`,
+  /* check.dhw.blank */ "Obszary kreskowane: brak dostępnego ukończonego okna z danymi czasowymi, nie zerowe chłodzenie. Znaki oznaczają obecność, nie czas trwania.",
   /* check.dhw.snapshot */ "Stan danych",
   /* check.dhw.stale */ "Bieżące odczyty do oceny wychładzania zasobnika CWU są niedostępne lub nieaktualne; zakończone okna pozostają obserwacjami historycznymi.",
   /* check.dhw.limit */ "R5T mierzy jeden punkt warstwowego zasobnika, nie jego energię. Oznaki pompy i poboru nie dowodzą ani przyczyny, ani poboru wody.",

@@ -134,6 +134,19 @@ both histories untouched. Safe mode and pre-opt-in states (`diagnostics_generati
 old hours, while booting while paused retains the active generation's compatible flash records for
 resumption; unidentified-source empty samples advance time without booking observations.
 
+Exact completed tank-cooling windows persist independently of hourly diagnosis totals. The
+timed journal restores compatible saved records within the last 24 hours after clock and source
+confirmation. It requires the matching circulation identity and diagnostics generation. A
+power loss can lose windows that had not yet been committed. Restored bars report historical
+observations. Freshness still requires complete inputs from the current boot.
+
+Once a restore or the first checkpoint preparation sets the clock anchor, a confirmed clock step
+withdraws restored windows and queues a barrier. Current windows can then be saved with corrected
+time. If power fails or the barrier write fails before commit, the prior checkpoint can still qualify for
+restoration under the usual identity and age checks. If the flash scan finds damaged barriers,
+only checkpoints written after finding the same set of damaged barriers qualify for restore.
+Changes in the damage set can withhold replay until a matching checkpoint is saved.
+
 A software restart can also carry each source's ongoing tank-loss filter through a separately sealed
 **one-shot handoff**. Adoption requires confirmation of that source and circulation scope, enabled
 diagnostics and no pending reset. The handoff preserves the hourly cooling candidate and settling

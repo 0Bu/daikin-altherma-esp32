@@ -22,6 +22,7 @@
 #include "logic/config_model.hpp"
 #include "logic/cycling_persist.hpp"
 #include "logic/cycling_run_context.hpp"
+#include "logic/dhw_loss_persist.hpp"
 #include "logic/fault_persist.hpp"
 #include "logic/fault_trace.hpp"
 #include "hydronic_observation_store.hpp"
@@ -38,6 +39,16 @@ namespace daik {
 using CheckupFlashRecord = logic::CheckupJournalRecord;
 
 enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
+
+bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage& page, uint32_t& token,
+                                  TickType_t wait_ticks, DiagnosticsSource source);
+bool checkup_dhw_trace_reset_pending(DiagnosticsSource source);
+void checkup_dhw_trace_checkpoint_appended(uint32_t token, DiagnosticsSource source);
+bool checkup_dhw_trace_restore_ready(DiagnosticsSource source);
+CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePage& page,
+                                                    TickType_t                     wait_ticks,
+                                                    DiagnosticsSource              source);
+void                      checkup_dhw_trace_forget();
 
 bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
                                 logic::CyclingTraceIdentity& identity, uint32_t& reset_token,

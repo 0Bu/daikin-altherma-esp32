@@ -411,10 +411,12 @@ starts are observed). Keep the observed start count available when classificatio
 unsupported. Distinguish unsupported inputs from temporarily insufficient readings. Label elapsed
 time as the observation window and reserve event timestamps for recorded events.
 
-The tank-cooling expander shows **Maximum recorded** in K/h when the aggregate has a rate.
-An eligible timeline draws a 24-hour chart. Position each bar by its endpoints and keep zero-rate
-bars visible. Fixed-size markers occupy separate pump and draw-like lanes. Selecting a bar shows
-the interval, rate, readable time and markers. **Data details** and **Calculation example** start
+The tank-cooling expander shows **Largest hourly drop at the tank sensor** in °C per hour when the
+aggregate has a rate. It shows the time and recorded circumstances of the most recent exact hour
+with that rate when available. Open **24-hour history** to see the chart. Position each bar by its
+endpoints, keep zero-rate bars visible and hatch the gaps between completed timed records.
+Fixed-size markers occupy separate pump and draw-like lanes. Selecting a bar shows the interval,
+rate, readable time and circumstances. **Data details** and **Calculation example** start
 collapsed when present.
 Preserve selection and disclosure state during same-scope polling. Select the newest retained
 window if the selected one expires. Clear the chart when an accepted diagnosis response changes

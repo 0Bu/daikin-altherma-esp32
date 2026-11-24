@@ -21,7 +21,7 @@ reset() {
     cp main/checkup.cpp "$WORK/main/checkup.cpp"
     cp main/logic/stop_context.hpp main/logic/stop_context_input.hpp \
        main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp main/logic/defrost_start.hpp \
-       main/logic/fault_trace.hpp main/logic/fault_persist.hpp main/logic/cycling_run_context.hpp main/logic/dhw_loss_trace.hpp \
+       main/logic/fault_trace.hpp main/logic/fault_persist.hpp main/logic/cycling_run_context.hpp main/logic/dhw_loss_trace.hpp main/logic/dhw_loss_persist.hpp \
        main/logic/hydronic_observation.hpp main/logic/hydronic_input.hpp \
        main/logic/hydronic_hourly.hpp main/logic/hydronic_payload.hpp \
        "$WORK/main/logic/"

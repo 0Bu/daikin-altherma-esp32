@@ -584,8 +584,9 @@ inline constexpr bool history_journal_retry_due(bool paused, int64_t now_us,
 // stop revision, and one reset barrier. HYDR independently reserves four records/hour as a design
 // allowance for close, seam revision, reset barrier and shutdown partial hour; this is not a
 // measured maximum under unbounded churn. Both cycling traces add up to four slots per four-minute
-// checkpoint, and both fault traces add one slot per fifteen-minute checkpoint. Repeated explicit
-// resets or shutdowns consume wear reserve and can shorten retention.
+// checkpoint, and both fault traces add one slot per fifteen-minute checkpoint. Each tank-cooling
+// trace reserves one full checkpoint and one reset barrier per hour. Repeated explicit resets
+// or shutdowns consume wear reserve and can shorten retention.
 inline constexpr size_t HISTORY_FLASH_CYCLING_MAX_PARTS  = 4;
 inline constexpr size_t HISTORY_FLASH_CYCLING_INTERVAL_S = 240;
 inline constexpr size_t HISTORY_FLASH_FAULT_INTERVAL_S   = 900;
@@ -594,7 +595,7 @@ inline constexpr size_t HISTORY_FLASH_FUTURE_SAMPLES =
     HISTORY_FLASH_FUTURE_HOURS * 60u * 60u / HISTORY_DT_S;
 inline constexpr size_t HISTORY_FLASH_FUTURE_RECORDS =
     HISTORY_FLASH_FUTURE_SAMPLES * 4u +
-    (2u + 2u + 4u + 4u +
+    (2u + 2u + 4u + 4u + 2u * 2u +
      2u * (3600u / HISTORY_FLASH_CYCLING_INTERVAL_S * HISTORY_FLASH_CYCLING_MAX_PARTS) +
      2u * (3600u / HISTORY_FLASH_FAULT_INTERVAL_S)) *
         HISTORY_FLASH_FUTURE_HOURS;
