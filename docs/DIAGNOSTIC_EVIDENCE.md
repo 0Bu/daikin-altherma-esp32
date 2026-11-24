@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: d5c39a480774e3f42a576bcb063cd648e26e03f5b386f1a2fff91d3075a45c44 -->
+<!-- diagnostic-evidence-contract: 9eeaccb7f823091c1b9f2bb0df78564e1d2469858dc15090a139586efb53e57c -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -222,9 +222,10 @@ row is **CHECKING**; after a full DHW scope day with no completed window it beco
 even if no candidate could open. This states missing hourly measurements, not full signal coverage,
 a cause or a promise that more waiting will produce a measurement.
 
-The optional timed chart plots individual accepted windows whose endpoints are known. Each bar
-pairs that window's measured rate, readable seconds and pump and draw-like markers. The aggregate
-diagnosis can include a window carried across a restart, for which the original start is estimated.
+Each timed bar pairs an accepted window's endpoints, rate, readable duration and markers. An hour
+at the aggregate maximum's rate is an example because multiple windows can share that rate.
+The aggregate can also include a candidate carried across a restart whose exact original start
+was unavailable for plotting.
 
 **Project boundary:** These thresholds, endpoint confirmation with a 30-second closing grace,
 one-hour intervals and settling filters are project choices,

@@ -120,6 +120,18 @@ CheckupFlashRestoreResult checkup_fault_restore(const logic::CheckupFaultTrace&,
     return CheckupFlashRestoreResult::Ignored;
 }
 void checkup_fault_forget() {}
+bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage&, uint32_t&, TickType_t,
+                                  DiagnosticsSource) {
+    return false;
+}
+bool                      checkup_dhw_trace_reset_pending(DiagnosticsSource) { return false; }
+void                      checkup_dhw_trace_checkpoint_appended(uint32_t, DiagnosticsSource) {}
+bool                      checkup_dhw_trace_restore_ready(DiagnosticsSource) { return false; }
+CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePage&, TickType_t,
+                                                    DiagnosticsSource) {
+    return CheckupFlashRestoreResult::Ignored;
+}
+void checkup_dhw_trace_forget() {}
 } // namespace daik
 namespace {
 using namespace daik;

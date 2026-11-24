@@ -8,6 +8,7 @@ const ROW = 'button[data-desc="model:health_dhw_loss"]';
 const DETAIL = ".checkup-dhw-detail";
 const CHART = `${DETAIL} .checkup-dhw-chart`;
 const WINDOWS = `${CHART} button[data-dhw-window]`;
+const TIMELINE = `${DETAIL} details[data-dhw-disclosure="timeline"]`;
 const BASIS = `${DETAIL} details[data-dhw-disclosure="basis"]`;
 const ENERGY = `${DETAIL} details[data-dhw-disclosure="energy"]`;
 const NOW = 172800;
@@ -73,17 +74,26 @@ async function assertSelection(page, end, context, focused = false) {
       rate: details?.querySelector('[data-dhw-readout="rate"]')?.textContent.trim(),
       time: details?.querySelector('[data-dhw-readout="time"]')?.textContent.trim(),
       coverage: details?.querySelector('[data-dhw-readout="coverage"]')?.textContent.trim(),
-      markers: details?.querySelector('[data-dhw-readout="markers"]')?.textContent.trim(),
+      context: details?.querySelector('[data-dhw-readout="context"]')?.textContent.trim(),
+      label: button.getAttribute("aria-label"),
       labels: { pump:t('check.dhw.pump'), draw:t('check.dhw.draw'),
-        yes:t('check.dhw.marker_yes'), no:t('check.dhw.marker_no') } };
+        yes:t('check.dhw.marker_yes'), no:t('check.dhw.marker_no'),
+        pumpContext:t('check.dhw.context_pump'), drawContext:t('check.dhw.context_draw'),
+        quietContext:t('check.dhw.context_quiet'), uncertainty:t('check.dhw.context_selected') } };
   }, windowButton(end));
   if (focused) assert.equal(state.focus, true, context + ": roving keyboard focus follows selection");
-  assert.ok(state.time && state.coverage && state.markers, context + ": selection exposes time, coverage and marker meaning");
+  assert.ok(state.time && state.coverage && state.context, context + ": selection exposes time, coverage and circumstances");
   assert.ok(state.rate?.includes("K/h"), context + ": selected rate keeps its unit");
   assert.equal(Number.parseFloat(state.rate), expected.rate_k_h, context + ": readout uses the selected record, not the aggregate maximum");
-  assert.equal(state.markers, `${state.labels.pump}: ${expected.pump_marker ? state.labels.yes : state.labels.no} · ` +
-    `${state.labels.draw}: ${expected.draw_marker ? state.labels.yes : state.labels.no}`,
-  context + ": the readout attributes both independent presence flags to this window only");
+  const markers = `${state.labels.pump}: ${expected.pump_marker ? state.labels.yes : state.labels.no} · ` +
+    `${state.labels.draw}: ${expected.draw_marker ? state.labels.yes : state.labels.no}`;
+  assert.ok(state.label?.endsWith(markers), context + ": the bar's accessible name preserves both presence flags");
+  const phrases = [];
+  if (expected.pump_marker) phrases.push(state.labels.pumpContext);
+  if (expected.draw_marker) phrases.push(state.labels.drawContext);
+  if (!phrases.length) phrases.push(state.labels.quietContext);
+  if (expected.rate_k_h > 0) phrases.push(state.labels.uncertainty);
+  assert.equal(state.context, phrases.join(" "), context + ": only this window's paired markers explain its circumstances");
 }
 
 function makeTimeline() {
@@ -241,6 +251,7 @@ async function beginContinuity(page, visible) {
     hooks.witness = { root, elements, ancestors, removed, record, observer,
       focused: document.activeElement,
       selected: [...document.querySelectorAll(windows + '[aria-pressed="true"]')].map(node => node.dataset.dhwWindow),
+      timeline: document.querySelector('[data-dhw-disclosure="timeline"]')?.open,
       basis: document.querySelector('[data-dhw-disclosure="basis"]')?.open,
       energy: document.querySelector('[data-dhw-disclosure="energy"]')?.open };
     hooks.observe = true;
@@ -251,7 +262,7 @@ async function beginContinuity(page, visible) {
   }, { visible, detail: DETAIL, chart: CHART, windows: WINDOWS, row: ROW });
 }
 
-async function finishContinuity(page, server, requests, visible, context) {
+async function finishContinuity(page, server, requests, visible, context, chartMounted = visible) {
   try {
     await page.waitFor("window.__dhwBrowserHooks.polls.length >= 3 && !_pollBusy", { timeoutMs: 12000 });
   } catch (error) {
@@ -271,7 +282,8 @@ async function finishContinuity(page, server, requests, visible, context) {
       focus: document.activeElement === w.focused,
       selection: JSON.stringify(w.selected) === JSON.stringify([...document.querySelectorAll(windows + '[aria-pressed="true"]')]
         .map(node => node.dataset.dhwWindow)),
-      disclosures: w.basis === document.querySelector('[data-dhw-disclosure="basis"]')?.open &&
+      disclosures: w.timeline === document.querySelector('[data-dhw-disclosure="timeline"]')?.open &&
+        w.basis === document.querySelector('[data-dhw-disclosure="basis"]')?.open &&
         w.energy === document.querySelector('[data-dhw-disclosure="energy"]')?.open,
       chart: !!document.querySelector(chart),
       tank: S.live?.tank, paintedTank: document.getElementById("svTank").textContent };
@@ -291,7 +303,7 @@ async function finishContinuity(page, server, requests, visible, context) {
   assert.equal(result.focus && result.selection && result.disclosures, true,
     context + ": live polling preserves selection, focus and native disclosure state");
   assert.equal(result.builds, 0, context + ": scalar polling performs no repeated or hidden chart construction");
-  assert.equal(result.chart, visible, context + ": a collapsed diagnosis does not mount a hidden plot");
+  assert.equal(result.chart, chartMounted, context + ": chart mounting follows the timeline disclosure");
 }
 
 export async function assertDhwTimeline(page, server, context, { locales = false } = {}) {
@@ -398,20 +410,29 @@ export async function assertDhwTimeline(page, server, context, { locales = false
     await finishContinuity(page, server, requests, false, context + "/collapsed");
 
     await tap(page, ROW);
-    await page.waitFor(`!!document.querySelector(${JSON.stringify(CHART)}) && !S.clickHold`);
     await settle(page);
     const hero = await page.evaluate(`(() => {
       const root = document.querySelector(${JSON.stringify(DETAIL)});
       return { unit: root.querySelector('.checkup-dhw-unit').textContent.trim(), text:root.innerText,
+        expectedUnit:t('check.dhw.hour_unit'), expectedMissing:t('check.dhw.context_missing'),
+        timeline:root.querySelector('[data-dhw-disclosure="timeline"]').open,
+        mounted:!!root.querySelector('[data-dhw-timeline]'),
         basis:root.querySelector('[data-dhw-disclosure="basis"]').open,
         energy:root.querySelector('[data-dhw-disclosure="energy"]').open };
     })()`);
     assert.equal(await heroValue(page), "4.5", context + ": hero retains the aggregate maximum, distinct from the timed chart's 2.7");
-    assert.equal(hero.unit, "K/h", context + ": hero shows net sensor cooling, not kWh or a loss share");
-    assert.equal(hero.basis || hero.energy, false, context + ": supporting details and energy start collapsed");
-    assert.match(hero.text, /R5T/, context + ": the single-sensor limitation remains visible");
-    assert.doesNotMatch(hero.text, /synthetic|illustrative timeline|example windows/i,
-      context + ": the production timeline must not use the concept preview's fabricated series");
+    assert.equal(hero.unit, hero.expectedUnit, context + ": hero shows degrees Celsius per hour");
+    assert.equal(hero.timeline || hero.basis || hero.energy, false, context + ": all supporting disclosures start collapsed");
+    assert.equal(hero.mounted, false, context + ": opening the diagnosis does not construct a hidden chart");
+    assert.ok(hero.text.includes(hero.expectedMissing), context + ": an unmatched maximum leaves time and circumstances unknown");
+    if (process.argv.includes("--dhw-only")) {
+      requests = server.valuesRequests;
+      await beginContinuity(page, true);
+      await finishContinuity(page, server, requests, true, context + "/timeline-folded", false);
+    }
+    await tap(page, `${TIMELINE} > summary`);
+    await page.waitFor(`!!document.querySelector(${JSON.stringify(CHART)}) && !S.clickHold`);
+    await settle(page);
     await assertGeometry(page, timeline, context);
     await assertLayout(page, context + "/en");
     await capture(page, context + "/en");
@@ -449,6 +470,11 @@ export async function assertDhwTimeline(page, server, context, { locales = false
     await assertSelection(page, zero.end_s, context + "/Space", true);
     await key(page, "Escape", "Escape", 27);
     await assertSelection(page, latest, context + "/Escape", true);
+    await tap(page, `${TIMELINE} > summary`);
+    await page.waitFor(`!document.querySelector(${JSON.stringify(CHART)}) && !S.descOpen.has('dhw:timeline')`);
+    await tap(page, `${TIMELINE} > summary`);
+    await page.waitFor(`!!document.querySelector(${JSON.stringify(CHART)}) && S.descOpen.has('dhw:timeline')`);
+    await assertSelection(page, latest, context + "/timeline-reopened");
 
     await tap(page, `${BASIS} > summary`);
     await tap(page, `${ENERGY} > summary`);
@@ -457,6 +483,7 @@ export async function assertDhwTimeline(page, server, context, { locales = false
       return {basis:basis.open,energy:energy.open,basisText:basis.innerText,energyText:energy.innerText};
     })()`);
     assert.equal(disclosures.basis && disclosures.energy, true, context + ": native summaries reveal their real content");
+    assert.match(disclosures.basisText, /R5T/, context + ": data details explain the single-sensor limitation");
     assert.match(disclosures.basisText, /8/, context + ": basis retains aggregate window totals, not only timed records");
     assert.match(disclosures.basisText, /3/, context + ": discarded-candidate evidence is still available");
     for (const phrase of [/200\s*l/i, /COP/, /1\.05\s*kWh/, /0\.35[–−-]0\.42\s*kWh/, /not measured energy/i])
@@ -468,13 +495,13 @@ export async function assertDhwTimeline(page, server, context, { locales = false
     const stamps = await evaluate(page, ({ chart, trace, window }) => {
       const formatter = new Intl.DateTimeFormat('en', {month:'short',day:'numeric',
         hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23',timeZoneName:'shortOffset'});
-      const bootUnix = trace.unix_s - trace.window_end_s;
-      return { expected:[window.start_s,window.end_s].map(s => formatter.format(new Date((bootUnix+s)*1000))),
+      const frameUnix = trace.unix_s - trace.window_end_s;
+      return { expected:[window.start_s,window.end_s].map(s => formatter.format(new Date((frameUnix+s)*1000))),
         actual:document.querySelector(chart + ' [data-dhw-readout="time"]').textContent,
         coverage:document.querySelector(chart + ' [data-dhw-readout="coverage"]').textContent };
     }, { chart: CHART, trace: timeline, window: draw });
     for (const stamp of stamps.expected) assert.ok(stamps.actual.includes(stamp),
-      context + ": selected wall times map exact uptime seconds through the supplied anchor");
+      context + ": selected wall times map exact timeline coordinates through the supplied anchor");
     assert.match(stamps.coverage, /60:15/, context + ": coverage preserves a real 3615-second completion, not a fabricated clock-hour bucket");
     await evaluate(page, selector => document.querySelector(selector).focus({preventScroll:true}), windowButton(draw.end_s));
     await settle(page);
@@ -483,7 +510,7 @@ export async function assertDhwTimeline(page, server, context, { locales = false
     await finishContinuity(page, server, requests, true, context + "/open-selected");
 
     // Expiry of an older saved bucket can change aggregate evidence without changing any timed
-    // current-boot window. Its scalar reading must update without discarding the selected plot.
+    // plotted window. Its scalar reading must update without discarding the selected plot.
     await page.evaluate(`window.__dhwBrowserHooks.aggregate = {
       chart:document.querySelector(${JSON.stringify(CHART)}), focused:document.activeElement }; true`);
     Object.assign(check, { max_k_h: 4.4, windows: 7, observed_s: 25200,
@@ -619,14 +646,33 @@ export async function assertDhwTimeline(page, server, context, { locales = false
       index >= priorDiagnostics && /Failed to load resource.*500/.test(line));
     if (expectedFailure >= 0) page.diagnostics.splice(expectedFailure, 1);
 
-    // An omitted or redacted timeline withdraws exact windows before the next value frame.
-    // The status still carries fresh aggregate readings.
+    // An equal rate identifies one matching timed hour. Scope retirement must withdraw its
+    // date and paired observations before the delayed values frame, just like the bars.
+    check.max_k_h = both.rate_k_h;
+    await publish();
+    const matched = await evaluate(page, detail => {
+      const root = document.querySelector(detail);
+      return { time: root.querySelector(".checkup-dhw-time")?.innerText,
+        context: root.querySelector(".checkup-dhw-assessment").innerText,
+        label: t("check.dhw.context_hour"), pump: t("check.dhw.context_pump"),
+        draw: t("check.dhw.context_draw"), uncertainty: t("check.dhw.context_title") };
+    }, DETAIL);
+    assert.equal(await heroValue(page), "2.7", context + ": the compact view renders the matching aggregate value");
+    const [hourLabel, interval] = matched.time?.split("\n") || [];
+    assert.equal(hourLabel, matched.label, context + ": the timed hour is labelled as a matching reading");
+    assert.ok(interval?.trim() && matched.context.includes(matched.pump) &&
+      matched.context.includes(matched.draw) && matched.context.includes(matched.uncertainty),
+    context + ": the matching hour explains both observations while leaving the cause open");
+    check.max_k_h = 4.4;
     await evaluate(page, selector => document.querySelector(selector).focus({ preventScroll: true }),
       windowButton(latest));
     delete check.timeline;
     await publish(async () => {
       assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(WINDOWS)}).length`), 0,
         context + ": adopting an omitted/redacted timeline withdraws old precise data before delayed values finish");
+      assert.equal(await evaluate(page, detail => [...document.querySelector(detail)
+        .querySelectorAll("[data-dhw-evidence]")].some(node => node.getClientRects().length > 0), DETAIL), false,
+      context + ": adopting an omitted timeline also withdraws the prior timed hero evidence");
       assert.equal(await evaluate(page, selector => document.activeElement.matches(selector), ROW), true,
         context + ": withdrawing the focused chart returns focus to the diagnosis row");
       assert.equal(await staleNoteVisible(), false,
@@ -636,6 +682,9 @@ export async function assertDhwTimeline(page, server, context, { locales = false
     assert.equal(await staleNoteVisible(), false,
       context + ": a fresh aggregate-only frame displays only the timed-evidence availability message");
     assert.equal(await heroValue(page), "4.4");
+    assert.equal(await evaluate(page, detail => document.querySelector(detail).innerText
+      .includes(t("check.dhw.context_missing")), DETAIL), true,
+    context + ": aggregate-only evidence explicitly leaves its time and circumstances unknown");
     check.timeline = { ...timeline, epoch: 0, live: false };
     await publish();
     await empty("malformed");
@@ -694,7 +743,7 @@ export async function assertDhwTimeline(page, server, context, { locales = false
     assert.doesNotMatch(await page.evaluate(`document.querySelector(${JSON.stringify(DETAIL)}).innerText`), /\b0\s*K\/h|\bkWh\b/,
       context + ": blocked or missing evidence never masquerades as zero cooling/energy");
 
-    Object.assign(check, completed, { timeline, reason: "observation_only" });
+    Object.assign(check, completed, { timeline, max_k_h: both.rate_k_h, reason: "observation_only" });
     timeline.live = true; timeline.unix_s = UNIX;
     status.ntp.synced = true; status.health.source_fresh = true; status.health.source_age_s = 0;
     await publish();
@@ -714,14 +763,16 @@ export async function assertDhwTimeline(page, server, context, { locales = false
       if (["en", "de"].includes(language)) await capture(page, context + "/locale/" + language);
       if (language === "de" && process.env.DAIKIN_BROWSER_EVIDENCE_DIR) {
         // Also retain the compact German card, using real summary actions rather than posed DOM.
-        for (const disclosure of [BASIS, ENERGY]) await tap(page, disclosure + " > summary");
+        const compactDisclosures = [TIMELINE, BASIS, ENERGY];
+        for (const disclosure of compactDisclosures) await tap(page, disclosure + " > summary");
         assert.equal(await evaluate(page, selectors => selectors.every(selector =>
-          !document.querySelector(selector).open), [BASIS, ENERGY]), true);
+          !document.querySelector(selector).open), compactDisclosures), true);
+        assert.equal(await page.evaluate(`!!document.querySelector(${JSON.stringify(CHART)})`), false);
         await assertLayout(page, context + "/locale/de-compact");
         await capture(page, context + "/locale/de-compact");
-        for (const disclosure of [BASIS, ENERGY]) await tap(page, disclosure + " > summary");
+        for (const disclosure of compactDisclosures) await tap(page, disclosure + " > summary");
         assert.equal(await evaluate(page, selectors => selectors.every(selector =>
-          document.querySelector(selector).open), [BASIS, ENERGY]), true);
+          document.querySelector(selector).open), compactDisclosures), true);
       }
     }
     const trusted = await page.evaluate("window.__dhwBrowserHooks.trusted");

@@ -289,22 +289,25 @@ abort reason includes invalid temperatures and an unconfirmed closing endpoint a
 grace. An unsupported profile also uses `unavailable`, with `blocked:false`.
 
 <a id="dhw-cooling-timeline"></a>
-**DHW cooling timeline.** Optional `dhw_loss.timeline` contains current-boot completed windows,
-not a reconstruction from hourly sums. It needs unredacted status, enabled diagnostics, a confirmed
-supported source, started collection and an admitted caller-owned snapshot allocation. It shares
-the cycling chart's values/TLS admission guard, but does not require a synchronized clock.
+**DHW cooling timeline.** Optional `dhw_loss.timeline` includes exact completed windows, including
+compatible records restored from flash. It needs unredacted status, enabled diagnostics, a confirmed
+supported source, and an admitted caller-owned snapshot allocation. It shares the cycling chart's
+values/TLS admission guard. New windows can appear without a synchronized clock. Restore requires
+synchronized time, matching diagnostics consent, source, profile, and circulation identity.
+The field first appears after a live sample starts the trace or a compatible checkpoint restores it.
+The `window_end_s`, `since_s`, and non-null `observed_end_s` coordinates are uint32 seconds.
 
 | Timeline field | Contract |
 |---|---|
-| `epoch` | Nonzero uint32 collection/reset generation, scoped to this boot and source. |
-| `window_end_s` | uint32 uptime at the snapshot's right edge, in whole seconds. |
-| `since_s` | uint32 uptime when this collection lifecycle began; not continuous coverage or the first completed window. |
-| `observed_end_s` | uint32 uptime of the last sample with plausible R5T, valve, internal-pump and tank-heater inputs readable, or null before one exists; not the end of a completed window. |
+| `epoch` | Nonzero uint32 collection, reset, or coordinate-frame generation for this boot and source. Withdrawing restored windows after a confirmed clock step advances it. |
+| `window_end_s` | Right edge in whole seconds on the timeline's monotonic frame. |
+| `since_s` | Start of collection, extended back to the first restored start if earlier. At clock-step withdrawal it moves to the first current-boot window's start if one is still stored at that point, otherwise to the boot origin on the same timeline frame. Subsequent window expiry leaves this coordinate in place. It conveys no continuous coverage. |
+| `observed_end_s` | Coordinate of the last current-boot sample with plausible R5T and readable valve, internal-pump and tank-heater inputs. Null until such a sample arrives. |
 | `unix_s` | Optional synchronized Unix-seconds anchor **at `window_end_s`**. The two monotonic bounds around the clock read must map to the same wall second. |
 | `live` | Boolean freshness of complete DHW inputs and the source, checked against the 15-second limit before rounding timestamps. |
 | `windows` | Array of at most 24 completed windows, oldest first, with no overlaps. |
 
-Each `timeline.windows` entry has `start_s` and `end_s` (uint32 uptime seconds), `rate_k_h`
+Each `timeline.windows` entry has `start_s` and `end_s` (uint32 timeline seconds), `rate_k_h`
 (nonnegative net sensor cooling, serialized with one decimal), `observed_s` (readable seconds,
 excluding tolerated blind time), and boolean `pump_marker` and `draw_marker`. The pump marker is
 internal hydronic-pump presence, **not** the external circulation witness. The draw marker is a
@@ -314,25 +317,30 @@ Actual endpoints are independently quantized to whole seconds. The evaluator acc
 elapsed whole seconds; the quantized endpoint difference can therefore be 3600–3631 seconds.
 Rate and observed seconds retain the evaluator's original calculation. Retention uses completion
 ends in `(window_end_s - 86400, window_end_s]`,
-including on reads after polling stops; a retained start may precede the left edge. With `unix_s`,
-map uptime `s` to `unix_s - window_end_s + s`; otherwise use relative time, never invented dates.
-Wall-clock corrections change labels, not monotonic retention.
+including on reads after polling stops. A retained start may precede the left edge. Restoring
+earlier windows can adopt a new, biased uptime frame so pre-boot endpoints remain unsigned.
+Use endpoint differences for durations. With `unix_s`, map coordinate `s` to
+`unix_s - window_end_s + s`. Without that anchor, use times relative to the snapshot.
+Retention advances with the monotonic clock. Restoration or first checkpoint preparation sets the
+wall anchor. A confirmed wall-clock reading within one second of the predicted time retains that
+anchor. A larger confirmed difference withdraws restored windows and schedules a journal barrier.
+Current-boot measurements keep their monotonic frame. See
+[reboot and persistence](PLANT.md#reboot-and-persistence) for barrier durability.
 
 `windows:[]` means eligible collection has begun but no accepted timed completion is retained.
 An absent timeline can mean unsupported, reset, disabled, redacted, allocation-denied or unreadable
 state; it is not zero cooling. Scope UI state to `boot_id`, `history.epoch`, `health.source` and
 `timeline.epoch`. Clear the previous chart when the timeline is absent or invalid, the diagnosis
 snapshot is unreadable, or any scope key changes; unlike cycling, omission cannot reuse a cache.
-Blank intervals mean no timed completed window, not zero cooling or a recorded exclusion cause.
+Hatched intervals indicate time without a completed timed record. Its cooling rate and reason are unknown.
 
 Exact completion-end retention and aggregate hourly expiry differ, so timed and aggregate counts
-can differ in either direction. Saved aggregate hours do not supply bars. A candidate carried
-across a reboot can still contribute aggregate evidence under existing rules, but never a timed
-bar: its original start is not exact in this boot. Source/profile, circulation-identity and consent
-generation resets clear the detail. While a circulation reset is pending, snapshots exclude the
-previous DHW scope's evidence and progress. Other checks continue reporting.
-Same-generation pause/resume preserves retained completed
-windows without bridging the pause. No timed windows survive a reboot. When both source slots
+can differ in either direction. Bars come from exact windows. A candidate carried across a
+reboot can still contribute aggregate evidence under existing rules. An exact bar needs both
+original endpoints. Source/profile, circulation-identity and consent-generation resets clear
+timed detail. While a circulation reset is pending, snapshots exclude the previous DHW scope's
+evidence and progress. Other checks continue reporting. Same-generation pause/resume preserves
+retained completed windows and leaves a gap for paused time. When both source slots
 observe the factory-forget latch, they stop recording timed samples for that boot, even if erasure
 fails. The snapshot checks the latch before returning timed detail. A response already holding
 that checked snapshot can finish sending it. See [method and claim limits](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss).

@@ -101,6 +101,7 @@
 #include "logic/cycling_persist.hpp"
 #include "logic/fault_trace.hpp"
 #include "logic/fault_persist.hpp"
+#include "logic/dhw_loss_persist.hpp"
 #include "logic/history_persist.hpp"
 #include "logic/lwt_select.hpp"
 #include "logic/rwt_select.hpp"
@@ -16525,7 +16526,7 @@ static void test_dhw_loss_trace() {
     CHECK(sizeof(DhwLossTraceWindow) == 16);
     CHECK(sizeof(DhwLossTrace) <= 416 && sizeof(DhwLossTimeline) <= 416);
     CHECK(DHW_LOSS_WINDOW_S * DHW_LOSS_TRACE_CAPACITY == DHW_LOSS_TRACE_WINDOW_S);
-    // No persisted layout was enlarged to store the new runtime-only detail.
+    // The timed journal page stays independent of aggregate and handoff layouts.
     CHECK(sizeof(DhwLossBucket) == 20 && sizeof(CheckupJournalPayload) == 128);
 
     constexpr int64_t frame_us = 100 * us;
@@ -16780,6 +16781,118 @@ static void test_dhw_loss_trace() {
         CHECK(out.windows[0].start_s >= 100 &&
               out.windows[0].end_s - out.windows[0].start_s == 3600);
     }
+}
+
+static void test_dhw_loss_restore() {
+    using namespace logic;
+    constexpr uint32_t saved = 1795000000;
+    constexpr uint32_t frame = DHW_LOSS_TRACE_RESTORE_OFFSET_S;
+    constexpr int64_t  us    = 1000000;
+    DhwLossTracePage   page{};
+    CHECK(dhw_loss_trace_page_valid(page, true));
+    page.model_fp               = 1;
+    page.source_fp              = 2;
+    page.dhw_source_fp          = 3;
+    page.diagnostics_generation = 4;
+    page.unix_s                 = saved;
+    page.count                  = DHW_LOSS_TRACE_CAPACITY;
+    for (size_t i = 0; i < page.count; ++i) {
+        const auto     start = frame - DHW_LOSS_TRACE_WINDOW_S + static_cast<uint32_t>(i) * 3600;
+        const uint16_t rate  = i ? 45 : 0;
+        CHECK(dhw_loss_trace_pack(page.records[i],
+                                  {start, start + 3600, rate, 3591, i % 2 == 1, i == 23}, frame));
+    }
+    CHECK(dhw_loss_trace_page_valid(page, false));
+    CHECK(!dhw_loss_trace_page_valid(page, true));
+    DhwLossTrace trace;
+    trace.epoch = UINT32_MAX;
+    CHECK(!dhw_loss_trace_restore(trace, page, 10, saved + 9));     // future at boot
+    CHECK(!dhw_loss_trace_restore(trace, page, 10, saved + 86400)); // strict expiry
+    CHECK(!dhw_loss_trace_restore(trace, page, UINT32_MAX, saved));
+    CHECK(!dhw_loss_trace_restore(trace, page, 10, 9));
+    CHECK(dhw_loss_trace_restore(trace, page, 10, saved + 20));
+    trace.prepend_restored({1, 3601}); // full
+    DhwLossTimeline timeline;
+    CHECK(trace.snapshot(timeline, 10 * us, CHECKUP_MAX_GAP_S));
+    CHECK(!timeline.live && !timeline.observed && timeline.count == 24 && timeline.epoch == 1);
+    CHECK(timeline.window_end_s == frame + 10);
+    CHECK(timeline.windows[0].rate_tenths == 0 && timeline.windows[0].observed_s == 3591);
+    CHECK(timeline.windows[23].end_s == frame - 10 && timeline.windows[23].draw_marker &&
+          timeline.windows[23].pump_marker && timeline.windows[23].rate_tenths == 45);
+    CHECK(!dhw_loss_trace_restore(trace, page, 10, saved + 20));
+    trace.observe(12 * us, true);
+    CHECK(trace.snapshot(timeline, 12 * us, CHECKUP_MAX_GAP_S));
+    CHECK(timeline.live && timeline.observed_end_s == frame + 12 &&
+          timeline.windows[23].end_s == frame - 10);
+    trace.observe(3612 * us, true);
+    CHECK(trace.record(12 * us, 3612 * us, 15, 3600, false, true));
+    CHECK(trace.snapshot(timeline, 3612 * us, CHECKUP_MAX_GAP_S) && timeline.count == 24 &&
+          timeline.windows[23].start_s == frame + 12);
+    CHECK(trace.snapshot(timeline, (3612 + 86400LL) * us, CHECKUP_MAX_GAP_S) &&
+          timeline.count == 0);
+    trace.epoch = UINT32_MAX;
+    trace.discard_restored();
+    CHECK(trace.epoch == 1 && trace.since_s == frame);
+    for (const uint32_t age : {82820u, 83500u}) {
+        trace.reset();
+        CHECK(dhw_loss_trace_restore(trace, page, 5, saved + age));
+        CHECK(trace.count == 1);
+    }
+
+    page.count = 1;
+    CHECK(
+        dhw_loss_trace_pack(page.records[0], {frame - 3631, frame, 900, 3630, true, false}, frame));
+    // Time may arrive after live windows. A new frame is adopted once and keeps real live
+    // freshness, with a visible gap from the restored endpoint to the first live window.
+    trace.reset();
+    trace.observe(0, true);
+    trace.observe(3600 * us, true);
+    CHECK(trace.record(0, 3600 * us, 0, 3600, false, false));
+    CHECK(dhw_loss_trace_restore(trace, page, 3600, saved + 3607));
+    CHECK(trace.snapshot(timeline, 3600 * us, CHECKUP_MAX_GAP_S) && timeline.count == 2);
+    CHECK(timeline.windows[0].end_s == frame - 7 && timeline.windows[0].rate_tenths == 900 &&
+          timeline.windows[0].end_s - timeline.windows[0].start_s == 3631);
+    CHECK(timeline.windows[1].start_s == frame && timeline.observed_end_s == frame + 3600);
+    trace.prepend_restored(timeline.windows[0]); // overlap
+    CHECK(trace.count == 2);
+    trace.discard_restored();
+    CHECK(trace.count == 1 && trace.windows[trace.head].start_s == frame);
+    page.records[0][5] |= 0x80;
+    CHECK(!dhw_loss_trace_page_valid(page, false));
+    trace.reset();
+    CHECK(!dhw_loss_trace_restore(trace, page, 1, saved + 2));
+    page.records[0][5] &= 0x7f;
+    page.count = 2; // following old window overlaps or is out of order
+    CHECK(!dhw_loss_trace_page_valid(page, false));
+    for (const auto& invalid :
+         {DhwLossTraceWindow{10, 9}, DhwLossTraceWindow{1, frame + 1}, DhwLossTraceWindow{0, 3600},
+          DhwLossTraceWindow{frame - 3599, frame}, DhwLossTraceWindow{frame - 3632, frame},
+          DhwLossTraceWindow{frame - 3600, frame, 901},
+          DhwLossTraceWindow{frame - 3600, frame, 0, 3601}})
+        CHECK(!dhw_loss_trace_pack(page.records[0], invalid, frame));
+    DhwLossTraceWindow decoded;
+    CHECK(!dhw_loss_trace_unpack(page.records[0], 1, decoded));
+    page.reserved[0] = 1;
+    CHECK(!dhw_loss_trace_page_valid(page, false));
+    HistoryJournalHeader header{};
+    header.magic       = HISTORY_JOURNAL_MAGIC;
+    header.version     = HISTORY_JOURNAL_VERSION;
+    header.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    header.catalog_fp  = dhw_loss_trace_schema(true, false);
+    header.value_count = sizeof(DhwLossTracePage) / sizeof(HistorySample);
+    header.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    header.dt_s        = 3600;
+    header.commit      = HISTORY_JOURNAL_COMMITTED;
+    header.sequence    = 1;
+    header.rings[0] = header.rings[1] = header.rings[2] = 1;
+    CHECK(dhw_loss_trace_header_matches(header, true));
+    CHECK(!dhw_loss_trace_header_matches(header, false));
+    header.catalog_fp = dhw_loss_trace_schema(false, true);
+    CHECK(dhw_loss_trace_header_matches(header, false));
+    header.source = static_cast<uint8_t>(HistoryJournalSource::X10a);
+    CHECK(!dhw_loss_trace_header_matches(header, false));
+    CHECK(dhw_loss_trace_schema(false, false) != dhw_loss_trace_schema(true, false));
+    CHECK(dhw_loss_trace_schema(false, false) != dhw_loss_trace_schema(false, true));
 }
 
 // ── The rolling X10A operating observation (logic/checkup.hpp, issue legacy-208)
@@ -26132,7 +26245,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 13536);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 13824);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -34803,6 +34916,7 @@ int main() {
     test_checkup(false);
     test_checkup(true);
     test_dhw_loss_trace();
+    test_dhw_loss_restore();
     test_checkup_population();
     test_checkup_evidence_overhaul();
     test_no_publish();

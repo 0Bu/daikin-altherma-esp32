@@ -1281,15 +1281,16 @@ for (const lang of locales) {
         assert.ok(body.indexOf("checkup-cycling-assessment") < body.indexOf("data-checkup-hours"));
         assert.doesNotMatch(diagnosis, /checkup-stop-box|checkup-cycling-chart/);
       } else if (id === "health_dhw_loss") {
-        assert.ok(body.startsWith('<div class="checkup-dhw-detail" inert><div class="checkup-dhw-hero">'),
-          `${lang}/${id}: dedicated hero leads the lazily mounted timeline`);
+        assert.ok(body.startsWith('<div class="checkup-dhw-detail" inert><div class="checkup-dhw-value num">'),
+          `${lang}/${id}: without a rate the status leads the lazily mounted timeline`);
         assert.match(body, /data-checkup-dhw/);
         assert.doesNotMatch(body, /data-dhw-window=/, `${lang}/${id}: collapsed rows build no chart`);
         assert.ok(body.indexOf("checkup-dhw-value") < body.indexOf("checkup-dhw-assessment"));
         assert.ok(body.indexOf("checkup-dhw-assessment") < body.indexOf("data-checkup-dhw"));
-        assert.match(body, /<details class="checkup-dhw-disclosure" data-dhw-disclosure="basis"><summary>/,
-          `${lang}/${id}: detailed evidence starts collapsed`);
-        assert.ok(body.includes(ui.text(lang, "check.dhw.limit")), `${lang}/${id}: primary claim limit stays visible`);
+        assert.match(body, /<details class="checkup-dhw-disclosure" data-dhw-disclosure="timeline"><summary>/,
+          `${lang}/${id}: the named history starts collapsed`);
+        const basis = body.slice(body.indexOf('data-dhw-disclosure="basis"'));
+        assert.ok(basis.includes(ui.text(lang, "check.dhw.limit")), `${lang}/${id}: the sensor limit stays in the data details`);
         assert.doesNotMatch(body, /check\.dhw\./, `${lang}/${id}: complete dedicated copy`);
       } else {
         assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/${id}/${verdict}`);
