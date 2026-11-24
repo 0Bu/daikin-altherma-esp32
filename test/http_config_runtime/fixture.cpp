@@ -1450,7 +1450,7 @@ void gas_comparison() {
 #else
     reset();
     const auto initial_service = service;
-    const auto initial_link    = link;
+    const auto initial_link    = fixture::link;
     const auto send            = [](Handler handler, const std::string& body) {
         saves = service_writes = link_writes = gas_writes = runtime_changes = weather_commits = 0;
         durable_started = false;
@@ -1473,7 +1473,7 @@ void gas_comparison() {
         send(daik::set_gas_comparison,
              R"({"elec_price":0.32,"gas_price":0.105,"currency":"chf","gas_efficiency_pct":50})");
     check(first.status == "200 OK" && saves == 1 && gas_writes == 1 && service_writes == 0 &&
-              link_writes == 0 && service == initial_service && link == initial_link &&
+              link_writes == 0 && service == initial_service && fixture::link == initial_link &&
               current.elec_price_tenth_mill == 3200 && current.gas_price_tenth_mill == 1050 &&
               current.tariff_currency == "CHF" && persisted().tariff_currency == "CHF" &&
               daik::GAS_EFFICIENCY_PCT == 88,

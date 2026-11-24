@@ -127,7 +127,7 @@ try {
       replaceBudgetMember("paths", "httpd_mcp_parse", "multipliers",
         { mcp_json_value: 18 }, { mcp_json_value: 17 })],
     ["the persistence transaction frame ceiling hides growth", () =>
-      replaceBudgetMember("symbols", "config_transaction", "max_bytes", 1600, 4096)],
+      replaceBudgetMember("symbols", "config_transaction", "max_bytes", 1888, 4096)],
     ["the mandatory persistence transaction is dropped", () =>
       mutateBudgets((budgets) => {
         assert.ok(Object.hasOwn(budgets.symbols, "config_transaction"));
