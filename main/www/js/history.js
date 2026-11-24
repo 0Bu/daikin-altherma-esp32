@@ -1470,6 +1470,7 @@ function flowMinimumBands(view, flow) {
   const w = flow?.windows;
   const span = (view.v.length - 1) * view.dt;
   if (!w || !Number.isFinite(view.t0) || span <= 0 ||
+      (flow.source === "modbus" && modbusFlowScaleUnverified()) ||
       !histVisibleSeries(view).some(s => s.source === flow.source && s.v.some(v => v != null))) return [];
   const bands = [];
   for (let h = 0; h < w.hour_masks.length; h++) {
@@ -1516,7 +1517,8 @@ function selectFlowMinimum(plot, clientX, clientY, tolerance = 0) {
     }
   }
   if (!picked) return false;
-  S.flowMinSelection = { from: Number(picked.dataset.flowBand), minimum: Number(plot.dataset.flowMinimum) };
+  S.flowMinSelection = { from: Number(picked.dataset.flowBand), minimum: Number(plot.dataset.flowMinimum),
+    source: plot.dataset.flowMinSource };
   for (const b of bands) b.classList.toggle("selected", b === picked);
   const readout = plot.closest(".vhist").querySelector(".vhist-flow-readout");
   readout.hidden = false;
@@ -1636,15 +1638,15 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
     const minimum = flow.minimum;
     const time = new Intl.DateTimeFormat(LANG, { dateStyle: "short", timeStyle: "short" });
     const explanation = t("check.flow.readout", histFmt1(minimum) + (u || " l/min"));
-    const selected = S.flowMinSelection?.minimum === minimum
+    const selected = S.flowMinSelection?.source === flow.source && S.flowMinSelection.minimum === minimum
       ? flowBands.find(b => b.from === S.flowMinSelection.from) : null;
     const windows = flowBands.map(b => `<rect class="vhist-flow-band${b === selected ? " selected" : ""}"` +
       ` x="${b.x.toFixed(3)}" y="0" width="${b.width.toFixed(3)}" height="${HIST_H}" data-flow-band="${b.from}"` +
       ` data-flow-time="${esc(flowMinimumTime(time, b.from, b.to))}" data-flow-readout="${esc(explanation)}"/>`).join("");
-    // Use the same closed paths as the X10A trend so the tint ends at the curve and leaves its gaps clear.
+    // Clip the tint to the reporting source's curve and leave its gaps clear.
     flowSvg = `<defs><clipPath id="flowObservationClip">${flowCurveArea}</clipPath></defs>` +
       `<g clip-path="url(#flowObservationClip)">${windows}</g>`;
-    flowAttr = ` data-flow-minimum="${minimum}"`;
+    flowAttr = ` data-flow-minimum="${minimum}" data-flow-min-source="${esc(flow.source)}"`;
     legendItems.push(`<button type="button" data-flow-min-show class="vhist-source vhist-legend-flow-min">` +
       `<i aria-hidden="true"></i>${esc(t("check.flow.show"))}</button>`);
     flowReadout = `<div class="vhist-flow-readout" role="status"${selected ? "" : " hidden"}>` +

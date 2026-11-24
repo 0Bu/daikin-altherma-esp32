@@ -466,36 +466,84 @@ append_status_outdoor_context(JsonOut& j, const logic::CheckupOutdoorReport& con
 }
 
 template <typename JsonOut>
+static void append_heating_windows(JsonOut& j, const logic::HydronicMinimumWindows& windows,
+                                   bool redact) {
+    if (redact || windows.first_bucket < 0) {
+        j += "null";
+        return;
+    }
+    j += "{\"t0\":";
+    append_json_uint(j, static_cast<uint64_t>(windows.first_bucket) * 3600);
+    j += ",\"slot_s\":300,\"hour_masks\":[";
+    for (size_t i = 0; i < logic::HYDRONIC_WINDOW_HOURS; ++i) {
+        if (i) j += ',';
+        append_json_uint(j, windows.masks[i]);
+    }
+    j += windows.locations_missing ? "],\"locations_missing\":true}"
+                                   : "],\"locations_missing\":false}";
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_heating_minimum(JsonOut& j, const CheckupHydronicReport& x10a,
+                                                     bool enabled, bool redact) {
+    j += ",\"heating_minimum\":";
+    if (!enabled) {
+        j += "null";
+        return;
+    }
+    const auto& obs           = x10a.observation;
+    const bool  x10a_observed = obs.confirmed && obs.dated && obs.totals.samples &&
+                               obs.totals.first_evidence_unix_us >= 0 &&
+                               obs.totals.flow.min_milli > 0;
+    const auto modbus =
+        x10a_observed ? logic::ModbusHeatingFlowReport{} : checkup_modbus_heating_report();
+    const bool x10a_collecting = x10a.reason != logic::HydronicReason::Unsupported &&
+                                 x10a.reason != logic::HydronicReason::NoSource &&
+                                 x10a.reason != logic::HydronicReason::Forgotten &&
+                                 x10a.reason != logic::HydronicReason::NoConsent;
+    const bool use_modbus = modbus.minimum_tenths || (!x10a_collecting && modbus.supported);
+    const bool observed   = x10a_observed || modbus.minimum_tenths;
+    j += "{\"source\":";
+    json_append_quoted(j, use_modbus ? "modbus" : "x10a");
+    j += ",\"reason\":";
+    json_append_quoted(
+        j, observed ? "observed"
+                    : ((x10a_collecting || modbus.supported) ? "collecting" : "unsupported"));
+    if (use_modbus) {
+        append_status_tenths_field(j, "min_l_min",
+                                   modbus.minimum_tenths ? modbus.minimum_tenths : -1);
+    } else {
+        j += ",\"min_l_min\":";
+        auto sink = detail::json_output(j);
+        hydronic_json_decimal(sink, obs.totals.flow.min_milli, 1, x10a_observed);
+    }
+    j += ",\"minimum_windows\":";
+    append_heating_windows(j, use_modbus ? modbus.windows : obs.minimum_windows,
+                           redact || !observed);
+    j += '}';
+}
+
+template <typename JsonOut>
 static __attribute__((noinline)) void
-append_hydronic_status(JsonOut& j, DiagnosticsSource diag_effective, bool redact) {
+append_hydronic_status(JsonOut& j, DiagnosticsSource diag_effective, bool enabled, bool redact) {
     CheckupHydronicReport report{};
+    if (enabled || diag_effective != DiagnosticsSource::Modbus) report = checkup_hydronic_report();
+    append_heating_minimum(j, report, enabled, redact);
     if (diag_effective == DiagnosticsSource::Modbus) {
+        report                             = {};
         report.observation.partial         = false;
         report.observation.restore_pending = false;
         // reason_code: 0 per docs/API.md
         report.reason = logic::HydronicReason::None;
-    } else {
-        report = checkup_hydronic_report();
     }
     j += ",\"hydronic\":";
     append_hydronic_json(j, report);
     const auto& observation = report.observation;
     const auto& windows     = observation.minimum_windows;
     j += ",\"minimum_windows\":";
-    if (redact || !observation.confirmed || !observation.dated || !observation.totals.samples ||
-        windows.first_bucket < 0) {
-        j += "null";
-    } else {
-        j += "{\"t0\":";
-        append_json_uint(j, static_cast<uint64_t>(windows.first_bucket) * 3600);
-        j += ",\"slot_s\":300,\"hour_masks\":[";
-        for (size_t i = 0; i < logic::HYDRONIC_WINDOW_HOURS; ++i) {
-            if (i) j += ',';
-            append_json_uint(j, windows.masks[i]);
-        }
-        j += windows.locations_missing ? "],\"locations_missing\":true}"
-                                       : "],\"locations_missing\":false}";
-    }
+    append_heating_windows(j, windows,
+                           redact || !observation.confirmed || !observation.dated ||
+                               !observation.totals.samples);
     const auto& secondary = report.secondary;
     j += ",\"secondary_supply\":";
     if (!report.current || !secondary.samples || !secondary.source.conv) {
@@ -1569,7 +1617,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 break;
             case logic::CheckupCheck::Flow:
                 tenths("min_l_min", ck.a);
-                append_hydronic_status(j, diag_effective, redact);
+                append_hydronic_status(j, diag_effective, c.diagnostics_enabled, redact);
                 break;
             case logic::CheckupCheck::Heater:
                 num("buh_min", whole_minutes(ck.a));

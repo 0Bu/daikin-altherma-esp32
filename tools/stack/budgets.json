@@ -2865,7 +2865,7 @@
     },
     "modbus_checkup_confirm": {
       "pattern": "^daik::checkup_modbus_confirm_source\\(daik::ModbusProfile, unsigned long\\)$",
-      "max_bytes": 48
+      "max_bytes": 64
     },
     "modbus_checkup_model_fingerprint": {
       "pattern": "^unsigned long daik::logic::checkup_modbus_model_fingerprint<daik::def::HomeHubReg>\\(daik::ModbusProfile, daik::def::HomeHubReg const\\*, int\\)$",
@@ -2876,7 +2876,7 @@
       "max_bytes": 128
     },
     "modbus_checkup_record": {
-      "pattern": "^daik::checkup_record_modbus\\(daik::CachedValue const\\*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis\\)$",
+      "pattern": "^daik::checkup_record_modbus\\(daik::CachedValue const\\*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis, long long, unsigned long\\)$",
       "max_bytes": 272
     },
     "modbus_checkup_coverage": {
@@ -3165,7 +3165,7 @@
     },
     "dhw_trace_modbus_gap": {
       "pattern": "^daik::mb_record_poll_gap\\(unsigned\\ long,\\ unsigned\\ long\\)$",
-      "max_bytes": 64
+      "max_bytes": 80
     },
     "dhw_trace_copy": {
       "pattern": "^daik::copy_dhw_trace_locked\\(daik::\\(anonymous\\ namespace\\)::CheckupSlot\\&,\\ daik::logic::DhwLossTimeline\\*,\\ long\\ long,\\ bool\\)$",

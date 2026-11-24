@@ -66,6 +66,10 @@ bool         config_throws = false, net_up = true, ota_active = false;
 int      config_reads = 0, config_saves = 0, history_calls = 0, history_gaps = 0, stack_samples = 0;
 int      checkup_calls = 0, checkup_live_calls = 0, checkup_confirm_calls = 0, checkup_resets = 0;
 uint32_t history_generation = 1, checkup_consent_epoch_val = 1;
+unsigned     checkup_heating_breaks         = 0;
+uint32_t     checkup_last_target_generation = 0, checkup_last_consent_epoch = 0;
+uint32_t     checkup_last_link_generation           = 0;
+int64_t      checkup_last_sweep_started_us          = -1;
 daik::ModbusProfile            checkup_last_profile = daik::ModbusProfile::Auto;
 daik::ModbusProfileBasis       checkup_last_basis   = daik::ModbusProfileBasis::Probing;
 std::function<void()>    history_hook;
@@ -112,12 +116,23 @@ void     checkup_modbus_confirm_source(ModbusProfile profile, uint32_t) {
     ++adapter::checkup_confirm_calls;
     adapter::checkup_last_profile = profile;
 }
-void checkup_record_modbus(const CachedValue*, size_t, ModbusProfile profile, uint32_t, uint32_t,
-                           bool source_confirmed, ModbusProfileBasis basis) {
+void checkup_record_modbus(const CachedValue*, size_t, ModbusProfile profile,
+                           uint32_t source_generation, uint32_t consent_epoch,
+                           bool source_confirmed, ModbusProfileBasis basis,
+                           int64_t sweep_started_us, uint32_t link_generation) {
     ++adapter::checkup_calls;
     if (source_confirmed) ++adapter::checkup_live_calls;
-    adapter::checkup_last_profile = profile;
-    adapter::checkup_last_basis   = basis;
+    adapter::checkup_last_profile           = profile;
+    adapter::checkup_last_basis             = basis;
+    adapter::checkup_last_target_generation = source_generation;
+    adapter::checkup_last_consent_epoch     = consent_epoch;
+    adapter::checkup_last_sweep_started_us  = sweep_started_us;
+    adapter::checkup_last_link_generation   = link_generation;
+}
+void checkup_modbus_heating_break(uint32_t source_generation, uint32_t consent_epoch) {
+    ++adapter::checkup_heating_breaks;
+    adapter::checkup_last_target_generation = source_generation;
+    adapter::checkup_last_consent_epoch     = consent_epoch;
 }
 void     checkup_modbus_reset() { ++adapter::checkup_resets; }
 uint32_t history_modbus_generation() { return adapter::history_generation; }
@@ -219,7 +234,12 @@ void reset() {
     adapter::checkup_confirm_calls     = 0;
     adapter::checkup_resets            = 0;
     adapter::checkup_consent_epoch_val = 1;
-    adapter::checkup_last_profile      = ModbusProfile::Auto;
+    adapter::checkup_heating_breaks         = 0;
+    adapter::checkup_last_target_generation = 0;
+    adapter::checkup_last_consent_epoch     = 0;
+    adapter::checkup_last_link_generation   = 0;
+    adapter::checkup_last_sweep_started_us  = -1;
+    adapter::checkup_last_profile           = ModbusProfile::Auto;
     adapter::checkup_last_basis        = ModbusProfileBasis::Probing;
     adapter::history_hook              = {};
     adapter::logs.clear();
@@ -610,7 +630,7 @@ struct Peer {
     std::atomic<bool>     batch_exception{false};
     std::atomic<bool>         probe_exception{false};
     std::atomic<uint8_t>      probe_exception_code{2};
-    std::atomic<bool>         space_route_exception{false};
+    std::atomic<uint16_t>     input_exception_offset{0};
     std::mutex                response_mutex;
     std::vector<RegisterWord> words;
     std::vector<WireRequest>  wire_requests;
@@ -663,7 +683,8 @@ struct Peer {
                 }
                 std::vector<uint8_t> r;
                 if ((batch_exception && qty > 1) ||
-                    (space_route_exception && req[7] == 4 && addr == 36 && qty == 1) ||
+                    (space == MbFunc::ReadInput && addr + 1 == input_exception_offset &&
+                     qty == 1) ||
                     (probe_exception && req[7] == 4 && addr == 78 && qty == 1)) {
                     const uint8_t exc = (probe_exception && req[7] == 4 && addr == 78 && qty == 1)
                                             ? probe_exception_code.load()
@@ -1138,6 +1159,49 @@ void poll_batch_fallback() {
     REQUIRE(mb_values_live());
     REQUIRE(peer.requests > first);
 }
+void heating_flow_poll_evidence() {
+    reset();
+    constexpr uint32_t target_generation = 11, consent_epoch = 4;
+    s_target_generation                = target_generation;
+    adapter::checkup_consent_epoch_val = consent_epoch;
+    Peer           peer(false, ModbusProfile::HomeHub,
+                        {{MbFunc::ReadInput, 35, 0}, {MbFunc::ReadInput, 36, 0}, {MbFunc::ReadInput, 37, 0}});
+    const uint32_t link_generation = s_link_generation;
+    REQUIRE(link_generation && link_generation != target_generation);
+    const int64_t started_us  = sdk::clock_us;
+    sdk::transport_time_model = true;
+    sdk::receive_delay_us     = 1000;
+    mb_poll_once();
+    sdk::transport_time_model = false;
+    REQUIRE(sdk::clock_us > started_us);
+    REQUIRE(adapter::checkup_live_calls == 1);
+    REQUIRE(adapter::checkup_last_sweep_started_us == started_us);
+    REQUIRE(adapter::checkup_last_link_generation == link_generation);
+    REQUIRE(adapter::checkup_last_target_generation == target_generation);
+    REQUIRE(adapter::checkup_last_consent_epoch == consent_epoch);
+
+    sdk::clock_us.fetch_add(1000000);
+    mb_poll_once();
+    REQUIRE(adapter::checkup_heating_breaks == 0 && adapter::checkup_live_calls == 1);
+
+    // A failed batch is retried one register at a time. Either missing phase reply must break
+    // heating continuity even while the other phase, space/Heating gates and socket remain live.
+    peer.batch_exception = true;
+    for (uint16_t offset : {35, 36}) {
+        peer.input_exception_offset = offset;
+        const unsigned previous     = adapter::checkup_heating_breaks;
+        sdk::clock_us.fetch_add(1000000);
+        mb_poll_once();
+        const auto st = mb_status();
+        REQUIRE(st.connected && st.plant_gate_active && st.space_route_active &&
+                st.heating_mode_active);
+        REQUIRE(st.last_error_register == offset);
+        REQUIRE(adapter::checkup_heating_breaks == previous + 1 &&
+                adapter::checkup_live_calls == 1);
+        REQUIRE(adapter::checkup_last_target_generation == target_generation);
+        REQUIRE(adapter::checkup_last_consent_epoch == consent_epoch);
+    }
+}
 void space_route_values() {
     // Independent wire expectations: 0 is the space circuit, 1 is DHW, and neither an unknown enum
     // nor a protocol sentinel proves either route. Both profiles and both commit paths use the
@@ -1185,7 +1249,7 @@ void space_route_missing() {
             // An exception for this one register leaves the socket and other gate replies healthy.
             // Their new replies must not renew the previously observed space-route word.
             peer.batch_exception       = true;
-            peer.space_route_exception = true;
+            peer.input_exception_offset = 37;
             s_cycle_tick               = tick;
             sdk::clock_us.fetch_add(1000000);
             mb_poll_once();
@@ -1194,7 +1258,7 @@ void space_route_missing() {
                     st.heating_mode_known && st.heating_mode_active);
             REQUIRE(!st.space_route_known && !st.space_route_active && s_space_route_ms == -1);
             REQUIRE(st.last_error_register == 37);
-            peer.space_route_exception = false;
+            peer.input_exception_offset = 0;
             s_cycle_tick               = tick;
             sdk::clock_us.fetch_add(1000000);
             mb_poll_once();
@@ -1599,6 +1663,7 @@ int main(int argc, char** argv) {
                     {"definition_snapshot_cutover", test::definition_snapshot_cutover},
                     {"poll_full_fast_break", test::poll_full_fast_break},
                     {"poll_batch_fallback", test::poll_batch_fallback},
+                    {"heating_flow_poll_evidence", test::heating_flow_poll_evidence},
                     {"space_route_values", test::space_route_values},
                     {"space_route_missing", test::space_route_missing},
                     {"space_route_age", test::space_route_age},

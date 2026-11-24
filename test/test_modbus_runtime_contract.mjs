@@ -52,7 +52,7 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=36\b/);
+  assert.match(baseline.stdout, /PASS total=37\b/);
   console.log(baseline.stdout.trim());
 
   // A successfully compiled mutation must fail its particular behavioral oracle. A crash,
@@ -179,9 +179,24 @@ try {
     },
     {
       name: "checkup-omits-resolved-basis", scenario: "probe_0x00_and_flow_scale",
-      before: "cycle_target_generation, consent_epoch, true, resolved_basis);",
-      after: "cycle_target_generation, consent_epoch, true);",
+      before: "cycle_target_generation, consent_epoch, true, resolved_basis,",
+      after: "cycle_target_generation, consent_epoch, true, ModbusProfileBasis::Affirmative,",
     },
+    {
+      name: "heating-uses-sweep-completion", scenario: "heating_flow_poll_evidence",
+      before: "sweep_started_us, cycle_generation);",
+      after: "((void)sweep_started_us, esp_timer_get_time()), cycle_generation);",
+    },
+    {
+      name: "heating-uses-target-as-link", scenario: "heating_flow_poll_evidence",
+      before: "sweep_started_us, cycle_generation);",
+      after: "sweep_started_us, cycle_target_generation);",
+    },
+    ...["defrost_clear", "hot_start_clear"].map(witness => ({
+      name: `heating-skips-fast-${witness}`, scenario: "heating_flow_poll_evidence",
+      before: `|| !gates.${witness}`,
+      after: "",
+    })),
   ];
   for (const mutation of mutations) {
     const mutated = mutateOnce(mutation.before, mutation.after, mutation.name);
@@ -192,7 +207,7 @@ try {
       `${mutation.name}: only its specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production Modbus runtime: 36 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
+  console.log(`production Modbus runtime: 37 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

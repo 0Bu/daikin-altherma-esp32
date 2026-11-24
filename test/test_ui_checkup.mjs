@@ -57,20 +57,26 @@ for (const key of [
   "draw_windows", "pump_windows", "quiet_high_windows",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
   "aborts", "best_aborted_s", "blocked", "abort_reasons",
-  "minimum_windows", "hour_masks", "locations_missing", "secondary_supply", "delta_k", "zone_context",
+  "heating_minimum", "minimum_windows", "hour_masks", "locations_missing", "secondary_supply", "delta_k", "zone_context",
 ]) {
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
 }
 assert.match(statusSource,
-             /case logic::CheckupCheck::Flow:\s*tenths\("min_l_min", ck\.a\);\s*append_hydronic_status\(j, diag_effective, redact\);/,
+             /case logic::CheckupCheck::Flow:\s*tenths\("min_l_min", ck\.a\);\s*append_hydronic_status\(j, diag_effective, c\.diagnostics_enabled, redact\);/,
              "flow check serializer must retain min_l_min and delegate hydronic details");
 assert.match(normalizedStatusSource,
-             /"minimum_windows":.*?;\s*if \(redact \|\| !observation\.confirmed \|\| !observation\.dated \|\| !observation\.totals\.samples \|\|\s*windows\.first_bucket < 0\)\s*\{\s*j \+= "null";/,
-             "flow minimum windows require unredacted and dated measurements");
+             /"heating_minimum":.*?;\s*if \(!enabled\)\s*\{\s*j \+= "null";/,
+             "the selected heating minimum respects diagnostics consent");
 assert.match(statusSource,
-             /if\s*\(diag_effective == DiagnosticsSource::Modbus\)\s*\{[\s\S]*?report\.observation\.partial\s*=\s*false;[\s\S]*?report\.observation\.restore_pending\s*=\s*false;[\s\S]*?report\.reason\s*=\s*logic::HydronicReason::None;[\s\S]*?\}\s*else\s*\{\s*report\s*=\s*checkup_hydronic_report\(\);\s*\}/,
-             "Modbus diagnostics mode must serialize an empty hydronic observation with reason_code 0 instead of leaking X10A data");
+             /append_heating_windows\(j, use_modbus \? modbus\.windows : obs\.minimum_windows,\s*redact \|\| !observed\);/,
+             "the selected minimum only locates recorded evidence from its own source in unredacted status");
+assert.match(statusSource,
+             /append_heating_windows\(j, windows,\s*redact \|\| !observation\.confirmed \|\| !observation\.dated \|\|\s*!observation\.totals\.samples\);/,
+             "legacy flow windows require confirmed and dated measurements in unredacted status");
+assert.match(statusSource,
+             /if\s*\(diag_effective == DiagnosticsSource::Modbus\)\s*\{\s*report\s*=\s*\{\};\s*report\.observation\.partial\s*=\s*false;\s*report\.observation\.restore_pending\s*=\s*false;[\s\S]*?report\.reason\s*=\s*logic::HydronicReason::None;\s*\}/,
+             "Modbus diagnostics mode keeps the legacy hydronic observation empty with reason_code 0");
 for (const key of [
   "confirmed", "current", "dated", "coverage_partial", "restore_pending", "persistence_pending",
   "dropped", "observed_hours", "method", "window_s", "settling_s", "max_gap_s", "reason_code",
@@ -981,7 +987,7 @@ assert.match(agreeBrief({ reason_code: 7 }), /Flow below 5\.0 l\/min/);
 assert.doesNotMatch(agreeBrief({ method: 1 }), /Pump-only R1T−R4T/);
 assert.doesNotMatch(agreeBrief(null), /Pump-only R1T−R4T/);
 assert.equal(agreeBrief({}, {}, { diagnostics: { enabled: true, source: "modbus", effective_source: "modbus" }, health: { source: "modbus" } }),
-  `<p>${ui.text("en", "check.flow.x10a_only")}</p>`);
+  `<p>${ui.text("en", "check.flow.unavailable")}</p>`);
 assert.equal(ui.flowReport().agreement, null, "Modbus flow report must omit X10A water agreement");
 assert.match(agreeBrief({}, { dated: false }), /Pump-only R1T−R4T:<\/span> <span class="num">No data<\/span>/);
 assert.doesNotMatch(agreeBrief({
@@ -1181,7 +1187,41 @@ context.S.status.health = { source: "modbus", status: "ok", checks: [heatingFlow
 assert.equal(ui.flowReport().source, "modbus");
 assert.equal(ui.flowReport().minimum, null, "Modbus has no qualified X10A heating minimum");
 assert.equal(ui.flowReport().windows, null);
-assert.ok(ui.flowBrief(ui.flowReport()).includes(ui.text("en", "check.flow.x10a_only")));
+assert.ok(ui.flowBrief(ui.flowReport()).includes(ui.text("en", "check.flow.unavailable")));
+const modbusMinimum = { source: "modbus", reason: "observed", min_l_min: 8.2, minimum_windows: exactWindows };
+context.S.status.health.source = "x10a";
+const setHeatingMinimum = heating_minimum => {
+  context.S.status.health.checks = [{ ...heatingFlowCheck, heating_minimum }];
+};
+setHeatingMinimum(modbusMinimum);
+assert.equal(ui.flowReport().source, "modbus", "the heating minimum gets its source independently of other diagnoses");
+assert.equal(ui.flowReport().minimum, 8.2, "the selected Modbus result replaces the legacy X10A fields");
+assert.equal(ui.flowReport().windows, exactWindows, "windows belong to the selected result");
+for (const lang of locales) {
+  ui.setLang(lang);
+  assert.ok(ui.flowBrief(ui.flowReport()).includes(" · Modbus"), `${lang} identifies the fallback source`);
+  setHeatingMinimum({ ...modbusMinimum, reason: "unsupported" });
+  assert.equal(ui.flowReport().minimum, null, "unsupported input cannot expose an old minimum");
+  assert.equal(ui.flowReport().windows, null);
+  assert.ok(ui.flowBrief(ui.flowReport()).includes(escapeText(ui.text(lang, "check.flow.unavailable"))));
+  setHeatingMinimum(modbusMinimum);
+}
+ui.setLang("en");
+context.S.status.health.source = "modbus";
+setHeatingMinimum({ ...modbusMinimum, source: "x10a", min_l_min: 7.5 });
+assert.equal(ui.flowReport().source, "x10a", "an admitted X10A minimum survives a Modbus diagnosis preference");
+assert.equal(ui.flowReport().minimum, 7.5);
+setHeatingMinimum({ ...modbusMinimum, reason: "collecting" });
+assert.equal(ui.flowReport().minimum, null);
+assert.ok(ui.flowBrief(ui.flowReport()).includes(ui.text("en", "check.flow.waiting")));
+setHeatingMinimum({ ...modbusMinimum, minimum_windows: null });
+assert.equal(ui.flowReport().windows, null, "Modbus records cannot borrow X10A locations");
+assert.equal(ui.flowReport().locationsMissing, true);
+for (const selected of [null, { ...modbusMinimum, source: "sensor" }, { ...modbusMinimum, reason: "unknown" }]) {
+  setHeatingMinimum(selected);
+  assert.equal(ui.flowReport(), null, "absent or unrecognized selection cannot reuse a legacy result");
+}
+setHeatingMinimum(modbusMinimum);
 context.S.otaCached = true;
 assert.equal(ui.flowReport(), null, "cached OTA status cannot publish a flow diagnostic");
 context.S.otaCached = false;

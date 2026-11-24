@@ -895,6 +895,7 @@ ModbusStatus mb_status() {
 // MBAP round-trips a second at a hub that also serves the Onecta app, the MMI and evcc — for a map
 // whose fastest-moving member is a water temperature.
 static void mb_poll_once() {
+    const int64_t  sweep_started_us        = esp_timer_get_time();
     const uint32_t cycle_target_generation = s_target_generation.load(std::memory_order_acquire);
     const uint32_t consent_epoch           = checkup_consent_epoch();
     struct ModbusTargetConfig {
@@ -982,6 +983,8 @@ static void mb_poll_once() {
         bool    space_route_active  = false;
         bool    heating_mode_known  = false;
         bool    heating_mode_active = false;
+        bool    defrost_clear       = false;
+        bool    hot_start_clear     = false;
         int16_t flow_idx            = -1;
         int64_t plant_gate_ms       = -1;
         int64_t space_route_ms      = -1;
@@ -1024,6 +1027,8 @@ static void mb_poll_once() {
             gates.heating_mode_active = raw == 1;
             gates.heating_mode_ms     = observed_ms;
         }
+        if (r.space == MbFunc::ReadInput && r.offset == 35) gates.defrost_clear = raw == 0;
+        if (r.space == MbFunc::ReadInput && r.offset == 36) gates.hot_start_clear = raw == 0;
         // Input 44's 40..45 batch is explicitly selected on every fast cycle by modbus_plan.hpp.
         // Decode the exact reply word here; the current-session half of freshness is applied after
         // the sweep, once it is known. It remains context only — selecting the batch is not a gate.
@@ -1323,6 +1328,9 @@ static void mb_poll_once() {
         }
         // The writer itself rechecks target generation under s_mtx, closing the last window between
         // this status commit and a concurrent /set_hp.
+        if (!final_current_session || !gates.plant_gate_active || !gates.space_route_active ||
+            !gates.heating_mode_active || !gates.defrost_clear || !gates.hot_start_clear)
+            checkup_modbus_heating_break(cycle_target_generation, consent_epoch);
         report_cycle_result(final_current_session);
         s_cycle_tick++;
         return;
@@ -1342,7 +1350,8 @@ static void mb_poll_once() {
         if (current_session && !link_broken && profile_settled) {
             checkup_modbus_confirm_source(resolved_prof, modbus_target_fp);
             checkup_record_modbus(fresh.data(), fresh.size(), resolved_prof,
-                                  cycle_target_generation, consent_epoch, true, resolved_basis);
+                                  cycle_target_generation, consent_epoch, true, resolved_basis,
+                                  sweep_started_us, cycle_generation);
         } else if (!current_session || link_broken) {
             checkup_record_modbus(nullptr, 0, resolved_prof, cycle_target_generation, consent_epoch,
                                   false, resolved_basis);

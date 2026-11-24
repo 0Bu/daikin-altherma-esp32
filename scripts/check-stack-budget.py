@@ -3315,7 +3315,7 @@ def self_test() -> None:
         'daik::checkup_modbus_confirm_source(daik::ModbusProfile, unsigned long)': 48,
         'unsigned long daik::logic::checkup_modbus_model_fingerprint<daik::def::HomeHubReg>(daik::ModbusProfile, daik::def::HomeHubReg const*, int)': 96,
         'daik::logic::dhw_loss_adopt(daik::logic::DhwLossState&, daik::logic::DhwLossCarry const&, long long)': 128,
-        'daik::checkup_record_modbus(daik::CachedValue const*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis)': 192,
+        'daik::checkup_record_modbus(daik::CachedValue const*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis, long long, unsigned long)': 192,
         'daik::logic::checkup_modbus_coverage(daik::ModbusProfile, daik::ModbusProfileBasis)': 64,
         'daik::(anonymous namespace)::commit_and_fold_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupSample const&, long long, unsigned long, bool)': 48,
         'daik::(anonymous namespace)::fold_checkup_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupSample const&, long long)': 48,

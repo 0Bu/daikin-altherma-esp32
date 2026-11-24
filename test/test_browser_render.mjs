@@ -1699,11 +1699,43 @@ async function assertFlowInspector(page, context, missingDay) {
     S.status.health.checks.find(c => c.id === "flow").min_l_min = 7.3;
     renderInspect();
   })()`);
-  assert.equal(await bandCount(), 0, `${context}: a Modbus report cannot use X10A diagnosis bands`);
+  assert.equal(await bandCount(), 0, `${context}: a legacy Modbus report cannot use X10A diagnosis bands`);
+  assert.equal((await diagnosisText()).trim(), await statusCopy("check.flow.unavailable"),
+    `${context}: legacy Modbus reports have neutral unavailable copy`);
+  const setHeatingMinimum = (source, reason = "observed") => page.evaluate(`(() => {
+    S.status.health.checks.find(c => c.id === "flow").heating_minimum =
+      ${JSON.stringify({ source, reason, min_l_min: reason === "observed" ? 11 : null,
+        minimum_windows: reason === "observed" ? windows : null })};
+    renderInspect();
+    return true;
+  })()`);
+  await setHeatingMinimum("x10a");
+  assert.equal(await bandCount(), intervals.length, `${context}: X10A remains eligible in Modbus diagnosis mode`);
+  const lastMinimumArea = `#inspHist [data-flow-band="${intervals[2][0]}"]`;
+  await clickElement(page, lastMinimumArea, { touch: context.startsWith("phone/"), yFraction: .85 });
+  assert.equal(await selectedInterval(intervals[2]), true, `${context}: the X10A time can be selected before a switch`);
+  await setHeatingMinimum("modbus");
+  assert.equal(await selectedInterval(intervals[2]), false,
+    `${context}: an identical minimum and time from Modbus cannot inherit the X10A selection`);
+  assert.equal(await page.evaluate(`(() => {
+    const plot = document.querySelector("#inspHist [data-hist=flow]");
+    const clip = [...plot.querySelectorAll("#flowObservationClip path")];
+    const areas = [...plot.querySelectorAll("svg > .vhist-area.mb")];
+    return plot.dataset.flowMinSource === "modbus" && clip.length > 0 &&
+      clip.map(p => p.getAttribute("d")).join() === areas.map(p => p.getAttribute("d")).join() &&
+      !clip.some(p => p.isPointInFill(new DOMPoint(3 * HIST_W / 7, HIST_H - 1)));
+  })()`), true, `${context}: the violet area is clipped to the Modbus curve and leaves its gap clear`);
+  assert.ok((await diagnosisText()).includes(" · Modbus"), `${context}: the fallback minimum names Modbus`);
+  await clickElement(page, lastMinimumArea, { touch: context.startsWith("phone/"), yFraction: .85 });
+  assert.equal(await selectedInterval(intervals[2]), true,
+    `${context}: tapping the Modbus area shows its recorded time between the chart and values`);
+  await assertLayout(await page.evaluate(layoutAudit), `${context}/modbus-minimum`);
+  await captureNativeEvidence(page, `${context}/modbus-minimum`, "#inspFlowDiagnosis", "#inspCard");
   await page.evaluate("S._modbus[0].flow_scale_unverified = true; renderApp(); true");
-  assert.equal(await bandCount(), 0, `${context}: provisional Modbus cannot supply heating minimum bands`);
-  assert.equal((await diagnosisText()).trim(), await statusCopy("check.flow.x10a_only"),
-    `${context}: provisional Modbus shows the source caveat without reusing the old minimum`);
+  assert.equal(await bandCount(), 0, `${context}: an unverified Modbus curve cannot be shaded`);
+  await setHeatingMinimum("modbus", "unsupported");
+  assert.equal((await diagnosisText()).trim(), await statusCopy("check.flow.unavailable"),
+    `${context}: an unsupported Modbus report cannot reuse the old minimum`);
   await page.evaluate("S.status.health.persist = 'unknown'; renderInspect(); true");
   assert.equal(await page.evaluate('document.getElementById("inspFlowDiagnosis").hidden'), true,
     `${context}: an unreadable snapshot cannot display a diagnosis`);
@@ -2270,7 +2302,8 @@ async function assertPlantDiagnosis(page, context) {
         checks: [
           { id: 'defrost', verdict: 'collecting', evidence: 'observation', reason: 'day_incomplete',
             count: 0, paired_count: 0, share_pct: null, defrost_s: 0, run_s: 900,
-            observed_s: 900, required_s: 0 },
+            observed_s: 900, required_s: 0,
+            outdoor_source: 'x10a', outdoor_min_c: 2, outdoor_mean_c: 3, outdoor_samples: 10 },
           { id: 'pressure', verdict: 'collecting', evidence: 'heuristic', reason: 'input_coverage',
             min_bar: 1.5, current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: false,
             confirmed_critical: false, observed_s: 900, required_s: 77760 },

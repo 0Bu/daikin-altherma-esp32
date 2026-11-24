@@ -57,6 +57,7 @@
 #include "logic/hydronic_hourly.hpp"
 #include "logic/hydronic_input.hpp"
 #include "logic/hydronic_payload.hpp"
+#include "logic/modbus_heating_flow.hpp"
 #include "logic/stop_context_input.hpp"
 #include "logic/observation_hourly.hpp"
 #include "checkup_population_fixture.hpp"
@@ -34700,6 +34701,46 @@ static void test_water_agreement() {
         }
     }
 }
+
+void test_modbus_heating_flow() {
+    using namespace daik::logic;
+    constexpr int64_t second   = 1000000;
+    constexpr int64_t utc_hour = 500000;
+    constexpr int64_t utc      = utc_hour * 3600;
+    ModbusHeatingFlow flow;
+    auto              sample = [&](int64_t at_s, uint16_t tenths = 83, int64_t age_s = 1) {
+        flow.record(at_s * second, (at_s - age_s) * second, utc + at_s, tenths);
+    };
+    auto report = [&](int64_t at_s) { return flow.report(at_s * second, utc + at_s); };
+
+    for (int t = 1; t < 601; t += 5) sample(t);
+    CHECK(report(600).minimum_tenths == 0);
+    sample(601);
+    CHECK(report(601).minimum_tenths == 83);
+    CHECK(report(601).windows.first_bucket == utc_hour - 23);
+    CHECK(report(601).windows.masks[23] == (1 << 2));
+    for (int t = 606; t <= 901; t += 5) sample(t, t == 901 ? 83 : 90);
+    CHECK(report(901).windows.masks[23] == ((1 << 2) | (1 << 3)));
+    sample(906, 75);
+    CHECK(report(906).minimum_tenths == 75);
+    CHECK(report(906).windows.masks[23] == (1 << 3));
+    sample(911, 60, 16); // stale sweep, despite a positive flow
+    sample(916, 60);
+    flow.break_run(); // socket was lost between completed sweeps
+    for (int t = 921; t < 1521; t += 5) sample(t, 60);
+    CHECK(report(1520).minimum_tenths == 75);
+    sample(1521, 60);
+    CHECK(report(1521).minimum_tenths == 60);
+    sample(1537, 50); // 16 s between accepted endpoints restarts run-up
+    sample(1542, 0);  // missing or ineligible plant evidence also restarts it
+    sample(1547, 50);
+    CHECK(report(1547).minimum_tenths == 60);
+    CHECK(report(24 * 3600).minimum_tenths == 0);
+    CHECK(flow.report(1547 * second, utc + 1547 + 3600).minimum_tenths == 0);
+    flow.record(1552 * second, 1551 * second, utc + 1552 + 3600, 50);
+    CHECK(flow.report(1552 * second, utc + 1552 + 3600).minimum_tenths == 0);
+}
+
 } // namespace hydronic_host_tests
 
 void test_cycling_run_context() {
@@ -35525,6 +35566,7 @@ void test_cycling_run_journal() {
 
 int main() {
     hydronic_host_tests::test_hourly_wire_and_population();
+    hydronic_host_tests::test_modbus_heating_flow();
     hydronic_host_tests::test_population_and_boundaries();
     hydronic_host_tests::test_witnesses_and_ranges();
     hydronic_host_tests::test_barriers_and_saturation();

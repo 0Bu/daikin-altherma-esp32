@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -180,7 +180,7 @@ I18N.fi = localeValues([
   /* check.flow.show */ "Näytä alin kohta kuvaajassa",
   /* check.flow.readout */ (value) => `Tällä aikavälillä mitattiin vähintään kerran ${value}. Tilojen lämmitys oli silloin jatkunut vähintään kymmenen minuuttia.`,
   /* check.flow.locations_missing */ "Tämän arvon aiempien mittausten ajankohtaa ei tallennettu.",
-  /* check.flow.x10a_only */ "Lämmityksen pienin virtaama lasketaan X10A-mittauksista.",
+  /* check.flow.unavailable */ "Lämmityksen pienimmän virtaaman määrittämiseen tarvittavat mittaukset puuttuvat.",
   /* check.flow.waiting */ "Odotetaan lämmitysjaksoa, joka täyttää mittausehdot.",
   /* check.heater */ "Sähkövastukset",
   /* check.retries */ "Suojauslaskurit",

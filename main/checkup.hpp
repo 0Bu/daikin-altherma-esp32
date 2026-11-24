@@ -28,6 +28,7 @@
 #include "logic/fault_trace.hpp"
 #include "logic/working_figure.hpp"
 #include "hydronic_observation_store.hpp"
+#include "logic/modbus_heating_flow.hpp"
 #include "stop_observation_store.hpp"
 
 #include <cstddef>
@@ -124,7 +125,10 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
                            uint32_t source_generation, uint32_t consent_epoch,
                            bool               source_confirmed = true,
-                           ModbusProfileBasis basis            = ModbusProfileBasis::Affirmative);
+                           ModbusProfileBasis basis            = ModbusProfileBasis::Affirmative,
+                           int64_t sweep_started_us = -1, uint32_t link_generation = 0);
+void checkup_modbus_heating_break(uint32_t source_generation, uint32_t consent_epoch);
+logic::ModbusHeatingFlowReport checkup_modbus_heating_report();
 
 // Judge the previous boot's handoff integrity and retire completed RAM hours. app_main calls ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.
