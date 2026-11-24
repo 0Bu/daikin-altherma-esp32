@@ -422,7 +422,7 @@ backs off to 30 seconds while unreachable, and suspends ordinary polling while h
 `/events` route or WebSocket broadcaster; building HTTP state never runs on the UART owner.
 [DESIGN.md](DESIGN.md) owns user-visible states and modal behavior.
 
-English and the application code remain in the startup page, capped at 181,248 gzip bytes.
+English and the application code remain in the startup page, capped at 186,368 gzip bytes.
 The build packs the minified script into an LZMA frame with a 512 KiB dictionary and a 1 MiB
 decoded-size limit using a self-contained pure-TypedArray LZMA1 decoder (`tools/web_asset/lzma1_decoder.js`).
 The inline loader verifies the header, decoded length, prefix, CRC and UTF-8 before inserting the

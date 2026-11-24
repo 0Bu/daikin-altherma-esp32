@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: a49e7655407113df44dffc5bf727304ac4da2b8bad35d0d140ba46322ce157e8 -->
+<!-- diagnostic-evidence-contract: 83e109e89b856b2eed3c31ea1aace9c1a0ed0a8fa3c06c1b6c98b93fc9be62fd -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -208,8 +208,8 @@ second-level intervals (`dt <= CHECKUP_MAX_GAP_S = 15 s`) across monotonic sweep
 non-monotonic timestamps, missing source sweeps, or source/consent transitions break continuity
 without bridging. X10A (`s_x10a`) and Modbus (`s_modbus`) maintain separate accumulators, 23-slot
 `EnergyRing` buffers (`EnergyBucket`, `32 bytes`, zero padding), open live-hour counters, and v5
-`CheckupJournalPayload` flash journals (`160 bytes`, `pel_source_fp` at offset `124` stamped
-`"x10a-pel-v1"` on X10A and `"modbus-pel-v1"` on Modbus). On flash restore,
+`CheckupJournalPayload` flash journals (`160 bytes`, `pel_source_fp` at offset `124` CRC-derived
+from domain tag `"x10a-pel-v1"` on X10A and `"modbus-pel-v1"` on Modbus). On flash restore,
 `checkup_journal_rebuild()` retains checkup/DHW buckets independently while retiring only energy
 buckets whose `pel_source_fp` differs from the active electrical source identity
 (`checkup_journal_pel_identity_matches`) or after an unwired-CT switch

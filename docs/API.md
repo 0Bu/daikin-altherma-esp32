@@ -140,7 +140,7 @@ configured, elec_price, gas_price, gas_efficiency_pct, currency, break_even_az
 ```
 
 `configured` is `true` when both `elec_price` and `gas_price` are positive (half-set tariffs are
-rejected); unconfigured omits `elec_price`, `gas_price` and `break_even_az` as `null`.
+rejected); when unconfigured, `elec_price`, `gas_price` and `break_even_az` are `null`.
 `gas_efficiency_pct` is a read-only `88` (fixed `88%` gross calorific value $H_s$ modern
 condensing gas boiler baseline), `currency` defaults to `"EUR"` within the curated 12-code
 allowlist (`EUR`, `CHF`, `GBP`, `USD`, `PLN`, `CZK`, `SEK`, `NOK`, `DKK`, `UAH`, `JPY`, `CNY`),
@@ -572,10 +572,10 @@ supported onboard X10A and Modbus sources). Native Altherma 4 Modbus reports `su
 post-BUH rises `41 − 40 > 1.5 K`). `heat_kwh` and `elec_kwh`
 are `null` when `!supported`; `az` is `null` in `unsupported`, `collecting`, and `standby`.
 Tariff fields (`elec_price`, `gas_price`, `break_even_az`) are `null` unless `tariffs_configured`;
-`gas_efficiency_pct` is always read-only `88` (fixed `88%` $H_s$ modern condensing gas boiler
-baseline), and `gas_equiv_kwh`, `cost_wp`, `cost_gas`, `cost_delta` (`cost_wp - cost_gas`, negative =
-heat pump cheaper), and `cost_delta_pct` are `null` unless `supported`, past
-`collecting`/`standby`, and `tariffs_configured`. `outdoor_mean_c` and `outdoor_min_c` are `null` when no running-compressor
+`gas_efficiency_pct` is always `88` (see `gas_comparison` above), and `gas_equiv_kwh`, `cost_wp`,
+`cost_gas`, `cost_delta` (`cost_wp - cost_gas`, negative = heat pump cheaper), and
+`cost_delta_pct` are `null` unless `supported`, past `collecting`/`standby`, and
+`tariffs_configured`. `outdoor_mean_c` and `outdoor_min_c` are `null` when no running-compressor
 outdoor sample was recorded. See [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#working-figure-observation)
 for thresholds, source selection and exclusions.
 
@@ -807,9 +807,6 @@ the revision has changed. Both refusals leave the submitted settings unwritten.
 
 ### Plant diagnostics and sources
 
-`/set_gas_comparison` updates supplied fields (or clears prices with `clear:true`) while keeping
-omitted fields.
-
 `POST /set_diagnostics {enabled?:boolean, source?:"x10a"|"modbus"}` persists diagnostics state and
 applies live (at least one field is required; invalid `source` returns `400`). The first opt-in
 (`enabled:true` while `diagnostics_generation == 0`) draws a durable non-zero generation. Setting
@@ -833,11 +830,10 @@ proof. Save applies live; cosmetic renaming does not retire evidence. Unchanged 
 `saved:false,reboot:false`. Numeric bounds/decoder policy are in `logic/circulation_source.hpp`.
 
 `POST /set_gas_comparison` accepts optional `elec_price` (number, `0`–`99.9999`), `gas_price`
-(number, `0`–`99.9999`), `currency` (normalized to uppercase against the curated 12-code allowlist
-`EUR`, `CHF`, `GBP`, `USD`, `PLN`, `CZK`, `SEK`, `NOK`, `DKK`, `UAH`, `JPY`, `CNY`; default
-`"EUR"`), and `clear` (boolean; resets both prices to `0` while keeping `currency` unless also
-updated). Boiler efficiency is fixed at `88%` ($H_s$); any legacy `gas_efficiency_pct` key is
-ignored without changing the baseline. Prices quantize to `1e-4` currency/kWh; either both prices
+(number, `0`–`99.9999`), `currency` (normalized to uppercase against the `gas_comparison`
+allowlist above; default `"EUR"`), and `clear` (boolean; resets both prices to `0` while keeping
+`currency` unless also updated). Any legacy `gas_efficiency_pct` key is ignored without changing
+the fixed `88%` ($H_s$) baseline. Prices quantize to `1e-4` currency/kWh; either both prices
 must be positive or both `0` (half-set tariffs return `400`). Missing fields retain saved values;
 unchanged config returns `{ok:true,saved:false,reboot:false}`. Saves apply live without reboot
 (`reboot:false`) and immediately recalculate `gas_comparison` and the existing 24 h `working_figure`

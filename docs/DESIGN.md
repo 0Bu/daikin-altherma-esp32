@@ -457,15 +457,16 @@ a command, not measured valve position.
 A separate neutral **Performance factor** (`Arbeitszahl` in German) observation row presents rolling
 24-hour heating/DHW energy and optional break-even gas comparison when `working_figure` is
 emitted (Plant diagnostics on, active display source either `X10A` with valid boot profile
-fingerprint or affirmatively confirmed HomeHub `Modbus`; omitted on older firmware). Like
+fingerprint or a configured `Modbus` target; omitted on older firmware). Like
 **Refrigerant (heating)**, it contributes no badge count or `/status.health` verdict. Collapsed rows
 leave the value blank while `Collecting` (retaining `Performance factor: Collecting` in `aria-label`
 for screen readers), show dimmed `Standby` or `Not supported` (including native Altherma 4 or
 unconfirmed `Probing`/`Fallback` Modbus sweeps) without a figure, or show the computed working
-figure (`~` prefix for estimates, with `prov.`/`lim.` tags and `ok`/`warn` tones). Expanded panels
+figure (`~` prefix for estimates, with `prov.`/`lim.` tags, `ok`/`warn` tones, and a words-only
+`aria-label`). Expanded panels
 are grouped into three concise zones without repeating the active card bus or collecting time:
-1. Primary KPI tiles (`Performance factor`, `Heat pump`, `Gas · 88%`, `Delta` plus the horizontal
-   `±20%` Break-Even scale bar with words-only `ariaValue` and `0`/`2`-decimal currency formatting
+1. Primary KPI tiles (`Performance factor`, `Heat pump`, `Gas · 88%`, `Delta`, the horizontal
+   `±20%` Break-Even scale bar, and `0`/`2`-decimal currency formatting
    when tariffs are configured; or deduplicated `Performance factor` + `24 h heat` with `Set
    tariffs` when unconfigured; or a single status line with a 2-hour progress bar during `Collecting`).
 2. Conditional warning banners (`stale` source, `limited`/`unpaired` BUH, excluded `BSH`, `CT 0 A`
