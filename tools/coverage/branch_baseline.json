@@ -2439,27 +2439,70 @@
     },
     {
       "compilers": {
-        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
-        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, ESP-IDF v6.1.1 Docker, aarch64",
-        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 release-coverage Docker, x86_64"
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Ubuntu 26.04 Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Ubuntu 26.04 Docker, aarch64"
       },
-      "measurement_limits": [
-        "gcc-15-linux-ubuntu26 (aarch64) remains unchanged pending an arm64 Ubuntu 26.04 GCC 15 container run."
-      ],
-      "runner": "scripts/run-mock-tests.sh --coverage on Darwin; matching g++ --coverage and gcov -n -b -c inside ESP-IDF v6.1.1 and Ubuntu 26.04 release-coverage containers",
-      "scope": "24 h working figure and standalone NVS gas blob (CheckupPersist v5 energy ring/buckets, gas_comparison.hpp, config_store/config_transaction gas blob, and reference_temperature / checkup integration) after removing the unused 17-parameter checkup_journal_rebuild overload.",
+      "hosted_confirmation": "The x86-64 Ubuntu 26.04 GCC 15 Docker result is the hosted candidate. GitHub CI confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin and logic test plus gcov in pinned Linux Docker toolchains",
+      "scope": "Retire heating-curve diagnostics and dedicated room and weather sources. Replace their branch inventory with the shared MQTT source parser and retired discovery ownership ledger. Validating the legacy room header in place removes a redundant flag check, with both removed outcomes covered in the preceding candidate. Preserve the protected base's coverage ratios for surviving branch-bearing sources.",
       "sources": {
-        "main/logic/checkup.hpp": "05ba94f98a628df562e4d2be301c7aa31a0d1edb5687395aa64f63c8381fa5c8",
+        "main/logic/config_model.hpp": "f23299d669332ece45b076186fc26b5ed23c87f750f51f27f65f2a60211463d4",
+        "main/logic/config_transaction.hpp": "34cce769b36a49046a7c5da5a02a2b9afd35fe9fabe15209e68247611d8340f1",
+        "main/logic/heartbeat.hpp": "ab92fa92d587131b5c501214e81ecb508ccfd3a662e82c4eda43498079ac6b08",
+        "main/logic/history.hpp": "1688b4b051d69da933a8133f8fb1444f65bf4bf4699c7f7aa5122a562bc13160",
+        "main/logic/history_persist.hpp": "5599b7c9b27e00fab13b0d7811bed44fa4dba3ceba6b61fdfe83fe07d6983b81",
+        "main/logic/json_integer.hpp": "f0c6970f1219ac1e17e2eb0b0b46d0cdd28189fad6fd70db4b0574ff4dfd85f2",
+        "main/logic/mqtt_publish_gate.hpp": "bab0770042dfe8f31e2d345a4d3f977f9f781e96da5c7d575688d4412efb6cf0",
+        "main/logic/mqtt_source.hpp": "35d9f5cf39b34ac93a4d7a71593197ec54fa1f5ae2f15c19d29981fbea218c9c",
+        "main/logic/mqtt_weather_retirement.hpp": "f46b64b2ed1b6179c027d3ce14a3de887ecd00586961766a49175845b8d68bea",
+        "main/logic/outdoor_evidence.hpp": "e37607c6cd705cee5504ba66186856302404edde7130ec90d160f9836d1f64da",
+        "main/logic/redact.hpp": "3870b43a76fbf206a14bdb6933f0034366ca70834d7c92d38bb43a0d9ea2a604"
+      },
+      "test_source_sha256": "b14eb976fc3da447e88b70195890f33382cc37624dcbbb9d9e72a548be02ed36",
+      "validation_boundary": "Exact compiler outcome counts measured on synthetic host fixtures. Hardware and hosted CI verification remain separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3.0, ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2.0, release-coverage Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 release-coverage Docker result is the hosted candidate. Authoritative GitHub CI confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage compiler flags and gcov invocation, with isolated outputs",
+      "scope": "Verify five-minute minimum bins, equal and lower claims across nonoverlapping revisions, and CRC-guarded minimum metadata in the unchanged legacy hourly envelope.",
+      "sources": {
+        "main/logic/hydronic_hourly.hpp": "b109f07b18def6d9ffe8d9456da0a32c0716f275750bc2429ecaa91987889a26"
+      },
+      "test_source_sha256": "0546a5f227ab6cc9d47594515b6e738f0dd1d11b672332712161fecad1166bb2",
+      "measurement_limits": [
+        "Before the source retirement, the GCC 15 aarch64 profile reported a prior MQTT mismatch of 39/40 against 35/36 for mqtt_publish_gate.hpp."
+      ],
+      "validation_boundary": "Hydronic coverage was measured with synthetic inputs on all four local compiler profiles before the source retirement was integrated."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 release-coverage Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 GCC 15 delta carried from x86-64"
+      },
+      "hosted_confirmation": "The x86-64 release-coverage Docker result is the hosted candidate. Authoritative GitHub CI must confirm it.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin and matching --coverage plus gcov -n -b -c invocations in Docker",
+      "scope": "Independent DKG1 v1 gas-comparison tariff blob, Config validation and NVS transactions (including OOM unwinding), 24h Wh EnergyRing checkpoint persistence, WorkingFigureReport observation evaluation, and post-main-merge alignment with retired heating-curve and weather sources.",
+      "sources": {
+        "main/logic/checkup.hpp": "ae1d7436a3a1aa1ea398c7ee84197d6cadc7316e5054c497e609f30ecf2c17bf",
         "main/logic/checkup_persist.hpp": "4c3180c45708a636950b013a682a6bcc437b13d97808fc44e9e9a959959e4775",
-        "main/logic/config_model.hpp": "c27d0c6f9e32f1b91eac0ec18404811065698da8daf85c865b4a9d4f8cf1a904",
-        "main/logic/config_store.hpp": "0cee473d5f3ce4417e1bdb0853806cd3098bf33b09f61f89f825629e4a0f1627",
-        "main/logic/config_transaction.hpp": "6df6ec213f19e0641f661a05a1970cf7221eb7fcf43755f576f716f6f5cff94f",
+        "main/logic/config_model.hpp": "448f5f8955bb1de09fa35f872d51b1662c88dd3e2134189dce52627e8eaea09e",
+        "main/logic/config_store.hpp": "2757316f11a79e78f300225a5507d6805fe9ec8bd1fc6a557f5ab103112629d9",
+        "main/logic/config_transaction.hpp": "0c4db99c3e5058fccd2c14affe3132cabb7df8a4546e1401814a03de1c3eb1ac",
         "main/logic/gas_comparison.hpp": "7db97d61238d8216ef01a24186445b4d326884b24ac1d2d62e565d9f88551729",
-        "main/logic/reference_temperature.hpp": "0bfbbf34ae06cf796a21b8049a54a2179b53c651e6b1a8bf8e622351e0c87b86",
         "main/logic/working_figure.hpp": "7e8b4316f8f2c4c67f66125157577b7909448dca9f1ae13192460aac3dba7db5"
       },
-      "test_source_sha256": "991c18717a41282ef84d5fe7cc0474903fe0de1b28c7d4befeec699f4e72e0c9",
-      "validation_boundary": "Measured locally on Darwin Clang 17 arm64, ESP-IDF v6.1.1 Docker GCC 13 aarch64, and Ubuntu 26.04 x86-64 release-coverage Docker GCC 15; authoritative hosted GitHub CI and arm64 gcc-15-linux-ubuntu26 remain separate."
+      "test_source_sha256": "ef3216d35ce3a7ad56b867ea158b7073403022e76c0429a128ee285c30d98e74",
+      "validation_boundary": "Directly measured on host Apple Clang 17 arm64, ESP-IDF v6.1.1 Docker GCC 13 aarch64, and release-coverage Ubuntu 26.04 Docker GCC 15 x86-64. Local arm64 ubuntu:26.04 is a bare base image without g++, so gcc-15-linux-ubuntu26 carries the identical measured GCC 15 x86-64 counts. Hardware behavior remains unverified by host tests."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2514,16 +2557,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 338,
-        "taken": 301
+        "outcomes": 308,
+        "taken": 279
       },
       "main/logic/config_store.hpp": {
         "outcomes": 542,
-        "taken": 368
+        "taken": 375
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 162,
-        "taken": 117
+        "outcomes": 106,
+        "taken": 87
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 26,
@@ -2634,32 +2677,20 @@
         "taken": 22
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 378,
-        "taken": 233
-      },
-      "main/logic/heating_curve_bins.hpp": {
-        "outcomes": 112,
-        "taken": 99
-      },
-      "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 105,
-        "taken": 91
-      },
-      "main/logic/heating_curve_mqtt.hpp": {
-        "outcomes": 310,
-        "taken": 182
+        "outcomes": 374,
+        "taken": 231
       },
       "main/logic/hexdump.hpp": {
         "outcomes": 14,
         "taken": 14
       },
       "main/logic/history.hpp": {
-        "outcomes": 452,
-        "taken": 443
+        "outcomes": 444,
+        "taken": 436
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 533,
-        "taken": 478
+        "outcomes": 510,
+        "taken": 460
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 70,
@@ -2701,13 +2732,9 @@
         "outcomes": 8,
         "taken": 8
       },
-      "main/logic/http_values_wait.hpp": {
-        "outcomes": 8,
-        "taken": 8
-      },
       "main/logic/hydronic_hourly.hpp": {
-        "outcomes": 204,
-        "taken": 152
+        "outcomes": 224,
+        "taken": 169
       },
       "main/logic/hydronic_input.hpp": {
         "outcomes": 142,
@@ -2805,9 +2832,17 @@
         "outcomes": 62,
         "taken": 62
       },
+      "main/logic/mqtt_source.hpp": {
+        "outcomes": 172,
+        "taken": 110
+      },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 54,
         "taken": 42
+      },
+      "main/logic/mqtt_weather_retirement.hpp": {
+        "outcomes": 12,
+        "taken": 6
       },
       "main/logic/net_link.hpp": {
         "outcomes": 49,
@@ -2816,10 +2851,6 @@
       "main/logic/observation_hourly.hpp": {
         "outcomes": 138,
         "taken": 137
-      },
-      "main/logic/open_meteo.hpp": {
-        "outcomes": 34,
-        "taken": 24
       },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 72,
@@ -2858,8 +2889,8 @@
         "taken": 12
       },
       "main/logic/outdoor_evidence.hpp": {
-        "outcomes": 21,
-        "taken": 15
+        "outcomes": 18,
+        "taken": 17
       },
       "main/logic/payload_complete.hpp": {
         "outcomes": 138,
@@ -2882,12 +2913,8 @@
         "taken": 10
       },
       "main/logic/redact.hpp": {
-        "outcomes": 72,
-        "taken": 64
-      },
-      "main/logic/reference_temperature.hpp": {
-        "outcomes": 320,
-        "taken": 218
+        "outcomes": 56,
+        "taken": 51
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 256,
@@ -2944,14 +2971,6 @@
       "main/logic/version_cmp.hpp": {
         "outcomes": 146,
         "taken": 130
-      },
-      "main/logic/weather_forecast.hpp": {
-        "outcomes": 187,
-        "taken": 176
-      },
-      "main/logic/weather_mqtt.hpp": {
-        "outcomes": 136,
-        "taken": 81
       },
       "main/logic/wifi_rollback.hpp": {
         "outcomes": 10,
@@ -3016,16 +3035,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 356,
-        "taken": 328
+        "outcomes": 342,
+        "taken": 314
       },
       "main/logic/config_store.hpp": {
         "outcomes": 516,
-        "taken": 379
+        "taken": 388
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 160,
-        "taken": 115
+        "outcomes": 104,
+        "taken": 89
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -3136,32 +3155,20 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 502,
-        "taken": 318
-      },
-      "main/logic/heating_curve_bins.hpp": {
-        "outcomes": 104,
-        "taken": 104
-      },
-      "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 125,
-        "taken": 110
-      },
-      "main/logic/heating_curve_mqtt.hpp": {
-        "outcomes": 274,
-        "taken": 167
+        "outcomes": 498,
+        "taken": 316
       },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 536,
-        "taken": 532
+        "outcomes": 526,
+        "taken": 523
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 622,
-        "taken": 561
+        "outcomes": 591,
+        "taken": 536
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 82,
@@ -3203,13 +3210,9 @@
         "outcomes": 12,
         "taken": 12
       },
-      "main/logic/http_values_wait.hpp": {
-        "outcomes": 12,
-        "taken": 12
-      },
       "main/logic/hydronic_hourly.hpp": {
-        "outcomes": 234,
-        "taken": 170
+        "outcomes": 254,
+        "taken": 187
       },
       "main/logic/hydronic_input.hpp": {
         "outcomes": 196,
@@ -3232,8 +3235,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 236,
-        "taken": 147
+        "outcomes": 188,
+        "taken": 120
       },
       "main/logic/label_override.hpp": {
         "outcomes": 24,
@@ -3307,9 +3310,17 @@
         "outcomes": 68,
         "taken": 68
       },
+      "main/logic/mqtt_source.hpp": {
+        "outcomes": 200,
+        "taken": 131
+      },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 66,
         "taken": 55
+      },
+      "main/logic/mqtt_weather_retirement.hpp": {
+        "outcomes": 14,
+        "taken": 7
       },
       "main/logic/net_link.hpp": {
         "outcomes": 71,
@@ -3318,10 +3329,6 @@
       "main/logic/observation_hourly.hpp": {
         "outcomes": 158,
         "taken": 157
-      },
-      "main/logic/open_meteo.hpp": {
-        "outcomes": 46,
-        "taken": 35
       },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 82,
@@ -3360,7 +3367,7 @@
         "taken": 28
       },
       "main/logic/outdoor_evidence.hpp": {
-        "outcomes": 29,
+        "outcomes": 24,
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
@@ -3384,12 +3391,8 @@
         "taken": 12
       },
       "main/logic/redact.hpp": {
-        "outcomes": 96,
-        "taken": 80
-      },
-      "main/logic/reference_temperature.hpp": {
-        "outcomes": 366,
-        "taken": 254
+        "outcomes": 76,
+        "taken": 64
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 310,
@@ -3446,14 +3449,6 @@
       "main/logic/version_cmp.hpp": {
         "outcomes": 174,
         "taken": 150
-      },
-      "main/logic/weather_forecast.hpp": {
-        "outcomes": 229,
-        "taken": 214
-      },
-      "main/logic/weather_mqtt.hpp": {
-        "outcomes": 148,
-        "taken": 90
       },
       "main/logic/wifi_rollback.hpp": {
         "outcomes": 16,
@@ -3518,16 +3513,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 356,
-        "taken": 328
+        "outcomes": 342,
+        "taken": 314
       },
       "main/logic/config_store.hpp": {
         "outcomes": 516,
-        "taken": 379
+        "taken": 388
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 160,
-        "taken": 115
+        "outcomes": 104,
+        "taken": 89
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -3638,32 +3633,20 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 422,
-        "taken": 260
-      },
-      "main/logic/heating_curve_bins.hpp": {
-        "outcomes": 104,
-        "taken": 104
-      },
-      "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 125,
-        "taken": 110
-      },
-      "main/logic/heating_curve_mqtt.hpp": {
-        "outcomes": 240,
-        "taken": 147
+        "outcomes": 418,
+        "taken": 258
       },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 534,
-        "taken": 530
+        "outcomes": 524,
+        "taken": 521
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 620,
-        "taken": 559
+        "outcomes": 589,
+        "taken": 534
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 82,
@@ -3705,13 +3688,9 @@
         "outcomes": 12,
         "taken": 12
       },
-      "main/logic/http_values_wait.hpp": {
-        "outcomes": 12,
-        "taken": 12
-      },
       "main/logic/hydronic_hourly.hpp": {
-        "outcomes": 234,
-        "taken": 170
+        "outcomes": 254,
+        "taken": 187
       },
       "main/logic/hydronic_input.hpp": {
         "outcomes": 196,
@@ -3734,8 +3713,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 236,
-        "taken": 147
+        "outcomes": 188,
+        "taken": 120
       },
       "main/logic/label_override.hpp": {
         "outcomes": 24,
@@ -3809,9 +3788,17 @@
         "outcomes": 68,
         "taken": 68
       },
+      "main/logic/mqtt_source.hpp": {
+        "outcomes": 200,
+        "taken": 131
+      },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 66,
         "taken": 55
+      },
+      "main/logic/mqtt_weather_retirement.hpp": {
+        "outcomes": 14,
+        "taken": 7
       },
       "main/logic/net_link.hpp": {
         "outcomes": 71,
@@ -3820,10 +3807,6 @@
       "main/logic/observation_hourly.hpp": {
         "outcomes": 158,
         "taken": 157
-      },
-      "main/logic/open_meteo.hpp": {
-        "outcomes": 46,
-        "taken": 35
       },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 82,
@@ -3862,7 +3845,7 @@
         "taken": 28
       },
       "main/logic/outdoor_evidence.hpp": {
-        "outcomes": 29,
+        "outcomes": 24,
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
@@ -3886,12 +3869,8 @@
         "taken": 12
       },
       "main/logic/redact.hpp": {
-        "outcomes": 96,
-        "taken": 80
-      },
-      "main/logic/reference_temperature.hpp": {
-        "outcomes": 366,
-        "taken": 254
+        "outcomes": 76,
+        "taken": 64
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 310,
@@ -3949,14 +3928,6 @@
         "outcomes": 174,
         "taken": 150
       },
-      "main/logic/weather_forecast.hpp": {
-        "outcomes": 229,
-        "taken": 214
-      },
-      "main/logic/weather_mqtt.hpp": {
-        "outcomes": 148,
-        "taken": 90
-      },
       "main/logic/wifi_rollback.hpp": {
         "outcomes": 16,
         "taken": 16
@@ -4005,11 +3976,11 @@
       },
       "main/logic/checkup.hpp": {
         "outcomes": 1581,
-        "taken": 1496
+        "taken": 1497
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 415,
-        "taken": 415
+        "outcomes": 443,
+        "taken": 443
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -4020,16 +3991,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 350,
-        "taken": 306
+        "outcomes": 342,
+        "taken": 314
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 474,
-        "taken": 332
+        "outcomes": 516,
+        "taken": 388
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 114,
-        "taken": 81
+        "outcomes": 104,
+        "taken": 89
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -4123,6 +4094,10 @@
         "outcomes": 14,
         "taken": 11
       },
+      "main/logic/gas_comparison.hpp": {
+        "outcomes": 16,
+        "taken": 16
+      },
       "main/logic/ha_device.hpp": {
         "outcomes": 180,
         "taken": 163
@@ -4136,32 +4111,20 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 502,
-        "taken": 318
-      },
-      "main/logic/heating_curve_bins.hpp": {
-        "outcomes": 104,
-        "taken": 104
-      },
-      "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 125,
-        "taken": 110
-      },
-      "main/logic/heating_curve_mqtt.hpp": {
-        "outcomes": 274,
-        "taken": 167
+        "outcomes": 498,
+        "taken": 316
       },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 534,
-        "taken": 530
+        "outcomes": 524,
+        "taken": 521
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 620,
-        "taken": 559
+        "outcomes": 589,
+        "taken": 534
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 82,
@@ -4203,13 +4166,9 @@
         "outcomes": 12,
         "taken": 12
       },
-      "main/logic/http_values_wait.hpp": {
-        "outcomes": 12,
-        "taken": 12
-      },
       "main/logic/hydronic_hourly.hpp": {
-        "outcomes": 234,
-        "taken": 170
+        "outcomes": 254,
+        "taken": 187
       },
       "main/logic/hydronic_input.hpp": {
         "outcomes": 196,
@@ -4232,8 +4191,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "outcomes": 236,
-        "taken": 147
+        "outcomes": 188,
+        "taken": 120
       },
       "main/logic/label_override.hpp": {
         "outcomes": 24,
@@ -4292,8 +4251,8 @@
         "taken": 381
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 36,
-        "taken": 35
+        "outcomes": 40,
+        "taken": 39
       },
       "main/logic/mqtt_retirement.hpp": {
         "outcomes": 46,
@@ -4307,9 +4266,17 @@
         "outcomes": 68,
         "taken": 68
       },
+      "main/logic/mqtt_source.hpp": {
+        "outcomes": 200,
+        "taken": 131
+      },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 66,
         "taken": 55
+      },
+      "main/logic/mqtt_weather_retirement.hpp": {
+        "outcomes": 14,
+        "taken": 7
       },
       "main/logic/net_link.hpp": {
         "outcomes": 71,
@@ -4318,10 +4285,6 @@
       "main/logic/observation_hourly.hpp": {
         "outcomes": 158,
         "taken": 157
-      },
-      "main/logic/open_meteo.hpp": {
-        "outcomes": 46,
-        "taken": 35
       },
       "main/logic/ota_changelog_range.hpp": {
         "outcomes": 82,
@@ -4360,7 +4323,7 @@
         "taken": 28
       },
       "main/logic/outdoor_evidence.hpp": {
-        "outcomes": 29,
+        "outcomes": 24,
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
@@ -4384,12 +4347,8 @@
         "taken": 12
       },
       "main/logic/redact.hpp": {
-        "outcomes": 96,
-        "taken": 80
-      },
-      "main/logic/reference_temperature.hpp": {
-        "outcomes": 366,
-        "taken": 252
+        "outcomes": 76,
+        "taken": 64
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 310,
@@ -4447,17 +4406,13 @@
         "outcomes": 174,
         "taken": 150
       },
-      "main/logic/weather_forecast.hpp": {
-        "outcomes": 229,
-        "taken": 214
-      },
-      "main/logic/weather_mqtt.hpp": {
-        "outcomes": 148,
-        "taken": 90
-      },
       "main/logic/wifi_rollback.hpp": {
         "outcomes": 16,
         "taken": 16
+      },
+      "main/logic/working_figure.hpp": {
+        "outcomes": 503,
+        "taken": 429
       },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,

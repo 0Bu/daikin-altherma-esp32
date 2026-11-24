@@ -18,14 +18,13 @@ observations without user authentication. [API.md](API.md) owns request/field co
 | MCP | LAN-only stateless status/value reads and OTA endpoint discovery. No session, SSE or write tool. Its setup page uses `connect-src 'none'`. |
 | MQTT | Stored credentials require `mqtts://` or `wss://` with common-root certificate verification; plaintext with credentials is refused. An anonymous broker may use plaintext on the trusted LAN. Uncovered/private roots are rejected. |
 | Syslog | Optional cleartext unauthenticated UDP. Logs plus boot/crash summary reveal operational metadata, version and code addresses, but do not export raw memory or credentials. Use a trusted collector. |
-| Weather | Explicit location plus diagnostics consent permits provider HTTPS requests, disclosing coordinates and source IP. Removing/replacing a source clears old decision/retained evidence. |
 
 Use network isolation where access control is required. An authenticated reverse proxy is a separate
 security boundary: it must also handle CSRF and send an allowed upstream Host without forwarding
 an external Origin or cross-site Fetch Metadata. A plain port forward supplies none of that.
 The device guards browser-origin attacks; they are not LAN-client authentication.
 
-Config, MQTT and Weather JSON ingress permits one complete document, at most 16 container levels,
+Configuration and MQTT JSON ingress permits one complete document, at most 16 container levels,
 no raw or decoded NUL or trailing non-whitespace. Ordinary HTTP body acceptance has a 30-second absolute budget;
 unread-body cleanup admits receives for two seconds and checks its 8 KiB cap after each 128-byte
 read. One in-progress read can add a socket timeout and the cap can reach 8 KiB + 128 bytes.
@@ -75,8 +74,8 @@ test capability, not official artifact promotion; see [MAINTENANCE.md](MAINTENAN
 ### Heap and transport bounds
 
 - The delivery worker's 11,776-byte stack/control block is boot-static. OTA quiesces complete MQTT
-  transport and allocation-rich X10A/HomeHub/Syslog work before network allocation; active Weather
-  unwinds within a bound. A 1.1-second lead allows a running publisher cycle to finish.
+  transport and allocation-rich X10A/HomeHub/Syslog work before network allocation. A 1.1-second
+  lead allows a running publisher cycle to finish.
 - Before each manifest/image TLS handshake, four samples require **56 KiB free internal heap and
   a 24 KiB largest internal block**. TLS admission waits at most 15 seconds. Free the client and
   1 KiB transfer buffer before RSA/PSA validation; each validation admission takes two **24/12 KiB**
@@ -252,17 +251,15 @@ an authorized signing invocation passes the offline key by path without wrapping
 
 ## Report redaction contract
 
-`GET /status?redact=1` redacts the following 29 identifying fields at emission, with `<redacted>`
-for set identifying values. HVAC mode preserves only its allowlisted public vocabulary; unknown
-source text is hidden without changing control evaluation.
-For these substitutions, unset strings remain empty, unset coordinates stay null, and field keys,
-types and configured-source evidence are preserved. The redaction audit compares the ordered
+`GET /status?redact=1` masks the identifying fields below with `<redacted>` at emission.
+Unset strings remain empty. Field keys, types and configured-source evidence are preserved. The redaction audit compares the ordered
 contract in `main/logic/redact.hpp` with this table and the serializer.
 Redacted status omits the optional compressor cycling `timeline`, `run_contexts` and
 `flow_typical_l_min`, DHW tank-cooling `timeline`, unit-fault `timeline` (and wall-clock
-`latest.start_unix_s`/`end_unix_s`), and heating-curve `outdoor_bins`.
-These contain event timing or the exact room target. The dashboard and
-the LAN MCP `get_status` tool use ordinary unredacted status.
+`latest.start_unix_s`/`end_unix_s`). These can reveal event timing. Redacted status also sets
+`flow.minimum_windows` to `null`, removing the five-minute masks for the heating minimum.
+It still includes the hydronic aggregates and their first and last accepted timestamps in seconds.
+The dashboard and the LAN MCP `get_status` tool use ordinary unredacted status.
 
 <!-- redacted-status-fields:start -->
 | Field | Why it goes |
@@ -276,23 +273,10 @@ the LAN MCP `get_status` tool use ordinary unredacted status.
 | `net.ip` | the active transport's internal address |
 | `net.eth.ip` | the wired interface's internal address |
 | `net.eth.mac` | identifies this specific wired controller |
-| `reference_temperature.name` | a name you typed, usually naming a room or a person |
-| `history.room_rows.label` | the same user-provided room-source name in the history offer array |
-| `reference_temperature.topic` | a path through your own broker — normally carries a room or device name |
-| `reference_temperature.temperature_path` | user-typed JSON path; may contain room, person or device names |
-| `reference_temperature.setpoint_topic` | a second broker path when the target temperature is published separately |
-| `reference_temperature.setpoint_path` | user-typed JSON path; may contain room, person or device names |
-| `reference_temperature.timestamp_topic` | a second broker path when the source timestamp is published separately |
-| `reference_temperature.timestamp_path` | user-typed JSON path; may contain room, person or device names |
-| `reference_temperature.enabled_path` | user-typed JSON path; may contain room, person or device names |
-| `reference_temperature.hvac_mode_path` | user-typed JSON path; may contain room, person or device names |
-| `reference_temperature.hvac_mode` | unknown source text may contain private names; known mode vocabulary remains visible |
 | `circulation_source.name` | a name you typed for the circulation-pump meter |
 | `circulation_source.topic` | a path through your own broker — normally embeds the smart plug's device id |
 | `circulation_source.power_path` | user-typed JSON path; may contain room, person or device names |
 | `circulation_source.timestamp_path` | user-typed JSON path; may contain room, person or device names |
-| `weather_forecast.latitude` | where your house is, to six decimals |
-| `weather_forecast.longitude` | the other half of the same |
 | `syslog.host` | an internal hostname |
 | `ntp.server` | often an internal hostname too |
 | `modbus.host` | your saved HomeHub address, whether found automatically, typed manually or filled by manual Search |

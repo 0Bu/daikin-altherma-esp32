@@ -212,7 +212,7 @@ from pathlib import Path
 import sys
 p = Path(sys.argv[1])
 s = p.read_text()
-start = s.index("void append_hydronic_status(")
+start = s.index("append_hydronic_status(")
 end = s.index("append_status_service_metric(", start)
 helper = s[start:end]
 assert helper.count("secondary_supply") == 1

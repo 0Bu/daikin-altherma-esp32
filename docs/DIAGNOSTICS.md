@@ -1,17 +1,18 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 3eb27c8a5e46402cfee9fb30369e5ada729b8dd3773bca16a93e021a308dcf73 -->
+<!-- user-docs-contract: 148ad2472d69a8715d6657ffd0097caaf7a92aaf0a6b9a813c20f6b63cffd6de -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
-**Plant diagnostics** to start an evidence window: the firmware records X10A and HomeHub Modbus into
-separate 24 h histories, while the setting selects which source the card displays (when only one
-source is available, only that option and **Off** are shown). Switching between **X10A** and
-**Modbus** keeps both histories; choosing **Off** pauses recording while keeping already collected
-24 h diagnostic histories (which continue aging out normally after 24 hours), stops additional
-room, forecast and circulation collection, and hides the Diagnostics name and card (Model becomes
-the default card when available). Re-enabling resumes into the preserved 24 h window without
-bridging the paused interval or carrying an unfinished run/candidate across pausing.
+**Plant diagnostics** to start an evidence window. The firmware records X10A and HomeHub Modbus
+into separate 24 h histories. The selector shows the active source. A configured Modbus gateway
+can stay active even while it is offline. With a gateway configured, X10A can be selected while it
+is connected, has answered within 30 seconds, or still has recorded diagnostic data. If both sources
+can be selected, the card uses your saved choice. With no gateway configured, it uses X10A.
+Switching between **X10A** and **Modbus** keeps both histories. Choosing **Off** pauses diagnostics
+and circulation recording and hides the Diagnostics card. The Model card becomes the default when
+available. Existing data ages out as usual. Re-enabling resumes the same 24 h history and starts
+any new run or candidate after the pause.
 In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, and passive
 **Refrigerant (heating)**) are unavailable and omitted from the card, while **Performance factor**
 switches to the independent affirmatively confirmed HomeHub (`EKRHH`) Modbus window (or shows
@@ -226,28 +227,20 @@ within the 24-hour window.
 ### Lowest water flow
 
 **In plain language:** Open **Flow rate** in the schematic for its current reading and 24-hour
-trend. When Plant diagnostics is on, the measurement below the trend shows how low flow went after
-the internal pump had run continuously for at least one minute. The chart marks this value with a
-red horizontal line when it displays readings from the matching source.
+trend. When X10A is the active source for Plant diagnostics, the card can also show the lowest
+reading recorded after at least ten minutes of continuous space heating. When Modbus is active,
+the card explains that the heating minimum requires X10A.
 
-**Meaning:** The minimum is an observation. **Measurement details** shows separate X10A heating
-statistics for temperature difference, flow, pump command and coverage after ten minutes of eligible
-heating. The statistics can remain visible during a link interruption, and water ranges can be
-available when the pump command is missing. With fresh readings from a supported mixed heating
-circuit, the details can show the average difference between the heat-pump supply and the mixed
-supply, how long they were compared and how many readings qualified. A negative difference means
-the measured mixed supply was warmer. The current shipped X10A profiles leave this comparison empty
-because each lacks at least one required reading.
-Modbus offers the lowest measurement only for verified HomeHub flow scaling. Heating statistics and
-the mixed-supply comparison require X10A.
+**Meaning:** Shading under the X10A curve marks covered parts of recorded five-minute windows
+containing that minimum. Select a shaded area or use the legend to see when it occurred directly
+below the chart. The legend is available when a recorded window overlaps the dated chart and an
+X10A sample is visible. It can also open windows inside curve gaps. The summary at the bottom of
+the card can show the minimum even if older records lack a time. It follows the available Modbus
+comparison, water pressure and requested pump percentage.
 
-**Important limit:** The minimum is recorded without its time or operating mode. The model and
-operating mode determine how much flow is required. The temperature difference concerns
-the heat exchanger's water circuit, the pump percentage reports the controller command, and these
-readings do not measure room emitters, pump speed, or available head. The ten-minute filter does
-not establish steady operation or diagnose a bypass or restriction, and the controller's target
-spread is unavailable. The optional comparison leaves the reason for mixing open, and estimating
-heat loss requires more measurements.
+**Important limit:** The required flow depends on the model and operating mode. Shading gives the
+time window of a reading, with no claim about how long the flow stayed there. The observation alone
+cannot identify a fault or establish the cause of low flow.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 
@@ -373,20 +366,6 @@ estimates, does not account for glycol heat capacity, fixed utility charges or i
 factor, and is neither a seasonal JAZ/SCOP rating nor a billing meter.
 
 **Evidence and limits:** [Performance factor observation](DIAGNOSTIC_EVIDENCE.md#working-figure-observation)
-
-## Heating-curve evaluation freshness
-
-**In plain language:** **Not evaluated recently** means the heating-curve check has not evaluated
-its inputs recently enough to describe their current state. The last recorded event remains dated
-evidence; the independent room source may still be fresh. This status identifies no broker, sensor
-or plant fault. [PLANT.md](PLANT.md#heating-curve-diagnosis) owns its age and event rules;
-[the evidence boundary](DIAGNOSTIC_EVIDENCE.md#heating-curve-evaluation-freshness) separates this
-project rule from plant conclusions.
-
-The **Outdoor temperature ranges** detail groups recorded room errors by the outdoor reading.
-The two outdoor sensors have separate results. The count and range give context for the average.
-A small average can include readings from times when the room was too cold or too warm. [Heating-curve
-observations](PLANT.md#heating-curve-diagnosis) describes the window and when it resets.
 
 ## What the diagnosis cannot do
 

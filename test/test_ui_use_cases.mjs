@@ -160,8 +160,6 @@ const fetch = async (url, options = {}) => {
       error: "Base topic violates a rule this UI predates",
     }, 400);
   if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
-  if (fetchState.mode === "room_evidence_reset" && url === "/set_ref_temp")
-    return response(true, { ok: true, reboot: false, saved: false, room_evidence_reset: true });
   if (fetchState.mode === "reboot" && url === "/set_ntp")
     return response(true, { reboot: true, saved: true });
   if (url === "/status") return response(true, fetchState.status || {});
@@ -260,8 +258,8 @@ vm.runInContext(`${source}
     S, MODALS, ROUTED_MODALS, TRANSIENT_MODALS, POPUP_ROUTES, notices, wire, initNavigation,
     applyRouteFromLocation, hydrateRoutedPopup, askOtaInstall, settleOtaDecision,
     otaFail, paintOtaAlert, dismissOtaAlert,
-    openWifi, openMqtt, openRefTemp, openCirculation, openGasComparison,
-    openWeather, openSyslog, openNtp, openHomehub, openBoard, openBug,
+    openWifi, openMqtt, openCirculation, openGasComparison,
+    openSyslog, openNtp, openHomehub, openBoard, openBug,
     refreshStatus: productionRefreshStatus,
     realStatusReader: () => { refreshStatus = productionRefreshStatus; },
   };`, context, { filename: "main/www/app.sources" });
@@ -270,13 +268,6 @@ const ui = context.__ui;
 ui.S.status = {
   wifi: { ssid: "ExampleNet" },
   mqtt: { broker: "192.0.2.27:1883", has_creds: false, base: "daikin-altherma-esp32", base_custom: false },
-  reference_temperature: {
-    configured: true, name: "Living room", topic: "sensor/living-room/temperature",
-    temperature_path: "temperature.tC", setpoint_topic: "", setpoint_path: "",
-    fixed_setpoint_c: 20, timestamp_topic: "sensor/living-room/sys",
-    timestamp_path: "read_at", enabled_path: "enabled", hvac_mode_path: "hvac_mode",
-    max_age_s: 600,
-  },
   circulation_source: {
     configured: true, name: "DHW circulation",
     topic: "fixture/circulation/status",
@@ -284,7 +275,6 @@ ui.S.status = {
     max_age_s: 120, on_threshold_w: 3.0, off_threshold_w: 1.0, confirm_s: 60,
   },
   gas_comparison: { configured: false, gas_efficiency_pct: 88, currency: "EUR" },
-  weather_forecast: { latitude: "", longitude: "" },
   syslog: {},
   ntp: { server: "pool.ntp.org" },
   modbus: { host: "", port: 502, unit_id: 1 },
@@ -312,10 +302,8 @@ ui.S.status = {
 const cases = [
   { name: "Wi-Fi", modal: "wifiModal", open: "openWifi", cancel: "wfCancel", backdrop: "wifiBackdrop", form: "wifiForm", url: "/set_wifi" },
   { name: "MQTT", modal: "mqttModal", open: "openMqtt", cancel: "mqCancel", backdrop: "mqttBackdrop", form: "mqttForm", url: "/set_mqtt" },
-  { name: "Room temperature", modal: "refTempModal", open: "openRefTemp", cancel: "rtCancel", backdrop: "refTempBackdrop", form: "refTempForm", url: "/set_ref_temp", customSave: true },
   { name: "Circulation pump", modal: "circulationModal", open: "openCirculation", cancel: "circCancel", backdrop: "circulationBackdrop", form: "circulationForm", url: "/set_circulation", customSave: true },
   { name: "Gas comparison", modal: "gasComparisonModal", open: "openGasComparison", cancel: "gcCancel", backdrop: "gasComparisonBackdrop", form: "gasComparisonForm", url: "/set_gas_comparison", customSave: true },
-  { name: "Weather", modal: "weatherModal", open: "openWeather", cancel: "wxCancel", backdrop: "weatherBackdrop", form: "weatherForm", url: "/set_weather" },
   { name: "Syslog", modal: "syslogModal", open: "openSyslog", cancel: "slCancel", backdrop: "syslogBackdrop", form: "syslogForm", url: "/set_syslog" },
   { name: "NTP", modal: "ntpModal", open: "openNtp", cancel: "ntpCancel", backdrop: "ntpBackdrop", form: "ntpForm", url: "/set_ntp" },
   { name: "HomeHub", modal: "homehubModal", open: "openHomehub", cancel: "hhCancel", backdrop: "homehubBackdrop", form: "homehubForm", url: "/set_hp", customSave: true },
@@ -490,10 +478,8 @@ const delegatedTarget = (selector, key, value) => ({
 // missing action branch otherwise leaves a perfectly rendered pencil/row inert.
 for (const entry of [
   ["settingsCards", "[data-act]", "act", "board", "boardModal"],
-  ["settingsCards", "[data-act]", "act", "ref-temp", "refTempModal"],
   ["settingsCards", "[data-act]", "act", "circulation", "circulationModal"],
   ["settingsCards", "[data-act]", "act", "gas-comparison", "gasComparisonModal"],
-  ["settingsCards", "[data-act]", "act", "weather", "weatherModal"],
   ["connTile", "[data-edit]", "edit", "wifi", "wifiModal"],
   ["connTile", "[data-edit]", "edit", "mqtt", "mqttModal"],
   ["connTile", "[data-edit]", "edit", "syslog", "syslogModal"],
@@ -724,12 +710,7 @@ const settle = async () => {
   await new Promise((resolve) => setImmediate(resolve));
 };
 const configureValid = (item) => {
-  if (item.modal === "refTempModal") {
-    document.getElementById("rtTemperatureSource").value = "sensor/living-room/temperature$temperature.tC";
-    document.getElementById("rtTarget").value = "20";
-    document.getElementById("rtTimestampSource").value = "sensor/living-room/sys$read_at";
-    document.getElementById("rtMaxAge").value = "600";
-  } else if (item.modal === "circulationModal") {
+  if (item.modal === "circulationModal") {
     document.getElementById("circTopic").value = "fixture/circulation/status";
     document.getElementById("circPowerPath").value = "apower";
     document.getElementById("circTimePath").value = "aenergy.minute_ts";
@@ -757,18 +738,7 @@ for (const item of cases.filter((entry) => entry.form)) {
   assert.equal(document.body.classList.contains("modal-open"), false,
     `${item.name}: accepted Save must release background scrolling`);
   assert.ok(fetchState.calls.some((call) => call.url === item.url), `${item.name}: Save must call ${item.url}`);
-  if (item.modal === "refTempModal") {
-    assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"],
-      "one room-source Save must persist immediately without a live probe");
-    assert.equal(fetchState.calls[0]?.body?.enabled_path, "enabled",
-      "editing the visible fields of an unchanged source must preserve its existing enabled gate");
-    assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "hvac_mode",
-      "editing the visible fields of an unchanged source must preserve its existing HVAC gate");
-    assert.equal(fetchState.calls[0]?.body?.fixed_setpoint_c, 20,
-      "a numeric target must be sent as a fixed temperature, not an MQTT mapping");
-    assert.equal(fetchState.calls[0]?.body?.timestamp_topic, "sensor/living-room/sys",
-      "the timestamp mapping must retain its independent MQTT topic");
-  } else if (item.modal === "circulationModal") {
+  if (item.modal === "circulationModal") {
     assert.deepEqual(fetchState.calls.map((call) => call.url), ["/test_circulation", "/set_circulation"],
       "one circulation-source Save must run live test before persistence");
     assert.equal(fetchState.calls[1]?.body?.test_proof, 83,
@@ -792,234 +762,6 @@ for (const item of cases.filter((entry) => entry.form)) {
     `${item.name}: rejected Save must keep background scrolling locked`);
   assert.equal(ui.S.busy, false, `${item.name}: rejected Save must release busy state`);
 }
-
-// This synthetic sensor fixture has a temperature topic but no target and need not publish a
-// source timestamp.
-// The fixed target plus live MQTT arrival-time contract must therefore survive immediate persistence
-// with both timestamp fields deliberately empty.
-fetchState.mode = "ok";
-fetchState.calls.length = 0;
-ui.S.busy = false;
-open(cases.find((item) => item.modal === "refTempModal"));
-document.getElementById("rtName").value = "Example temperature sensor";
-document.getElementById("rtTemperatureSource").value =
-  "fixture/room-temperature/status$tC";
-document.getElementById("rtTarget").value = "20";
-document.getElementById("rtTimestampSource").value = "";
-document.getElementById("rtMaxAge").value = "600";
-await document.getElementById("refTempForm").fire("submit");
-await settle();
-assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"],
-  "a timestamp-less source must persist without waiting for its next report");
-assert.equal(fetchState.calls[0]?.body?.timestamp_topic, "");
-assert.equal(fetchState.calls[0]?.body?.timestamp_path, "");
-assert.equal(fetchState.calls[0]?.body?.fixed_setpoint_c, 20);
-
-// Opening and immediately saving an existing source must preserve absence, advanced eligibility
-// gates and exact topic/path bytes. Exercise the production fill → submit → /set_ref_temp path.
-const roundtripSource = cases.find((item) => item.modal === "refTempModal");
-const roomSourceBeforeRoundtrips = ui.S.status.reference_temperature;
-const roundtripMappings = [
-  { topic: "fixture/room", temperature_path: "", setpoint_topic: "20", setpoint_path: "",
-    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: null },
-  { topic: "fixture/room", temperature_path: "", setpoint_topic: " 20 ", setpoint_path: "",
-    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: null },
-  { topic: " ", temperature_path: "", setpoint_topic: " ", setpoint_path: "",
-    timestamp_topic: " ", timestamp_path: "", fixed_setpoint_c: null },
-  { topic: "fixture/temperature", temperature_path: "tC", setpoint_topic: "", setpoint_path: "",
-    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: 20 },
-  { topic: "$SYS/room", temperature_path: "tC", setpoint_topic: "", setpoint_path: "",
-    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: 20 },
-  { topic: "fixture/room$temperature", temperature_path: "", setpoint_topic: "", setpoint_path: "",
-    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: 20 },
-  { topic: "fixture/room$temperature", temperature_path: "value$reading",
-    setpoint_topic: "fixture/target\\setpoint", setpoint_path: "value$target",
-    timestamp_topic: "fixture/time$source", timestamp_path: "value\\time", fixed_setpoint_c: null },
-  { topic: " sensor/room ", temperature_path: " temperature ", setpoint_topic: "", setpoint_path: "",
-    fixed_setpoint_c: 20, timestamp_topic: "", timestamp_path: "", enabled_path: "enabled", hvac_mode_path: "hvac_mode" },
-  { topic: "$".repeat(192), temperature_path: "\\".repeat(128), setpoint_topic: "", setpoint_path: "",
-    timestamp_topic: "", timestamp_path: "", fixed_setpoint_c: 20 },
-];
-const template = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
-for (const mapping of roundtripMappings) {
-  const original = { ...mapping, configured: true, name: "Roundtrip fixture", max_age_s: 600,
-    enabled_path: "enabled", hvac_mode_path: "hvac_mode" };
-  ui.S.status.reference_temperature = original;
-  fetchState.mode = "ok";
-  fetchState.calls.length = 0;
-  ui.S.busy = false;
-  open(roundtripSource);
-  for (const id of ["rtTemperatureSource", "rtTarget", "rtTimestampSource"]) {
-    const maxLength = Number(template.match(new RegExp(`id="${id}" maxlength="(\\d+)"`))?.[1]);
-    assert.equal(maxLength, 641, `${id} must allow the maximum escaped topic/path representation`);
-    assert.ok(document.getElementById(id).value.length <= maxLength,
-      `${id} prefilled mapping must fit the real input's editing/paste limit`);
-  }
-  if (!mapping.timestamp_topic && !mapping.timestamp_path)
-    assert.equal(document.getElementById("rtTimestampSource").value, "",
-      "an absent source timestamp must stay absent when the form opens");
-  await document.getElementById("refTempForm").fire("submit");
-  await settle();
-  assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"]);
-  const body = fetchState.calls[0].body;
-  for (const key of ["topic", "temperature_path", "setpoint_topic", "setpoint_path",
-    "timestamp_topic", "timestamp_path", "enabled_path", "hvac_mode_path"])
-    assert.equal(body[key], original[key], `unchanged Save must preserve ${key} for ${mapping.topic}`);
-  assert.equal(body.fixed_setpoint_c, original.fixed_setpoint_c ?? 0);
-  assert.equal(document.getElementById("refTempModal").hidden, true);
-}
-ui.S.status.reference_temperature = roomSourceBeforeRoundtrips;
-
-for (const [mode, expected] of [
-  ["room_evidence_reset", "Aktueller Raumwert und Beobachtungen zur Heizkurve wurden gelöscht"],
-  ["ok", "Keine Änderungen"],
-]) {
-  fetchState.mode = mode;
-  fetchState.calls.length = 0;
-  ui.notices.length = 0;
-  open(roundtripSource);
-  await document.getElementById("refTempForm").fire("submit");
-  assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"]);
-  assert.equal(ui.notices.length, 1);
-  assert.equal(ui.notices[0].message, expected);
-  assert.equal(ui.notices[0].type, "info");
-  assert.equal(document.getElementById("refTempModal").hidden, true);
-}
-
-// The displayed escape grammar must also work when entered manually, instead of relying only on
-// the formatter's prefilled text. A changed mapping deliberately drops invisible old gates.
-fetchState.calls.length = 0;
-ui.S.busy = false;
-open(roundtripSource);
-document.getElementById("rtTemperatureSource").value = String.raw`fixture/room\$temperature\\sensor$value\$reading`;
-document.getElementById("rtTarget").value = "20";
-document.getElementById("rtTimestampSource").value = "";
-await document.getElementById("refTempForm").fire("submit");
-await settle();
-assert.equal(fetchState.calls[0]?.body?.topic, "fixture/room$temperature\\sensor");
-assert.equal(fetchState.calls[0]?.body?.temperature_path, "value$reading");
-assert.equal(fetchState.calls[0]?.body?.enabled_path, "");
-assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "");
-
-// Missing and malformed paths are saved as operator intent. The durable subscriber reports their
-// failure only after a real MQTT frame arrives. Delete remains a separate destructive action.
-const roomSource = cases.find((item) => item.modal === "refTempModal");
-fetchState.calls.length = 0;
-ui.S.busy = false;
-open(roomSource);
-document.getElementById("rtName").value = "Example sleeping sensor";
-document.getElementById("rtTemperatureSource").value = "fixture/room-temperature/status";
-document.getElementById("rtTarget").value = "22";
-document.getElementById("rtTimestampSource").value = "";
-document.getElementById("rtMaxAge").value = "600";
-await document.getElementById("refTempForm").fire("submit");
-await settle();
-assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"]);
-assert.equal(fetchState.calls[0]?.body?.temperature_path, "",
-  "a topic without a JSON path must still be persisted");
-assert.equal(document.getElementById("refTempModal").hidden, true,
-  "saving an unverified path must not wait for a live MQTT value");
-
-fetchState.calls.length = 0;
-ui.S.busy = false;
-open(roomSource);
-document.getElementById("rtTemperatureSource").value = "sensor/living-room$temperature..tC";
-document.getElementById("rtTarget").value = "22";
-await document.getElementById("refTempForm").fire("submit");
-await settle();
-assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"]);
-assert.equal(fetchState.calls[0]?.body?.temperature_path, "temperature..tC",
-  "even a malformed path must reach persistence and runtime diagnostics");
-
-fetchState.mode = "ok";
-fetchState.calls.length = 0;
-ui.S.busy = false;
-open(roomSource);
-configureValid(roomSource);
-document.getElementById("rtTarget").value = "thermostat/living-room/status$target.temperature_c";
-await document.getElementById("refTempForm").fire("submit");
-await settle();
-assert.equal(fetchState.calls[0]?.body?.setpoint_topic, "thermostat/living-room/status",
-  "an MQTT target must keep its independent exact topic");
-assert.equal(fetchState.calls[0]?.body?.setpoint_path, "target.temperature_c",
-  "an MQTT target must split the dotted JSON path after the final $ delimiter");
-assert.equal(fetchState.calls[0]?.body?.fixed_setpoint_c, 0,
-  "an MQTT target must not also send a fixed temperature");
-
-fetchState.calls.length = 0;
-ui.S.busy = false;
-open(roomSource);
-assert.equal(document.getElementById("rtDeleteBtn").disabled, false,
-  "a configured room source must expose Delete");
-document.getElementById("rtName").value = "unsaved draft";
-await document.getElementById("rtDeleteBtn").fire("click");
-await settle();
-assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"],
-  "Delete must not run the live-test endpoint");
-assert.deepEqual(fetchState.calls[0]?.body, {
-  name: "", topic: "", temperature_path: "", setpoint_topic: "", setpoint_path: "",
-  fixed_setpoint_c: 0, timestamp_topic: "", timestamp_path: "", max_age_s: 600,
-  enabled_path: "", hvac_mode_path: "",
-}, "Delete must submit the explicit empty mapping rather than the draft fields");
-assert.equal(document.getElementById("refTempModal").hidden, true,
-  "accepted Delete must close the dialog");
-assert.equal(document.body.classList.contains("modal-open"), false,
-  "accepted Delete must release background scrolling");
-open(roomSource);
-for (const id of ["rtName", "rtTemperatureSource", "rtTarget", "rtTimestampSource"])
-  assert.equal(document.getElementById(id).value, "",
-    `accepted Delete must leave ${id} empty when the dialog is reopened`);
-assert.equal(document.getElementById("rtMaxAge").value, "600",
-  "an empty source must retain only the real default freshness limit");
-assert.equal(document.getElementById("rtDeleteBtn").disabled, true,
-  "the locally cleared source must not offer another Delete before the status refresh completes");
-
-fetchState.mode = "reject";
-fetchState.calls.length = 0;
-ui.S.busy = false;
-ui.S.status.reference_temperature = {
-  configured: true, name: "Living room", topic: "sensor/living-room/temperature",
-  temperature_path: "temperature.tC", setpoint_topic: "", setpoint_path: "",
-  fixed_setpoint_c: 20, timestamp_topic: "sensor/living-room/sys",
-  timestamp_path: "read_at", enabled_path: "enabled", hvac_mode_path: "hvac_mode",
-  max_age_s: 600,
-};
-open(roomSource);
-await document.getElementById("rtDeleteBtn").fire("click");
-await settle();
-assert.equal(document.getElementById("refTempModal").hidden, false,
-  "rejected Delete must keep the dialog open");
-assert.equal(document.body.classList.contains("modal-open"), true,
-  "rejected Delete must keep background scrolling locked");
-assert.equal(document.getElementById("rtDeleteBtn").disabled, false,
-  "rejected Delete must release its button for retry");
-assert.equal(ui.S.busy, false, "rejected Delete must release global busy state");
-
-ui.S.status.reference_temperature = {
-  configured: false, name: "stale name", topic: "stale/topic",
-  temperature_path: "stale.current", setpoint_topic: "stale/target", setpoint_path: "stale.target",
-  timestamp_topic: "stale/time", timestamp_path: "stale.time", enabled_path: "stale.enabled",
-  hvac_mode_path: "stale.hvac", max_age_s: 900,
-};
-fetchState.mode = "ok";
-open(roomSource);
-assert.equal(document.getElementById("rtDeleteBtn").disabled, true,
-  "an unconfigured source must not offer a destructive no-op");
-for (const id of ["rtName", "rtTemperatureSource", "rtTarget", "rtTimestampSource"])
-  assert.equal(document.getElementById(id).value, "",
-    `an unconfigured source must ignore stale ${id} status data`);
-assert.equal(document.getElementById("rtMaxAge").value, "600",
-  "an unconfigured source must use the standard freshness limit instead of stale status data");
-fetchState.calls.length = 0;
-ui.S.busy = false;
-configureValid(roomSource);
-await document.getElementById("refTempForm").fire("submit");
-await settle();
-assert.equal(fetchState.calls[0]?.body?.enabled_path, "",
-  "a new source must not inherit a stale hidden enabled gate");
-assert.equal(fetchState.calls[0]?.body?.hvac_mode_path, "",
-  "a new source must not inherit a stale hidden HVAC gate");
-ui.S.status.reference_temperature.configured = true;
 
 // Circulation-source Save follows the same proof boundary, but its proof is actual active power.
 // Delete removes only the read-only observer mapping; there is no device switch request.
@@ -1167,9 +909,7 @@ assert.equal(ui.S.busy, false, "a failed ENV III probe must release the shared S
 const invalid = [
   { modal: "wifiModal", form: "wifiForm", set() { document.getElementById("wfSSID").value = ""; } },
   { modal: "mqttModal", form: "mqttForm", set() { document.getElementById("mqBroker").value = "bad uri"; } },
-  { modal: "refTempModal", form: "refTempForm", set() { document.getElementById("rtTemperatureSource").value = "bad/#$value"; } },
   { modal: "gasComparisonModal", form: "gasComparisonForm", set() { document.getElementById("gcElecPrice").value = "0.32"; document.getElementById("gcGasPrice").value = "0.10"; document.getElementById("gcCurrency").value = "CAD"; } },
-  { modal: "weatherModal", form: "weatherForm", set() { document.getElementById("wxLatitude").value = "51.0"; document.getElementById("wxLongitude").value = ""; } },
   { modal: "syslogModal", form: "syslogForm", set() { document.getElementById("slHost").value = "host:not-a-port"; } },
   { modal: "homehubModal", form: "homehubForm", set() { document.getElementById("hhPort").value = "70000"; } },
 ];
@@ -1410,7 +1150,6 @@ fetchState.mode = "ok";
 // intervening real status can already contain another session's new mapping and its new history.
 ui.realStatusReader();
 for (const [modal, button, key, endpoint] of [
-  ["refTempModal", "rtDeleteBtn", "reference_temperature", "/set_ref_temp"],
   ["circulationModal", "circDeleteBtn", "circulation_source", "/set_circulation"],
 ]) {
   fetchState.mode = "source_delete"; fetchState.pending = new Map();

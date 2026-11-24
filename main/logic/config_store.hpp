@@ -117,28 +117,15 @@ struct ConfigBlob {
     // may have been an explicit user deletion and must never silently regain LAN activity.
     bool        mb_discovery_done = false;
     bool        has_modbus_discovery_state = false;
-    // ── v7/v8/v13: one MQTT-backed reference-temperature source ───────────────────────────────
+    // Retired MQTT room-input slots (v7/v8/v13), kept here for v21 layout compatibility.
+    // The service transaction encodes empty mappings and ignores old decoded values.
     std::string ref_temp_name, ref_temp_topic, ref_temp_path;
-    // v8 adds the source timestamp mapping and the freshness limit. Defaults migrate a v7 blob
-    // written by the hardware-tested capture slice without discarding its topic or credentials.
     std::string ref_temp_time_path;
     uint32_t    ref_temp_max_age_s = 600;
-    // v13 appends control-readiness mappings at the END of the blob so every earlier version keeps
-    // its byte-exact layout. Empty on v7-v12 migration: the old source remains observable but cannot
-    // produce an eligible room error until a target mapping is explicitly saved.
-    std::string ref_temp_setpoint_path;
-    std::string ref_temp_enabled_path;
-    std::string ref_temp_hvac_mode_path;
+    std::string ref_temp_setpoint_path, ref_temp_enabled_path, ref_temp_hvac_mode_path;
     bool        has_ref_temp = false;
     bool        has_ref_control = false;
-    // ── v14: RETIRED controller-mode byte. The heating-curve diagnosis arms itself from the v19
-    // diagnostics consent plus its required MQTT room source and an active HomeHub (config_model.hpp's
-    // heating_curve_diagnosis_armed), so there is no mode to store; the optional forecast never
-    // gates sampling. The
-    // byte keeps its place in the layout — the exact-length rule below is what refuses a truncated
-    // newer blob, and shrinking v14 would make a v13 blob decode as one — and is written as zero and
-    // ignored on read, exactly as the v9 actuation-consent bit is. `has_dynamic_lwt` stays as the
-    // "this blob was at least v14" witness the migration tests read.
+    // v14 retired controller-mode byte stays at its historical offset.
     bool        has_dynamic_lwt = false;
     // ── v15: independent MQTT power witness for the potable-water circulation pump ────────────
     std::string circulation_name, circulation_topic, circulation_power_path,
@@ -148,7 +135,7 @@ struct ConfigBlob {
     uint32_t    circulation_off_tenths_w = 10;
     uint32_t    circulation_confirm_s = 60;
     bool        has_circulation = false;
-    // ── v10: direct Open-Meteo location ────────────────────────────────────────────────────────
+    // Retired v10 forecast location slots. Decoded for compatibility, empty on new saves.
     bool        weather_enabled = false;
     int32_t     weather_latitude_e6 = 0;
     int32_t     weather_longitude_e6 = 0;
@@ -190,11 +177,11 @@ struct ConfigBlob {
     bool        has_ref_multi_source = false;
     bool        has_diagnostics = false; // decoded presence flags share the same alignment slot
     // ── v19: explicit master consent for optional plant diagnostics ──────────────────────
-    // Every transition advances the generation. The 24 h journal carries it so a later enable can
-    // never adopt evidence recorded before an intervening disable. Pre-v19 blobs remain OFF/zero.
+    // First opt-in assigns the persisted generation used to identify 24 h journal evidence.
+    // Pause and resume keep it and change the runtime consent epoch. Pre-v19 blobs default off.
     bool        diagnostics_enabled = false;
     uint32_t    diagnostics_generation = 0;
-    // v20: independent MQTT room-temperature history lifetime. Older mappings start at zero.
+    // v20 retired room history generation slot.
     uint32_t ref_temp_generation = 0;
     // v21: preferred plant-diagnostics display source (0 = X10A, 1 = Modbus). Defaults to X10A on
     // upgrade so existing installations keep their active card view.
@@ -240,7 +227,7 @@ inline constexpr uint16_t CONFIG_BLOB_MAX_STR = 512;
 // config that cannot be read back at all, and the fallback is the legacy per-key layout (stale
 // per-key-era values on an upgraded device, nothing on any other) or the Kconfig defaults. The
 // board then boots — typically into the setup portal — having silently lost WiFi, MQTT, syslog,
-// NTP, board hardware, OTA channel, language, ENV III, both MQTT sources and the weather location.
+// NTP, board hardware, OTA channel, language, ENV III and circulation. Historical slots also fit.
 //
 // It was reachable: every other string here is bounded by its own validator or by its route's body
 // buffer, but `mb_host` was documented as "free text like syslog_host" while its route reads a

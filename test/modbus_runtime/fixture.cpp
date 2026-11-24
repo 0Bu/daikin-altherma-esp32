@@ -62,7 +62,7 @@ ssize_t timed_recv(int fd, void* b, size_t n, int flags) {
 namespace adapter {
 daik::Config cfg;
 std::mutex   config_mutex;
-bool         config_throws = false, net_up = true, ota_active = false, weather_active = false;
+bool         config_throws = false, net_up = true, ota_active = false;
 int      config_reads = 0, config_saves = 0, history_calls = 0, history_gaps = 0, stack_samples = 0;
 int      checkup_calls = 0, checkup_live_calls = 0, checkup_confirm_calls = 0, checkup_resets = 0;
 uint32_t history_generation = 1, checkup_consent_epoch_val = 1;
@@ -106,7 +106,6 @@ void diag_printf(const char* fmt, ...) {
 }
 bool     net_is_up() { return adapter::net_up; }
 bool     ota_download_active() { return adapter::ota_active; }
-bool     weather_fetch_active() { return adapter::weather_active; }
 void     stack_watch_sample(StackWatch) noexcept { ++adapter::stack_samples; }
 uint32_t checkup_consent_epoch() { return adapter::checkup_consent_epoch_val; }
 void     checkup_modbus_confirm_source(ModbusProfile profile, uint32_t) {
@@ -208,7 +207,6 @@ void reset() {
     adapter::cfg                = Config{};
     adapter::config_throws      = false;
     adapter::ota_active         = false;
-    adapter::weather_active     = false;
     adapter::net_up             = true;
     adapter::config_reads       = 0;
     adapter::config_saves       = 0;
@@ -1533,7 +1531,7 @@ void retiring_reenable() {
     REQUIRE(!s_mb_task_running && !s_ota_quiesced);
     REQUIRE(mb_status().enabled);
     const auto successor    = s_task;
-    adapter::weather_active = true;
+    adapter::net_up         = false;
     bool saw_running        = false;
     sdk::on_delay           = [&] {
         saw_running = s_mb_task_running;

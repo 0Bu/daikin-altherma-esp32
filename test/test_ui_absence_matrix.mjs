@@ -1,18 +1,14 @@
 // THE ABSENCE MATRIX — what the UI says when a third-party system is unconfigured, deleted, or
 // simply not answering. Every optional source this firmware reads (the MQTT broker, the HomeHub, the
-// ENV III accessory, the MQTT room source, the MQTT circulation witness, Open-Meteo, the X10A bus
-// itself) can be absent independently of the others, and safe mode removes all of them at once. That
+// ENV III accessory, the MQTT circulation witness and the X10A bus itself) can be absent
+// independently of the others, and safe mode removes all of them at once. That
 // is a state space no single-feature test walks, and it is the one where this UI has been wrong.
 //
 // It exists because every other gate was green while the copy lied. The firmware built, the values
 // were physically true, the drawing was right, the schematic audit passed, and:
 //
-//   • the heating-curve card told a reader to "set up a room source" while their configured room
-//     source sat one row below it — because the card keyed on the sampler's state, and "off" is the
-//     evaluator's word for BOTH "nothing is mapped" and "the sampler never ran" (safe mode, or a
-//     broker cleared after the mapping was saved);
 //   • the circulation row answered a cleared broker with "waiting for a message", forever, with no
-//     colour and no hint, while the room source one row up named the same cause outright;
+//     colour or accurate explanation;
 //   • an unconfigured circulation witness was still offered a 24-hour chart, so its tongue said "no
 //     readings yet" under a row that said "not configured" — an absent feature reported as an empty
 //     buffer, which is exactly what logic/history.hpp's rule refuses.
@@ -94,10 +90,9 @@ const context = vm.createContext({
 });
 
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
-  this.__ui = { S, t, esp32CardHtml, dynamicControlCardHtml, circulationSettingsCardHtml,
+  this.__ui = { S, t, esp32CardHtml, circulationSettingsCardHtml,
                 refrigerantServiceRowHtml, workingFigureRowHtml, checkupCardHtml, checkupDetailHtml,
-                connLinks, liveData, histHtml, INSPECT, roomSourceStatus, hasRoomHist,
-                roomReferencePresent, roomReferenceValue };`, context,
+                connLinks, liveData, histHtml, INSPECT };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -117,37 +112,13 @@ const HEALTHY = () => ({
     mac: "02:00:00:00:01:70", std: "Wi-Fi 4", rolled_back: false },
   mqtt: { configured: true, connected: true, tls: false, has_creds: false, broker: "192.0.2.27:1883",
           base: "daikin-altherma-esp32", base_custom: false },
-  reference_temperature: { configured: true, name: "Example room", topic: "fixture/room/status",
-    temperature_path: "temperature", setpoint_path: "setpoint", timestamp_path: "ts",
-    enabled_path: "on", hvac_mode_path: "mode", max_age_s: 300, subscribed: true, has_value: true,
-    temperature_c: 21.5, has_setpoint: true, setpoint_c: 22, enabled: true, hvac_mode: "heat",
-    age_s: 10, received_ago_s: 10, fresh: true, freshness_reason: "fresh", temperature_valid: true,
-    setpoint_valid: true, control_eligible: true, room_error_k: -0.5, reason: "eligible",
-    reason_code: 0, retained: false, messages: 10, errors: 0, rejections: 0 },
-  heating_curve: { method_version: 2, armed: true, state: "recording", state_code: 1,
-    reason: "sample_recorded", reason_code: 1, sample_eligible: true, current_room_error_k: -0.5,
-    last_sample_room_error_k: -0.4, last_sample_unix_s: 1780000000, forecast_available: true,
-    outdoor_temperature_c: 21.4, outdoor_source: "env3",
-    last_sample_outdoor_temperature_c: 21.2, last_sample_outdoor_source: "env3",
-    plant_outdoor_temperature_c: 9.1, plant_outdoor_source: "homehub",
-    last_sample_plant_outdoor_temperature_c: 8.9,
-    last_sample_plant_outdoor_source: "homehub",
-    plant_gate_known: true, plant_gate_active: true, heating_mode_known: true,
-    heating_mode_active: true, room_source_unix_s: 1780000000, room_age_s: 10, sequence: 3,
-    evaluations: 900, samples: 3, holds: 1, blocks: 0 },
   circulation_source: { configured: true, name: "Example circulation pump", topic: "fixture/circulation/status",
-    power_path: "apower", timestamp_path: "", max_age_s: 120, on_threshold_w: "3.0",
+    power_path: "apower", timestamp_path: "aenergy.minute_ts", max_age_s: 120, on_threshold_w: "3.0",
     off_threshold_w: "1.0", confirm_s: 60, subscribed: true, has_value: true, power_w: 5.4,
     state: "on", age_s: 5, fresh: true, freshness_reason: "fresh", retained: false, messages: 5,
     errors: 0, rejections: 0 },
   gas_comparison: { configured: true, elec_price: 0.32, gas_price: 0.105,
     gas_efficiency_pct: 88, currency: "EUR", break_even_az: 2.68 },
-  weather_forecast: { configured: true, provider: "open-meteo", model: "icon_seamless",
-    fetch_interval_s: 2700, max_age_s: 5400, fetching: false, available: true, has_value: true,
-    latitude: "12.345678", longitude: "23.456789", state: "ok", outdoor_mean_2h_c: 9.2,
-    solar_energy_2h_wh_m2: 120, issued_at: null, fetched_at: "2026-08-07T10:00:00Z",
-    valid_for_decision_at: "2026-08-07T10:00:00Z", last_attempt_at: "2026-08-07T10:00:00Z",
-    age_s: 300, fresh: true, freshness_reason: "fresh", successes: 5, errors: 0 },
   syslog: { configured: true, resolved: true, reachable: true, host: "192.0.2.5", port: 514 },
   hp: { proto: "I", rx: 1, tx: 2, connected: true, last_ok_s: 0, registers: 12, values: 99,
     crc_err: 0, timeout_err: 0 },
@@ -162,8 +133,7 @@ const HEALTHY = () => ({
            { id: "max_alloc", label: "Largest free block" },
            { id: "circulation_state", label: "DHW circulation pump" }],
     modbus_rows: [{ id: "dhw_tank", label: "Domestic Hot Water temperature" }],
-    env3_rows: [{ id: "env3_temperature", label: "Outdoor temperature" }],
-    room_rows: [{ id: "room_temp", label: "Example room" }] },
+    env3_rows: [{ id: "env3_temperature", label: "Outdoor temperature" }] },
   health: { covered_s: 86400, full_span: true, available: 7, assessable: 7, evaluated: 7,
     status: "ok", checks: [] },
   refrigerant_service: { kind: "observation", state: "waiting", continuous_s: 0, samples: 0,
@@ -189,41 +159,21 @@ const HEALTHY = () => ({
 
 // Each removal, written ONCE, in the shape the firmware actually emits. Scenarios compose them, so a
 // change to how a source reports its absence is made in one place and reaches every combination.
+function clearCirculationReading(s) {
+  Object.assign(s.circulation_source, { has_value: false, fresh: false, power_w: null,
+    state: "unknown", freshness_reason: "no_value", age_s: null, retained: false });
+}
+
 const REMOVE = {
-  // The broker is cleared. Both MQTT-backed sources stay SAVED — that is the state that produced two
-  // of the three defects above, and it is reachable in one tap (edit the broker, save an empty one).
+  // Clearing the broker stops receipt without deleting the saved circulation mapping.
   mqtt(s) {
     // base/base_custom come from the CONFIG, not from the broker link, so http_status.cpp still
     // emits them with no broker — an installation keeps its identity while MQTT is switched off.
     s.mqtt = { configured: false, connected: false, tls: false, has_creds: false, broker: "",
                base: "daikin-altherma-esp32", base_custom: false };
-    s.reference_temperature = { ...s.reference_temperature, subscribed: false, has_value: false,
-      temperature_c: null, has_setpoint: false, setpoint_c: null, fresh: false,
-      freshness_reason: "no_value", control_eligible: false, room_error_k: null, reason: "no_value",
-      age_s: null, received_ago_s: null };
-    s.circulation_source = { ...s.circulation_source, subscribed: false, has_value: false,
-      power_w: null, state: "unknown", fresh: false, freshness_reason: "no_value", age_s: null };
-    // heating_curve_diagnosis_armed() requires a broker, so clearing it DISARMS a fully mapped room
-    // source: armed goes false and the evaluator reports its ordinary Off/Disabled.
-    s.heating_curve = { ...s.heating_curve, armed: false, state: "off", state_code: 0,
-      reason: "disabled", reason_code: 0, sample_eligible: false, current_room_error_k: null,
-      last_sample_room_error_k: null, last_sample_unix_s: null, evaluations: 0, samples: 0 };
+    s.circulation_source.subscribed = false;
+    clearCirculationReading(s);
     s.history.rows = s.history.rows.filter((r) => r.id !== "circulation_state");
-    s.history.room_rows = [];
-    return s;
-  },
-  room(s) {
-    s.history.room_rows = [];
-    s.reference_temperature = { configured: false, name: "", topic: "", temperature_path: "",
-      setpoint_path: "", timestamp_path: "", enabled_path: "", hvac_mode_path: "", max_age_s: 300,
-      subscribed: false, has_value: false, temperature_c: null, has_setpoint: false,
-      setpoint_c: null, enabled: null, hvac_mode: null, age_s: null, received_ago_s: null,
-      fresh: false, freshness_reason: "not_configured", temperature_valid: false,
-      setpoint_valid: false, control_eligible: false, room_error_k: null, reason: "not_configured",
-      reason_code: 1, retained: false, messages: 0, errors: 0, rejections: 0 };
-    s.heating_curve = { ...s.heating_curve, armed: false, state: "off", state_code: 0,
-      reason: "disabled", reason_code: 0, sample_eligible: false, current_room_error_k: null,
-      last_sample_room_error_k: null, last_sample_unix_s: null, evaluations: 0, samples: 0 };
     return s;
   },
   circulation(s) {
@@ -236,15 +186,6 @@ const REMOVE = {
     s.history.rows = s.history.rows.filter((r) => r.id !== "circulation_state");
     return s;
   },
-  weather(s) {
-    s.weather_forecast = { ...s.weather_forecast, configured: false, available: false,
-      has_value: false, latitude: null, longitude: null, state: "disabled",
-      outdoor_mean_2h_c: null, solar_energy_2h_wh_m2: null, issued_at: null, fetched_at: null,
-      valid_for_decision_at: null, age_s: null, fresh: false, freshness_reason: "not_configured",
-      reason: "not_configured" };
-    s.heating_curve = { ...s.heating_curve, forecast_available: false };
-    return s;
-  },
   homehub(s) {
     s.modbus = { enabled: false, connected: false, discovering: false, host: "", port: 502,
       // null, not 0: with no HomeHub there is no task, so its stack was never sampled — the
@@ -254,12 +195,6 @@ const REMOVE = {
       plant_gate_known: false, plant_gate_active: false, heating_mode_known: false,
       heating_mode_active: false };
     s.history.modbus_rows = [];
-    s.heating_curve = { ...s.heating_curve, state: "blocked", state_code: 4,
-      reason: "homehub_unavailable", reason_code: 7, sample_eligible: false,
-      plant_gate_known: false, plant_gate_active: false,
-      plant_outdoor_temperature_c: null, plant_outdoor_source: null,
-      last_sample_plant_outdoor_temperature_c: null,
-      last_sample_plant_outdoor_source: null };
     return s;
   },
   env3(s) {
@@ -267,8 +202,6 @@ const REMOVE = {
       age_s: null, temperature_c: null, humidity_pct: null, pressure_hpa: null,
       error: "unsupported_board", samples: 0, presets: [] };
     s.history.env3_rows = [];
-    s.heating_curve = { ...s.heating_curve, outdoor_temperature_c: null, outdoor_source: null,
-      last_sample_outdoor_temperature_c: null, last_sample_outdoor_source: null };
     return s;
   },
   x10a(s) {
@@ -281,8 +214,6 @@ const REMOVE = {
     // Only the BOARD's own trends survive an unresolved profile — history_record_board() owns them
     // and the poll task calls it before it decides whether to detect or to sweep.
     s.history.rows = s.history.rows.filter((r) => r.id === "free_heap" || r.id === "max_alloc");
-    s.heating_curve = { ...s.heating_curve, state: "blocked", state_code: 4,
-      reason: "x10a_unavailable", reason_code: 6, sample_eligible: false };
     return s;
   },
   // Two optional systems that own a Connections row rather than a card. They are here because
@@ -295,13 +226,12 @@ const REMOVE = {
     return s;
   },
   ntp(s) {
-    s.ntp = { server: "", synced: false, time: null };
+    s.ntp = { ...s.ntp, synced: false, time: null };
+    // The clock has never synchronized and the subscription has yet to receive a message.
+    clearCirculationReading(s);
+    Object.assign(s.circulation_source, { messages: 0, errors: 0, rejections: 0 });
     return s;
   },
-  // Safe mode is not one absent source: main.cpp skips EVERY optional consumer, so the sampler's
-  // task is never created and its snapshot stays default-constructed while /status still derives
-  // `armed` from the saved configuration. logic/heating_curve_diagnosis.hpp names that state rather
-  // than letting it share a wording with "no room source is mapped".
   safeMode(s) {
     // safe_mode_cause is part of the shape http_status.cpp emits: this scenario is the CRASH-LOOP
     // route (reset_reason task_wdt), so the recovery banner must give configuration advice. The
@@ -318,16 +248,8 @@ const REMOVE = {
       plant_gate_active: false };
     s.env3 = { ...s.env3, connected: false, fresh: false, temperature_c: null, humidity_pct: null,
       pressure_hpa: null, error: "not_started", samples: 0 };
-    s.weather_forecast = { ...s.weather_forecast, available: false, fresh: false,
-      state: "waiting", reason: "safe_mode" };
-    s.heating_curve = { ...s.heating_curve, armed: true, state: "off", state_code: 0,
-      reason: "sampler_inactive", reason_code: 14, sample_eligible: false, evaluations: 0,
-      samples: 0, plant_gate_known: false, plant_gate_active: false,
-      outdoor_temperature_c: null, outdoor_source: null,
-      last_sample_outdoor_temperature_c: null, last_sample_outdoor_source: null,
-      plant_outdoor_temperature_c: null, plant_outdoor_source: null,
-      last_sample_plant_outdoor_temperature_c: null,
-      last_sample_plant_outdoor_source: null };
+    REMOVE.mqtt(s);
+    Object.assign(s.circulation_source, { messages: 0, errors: 0, rejections: 0 });
     s.history = { dt: 300, rows: [], modbus_rows: [], env3_rows: [] };
     return s;
   },
@@ -337,18 +259,16 @@ const REMOVE = {
 // present and healthy, so a rule about "a configured source" needs no per-scenario bookkeeping.
 const SCENARIOS = [
   { name: "everything configured", remove: [] },
-  { name: "no MQTT broker (MQTT sources stay saved)", remove: ["mqtt"] },
-  { name: "no room source", remove: ["room"] },
+  { name: "no MQTT broker (circulation mapping stays saved)", remove: ["mqtt"] },
   { name: "no circulation witness", remove: ["circulation"] },
-  { name: "no weather location", remove: ["weather"] },
+
   { name: "no HomeHub", remove: ["homehub"] },
   { name: "no ENV III", remove: ["env3"] },
   { name: "X10A bus silent", remove: ["x10a"] },
-  { name: "no HomeHub and no weather", remove: ["homehub", "weather"] },
+
   { name: "X10A silent and no HomeHub (no plant source at all)", remove: ["x10a", "homehub"] },
-  { name: "MQTT sources deleted, broker kept", remove: ["room", "circulation"] },
-  { name: "every optional source removed", remove: ["mqtt", "room", "circulation",
-                                                    "weather", "homehub", "env3", "x10a"] },
+  { name: "every optional source removed", remove: ["mqtt", "circulation",
+                                                    "homehub", "env3", "x10a"] },
   { name: "no syslog collector", remove: ["syslog"] },
   { name: "clock never synced", remove: ["ntp"] },
   { name: "no syslog and no clock", remove: ["syslog", "ntp"] },
@@ -366,25 +286,12 @@ const RENDERERS = {
   // to a string here so the same artefact/setup-copy rules apply to them unchanged.
   connLinks: () => JSON.stringify(ui.connLinks()),
   esp32CardHtml: () => ui.esp32CardHtml(),
-  dynamicControlCardHtml: () => ui.dynamicControlCardHtml(),
   circulationSettingsCardHtml: () => ui.circulationSettingsCardHtml(),
   refrigerantServiceRowHtml: () => ui.refrigerantServiceRowHtml(),
   workingFigureRowHtml: () => ui.workingFigureRowHtml(),
 };
 
-// Copy that tells the reader to CONFIGURE a source. Printing one of these while that very source is
-// configured is the defect this file was built around, so each is tied to the status field that
-// makes it false — and to the CARD it belongs to. Scoping matters: several keys share one German
-// word ("Nicht konfiguriert" is `circ.not_configured` on one card and `dyn.not_configured` on
-// another), so a search across the whole page would fail on a card that is telling the truth about a
-// different source.
 const SETUP_COPY = [
-  { card: "dynamicControlCardHtml", text: () => ui.t("dyn.state_setup_room"),
-    falseWhen: (s) => s.reference_temperature.configured,
-    why: "the heating-curve card told the reader to set up the room source they have configured" },
-  { card: "dynamicControlCardHtml", text: () => ui.t("dyn.state_setup_homehub"),
-    falseWhen: (s) => s.modbus.enabled,
-    why: "the heating-curve card called a configured HomeHub 'not set up'" },
   { card: "circulationSettingsCardHtml", text: () => ui.t("circ.not_configured"),
     falseWhen: (s) => s.circulation_source.configured,
     why: "the circulation row called a configured witness 'not configured'" },
@@ -477,7 +384,7 @@ for (const scenario of SCENARIOS) {
     assert.match(rendered.circulationSettingsCardHtml, /class="[^"]*\berr\b[^"]*"/,
       `${scenario.name}: an unreachable circulation witness must not render as a healthy row`);
     assert.ok(rendered.circulationSettingsCardHtml.includes(ui.t("circ.broker_off")),
-      `${scenario.name}: the circulation row must name the missing broker, as the room row does`);
+      `${scenario.name}: the circulation row must name the missing broker, by its actual cause`);
     checks++;
   }
   if (status.working_figure) {
@@ -487,6 +394,15 @@ for (const scenario of SCENARIOS) {
       `${scenario.name}: working_figure must use an onboard estimated electrical source with +-20% band`);
     checks++;
   }
+  if (status.sys.safe_mode || scenario.remove.includes("ntp")) {
+    // Safe mode stops MQTT. The circulation row follows the broker state from /status.
+    const state = status.sys.safe_mode ? "circ.broker_off" : "circ.waiting";
+    assert.ok(rendered.circulationSettingsCardHtml.includes(ui.t(state)),
+      `${scenario.name}: the saved circulation mapping must reflect the observed input state`);
+    assert.ok(!rendered.circulationSettingsCardHtml.includes(ui.t("circ.detail.power")),
+      `${scenario.name}: the circulation input must not contribute a power reading`);
+    checks += 2;
+  }
 
   // RULE 5 — an unoffered trend renders NOTHING. The device decides which series exist; a browser
   // that draws a chart the firmware is not buffering is showing an empty buffer as a feature.
@@ -494,7 +410,6 @@ for (const scenario of SCENARIOS) {
     ...status.history.rows.map((r) => r.id),
     ...status.history.modbus_rows.map((r) => r.id),
     ...status.history.env3_rows.map((r) => r.id),
-    ...(status.history.room_rows || []).map((r) => r.id),
   ]);
   for (const id of ["circulation_state", "free_heap", "max_alloc", "dhw_tank", "env3_temperature", "room_temp"]) {
     if (offered.has(id)) continue;
@@ -502,13 +417,6 @@ for (const scenario of SCENARIOS) {
       `${scenario.name}: the UI offered a "${id}" chart the device is not buffering`);
     checks++;
   }
-  const roomOffered = !["mqtt", "room", "safeMode"].some((key) => scenario.remove.includes(key));
-  assert.equal(ui.hasRoomHist("room_temp"), roomOffered,
-    `${scenario.name}: the independent MQTT history must follow only its own source lifecycle`);
-  assert.equal(ui.roomReferencePresent(), roomOffered,
-    `${scenario.name}: source outages must not hide another instrument's room history`);
-  checks += 2;
-
   // RULE 6 — a CONFIGURED endpoint must never be reported as "disabled" because its task is not
   // running. /status.modbus.enabled is the one optional-source flag that reports the TASK rather than
   // the config (mb_start() is skipped in safe mode), so the Connections row has to key its off-state
@@ -524,83 +432,12 @@ for (const scenario of SCENARIOS) {
     checks++;
   }
 
-  // RULE 7 — an ARMED diagnosis that is not running must say so, not report itself disabled. `off`
-  // plus `armed` can only mean the sampler's task was never created (safe mode); publishing the
-  // evaluator's "disabled" there makes a running installation read as an unconfigured one.
-  if (status.heating_curve.armed && status.heating_curve.state === "off") {
-    assert.equal(status.heating_curve.reason, "sampler_inactive",
-      `${scenario.name}: /status.heating_curve is self-contradictory (armed + disabled)`);
-    assert.ok(rendered.dynamicControlCardHtml.includes(ui.t("dyn.state_safe_mode")),
-      `${scenario.name}: an armed-but-inactive sampler must name why it is not recording`);
-    checks++;
-  }
-
-  // RULE 8 — the optional outdoor axis must blame only ITSELF. A healthy ENV III with no value in
-  // the diagnosis means the RECORDER stopped, not the sensor: clearing the broker disarms the
-  // sampler while the sensor keeps measuring, and warning there sends the reader to check hardware
-  // that is fine. Only a running recorder that is not being fed may warn, and an absent sensor is
-  // never a fault at all — the axis gates no sampling.
-  // The row is PASSIVE — label and value share one accordion button, since the sensor's only editor
-  // is the Board Hardware modal on the ESP32 card. The match runs to the TONGUE, not to the first
-  // </button>, and that is the load-bearing part rather than a tidier regex: a row that regains a
-  // configuration action becomes a SPLIT row, whose first </button> closes the info toggle — so a
-  // face stopping there would never contain the `data-act` it is checking for, and the guard below
-  // would pass vacuously on exactly the change it exists to catch. Measured, not reasoned: with the
-  // action put back, the first version of this matcher reported success.
-  // Asserted to be found rather than guarded by `if (face)` for the same reason — this selector used
-  // to name the removed button, and a face that stops matching retires the rule in silence.
-  const outdoorFace = rendered.dynamicControlCardHtml
-    .match(/data-desc="dynamic:outdoor"[\s\S]*?<div class="vdesc">/)?.[0] || "";
-  assert.ok(outdoorFace, `${scenario.name}: the outdoor axis row must render`);
-  assert.doesNotMatch(outdoorFace, /data-act=/,
-    `${scenario.name}: the outdoor axis must not offer an editor — the Board modal owns the sensor`);
-  checks += 2;
-  {
-    const sensorOk = status.env3 && status.env3.enabled && status.env3.fresh;
-    const axisMissing = status.heating_curve.outdoor_temperature_c == null;
-    const recording = status.heating_curve.armed &&
-      status.heating_curve.reason !== "sampler_inactive";
-    if (axisMissing && (!sensorOk || !recording)) {
-      assert.doesNotMatch(outdoorFace, /vrow-val settings-wrap (?:warn|err)/,
-        `${scenario.name}: the outdoor axis must not report a fault when the sensor is absent ` +
-        `or the recorder is not running`);
-      checks++;
-    }
-    if (sensorOk && axisMissing && !recording) {
-      assert.ok(rendered.dynamicControlCardHtml.includes(ui.t("dyn.outdoor_status_idle")),
-        `${scenario.name}: a healthy sensor with a stopped recorder must name the recorder`);
-      checks++;
-    }
-  }
-
-  // RULE 9 — the plant axis is a second, separately sourced row. HomeHub absence must not leak the
-  // last input-44 value or turn this OPTIONAL context into a warning; when present, the face and the
-  // event tongue name HomeHub rather than silently presenting it as ENV III.
-  const plantFace = rendered.dynamicControlCardHtml
-    .match(/data-desc="dynamic:plant-outdoor"[\s\S]*?<div class="vdesc">/)?.[0] || "";
-  assert.ok(plantFace, `${scenario.name}: the plant outdoor axis row must render`);
-  assert.doesNotMatch(plantFace, /data-act=/,
-    `${scenario.name}: plant outdoor evidence must not offer a configuration action`);
-  checks += 2;
-  if (scenario.remove.includes("homehub") || scenario.remove.includes("safeMode")) {
-    assert.doesNotMatch(plantFace, /vrow-val settings-wrap (?:warn|err)/,
-      `${scenario.name}: absent plant outdoor context must stay neutral and never gate sampling`);
-    assert.doesNotMatch(plantFace, /9[,.]1.*°C|8[,.]9.*°C/,
-      `${scenario.name}: a removed HomeHub must not leak an old plant outdoor value`);
-    checks += 2;
-  } else {
-    assert.match(plantFace, /HomeHub/,
-      `${scenario.name}: plant outdoor evidence must name its source`);
-    assert.match(rendered.dynamicControlCardHtml, /9,1.*°C[^]*HomeHub|9\.1.*°C[^]*HomeHub/,
-      `${scenario.name}: current plant outdoor evidence must render with provenance`);
-    checks += 2;
-  }
 }
 
 // The board's own memory trends are the case that must survive EVERY plant absence: they describe
 // the ESP32, not the heat pump. Assert it here as a property of the matrix rather than of one
 // scenario, because the regression was precisely that they rode on the heat pump's poll cycle.
-const busSilent = build(["x10a", "homehub", "mqtt", "room", "circulation", "weather", "env3"]);
+const busSilent = build(["x10a", "homehub", "mqtt", "circulation", "env3"]);
 for (const id of ["free_heap", "max_alloc"]) {
   assert.ok(busSilent.history.rows.some((r) => r.id === id),
     `a board memory trend must survive every absent plant source ("${id}" was dropped)`);
@@ -644,34 +481,6 @@ for (const c of WIRED) {
 assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
   "no cable and no address are different problems and must read differently");
 
-// A room temperature whose separately mapped timestamp has not arrived has no known age. The
-// firmware reports `missing_source_time`; the row must name that absence instead of calling a
-// value of unknown age stale.
-{
-  const healthy = HEALTHY();
-  const awaiting = { ...healthy.reference_temperature, fresh: false,
-    freshness_reason: "missing_source_time", age_s: null, temperature_valid: false,
-    setpoint_valid: false, control_eligible: false, room_error_k: null,
-    reason: "missing_source_time", reason_code: 4 };
-  const room = ui.roomSourceStatus(awaiting, healthy.mqtt);
-  assert.equal(room.key, "unusable", "a missing mapped timestamp must block the room source");
-  assert.equal(room.detail, ui.t("dyn.room_no_time"),
-    "a missing mapped timestamp must be named, not reported as a stale value");
-  assert.notEqual(room.detail, ui.t("ref.detail.stale"));
-  // A reading without a trusted age (age_s null) must not show its MQTT arrival time as its age,
-  // whatever the reason: a missing, unusable or unsynced source time, or a retained replay.
-  for (const reason of ["missing_source_time", "future_timestamp", "clock_unsynced",
-    "retained_without_timestamp"]) {
-    ui.S.status = { ...healthy, reference_temperature: { ...awaiting, freshness_reason: reason,
-      reason, received_ago_s: 10, retained: reason === "retained_without_timestamp" } };
-    const card = ui.dynamicControlCardHtml();
-    assert.ok(card.includes(ui.t("ref.age_unknown")), `${reason}: a reading without a trusted age shows unknown`);
-    assert.ok(!card.includes(ui.t("ref.ago", 10)),
-      `${reason}: the arrival age must not stand in for the reading age`);
-  }
-  checks++;
-}
-
 // When X10A is absent while HomeHub Modbus carries the working_figure observation, the UI must
 // keep the refrigerant-service row hidden while rendering the Modbus estimate.
 {
@@ -692,7 +501,6 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
   assert.match(wfHtml, /class="wf-foot"/);
   checks += 2;
 }
-
 // Modbus-only diagnostics and unavailable flow never surface X10A hydronic observation details
 // or keep an unavailable flow row visible via a hydronic placeholder or stale X10A payload.
 {
@@ -718,8 +526,7 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
       first_evidence_unix_s: 1791880000, last_evidence_unix_s: 1791880020,
       samples: 4, spread_k: { min: 1.0, mean: 2.0, max: 3.0 } } };
   modbusOnly.health.checks = [modbusOkFlow];
-  const spreadLabel = ui.t("check.hydronic.labels").split("|")[0];
-  assert.ok(!ui.checkupDetailHtml(modbusOkFlow, false, modbusOnly.health).includes(spreadLabel),
+  assert.ok(!ui.checkupDetailHtml(modbusOkFlow, false, modbusOnly.health).includes("Water spread"),
     "Modbus flow detail must omit X10A hydronic population rows");
   checks++;
 }

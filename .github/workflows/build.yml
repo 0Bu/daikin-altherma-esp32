@@ -482,11 +482,8 @@ jobs:
       # (a bounded QoS-1 cleanup transaction reconstructed on every broker connection: predecessor
       # state plus retired/disabled discovery after persisted source, consent or identity changes;
       # that source's ordinary publish is suppressed for the cleanup cycle), the HomeHub discovery
-      # lifecycle (only the explicit UI action may browse mDNS)
-      # and the heating-curve-diagnosis boundary (the firmware records only raw target-minus-actual
-      # room error and exposes no Modbus write capability; explicit consent subscribes the saved
-      # room source, while forecast evidence remains optional and private). Collection is additionally
-      # gated by HomeHub readiness, an active plant and a positively identified heating mode. These were
+      # lifecycle (only the explicit UI action may browse mDNS).
+      # These were
       # three bare `node` steps with no local entry point, so the
       # local loop skipped them and a new sibling was invisible everywhere at once; the script globs
       # test/test_*_contract.mjs, so one now joins the gate without a workflow edit.

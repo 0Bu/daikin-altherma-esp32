@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: ac7ded427a3eb99eed8053147078eb561c76646e05b1f5aefe32bbcd98d60d42 -->
+<!-- diagnostic-evidence-contract: a49e7655407113df44dffc5bf727304ac4da2b8bad35d0d140ba46322ce157e8 -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -13,7 +13,7 @@ answers four questions.
 The whole feature is an explicit opt-in under Settings › Firmware and is off by default. The first
 opt-in starts a fresh evidence generation; turning it off pauses recording and hides the card while
 keeping already collected 24-hour diagnostic histories (which continue aging out after 24 hours),
-stops live room/forecast/circulation sampling and closes any open run as censored without bridging
+stops live circulation sampling and closes any open run as censored without bridging
 paused time on resume. Only factory reset or a source/mapping change clears stored history. None of
 the results below is a recommendation. Polls begun before a consent transition cannot supply
 diagnosis evidence for the replacement state.
@@ -656,10 +656,8 @@ and the committed row carries `!cv.modbus_flow_scale_unverified`; `Probing`, `Fa
 Modbus mode leaves `flow.hydronic` unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`,
 null metrics). See CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
 
-After diagnostic opt-in, the **Flow rate** inspector displays the accepted `min_l_min` from the
-`flow` check in `/status.health`. When the matching source has a visible series with samples, the
-horizontal reference uses the same Y-axis as the five-minute trend. The reference leaves the
-trend samples unchanged.
+The 60-second `min_l_min` remains in `/status.health` independently of the heating minimum
+shown in the **Flow rate** inspector.
 
 The independent X10A hydronic population uses the same completed X10A sweep for measured pre-heater
 leaving water, return water, flow and the required operating witnesses. Readable endpoints count
@@ -675,8 +673,14 @@ The first sample after 600 continuous eligible seconds enters the ranges. Qualif
 two qualified endpoints. The signed spread is measured leaving water minus return. Water ranges
 are sample-weighted. Effort is 100 minus a valid, finite 0–100 pump command, with its own sample
 count. Dated hours use the shared journal with independent method, schema, model, source and
-consent identity. Clock loss and incomplete replay are exposed separately. See [the API
-contract](API.md#qualified-water-circuit-observations).
+consent identity. Clock loss and incomplete replay are exposed separately. Each hour also retains
+the five-minute windows containing samples tied at its exact stored flow minimum. The report uses
+only windows from hours tied at the overall minimum. Compatible older hours retain their minimum
+with unknown locations. The timing mask uses type-specific journal header bytes covered by the
+record CRC. The payload and identity stay compatible with firmware that ignores these bytes.
+With X10A active for diagnostics, the inspector shows the qualified minimum when available. Its
+recorded windows can shade the visible, dated X10A trend independently of the plotted values.
+See [the API contract](API.md#qualified-water-circuit-observations).
 
 The optional secondary comparison additionally requires the exact ERRA08–12E + ELSH/X(B) ECH₂O
 profile, an unambiguous publishable EKMIK temperature at `0x65/4` and current main-zone pump
@@ -693,9 +697,11 @@ active-zone controller target is available in current queryable profiles. No 900
 classifier, 9 K alarm or model minimum compressor speed is inferred. The secondary comparison
 keeps zone intent unknown even where multiple setpoints are visible.
 
-**Not established:** The minimum has no retained timestamp or operating-mode context and is not a
-design-flow measurement. It cannot be compared generally with a model manual's commissioning
-minimum or identify a hydraulic restriction. The hydronic ranges do not establish steady operation,
+**Not established:** The 60-second pump minimum has no retained location or operating-mode
+context. The qualified heating minimum mask locates readings at five-minute resolution. It carries
+no per-reading timestamp or duration. The separate first and last accepted timestamps retain
+second resolution. Neither value establishes design flow, a general comparison
+with commissioning limits, or a hydraulic restriction. The hydronic ranges do not establish steady operation,
 emitter output, bypass, restriction, sensor calibration or available pump head. The secondary
 temperature difference alone establishes neither flow through a separator nor heat lost from a
 buffer or extra electricity use.
@@ -813,28 +819,6 @@ cannot be reconstructed from the retained flag.
   (2009), 2701–2707, DOI 10.1016/j.applthermaleng.2009.01.003:
   [publisher page and abstract][R2-doi]. The study supports dependence on outdoor conditions, not
   this project's 15% heuristic.
-
-## Heating-curve evaluation freshness
-
-**External evidence:** None is required for this internal producer-age observation; it is not a
-manufacturer timing limit or a diagnosis of the plant.
-
-**Firmware rule:** HTTP and MQTT read the same age-projected MQTT-owner evaluation. Expiration
-withholds current diagnosis context while preserving dated events, counters and sample cadence.
-[PLANT.md](PLANT.md#heating-curve-diagnosis) owns the complete age and recovery rule.
-
-**Project boundary:** The expiry bound is a project choice tied to the nominal evaluation cadence.
-Readers never evaluate inputs or renew their own evidence. A delayed legitimate task stage can
-therefore temporarily report **Not evaluated recently**.
-
-**Not established:** This status identifies no transport, sensor, broker or plant failure, and does
-not change the freshness of the independently observed room source or prove heating-season behavior.
-
-Method 4 summarizes admitted events in a boot-local date window. It reports
-each outdoor axis independently against the same count of admitted room observations. The
-boundaries at 0, 5 and 10 °C are display groups. The counts show sample coverage, and the extrema
-show observed spread. These summaries cannot establish continuous heating, thermostat action or a
-causal curve defect. [PLANT.md](PLANT.md#heating-curve-diagnosis) specifies sources and resets.
 
 ## Maintenance rule
 

@@ -13,15 +13,12 @@ drove every modal:
   exactly the board someone was debugging, the two heap curves that answer "is the heap drifting"
   were absent from `/status.history.rows` entirely. An unrelated feature disappeared because a
   *different* subsystem was unreachable.
-* The heating-curve card told a reader to **"set up a room source"** while their configured room
-  source sat one row below it, because `off` is the evaluator's word for both "nothing is mapped"
-  and "the sampler never ran".
-* The circulation row answered a **cleared broker** with "waiting for a message", forever, with no
-  colour and no cause, while the room source one row up named the same cause outright.
+* The circulation row answered a **cleared broker** with "waiting for a message" instead of naming
+  the missing broker.
 * An **unconfigured** circulation witness was still offered a 24-hour chart, so its tongue read "no
   readings yet" under a row reading "not configured".
-* `?redact=1` **invented identifiers**: a device with no room source, no witness, no HomeHub and no
-  syslog collector produced a bug report indistinguishable from one that had all four and hid them.
+* `?redact=1` **invented identifiers**: a device with no witness, HomeHub or syslog collector produced
+  a report indistinguishable from one that hid configured services.
 
 None of these is visible in a value, a converter, a payload schema or a pixel. They are visible in
 one place: the pair (what is configured, what is answering).

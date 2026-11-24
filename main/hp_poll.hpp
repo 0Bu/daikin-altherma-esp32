@@ -153,11 +153,11 @@ HpMqttSourceState hp_mqtt_source_state();
 // Lock-free and allocation-free, because the increment happens inside the OOM catch handler.
 uint32_t hp_skipped_cycles();
 
-// Has the running X10A task observed either OTA or weather's lock-free network-heap quiesce request
+// Has the running X10A task observed the OTA network-heap quiesce request
 // and left its allocation-rich cycle? True also when no poll task exists.
 bool hp_poll_network_quiesced();
 
-// OTA-facing compatibility name; the acknowledgement is shared with weather.
+// Compatibility name for the OTA heap owner.
 bool hp_poll_ota_quiesced();
 
 // Identity token for one complete X10A cycle. A config change bumps it before arming the consumer

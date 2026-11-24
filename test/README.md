@@ -122,20 +122,17 @@ Configuration cases assert RAM, durable entries and result together. X10A saves 
 The fake NVS models pinned IDF's write-through `nvs_set_blob`: a failed set preserves the old value,
 and `nvs_commit` is a no-op. An allocation witness pauses fake bookkeeping and requires zero
 calling-thread `operator new` allocations after the transaction's first durable write.
-Six mutation flags change fake behavior or harness call sites: NVS atomicity, late allocation,
-header/body watchdogs, discard deadline and Weather body completion. The Weather flag bypasses
-`http_body_complete()` at its call site. Named failing assertions verify these modeled controls;
-they do not prove that corresponding firmware `.cpp` regressions would be caught. This generic
-harness does not compile production HTTP/MCP, X10A, MQTT or Weather glue; the separate complete-unit
-fixtures below add production orchestration coverage within their stated adapter boundaries.
+Mutation flags cover NVS atomicity, late allocation, header/body watchdogs, the discard deadline
+and HTTP body completion. Named failing assertions verify the modeled controls. This generic
+harness uses production headers. The complete-unit fixtures below exercise production adapters.
 
 The same runner also executes complete production units through SDK/service adapters:
 
 | Harness | Runtime evidence and limits |
 |---|---|
-| `node test/test_ota_runtime.mjs` | Complete `ota_update.cpp`: 88 cases covering feed transfers, dev-only direct upload, boot-time lwIP readiness, exact image identity, failure cleanup, async completion, static worker ownership and 90/600-second health transitions. Source mutations exercise these boundaries. SDK network, flash and cryptography remain adapters; target memory, reboot and rollback require separate acceptance. |
+| `node test/test_ota_runtime.mjs` | Complete `ota_update.cpp`: 87 cases covering feed transfers, dev-only direct upload, boot-time lwIP readiness, exact image identity, failure cleanup, async completion, static worker ownership and 90/600-second health transitions. Source mutations exercise these boundaries. SDK network, flash and cryptography remain adapters; target memory, reboot and rollback require separate acceptance. |
 | `node test/test_network_runtime.mjs` | Complete WiFi/syslog units: 19 scenarios and 22 mutations cover leases, boot wakes, rollback, scan errors, queue loss, reentrant logging, static status-mutex ownership, independent OOM episodes and RFC 5424 framing; no real DHCP/radio/UDP delivery or collector retention. |
-| `node test/test_src_runtime.mjs` | Complete ENV III/Weather units and source mutations cover probe identity/CRC, partial I2C allocation/cleanup, OOM, sensor freshness/recovery, forecast conversion/units, HTTP bounds/cleanup, rejected-response retention, A→B→A and zero Config-copy/request-buffer retention at network release and task waits. Default cJSON is an AST adapter; no real sensor, TLS, scheduler or JSON lexer runs. |
+| `node test/test_src_runtime.mjs` | Complete ENV III unit and source mutations cover probe identity and CRC, partial I²C allocation and cleanup, allocation failures, sensor freshness and recovery. Physical sensor, bus and task scheduling remain outside the adapter. |
 | `python3 test/poll_runtime/run.py` | Complete polling/converter units: OOM/RAII, detection corroboration and generation, saturation freshness, late probe ownership including ticket wrap, and successful raw-capture budget. Named compiling source mutations bind each invariant; UART, clocks and RTOS are adapters. [Limits](poll_runtime/README.md). |
 | `python3 test/checkup_runtime/run.py` | Complete diagnosis adapter: independent heater clocks, fault completeness, source freshness, consent/source/circulation barriers and producerless expiry. Compiling consent mutants reject a lost or late epoch; clocks, SDK and service ports are modeled, not physical flash or scheduling. [Limits](checkup_runtime/README.md). |
 | `python3 test/hydronic_observation_runtime/run.py --sanitizer undefined` | Complete independent Hydronic Store (`hydronic_observation_store.cpp`) and hourly codec: 600 s run-up durations, hourly seams, archive overlap, clock rollback, saturation and early forget with compiling negative controls. [Limits](hydronic_observation_runtime/README.md). |
@@ -150,14 +147,7 @@ The same runner also executes complete production units through SDK/service adap
 | `node test/test_http_stream_runtime.mjs` | Complete common/status/dwell units: independent JSON/UTF-8 oracles, all observed allocation/chunk failure points, next-request recovery and cache-bound dwell snapshots. SDK/source providers are adapters. [Limits](http_stream_runtime/README.md). |
 | `node test/test_http_ota_runtime.mjs` | Actual HTTP OTA handlers: dev/SHA query checks, async refusal, copied binary ingress and completion responses. HTTP/OTA SDK boundaries are adapters; no target upload, signing, flash or reboot is exercised. |
 
-After the pinned IDF build resolves `espressif/cjson` from `dependencies.lock`, run
-`node test/test_src_runtime.mjs --real-cjson managed_components/espressif__cjson/cJSON` for the same
-Weather unit/cases/mutations with the real lexer plus malformed, embedded-NUL and overflow documents.
-This optional layer downloads nothing and prints the bound source hashes; HTTP/TLS remain adapted.
-Weather lifetime checks use synthetic public topic/name fields and a fixed allocation table, excluding
-SDK bookkeeping. Tagged host C++ counts prove scoped release, not ESP heap fragmentation or C/TLS allocations.
-
-After resolving the pinned cJSON component, run `python3 test/json_ingress_runtime/run.py
+After the pinned IDF build resolves `espressif/cjson` from `dependencies.lock`, run `python3 test/json_ingress_runtime/run.py
 --real-cjson managed_components/espressif__cjson/cJSON` and `python3 test/mqtt_runtime/run.py
 --real-cjson managed_components/espressif__cjson/cJSON`. `ci-build-all.sh` runs both after the target
 build. The first executes the real HTTP parser adapter's object/depth/size/trailing/OOM corpus and
@@ -199,7 +189,7 @@ Important target boundaries covered by source contracts include:
 
 | Surface | Contract |
 |---|---|
-| Config/JSON ingress | Revision refusal before copying/writing, staged blobs, link-only X10A save, reconfigure only after saved results; actual body byte counts, depth-16 single-document cJSON/Weather preflight and bounded room-source body |
+| Config/JSON ingress | Revision refusal before copying/writing, staged blobs, link-only X10A save, reconfigure only after saved results, actual body byte counts and depth-16 single-document cJSON preflight |
 | Recovery/history | Early crash guard/static NVS lock, no automatic NVS erase, conditional WiFi-driver NVS; per-raster age guards, boot liveness/seals and adopted-tail journal safety |
 | Checkup restart | Dated compatible journal records require clock/current-source confirmation and matching consumer schema/method; RAM hours retire, scoped DHW handoff and exact slot expiry remain separate |
 | Deployment helpers | Production `{values:[...]}` envelope; malformed/held values, missing MQTT evidence, stale ages, invalid heap, non-200 and curl failures reject synthetic endpoints |
@@ -209,9 +199,10 @@ OTA delivery tests use fixtures only. Bench pressure begins while rollback is pe
 120 seconds of boot, for the unchanged 180-second window. Bounded confirmation then requires valid
 state, rollback disarmed, the same version/ELF/MAC and monotonic uptime/counters. Production fixtures
 retain exact artifact/generation binding, one un-retried write, release exercise, dev restore,
-completed verification and read-only X10A/Weather/MQTT canaries. Weather uses the 48/20 KiB admission
-floor; a retained exact headroom refusal permits only its bounded causal recovery path after workers
-stop. Private atomic receipts preserve completed stages and ambiguous write attempts; public
+completed verification and read-only X10A and MQTT canaries. Legacy status responses exercise the
+bounded Weather checks in the [OTA runbook](../docs/MAINTENANCE.md#role-pinned-ota). Current status
+fixtures verify that those legacy checks cannot be skipped by a malformed response. Private atomic
+receipts preserve completed stages and ambiguous write attempts. Public
 projections exclude device identity/complete status. Their mutations must fail even when a candidate
 subsequently boots. `scripts/trigger-ota-wait.sh` fixtures allow GET-only observation of an accepted
 update and reject obsolete write options. None of these proves a device update, rollback or cold cycle.
@@ -351,7 +342,7 @@ including on Colima installations that do not share macOS temporary directories.
 Docker's local image/build cache retains that allowlisted source snapshot until normal cache cleanup.
 
 The source-absence matrix is part of the contract and UI globs. It independently removes the broker,
-room source, circulation witness, HomeHub, ENV III, weather and X10A, and includes safe mode. A missing
+circulation witness, HomeHub, ENV III and X10A, and includes safe mode. A missing
 input must remain absent/stale rather than becoming zero, current or a blocker attributed to another
 source. `tools/absence/selftest.sh` seeds failures in both halves.
 

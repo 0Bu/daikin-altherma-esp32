@@ -80,8 +80,8 @@ void* operator new(size_t size) {
     if (cpp_witness::fail_after > 0) --cpp_witness::fail_after;
     if (staged_failure || sdk::fail_next_new || (sdk::fail_locked_new && sdk::locks > 0)) {
         cpp_witness::fail_after = -1;
-        sdk::fail_locked_new    = false;
-        sdk::fail_next_new      = false;
+        sdk::fail_locked_new = false;
+        sdk::fail_next_new   = false;
         ++sdk::failed_news;
         sdk::allocation_fail_lock_depth = sdk::locks;
         throw std::bad_alloc();
@@ -96,35 +96,27 @@ void  operator delete[](void* p) noexcept { std::free(p); }
 void  operator delete[](void* p, size_t) noexcept { std::free(p); }
 
 namespace adapter {
-daik::Config                   cfg;
-int                            config_locks = 0, skipped_logs = 0, retirement_logs = 0;
-int64_t                        clock_shift_s = 0;
-char                           last_skip[256]{};
-daik::HpStats                  hp;
-daik::WifiInfo                 wifi{};
-daik::ModbusStatus             modbus;
+daik::Config cfg;
+int          config_locks = 0, skipped_logs = 0, retirement_logs = 0;
+int64_t                                                            clock_shift_s = 0;
+char         last_skip[256]{};
+daik::HpStats               hp;
+daik::WifiInfo              wifi{};
+daik::ModbusStatus          modbus;
 bool                           modbus_enabled = false, modbus_live = false;
-bool                           ota_active = false, weather_active = false;
+bool                           ota_active        = false;
 uint32_t                       modbus_generation = 0, x10a_generation = 0;
 std::vector<daik::CachedValue> modbus_values;
 daik::Env3Status               env;
-// One-shot seam: the heating-curve evaluator reads ENV III after the room status and before its
-// evaluation lock, so a scenario can land a concurrent HTTP reconfiguration exactly there.
-void (*on_env3_status)()                            = nullptr;
-void (*on_config)()                                 = nullptr;
-uint32_t                            room_generation = 1, room_last_generation = 0;
-unsigned                            room_history_calls = 0, room_history_accepted = 0;
-bool                                room_history_valid       = false;
-double                              room_history_temperature = 0.0;
-std::string                         x10a_payload;
-daik::WeatherForecastStatus         weather;
-daik::logic::CheckupCyclingEvidence cycling;
-daik::logic::CheckupCyclingEvidence modbus_cycling;
-daik::CheckupStopContextReport      stop_context;
-daik::CrashInfo                     boot, live_crash;
-daik::EthInfo                       ethernet;
-daik::NetLink                       link            = daik::NetLink::None;
-uint32_t                            wifi_reconnects = 0, poll_skips = 0;
+void (*on_config)()                            = nullptr;
+std::string                    x10a_payload;
+daik::logic::CheckupCyclingEvidence                                cycling;
+daik::logic::CheckupCyclingEvidence                                modbus_cycling;
+daik::CheckupStopContextReport                                     stop_context;
+daik::CrashInfo             boot, live_crash;
+daik::EthInfo               ethernet;
+daik::NetLink               link            = daik::NetLink::None;
+uint32_t                    wifi_reconnects = 0, poll_skips = 0;
 std::array<uint32_t, static_cast<size_t>(daik::StackWatch::COUNT)> stack_minima = [] {
     std::array<uint32_t, static_cast<size_t>(daik::StackWatch::COUNT)> minima{};
     minima.fill(4096);
@@ -177,7 +169,6 @@ void          config_unlock() { --adapter::config_locks; }
 const Config& config_ref_locked() { return adapter::cfg; }
 } // namespace detail
 bool ota_download_active() { return adapter::ota_active; }
-bool weather_fetch_active() { return adapter::weather_active; }
 void diag_printf(const char* format, ...) {
     // Production contract: diag_printf is bounded/no-throw and does not allocate.
     char    line[512];
@@ -223,47 +214,33 @@ HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t, uint64_t
 bool          mb_target_enabled() noexcept { return adapter::modbus_enabled; }
 ModbusStatus  mb_status() { return adapter::modbus; }
 ModbusProfile mb_active_profile() { return adapter::modbus.profile; }
-size_t        mb_values_capacity() { return adapter::modbus_values.size(); }
-size_t        mb_values_snapshot(CachedValue* out, size_t capacity, bool& live) {
+size_t       mb_values_capacity() { return adapter::modbus_values.size(); }
+size_t       mb_values_snapshot(CachedValue* out, size_t capacity, bool& live) {
     live               = adapter::modbus_live;
     const size_t count = std::min(capacity, adapter::modbus_values.size());
     for (size_t i = 0; i < count; ++i) out[i] = adapter::modbus_values[i];
     return count;
 }
-bool       mb_values_live() { return adapter::modbus_live; }
-uint32_t   mb_cache_generation() { return adapter::modbus_generation; }
-Env3Status env3_status() {
-    if (void (*hook)() = adapter::on_env3_status) {
-        adapter::on_env3_status = nullptr;
-        hook();
-    }
+bool                  mb_values_live() { return adapter::modbus_live; }
+uint32_t              mb_cache_generation() { return adapter::modbus_generation; }
+Env3Status            env3_status() {
     return adapter::env;
 }
-WeatherForecastStatus weather_forecast_status() { return adapter::weather; }
 void                  history_record_circulation() {}
 void                  history_circulation_reset() {}
-uint32_t              history_room_generation() noexcept { return adapter::room_generation; }
-void                  history_record_room(bool valid, double temperature, uint32_t generation) {
-    // Record the production caller's admission witness; this adapter does not model a trend ring.
-    ++adapter::room_history_calls;
-    adapter::room_history_valid       = valid;
-    adapter::room_history_temperature = temperature;
-    adapter::room_last_generation     = generation;
-    if (generation == adapter::room_generation) ++adapter::room_history_accepted;
-}
-void                          checkup_dhw_reset() {}
+void                  checkup_dhw_reset() {}
 logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source) {
     return source == DiagnosticsSource::Modbus ? adapter::modbus_cycling : adapter::cycling;
 }
 CheckupStopContextReport      checkup_stop_context_report() { return adapter::stop_context; }
 CheckupHydronicReport         checkup_hydronic_report() { return {}; }
-CrashInfo                     diag_crash_info() { return adapter::boot; }
-CrashInfo                     diag_crash_info_live() { return adapter::live_crash; }
-WifiInfo                      wifi_info() { return adapter::wifi; }
-uint32_t                      wifi_reconnect_count() { return adapter::wifi_reconnects; }
-EthInfo                       net_eth_info() { return adapter::ethernet; }
-NetLink                       net_kind() { return adapter::link; }
-void                          time_now(int64_t& unix_s, int32_t& ms) {
+CrashInfo             diag_crash_info() { return adapter::boot; }
+CrashInfo             diag_crash_info_live() { return adapter::live_crash; }
+WifiInfo              wifi_info() { return adapter::wifi; }
+uint32_t              wifi_reconnect_count() { return adapter::wifi_reconnects; }
+EthInfo               net_eth_info() { return adapter::ethernet; }
+NetLink               net_kind() { return adapter::link; }
+void                  time_now(int64_t& unix_s, int32_t& ms) {
     unix_s = 1700000000 + sdk::ticks / 1000 + adapter::clock_shift_s;
     ms     = sdk::ticks % 1000;
 }
@@ -296,12 +273,6 @@ void initial_config(const char* base = nullptr) {
         adapter::cfg.mqtt_base.assign(80, 'm'); // ordinary Config copy must allocate
     adapter::cfg.profile                        = "auto";
     adapter::cfg.diagnostics_enabled            = true;
-    adapter::cfg.ref_temp_topic                 = "room";
-    adapter::cfg.ref_temp_path                  = "temperature";
-    adapter::cfg.ref_temp_time_path             = "time";
-    adapter::cfg.ref_temp_enabled_path          = "enabled";
-    adapter::cfg.ref_temp_fixed_setpoint_tenths = 220;
-    adapter::cfg.ref_temp_max_age_s             = 600;
     adapter::cfg.circulation_name               = "DHW circulation";
     adapter::cfg.circulation_topic              = "circulation";
     adapter::cfg.circulation_power_path         = "power";
@@ -317,85 +288,6 @@ void check_cycle(TickType_t delay) {
     require(sdk::locks == 0 && !sdk::mutex.held, "MQTT_MUTEX_RELEASED_AT_DELAY");
     require(sdk::takes == sdk::gives, "MQTT_LOCK_OWNERSHIP_BALANCED");
     require(adapter::config_locks == 0, "CONFIG_LOCK_OWNERSHIP_BALANCED");
-}
-void room_history_observation() {
-    initial_config();
-    adapter::cfg.ref_temp_fixed_setpoint_tenths = 0;
-    adapter::cfg.ref_temp_setpoint_topic        = "target";
-    adapter::cfg.ref_temp_setpoint_path         = "target";
-    feed("room", R"({"temperature":23.6,"time":1700000100,"enabled":false})");
-    sdk::on_delay = [](TickType_t delay) {
-        check_cycle(delay);
-        require(adapter::room_history_calls == static_cast<unsigned>(sdk::delays),
-                "ROOM_HISTORY_TICKS_WITHOUT_X10A_PUBLICATION");
-        switch (sdk::delays) {
-        case 1:
-            require(adapter::room_history_valid && adapter::room_history_temperature == 23.6 &&
-                        !daik::s_ref_status.has_setpoint && !daik::s_ref_status.enabled,
-                    "ROOM_HISTORY_ACCEPTS_VALID_TEMPERATURE_WITHOUT_TARGET_OR_HEAT_PERMISSION");
-            adapter::clock_shift_s = 601;
-            break;
-        case 2:
-            require(!adapter::room_history_valid, "ROOM_HISTORY_STALE_VALUE_IS_GAP");
-            adapter::clock_shift_s = 0;
-            feed("room", R"({"temperature":"invalid","time":1700000102})");
-            break;
-        case 3:
-            require(!adapter::room_history_valid, "ROOM_HISTORY_INVALID_PAYLOAD_IS_GAP");
-            adapter::cfg.ref_temp_time_topic = "room-time";
-            daik::mqtt_reference_reconfigure();
-            feed("room", R"({"temperature":23.7,"enabled":false})");
-            break;
-        case 4:
-            require(!adapter::room_history_valid && daik::s_ref_status.has_value &&
-                        !daik::s_ref_status.has_source_time,
-                    "ROOM_HISTORY_MISSING_MAPPED_TIME_IS_GAP");
-            adapter::cfg.ref_temp_time_topic.clear();
-            adapter::cfg.ref_temp_time_path.clear();
-            daik::mqtt_reference_reconfigure();
-            feed("room", R"({"temperature":23.8,"enabled":false})", true);
-            break;
-        case 5:
-            require(!adapter::room_history_valid, "ROOM_HISTORY_RETAINED_UNDATED_VALUE_IS_GAP");
-            feed("room", R"({"temperature":23.9,"enabled":false})");
-            break;
-        case 6:
-            require(adapter::room_history_valid && adapter::room_history_temperature == 23.9,
-                    "ROOM_HISTORY_LIVE_ARRIVAL_CAN_ESTABLISH_FRESHNESS");
-            adapter::cfg.diagnostics_enabled = false;
-            daik::mqtt_reference_reconfigure();
-            break;
-        case 7:
-            require(!adapter::room_history_valid, "ROOM_HISTORY_CONSENT_OFF_WITHHOLDS_OBSERVATION");
-            throw StopTask{};
-        }
-    };
-    try {
-        sdk::task_fn(nullptr);
-    } catch (const StopTask&) {}
-}
-void room_history_scope() {
-    initial_config();
-    feed("room", R"({"temperature":23.6,"time":1700000100,"enabled":true})");
-    sdk::on_delay = [](TickType_t delay) {
-        check_cycle(delay);
-        if (sdk::delays == 1) {
-            require(adapter::room_history_valid && adapter::room_history_accepted == 1,
-                    "ROOM_HISTORY_BASELINE_ADMITTED");
-            adapter::on_config = [] {
-                ++adapter::room_generation;
-                ++adapter::cfg.ref_temp_generation;
-            };
-        } else if (sdk::delays == 2) {
-            require(adapter::room_last_generation == 1 && adapter::room_generation == 2 &&
-                        adapter::room_history_accepted == 1,
-                    "ROOM_HISTORY_GENERATION_CAPTURE_PRECEDES_CONFIG_CUTOVER");
-            throw StopTask{};
-        }
-    };
-    try {
-        sdk::task_fn(nullptr);
-    } catch (const StopTask&) {}
 }
 void startup_failure_recovery() {
     initial_config();
@@ -415,8 +307,8 @@ void startup_failure_recovery() {
             require(sdk::start_calls == 3 && daik::s_client_running.load() &&
                               daik::mqtt_status().connected,
                           "START_FAILURE_RECOVERS_WITHOUT_REBOOT");
-            require(daik::s_ref_status.subscribed && daik::s_circulation_status.subscribed,
-                          "START_FAILURE_RECOVERY_SERVICES_INBOUND_WITHOUT_X10A");
+            require(daik::s_circulation_status.subscribed,
+                    "START_FAILURE_RECOVERY_SERVICES_INBOUND_WITHOUT_X10A");
             throw StopTask{};
         }
     };
@@ -431,7 +323,7 @@ void startup_failure_recovery() {
 void startup_preserves_concurrent_pause() {
     adapter::cfg.mqtt_uri = "mqtt://host-witness";
     adapter::on_config    = []() {
-        adapter::weather_active = true;
+        adapter::ota_active = true;
         daik::mqtt_transport_withdraw_online_on_pause();
         daik::mqtt_transport_pause_for_network_heap();
     };
@@ -452,7 +344,7 @@ void startup_preserves_concurrent_pause() {
                         daik::mqtt_transport_network_quiesced(),
                     "STARTUP_DEFERRED_TRANSPORT_ACKNOWLEDGES_QUIESCE");
             daik::mqtt_transport_resume_after_network_heap();
-            adapter::weather_active = false;
+            adapter::ota_active = false;
         } else if (sdk::delays == 2) {
             check_cycle(delay);
             require(sdk::start_calls == 1 && daik::s_client_running.load() &&
@@ -478,64 +370,8 @@ void event_registration_failure() {
             "REGISTRATION_FAILURE_REPORTS_ITS_ACTUAL_CAUSE");
 }
 
-void ref_oom_recovery() {
-    initial_config();
-    feed("room", R"({"temperature":20,"time":1700000100})");
-    feed("circulation", R"({"power":50,"time":1700000100})");
-    sdk::on_delay = [](TickType_t delay) {
-        check_cycle(delay);
-        if (sdk::delays == 1) {
-            require(daik::s_ref_status.has_value && daik::s_ref_status.has_source_time,
-                    "REFERENCE_BASELINE_PRESENT");
-            require(daik::s_ref_status.temperature_c == 20 &&
-                        daik::s_ref_status.source_unix_s == 1700000100,
-                    "REFERENCE_BASELINE_RAW_EVIDENCE");
-            require(daik::s_ref_status.eligibility_error.size() > 32,
-                    "REFERENCE_ALLOCATING_SNAPSHOT_SEEDED");
-            require(daik::s_circulation_status.has_value &&
-                        daik::s_circulation_status.source_unix_s == 1700000100,
-                    "CIRCULATION_BASELINE_PRESENT");
-            feed("room", R"({"temperature":99,"time":1700000101,"enabled":true})");
-            sdk::fail_locked_new = true;
-        } else if (sdk::delays == 2) {
-            require(sdk::failed_news == 1 && sdk::allocation_fail_lock_depth == 1,
-                    "REAL_CPP_ALLOCATION_FAILED_UNDER_STATUS_LOCK");
-            require(daik::mqtt_skip_stats().skipped == 1, "OOM_COUNTED_ONCE");
-            require(adapter::skipped_logs == 1 && std::strstr(adapter::last_skip, "subscriptions"),
-                    "OOM_REPORTED_AT_SOURCE_STAGE");
-            require(daik::s_ref_status.temperature_c == 20 &&
-                        daik::s_ref_status.source_unix_s == 1700000100 &&
-                        daik::s_ref_status.has_value && daik::s_ref_status.has_source_time &&
-                        daik::s_ref_status.messages == 1,
-                    "OOM_PRESERVES_LAST_GOOD_REFERENCE_STATE");
-            require(!daik::s_ref_source_time.allows(1700000099),
-                    "OOM_PRESERVES_REFERENCE_TIME_WATERMARK");
-            require(daik::s_circulation_status.power_w == 50 &&
-                        daik::s_circulation_status.source_unix_s == 1700000100,
-                    "OOM_PRESERVES_OTHER_SOURCE_STATE");
-            feed("room", R"({"temperature":21,"time":1700000102,"enabled":true})");
-            feed("circulation", R"({"power":55,"time":1700000102})");
-        } else if (sdk::delays == 3) {
-            require(daik::s_ref_status.temperature_c == 21 &&
-                        daik::s_ref_status.source_unix_s == 1700000102 &&
-                        daik::s_ref_status.messages == 2 &&
-                        daik::s_ref_status.eligibility_error.empty(),
-                    "REFERENCE_RECOVERS_ON_NEXT_SUCCESSFUL_ITERATION");
-            require(daik::s_circulation_status.power_w == 55 &&
-                        daik::s_circulation_status.source_unix_s == 1700000102,
-                    "CIRCULATION_RECOVERS_ON_NEXT_SUCCESSFUL_ITERATION");
-            require(daik::mqtt_skip_stats().skipped == 1 && sdk::resets >= 3 && sdk::samples == 3,
-                    "RECOVERY_RETAINS_COUNT_AND_FEEDS_WATCHDOG");
-            throw StopTask{};
-        }
-    };
-    try {
-        sdk::task_fn(nullptr);
-    } catch (const StopTask&) {}
-}
 void circulation_oom_recovery() {
     initial_config();
-    feed("room", R"({"temperature":20,"time":1700000100,"enabled":true})");
     feed("circulation", R"({"power":50,"time":1700000100})");
     sdk::ticks += 1000;
     feed("circulation", R"({"power":50,"time":1700000101})");
@@ -570,9 +406,6 @@ void circulation_oom_recovery() {
                     "OOM_PRESERVES_CIRCULATION_CONFIRMED_STATE_AND_TRACKER");
             require(!daik::s_circulation_source_time.allows(1700000100),
                     "OOM_PRESERVES_CIRCULATION_TIME_WATERMARK");
-            require(daik::s_ref_status.temperature_c == 20 &&
-                        daik::s_ref_status.source_unix_s == 1700000100,
-                    "OOM_PRESERVES_OTHER_SOURCE_STATE");
             feed("circulation", R"({"power":55,"time":1700000103})");
         } else if (sdk::delays == 3) {
             require(daik::s_circulation_status.power_w == 55 &&
@@ -591,56 +424,58 @@ void circulation_oom_recovery() {
 }
 void failure_episodes() {
     initial_config();
-    feed("room", R"({"temperature":20,"time":1700000100})");
+    feed("circulation", R"({"power":20,"time":1700000100})");
+    feed("circulation", R"({"power":"invalid","time":1700000100})");
     sdk::on_delay = [](TickType_t delay) {
         check_cycle(delay);
         switch (sdk::delays) {
         case 1:
-            require(daik::s_ref_status.has_value &&
-                        daik::s_ref_status.eligibility_error.size() > 32,
+            require(daik::s_circulation_status.has_value &&
+                        daik::s_circulation_status.error.size() > 32,
                     "EPISODE_ALLOCATING_LAST_GOOD_STATE_SEEDED");
-            feed("room", R"({"temperature":90,"time":1700000101})");
+            feed("circulation", R"({"power":90,"time":1700000101})");
             sdk::fail_locked_new = true;
             break;
         case 2:
             require(sdk::failed_news == 1 && daik::mqtt_skip_stats().skipped == 1 &&
                         adapter::skipped_logs == 1,
                     "FIRST_FAILURE_COUNTS_AND_LOGS_EPISODE");
-            require(daik::s_ref_status.temperature_c == 20 &&
-                        daik::s_ref_status.source_unix_s == 1700000100,
+            require(daik::s_circulation_status.power_w == 20 &&
+                        daik::s_circulation_status.source_unix_s == 1700000100,
                     "FIRST_FAILURE_PRESERVES_LAST_GOOD_STATE");
-            feed("room", R"({"temperature":91,"time":1700000102})");
+            feed("circulation", R"({"power":91,"time":1700000102})");
             sdk::fail_locked_new = true;
             break;
         case 3:
             require(sdk::failed_news == 2 && daik::mqtt_skip_stats().skipped == 2,
                     "CONSECUTIVE_FAILURES_COUNT_EACH_SKIPPED_CYCLE");
             require(adapter::skipped_logs == 1, "CONSECUTIVE_FAILURES_LOG_ONCE_PER_EPISODE");
-            require(daik::s_ref_status.temperature_c == 20 &&
-                        daik::s_ref_status.source_unix_s == 1700000100,
+            require(daik::s_circulation_status.power_w == 20 &&
+                        daik::s_circulation_status.source_unix_s == 1700000100,
                     "CONSECUTIVE_FAILURES_PRESERVE_LAST_GOOD_STATE");
-            feed("room", R"({"temperature":21,"time":1700000103})");
+            feed("circulation", R"({"power":21,"time":1700000103})");
             break;
         case 4:
-            require(daik::s_ref_status.temperature_c == 21 &&
-                        daik::s_ref_status.source_unix_s == 1700000103,
+            require(daik::s_circulation_status.power_w == 21 &&
+                        daik::s_circulation_status.source_unix_s == 1700000103,
                     "SUCCESSFUL_ITERATION_RECOVERS_AND_REARMS_EPISODE");
-            feed("room", R"({"temperature":92,"time":1700000104})");
-            sdk::fail_locked_new = true;
+            feed("circulation", R"({"power":"invalid","time":1700000104})");
+            feed("circulation", R"({"power":92,"time":1700000104})");
+            sdk::fail_next_new = true;
             break;
         case 5:
             require(sdk::failed_news == 3 && daik::mqtt_skip_stats().skipped == 3 &&
                         adapter::skipped_logs == 2,
                     "NEW_FAILURE_EPISODE_LOGS_AGAIN_AFTER_RECOVERY");
-            require(daik::s_ref_status.temperature_c == 21 &&
-                        daik::s_ref_status.source_unix_s == 1700000103,
+            require(daik::s_circulation_status.power_w == 21 &&
+                        daik::s_circulation_status.source_unix_s == 1700000103,
                     "NEW_FAILURE_EPISODE_PRESERVES_LAST_GOOD_STATE");
-            feed("room", R"({"temperature":22,"time":1700000105,"enabled":true})");
+            feed("circulation", R"({"power":22,"time":1700000105})");
             break;
         case 6:
-            require(daik::s_ref_status.temperature_c == 22 &&
-                        daik::s_ref_status.source_unix_s == 1700000105 &&
-                        daik::s_ref_status.eligibility_error.empty(),
+            require(daik::s_circulation_status.power_w == 22 &&
+                        daik::s_circulation_status.source_unix_s == 1700000105 &&
+                        daik::s_circulation_status.error.empty(),
                     "SECOND_EPISODE_RECOVERS_ON_SUCCESSFUL_ITERATION");
             require(daik::mqtt_skip_stats().skipped == 3 && adapter::skipped_logs == 2 &&
                         sdk::samples == 6,
@@ -654,19 +489,14 @@ void failure_episodes() {
 }
 void reconfigure_config_oom() {
     initial_config();
-    feed("room", R"({"temperature":20,"time":1700000100,"enabled":true})");
     feed("circulation", R"({"power":50,"time":1700000100})");
     sdk::on_delay = [](TickType_t delay) {
         check_cycle(delay);
         if (sdk::delays == 1) {
-            require(daik::reference_temperature_status(adapter::cfg).has_value,
-                    "REFERENCE_BASELINE_PRESENT");
             require(daik::circulation_source_status(adapter::cfg).has_value,
                     "CIRCULATION_BASELINE_PRESENT");
-            daik::mqtt_reference_reconfigure();
             daik::mqtt_circulation_reconfigure(true);
-            require(!daik::reference_temperature_status(adapter::cfg).has_value &&
-                        !daik::circulation_source_status(adapter::cfg).has_value,
+            require(!daik::circulation_source_status(adapter::cfg).has_value,
                     "RECONFIGURATION_WITHDRAWS_BEFORE_NEXT_TASK_ITERATION");
             sdk::fail_next_new = true;
         } else if (sdk::delays == 2) {
@@ -675,19 +505,13 @@ void reconfigure_config_oom() {
             require(daik::mqtt_skip_stats().skipped == 1 &&
                         std::strstr(adapter::last_skip, "config"),
                     "CONFIG_OOM_COUNTED_AND_REPORTED");
-            require(!daik::reference_temperature_status(adapter::cfg).has_value &&
-                        !daik::circulation_source_status(adapter::cfg).has_value,
+            require(!daik::circulation_source_status(adapter::cfg).has_value,
                     "CONFIG_OOM_DOES_NOT_REPUBLISH_WITHDRAWN_SOURCE_STATE");
-            require(!daik::s_ref_source_time.allows(1700000099) &&
-                        !daik::s_circulation_source_time.allows(1700000099),
-                    "CONFIG_OOM_PRESERVES_BOTH_SOURCE_TIME_WATERMARKS");
+            require(!daik::s_circulation_source_time.allows(1700000099),
+                    "CONFIG_OOM_PRESERVES_CIRCULATION_TIME_WATERMARK");
             feed("room", R"({"temperature":21,"time":1700000102,"enabled":true})");
             feed("circulation", R"({"power":55,"time":1700000102})");
         } else if (sdk::delays == 3) {
-            require(daik::reference_temperature_status(adapter::cfg).temperature_c == 21 &&
-                        daik::reference_temperature_status(adapter::cfg).source_unix_s ==
-                            1700000102,
-                    "REFERENCE_RECONFIGURATION_RECOVERS_ON_SUCCESS");
             require(daik::circulation_source_status(adapter::cfg).power_w == 55 &&
                         daik::circulation_source_status(adapter::cfg).source_unix_s == 1700000102,
                     "CIRCULATION_RECONFIGURATION_RECOVERS_ON_SUCCESS");
@@ -853,7 +677,7 @@ void circulation_saved_reconnect_oom() {
     require(retry_pending && !daik::s_circulation_subscription_retry,
             "CIRCULATION_RECONNECT_RETRY_SURVIVES_OOM_AND_CLEARS_AFTER_ACCEPTANCE");
     feed(topic.c_str(), R"({"power":58,"time":1700000100})");
-    daik::service_reference_frames(adapter::cfg);
+    daik::service_circulation_frames(adapter::cfg);
     require(daik::s_circulation_status.has_value && daik::s_circulation_status.power_w == 58 &&
                 daik::s_circulation_status.source_unix_s == 1700000100,
             "CIRCULATION_RECONNECT_ACCEPTED_SUBSCRIPTION_RECEIVES_CURRENT_WIRE_VALUE");
@@ -917,7 +741,7 @@ void circulation_saved_retry() {
     require(!daik::s_circulation_status.subscribed,
             "CIRCULATION_FAILED_RESUBSCRIBE_DOES_NOT_CLAIM_SUCCESS");
     feed(topic.c_str(), R"({"power":57,"time":1700000100})");
-    daik::service_reference_frames(adapter::cfg);
+    daik::service_circulation_frames(adapter::cfg);
     require(daik::s_circulation_status.has_value && daik::s_circulation_status.power_w == 57 &&
                 daik::s_circulation_status.source_unix_s == 1700000100,
             "CIRCULATION_STILL_LIVE_SUBSCRIPTION_CAN_UPDATE_AFTER_FAILED_RESUBSCRIBE");
@@ -972,218 +796,6 @@ void circulation_saved_replacement_failure() {
             "CIRCULATION_REPLACEMENT_FINAL_CLEANUP_IS_EXACT");
     subscription_locks_released();
 }
-daik::ReferenceTopicSet saved_reference_topics() {
-    adapter::cfg.ref_temp_topic = "mem01-public-reference/temperature/" + std::string(70, 't');
-    adapter::cfg.ref_temp_setpoint_topic =
-        "mem01-public-reference/setpoint/" + std::string(70, 's');
-    adapter::cfg.ref_temp_time_topic = "mem01-public-reference/time/" + std::string(70, 'u');
-    adapter::cfg.ref_temp_fixed_setpoint_tenths = 0;
-    adapter::cfg.ref_temp_setpoint_path         = "setpoint";
-    return daik::reference_topics(adapter::cfg);
-}
-void reference_saved_reconnect_oom() {
-    initial_config();
-    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    const auto     topics = saved_reference_topics();
-    const uint32_t epoch  = daik::s_ref_requested_epoch.load();
-    daik::service_reference_subscription(adapter::cfg, epoch);
-    require(daik::s_ref_subscribed_topics == topics && daik::s_ref_status.subscribed &&
-                !daik::s_ref_subscription_retry,
-            "REFERENCE_RECONNECT_OOM_ACCEPTED_UNCHANGED_OWNER_BASELINE");
-    // Fail the setpoint and time copies, then each of the three desired-topic slot copies. The
-    // mapping and accepted owners stay unchanged, so only post-force preparation is under test.
-    for (int allocation = 0; allocation < 5; ++allocation) {
-        clean_broker_reconnect();
-        for (const auto& topic : topics)
-            require(!sdk::topic_live(topic.c_str()),
-                    "REFERENCE_CLEAN_SESSION_HAS_NO_SUBSCRIPTIONS");
-        const int before        = sdk::subscribe_calls;
-        const int failed_before = sdk::failed_news;
-        cpp_witness::attempted  = 0;
-        cpp_witness::fail_after = allocation;
-        bool threw              = false;
-        try {
-            daik::service_reference_subscription(adapter::cfg, epoch);
-        } catch (const std::bad_alloc&) {
-            threw = true;
-        }
-        cpp_witness::fail_after = -1;
-        require(threw && cpp_witness::attempted == allocation + 1 &&
-                    sdk::failed_news == failed_before + 1 && sdk::allocation_fail_lock_depth == 0,
-                "REFERENCE_RECONNECT_PREPARATION_REAL_BAD_ALLOC");
-        require(sdk::subscribe_calls == before && daik::s_ref_subscribed_topics == topics &&
-                    !daik::s_ref_status.subscribed && !daik::s_ref_reconfigure,
-                "REFERENCE_RECONNECT_OOM_RETAINS_PRIOR_OWNERS_WITHOUT_BROKER_EFFECT");
-        const bool retry_pending = daik::s_ref_subscription_retry;
-        subscription_locks_released();
-        daik::service_reference_subscription(adapter::cfg, epoch);
-        bool all_live = true;
-        for (const auto& topic : topics) all_live = all_live && sdk::topic_live(topic.c_str());
-        require(sdk::subscribe_calls == before + 3 && all_live &&
-                    daik::s_ref_subscribed_topics == topics && daik::s_ref_status.subscribed &&
-                    daik::s_ref_status.error.empty(),
-                "REFERENCE_RECONNECT_OOM_NEXT_CYCLE_RESUBSCRIBES_ALL_TOPICS");
-        require(retry_pending && !daik::s_ref_subscription_retry,
-                "REFERENCE_RECONNECT_RETRY_SURVIVES_OOM_AND_CLEARS_AFTER_ACCEPTANCE");
-        feed(topics[0].c_str(), R"({"temperature":21,"enabled":true})");
-        feed(topics[1].c_str(), R"({"setpoint":22})");
-        feed(topics[2].c_str(), R"({"time":1700000100})");
-        daik::service_reference_frames(adapter::cfg);
-        require(daik::s_ref_status.has_value && daik::s_ref_status.temperature_c == 21 &&
-                    daik::s_ref_status.has_setpoint && daik::s_ref_status.setpoint_c == 22 &&
-                    daik::s_ref_status.has_source_time &&
-                    daik::s_ref_status.source_unix_s == 1700000100,
-                "REFERENCE_RECONNECT_ACCEPTED_SUBSCRIPTIONS_RECEIVE_CURRENT_WIRE_VALUES");
-        subscription_locks_released();
-    }
-}
-void reference_cleanup_once(const daik::ReferenceTopicSet& topics) {
-    adapter::cfg.ref_temp_topic.clear();
-    daik::mqtt_reference_reconfigure();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    for (const auto& topic : topics)
-        require(sdk::unsubscribe_count(topic.c_str()) == 1 && !sdk::topic_live(topic.c_str()),
-                "REFERENCE_CLEANUP_UNSUBSCRIBES_EACH_ACCEPTED_TOPIC_ONCE");
-    require(daik::s_ref_subscribed_topics == daik::ReferenceTopicSet{} &&
-                !daik::s_ref_status.subscribed,
-            "REFERENCE_CLEANUP_RELEASES_ALL_OWNERS_AND_STATUS");
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    for (const auto& topic : topics)
-        require(sdk::unsubscribe_count(topic.c_str()) == 1,
-                "REFERENCE_CLEANUP_DOES_NOT_REPEAT_UNSUBSCRIBE");
-    subscription_locks_released();
-}
-void reference_saved_postsubscribe_oom(bool final_copy) {
-    initial_config();
-    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    const auto              topics = saved_reference_topics();
-    daik::ReferenceTopicSet fresh_owner;
-    daik::s_ref_subscribed_topics.swap(fresh_owner);
-    for (size_t i = 0; i < topics.size(); ++i)
-        require(daik::s_ref_subscribed_topics[i].capacity() < topics[i].size(),
-                "REFERENCE_NO_PRIOR_OWNER_ARRAY_CAPACITY");
-    if (final_copy) {
-        sdk::on_subscribe = [](const char*, int) {
-            if (sdk::subscribe_calls == 3) sdk::reject_new_after_subscribe = true;
-        };
-    } else {
-        sdk::reject_new_after_subscribe = true;
-    }
-    bool threw = false;
-    try {
-        daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    } catch (const std::bad_alloc&) {
-        threw = true;
-    }
-    const bool refusal_still_armed = sdk::fail_next_new;
-    sdk::fail_next_new             = false;
-    sdk::on_subscribe              = {};
-    require(daik::s_ref_subscribed_topics == topics,
-            final_copy ? "SAVED_REFERENCE_FINAL_OWNER_ARRAY_COMMITTED"
-                       : "SAVED_REFERENCE_ACCEPTED_TOPIC_CLEANUP_OWNERSHIP");
-    require(sdk::subscribe_calls == 3, "REFERENCE_SDK_ATTEMPTED_ALL_THREE_EXACT_TOPICS");
-    for (const auto& topic : topics)
-        require(sdk::topic_live(topic.c_str()), "REFERENCE_SDK_ACCEPTED_EXACT_TOPIC");
-    require(!threw && sdk::failed_news == 0 && refusal_still_armed,
-            "REFERENCE_POSTSUBSCRIBE_OWNER_COMMITS_DO_NOT_ALLOCATE");
-    require(daik::s_ref_status.subscribed && daik::s_ref_status.error.empty(),
-            "REFERENCE_COMPLETE_SUBSCRIPTION_STATUS_RECORDED");
-    subscription_locks_released();
-    reference_cleanup_once(topics);
-}
-void reference_saved_partial_retry() {
-    initial_config();
-    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    const auto topics          = saved_reference_topics();
-    sdk::subscribe_failures[1] = true;
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(sdk::subscribe_calls == 3 && sdk::topic_live(topics[0].c_str()) &&
-                !sdk::topic_live(topics[1].c_str()) && sdk::topic_live(topics[2].c_str()),
-            "REFERENCE_PARTIAL_BATCH_SDK_RESULTS_ARE_INDEPENDENT");
-    require(daik::reference_topic_owned(topics[0]) && !daik::reference_topic_owned(topics[1]) &&
-                daik::reference_topic_owned(topics[2]),
-            "REFERENCE_PARTIAL_BATCH_RETAINS_ONLY_ACCEPTED_NEW_OWNERS");
-    require(!daik::s_ref_status.subscribed && !daik::s_ref_status.error.empty(),
-            "REFERENCE_PARTIAL_BATCH_DOES_NOT_CLAIM_FULL_SUBSCRIPTION");
-    subscription_locks_released();
-    const int before_retry = sdk::subscribe_calls;
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(sdk::subscribe_calls > before_retry && daik::s_ref_subscribed_topics == topics &&
-                sdk::topic_live(topics[1].c_str()) && daik::s_ref_status.subscribed &&
-                daik::s_ref_status.error.empty(),
-            "REFERENCE_PARTIAL_BATCH_RECOVERS_ON_LATER_RETRY");
-    subscription_locks_released();
-    reference_cleanup_once(topics);
-}
-void reference_saved_prior_owner_failure(bool retry) {
-    initial_config();
-    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    const auto topics = saved_reference_topics();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(daik::s_ref_subscribed_topics == topics && daik::s_ref_status.subscribed,
-            "REFERENCE_PRIOR_LIVE_OWNER_BASELINE");
-    daik::mqtt_reference_reconfigure();
-    sdk::subscribe_failures[sdk::subscribe_calls + 1] = true;
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(daik::s_ref_subscribed_topics == topics && sdk::topic_live(topics[1].c_str()) &&
-                sdk::unsubscribe_count(topics[1].c_str()) == 0,
-            "REFERENCE_FAILED_RESUBSCRIBE_RETAINS_STILL_LIVE_PRIOR_OWNER");
-    require(!daik::s_ref_status.subscribed,
-            "REFERENCE_FAILED_RESUBSCRIBE_DOES_NOT_CLAIM_FULL_SUCCESS");
-    feed(topics[0].c_str(), R"({"temperature":21,"enabled":true})");
-    feed(topics[1].c_str(), R"({"setpoint":22})");
-    feed(topics[2].c_str(), R"({"time":1700000100})");
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.has_value && daik::s_ref_status.temperature_c == 21 &&
-                daik::s_ref_status.has_setpoint && daik::s_ref_status.setpoint_c == 22 &&
-                daik::s_ref_status.has_source_time &&
-                daik::s_ref_status.source_unix_s == 1700000100,
-            "REFERENCE_STILL_LIVE_SUBSCRIPTIONS_UPDATE_AFTER_FAILED_RESUBSCRIBE");
-    subscription_locks_released();
-    if (retry) {
-        const int before_retry = sdk::subscribe_calls;
-        daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-        require(sdk::subscribe_calls > before_retry && daik::s_ref_status.subscribed &&
-                    daik::s_ref_status.error.empty(),
-                "REFERENCE_PRIOR_OWNER_ARRAY_EQUALITY_DOES_NOT_BYPASS_RETRY");
-        require(daik::s_ref_status.has_value && daik::s_ref_status.temperature_c == 21 &&
-                    daik::s_ref_status.has_setpoint && daik::s_ref_status.setpoint_c == 22 &&
-                    daik::s_ref_status.has_source_time &&
-                    daik::s_ref_status.source_unix_s == 1700000100,
-                "REFERENCE_SUBSCRIBE_RETRY_PRESERVES_ACCEPTED_SOURCE_EVIDENCE");
-    }
-    reference_cleanup_once(topics);
-}
-void reference_saved_replacement_partial_failure() {
-    initial_config();
-    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    const auto old_topics = saved_reference_topics();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    adapter::cfg.ref_temp_topic = "mem01-public-new-reference/temperature/" + std::string(60, 'n');
-    adapter::cfg.ref_temp_time_topic = "mem01-public-new-reference/time/" + std::string(60, 'm');
-    const auto new_topics            = daik::reference_topics(adapter::cfg);
-    daik::mqtt_reference_reconfigure();
-    sdk::subscribe_failures[sdk::subscribe_calls + 1] = true; // prior still-live setpoint
-    sdk::subscribe_failures[sdk::subscribe_calls + 2] = true; // new timestamp was never accepted
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(sdk::unsubscribe_count(old_topics[0].c_str()) == 1 &&
-                sdk::unsubscribe_count(old_topics[2].c_str()) == 1 &&
-                !sdk::topic_live(old_topics[0].c_str()) && !sdk::topic_live(old_topics[2].c_str()),
-            "REFERENCE_REPLACEMENT_RETIRES_EACH_REMOVED_OLD_OWNER_ONCE");
-    require(daik::reference_topic_owned(new_topics[0]) &&
-                daik::reference_topic_owned(new_topics[1]) &&
-                !daik::reference_topic_owned(new_topics[2]) &&
-                sdk::topic_live(new_topics[0].c_str()) && sdk::topic_live(new_topics[1].c_str()) &&
-                !sdk::topic_live(new_topics[2].c_str()) && !daik::s_ref_status.subscribed,
-            "REFERENCE_PARTIAL_REPLACEMENT_DISTINGUISHES_NEW_AND_PRIOR_OWNERS");
-    subscription_locks_released();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(daik::s_ref_subscribed_topics == new_topics && daik::s_ref_status.subscribed &&
-                sdk::unsubscribe_count(old_topics[0].c_str()) == 1 &&
-                sdk::unsubscribe_count(old_topics[2].c_str()) == 1,
-            "REFERENCE_REPLACEMENT_RETRY_PRESERVES_EXACT_RETIRED_CLEANUP");
-    reference_cleanup_once(new_topics);
-}
 void circulation_unsubscribe_rejection(bool replacement) {
     initial_config();
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
@@ -1227,43 +839,6 @@ void circulation_unsubscribe_rejection(bool replacement) {
             "CIRCULATION_UNSUBSCRIBE_RETRY_LEAVES_NO_STALE_OWNER");
     subscription_locks_released();
 }
-void reference_unsubscribe_rejection(bool replacement) {
-    initial_config();
-    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    const auto old_topics = saved_reference_topics();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    adapter::cfg.ref_temp_topic =
-        replacement ? "mem01-public-reference-next/" + std::string(60, 'n') : "";
-    const auto new_topics = daik::reference_topics(adapter::cfg);
-    daik::mqtt_reference_reconfigure();
-    const int before_subscribe                        = sdk::subscribe_calls;
-    sdk::unsubscribe_failures[sdk::unsubscribe_calls] = true;
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(daik::reference_topic_owned(old_topics[0]) && sdk::topic_live(old_topics[0].c_str()) &&
-                sdk::accepted_unsubscribe_count(old_topics[0].c_str()) == 0 &&
-                !daik::s_ref_status.subscribed,
-            "REFERENCE_REJECTED_UNSUBSCRIBE_RETAINS_EXACT_LIVE_OWNER");
-    require(sdk::subscribe_calls == before_subscribe,
-            "REFERENCE_REJECTED_RETIRE_STARTS_NO_NEW_SUBSCRIPTION");
-    subscription_locks_released();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(sdk::unsubscribe_count(old_topics[0].c_str()) == 2 &&
-                sdk::accepted_unsubscribe_count(old_topics[0].c_str()) == 1 &&
-                !sdk::topic_live(old_topics[0].c_str()),
-            "REFERENCE_REJECTED_RETIRE_RECOVERS_WITH_ONE_ACCEPTED_UNSUBSCRIBE");
-    if (replacement) {
-        require(daik::s_ref_subscribed_topics == new_topics && daik::s_ref_status.subscribed,
-                "REFERENCE_REPLACEMENT_STARTS_ONLY_AFTER_RETIRED_OWNER_RELEASED");
-        reference_cleanup_once(new_topics);
-    } else {
-        require(daik::s_ref_subscribed_topics == daik::ReferenceTopicSet{},
-                "REFERENCE_UNSUBSCRIBE_RETRY_RELEASES_ALL_OWNERS");
-        for (const auto& topic : old_topics)
-            require(sdk::accepted_unsubscribe_count(topic.c_str()) == 1,
-                    "REFERENCE_UNSUBSCRIBE_RETRY_EACH_TOPIC_RELEASED_ONCE");
-    }
-    subscription_locks_released();
-}
 void circulation_probe_unsubscribe_rejection(bool diagnostics_disabled) {
     initial_config();
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
@@ -1292,17 +867,9 @@ void shared_subscription_owners() {
     initial_config();
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     const std::string topic        = "mem01-public-shared-source/" + std::string(60, 's');
-    adapter::cfg.ref_temp_topic    = topic;
     adapter::cfg.circulation_topic = topic;
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
     daik::service_circulation_subscription(adapter::cfg,
                                            daik::s_circulation_requested_epoch.load());
-    adapter::cfg.ref_temp_topic.clear();
-    daik::mqtt_reference_reconfigure();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(!daik::reference_topic_owned(topic) && daik::s_circulation_subscribed_topic == topic &&
-                sdk::topic_live(topic.c_str()) && sdk::unsubscribe_count(topic.c_str()) == 0,
-            "REFERENCE_RETIRE_PRESERVES_SHARED_CIRCULATION_OWNER");
     daik::s_circulation_probe_subscribed_topic = topic;
     daik::s_circulation_probe.active           = false;
     adapter::cfg.circulation_topic.clear();
@@ -1406,8 +973,9 @@ void probe_active_shared_prior_owner() {
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     const std::string old_topic = "mem01-public-shared-old-probe/" + std::string(60, 's');
     const std::string new_topic = "mem01-public-unshared-new-probe/" + std::string(60, 'n');
-    adapter::cfg.ref_temp_topic = old_topic;
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    adapter::cfg.circulation_topic = old_topic;
+    daik::service_circulation_subscription(adapter::cfg,
+                                           daik::s_circulation_requested_epoch.load());
     daik::s_circulation_probe_subscribed_topic = old_topic;
     daik::s_circulation_probe_task_generation  = 41;
     prepare_active_probe(new_topic, 42);
@@ -1418,33 +986,27 @@ void probe_active_shared_prior_owner() {
             "PROBE_ACTIVE_REPLACEMENT_PRESERVES_OTHER_ACTUAL_PRIOR_OWNER");
     daik::s_circulation_probe.active = false;
     daik::service_circulation_probe_subscription(adapter::cfg);
-    adapter::cfg.ref_temp_topic.clear();
-    daik::mqtt_reference_reconfigure();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    adapter::cfg.circulation_topic.clear();
+    daik::mqtt_circulation_reconfigure(false);
+    daik::service_circulation_subscription(adapter::cfg,
+                                           daik::s_circulation_requested_epoch.load());
     require(sdk::accepted_unsubscribe_count(old_topic.c_str()) == 1 &&
                 sdk::accepted_unsubscribe_count(new_topic.c_str()) == 1,
             "PROBE_ACTIVE_SHARED_REPLACEMENT_FINAL_CLEANUP_EXACT");
     subscription_locks_released();
 }
-daik::ReferenceMqttFrame json_frame(const std::string& payload) {
-    daik::ReferenceMqttFrame frame{};
-    require(payload.size() <= daik::REF_TEMP_PAYLOAD_MAX, "JSON_FIXTURE_FITS_PRODUCTION_FRAME");
+daik::CirculationMqttFrame json_frame(const std::string& payload) {
+    daik::CirculationMqttFrame frame{};
+    require(payload.size() <= daik::CIRCULATION_PAYLOAD_MAX, "JSON_FIXTURE_FITS_PRODUCTION_FRAME");
     std::strcpy(frame.topic, "source");
     std::memcpy(frame.payload, payload.data(), payload.size());
     frame.payload_len     = payload.size();
     frame.received_unix_s = 1700000100;
     return frame;
 }
-void json_both(const std::string& payload, bool accepted, const char* expected_error = nullptr) {
+void json_circulation(const std::string& payload, bool accepted,
+                      const char* expected_error = nullptr) {
     const auto frame = json_frame(payload);
-    const auto ref = daik::decode_reference_frame(frame, "source", "temperature", "", "", "source",
-                                                  "time", "enabled", "");
-    require(ref.valid == accepted, "REAL_CJSON_REFERENCE_EXPECTED_ACCEPTANCE");
-    if (expected_error)
-        require(ref.error && std::strstr(ref.error, expected_error),
-                "REAL_CJSON_REFERENCE_EXPECTED_REJECTION_REASON");
-    require(json_witness::live == 0 && json_witness::allocations == json_witness::frees,
-            "REAL_CJSON_REFERENCE_OWNERSHIP_BALANCED");
     const auto circ = daik::decode_circulation_frame(frame, "power", "time");
     require(circ.valid == accepted, "REAL_CJSON_CIRCULATION_EXPECTED_ACCEPTANCE");
     if (expected_error)
@@ -1455,58 +1017,55 @@ void json_both(const std::string& payload, bool accepted, const char* expected_e
 }
 void real_json_consumers() {
     const std::string valid = R"({"temperature":20,"power":50,"time":1700000100,"enabled":true})";
-    json_both(valid, true);
-    json_both(valid + " \t\r\n", true);
-    json_both(valid + "junk", false, "trailing");
-    json_both(valid + "{}", false, "trailing");
-    json_both(valid + std::string("\0", 1) + "junk", false, "not valid");
+    json_circulation(valid, true);
+    json_circulation(valid + " \t\r\n", true);
+    json_circulation(valid + "junk", false, "trailing");
+    json_circulation(valid + "{}", false, "trailing");
+    json_circulation(valid + std::string("\0", 1) + "junk", false, "not valid");
     const std::string with_extra     = valid.substr(0, valid.size() - 1) + ",\"extra\":\"";
     const int         before_strings = json_witness::parses;
-    json_both(with_extra + "a" + std::string(1, '\0') + "b\"}", false, "not valid");
-    json_both(with_extra + R"(a\u0000b"})", false, "not valid");
-    json_both(with_extra + "a\nb\"}", false, "not valid");
+    json_circulation(with_extra + "a" + std::string(1, '\0') + "b\"}", false, "not valid");
+    json_circulation(with_extra + R"(a\u0000b"})", false, "not valid");
+    json_circulation(with_extra + "a\nb\"}", false, "not valid");
     require(json_witness::parses == before_strings,
             "UNREPRESENTABLE_STRINGS_REJECTED_BEFORE_REAL_CJSON_PARSE");
     for (const std::string_view escape : {"uZZZZ", "uZ000", "u0Z00", "u00Z0", "u000Z"}) {
-        json_both(with_extra + "a\\" + std::string(escape) + "b\"}", false, "not valid");
-        json_both(valid.substr(0, valid.size() - 1) + ",\"a\\" + std::string(escape) + "b\":1}",
-                  false, "not valid");
+        json_circulation(with_extra + "a\\" + std::string(escape) + "b\"}", false, "not valid");
+        json_circulation(valid.substr(0, valid.size() - 1) + ",\"a\\" + std::string(escape) +
+                             "b\":1}",
+                         false, "not valid");
     }
     require(json_witness::parses == before_strings,
             "MALFORMED_UNICODE_REJECTED_BEFORE_REAL_CJSON_PARSE");
-    json_both(with_extra + R"(a\u000"})", false, "not valid");
-    json_both(with_extra + R"(a\\u0000b\n\t"})", true);
-    json_both(with_extra + R"(a\u0041\u00Af"})", true);
-    json_both(
+    json_circulation(with_extra + R"(a\u000"})", false, "not valid");
+    json_circulation(with_extra + R"(a\\u0000b\n\t"})", true);
+    json_circulation(with_extra + R"(a\u0041\u00Af"})", true);
+    json_circulation(
         R"({"temperature":20,"power":50,"time":1700000100,"enabled":true,"literal":"{[\\\" ]}"})",
         true);
     const std::string suffix = ",\"extra\":";
     const std::string prefix = valid.substr(0, valid.size() - 1) + suffix;
-    json_both(prefix + std::string(daik::JSON_MAX_DEPTH - 1, '[') + "0" +
-                  std::string(daik::JSON_MAX_DEPTH - 1, ']') + "}",
-              true);
+    json_circulation(prefix + std::string(daik::JSON_MAX_DEPTH - 1, '[') + "0" +
+                         std::string(daik::JSON_MAX_DEPTH - 1, ']') + "}",
+                     true);
     const int parses = json_witness::parses;
-    json_both(prefix + std::string(daik::JSON_MAX_DEPTH, '[') + "0" +
-                  std::string(daik::JSON_MAX_DEPTH, ']') + "}",
-              false, "depth");
+    json_circulation(prefix + std::string(daik::JSON_MAX_DEPTH, '[') + "0" +
+                         std::string(daik::JSON_MAX_DEPTH, ']') + "}",
+                     false, "depth");
     require(json_witness::parses == parses, "EXCESS_DEPTH_REJECTED_BEFORE_REAL_CJSON_PARSE");
-    json_both(R"({"temperature":20,"power":50,"time":1700000100,"enabled":true,)", false,
-              "not valid");
-    json_both(R"({"temperature":"20","power":"50","time":1700000100})", false, "not numeric");
-    json_both(R"({"temperature":null,"power":false,"time":1700000100})", false, "not numeric");
-    json_both(R"({"time":1700000100})", false, "missing");
-    json_both(R"({"temperature":20,"power":50,"time":"wrong type"})", false, "Timestamp path");
-    json_both("null", false, "missing");
-    json_both("[]", false, "missing");
+    json_circulation(R"({"temperature":20,"power":50,"time":1700000100,"enabled":true,)", false,
+                     "not valid");
+    json_circulation(R"({"temperature":"20","power":"50","time":1700000100})", false,
+                     "not numeric");
+    json_circulation(R"({"temperature":null,"power":false,"time":1700000100})", false,
+                     "not numeric");
+    json_circulation(R"({"time":1700000100})", false, "missing");
+    json_circulation(R"({"temperature":20,"power":50,"time":"wrong type"})", false,
+                     "Timestamp path");
+    json_circulation("null", false, "missing");
+    json_circulation("[]", false, "missing");
     const auto frame = json_frame(valid);
     for (int allowed : {1, 3, 5}) {
-        json_witness::fail_after = allowed;
-        const auto partial_ref   = daik::decode_reference_frame(frame, "source", "temperature", "",
-                                                                "", "source", "time", "enabled", "");
-        require(!partial_ref.valid && json_witness::fail_after == -1,
-                "REAL_CJSON_REFERENCE_PARTIAL_TREE_ALLOC_FAILURE_FAILS_CLOSED");
-        require(json_witness::live == 0 && json_witness::allocations == json_witness::frees,
-                "REAL_CJSON_REFERENCE_PARTIAL_TREE_ALLOC_FAILURE_RELEASED");
         json_witness::fail_after = allowed;
         const auto partial_circ  = daik::decode_circulation_frame(frame, "power", "time");
         require(!partial_circ.valid && json_witness::fail_after == -1,
@@ -1515,20 +1074,13 @@ void real_json_consumers() {
                 "REAL_CJSON_CIRCULATION_PARTIAL_TREE_ALLOC_FAILURE_RELEASED");
     }
     json_witness::fail_next = true;
-    const auto ref = daik::decode_reference_frame(frame, "source", "temperature", "", "", "source",
-                                                  "time", "enabled", "");
-    require(!ref.valid && ref.error && std::strstr(ref.error, "not valid"),
-            "REAL_CJSON_REFERENCE_ALLOC_FAILURE_FAILS_CLOSED");
-    require(!json_witness::fail_next && json_witness::live == 0,
-            "REAL_CJSON_REFERENCE_ALLOC_FAILURE_RELEASED");
-    json_witness::fail_next = true;
     const auto circ         = daik::decode_circulation_frame(frame, "power", "time");
     require(!circ.valid && circ.error && std::strstr(circ.error, "not valid"),
             "REAL_CJSON_CIRCULATION_ALLOC_FAILURE_FAILS_CLOSED");
     require(!json_witness::fail_next && json_witness::live == 0,
             "REAL_CJSON_CIRCULATION_ALLOC_FAILURE_RELEASED");
-    json_both(valid, true);
-    require(json_witness::parses == 40, "BOTH_PRODUCTION_CONSUMERS_USED_REAL_CJSON");
+    json_circulation(valid, true);
+    require(json_witness::parses == 20, "CIRCULATION_DECODER_USED_REAL_CJSON");
     require(json_witness::live == 0 && json_witness::allocations == json_witness::frees,
             "REAL_CJSON_ALL_ALLOCATIONS_RELEASED");
 }
@@ -1596,14 +1148,14 @@ void outgoing_heartbeat() {
         wire_number(root.get(), "stop_context_readable_s", 60,
                     "STOP_CONTEXT_INDEPENDENT_READABLE_CLOCK");
     }
-    adapter::cycling.cycling_censored_transition_runs        = 1;
-    adapter::cycling.cycling_censored_handover_runs          = 2;
-    adapter::cycling.cycling_censored_unreadable_runs        = 3;
-    adapter::cycling.cycling_censored_restart_runs           = 4;
-    adapter::cycling.cycling_censored_start_runs             = 0;
-    adapter::cycling.cycling_classified_runtime_s            = 6696;
-    adapter::cycling.cycling_censored_runtime_s              = 65535;
-    adapter::cycling.cycling_runtime_saturated               = true;
+    adapter::cycling.cycling_censored_transition_runs = 1;
+    adapter::cycling.cycling_censored_handover_runs   = 2;
+    adapter::cycling.cycling_censored_unreadable_runs = 3;
+    adapter::cycling.cycling_censored_restart_runs    = 4;
+    adapter::cycling.cycling_censored_start_runs      = 0;
+    adapter::cycling.cycling_classified_runtime_s     = 6696;
+    adapter::cycling.cycling_censored_runtime_s       = 65535;
+    adapter::cycling.cycling_runtime_saturated        = true;
     adapter::modbus_cycling.cycling_censored_transition_runs = 2;
     adapter::modbus_cycling.cycling_censored_handover_runs   = 1;
     adapter::modbus_cycling.cycling_censored_unreadable_runs = 4;
@@ -1725,544 +1277,6 @@ void outgoing_heartbeat() {
     require(daik::s_mqtt_pub_ok == 42 && daik::s_mqtt_pub_fail == 2 && sdk::resets == 1,
             "HEARTBEAT_ACCEPT_UPDATES_PUBLISH_COUNTER_AND_WATCHDOG");
 }
-void outgoing_weather() {
-    initial_config();
-    daik::publish_weather_state(true);
-    require(sdk::publish_calls == 0 && !daik::s_weather_cleanup_requested.load(),
-            "WEATHER_ENABLE_TRANSITION_SUPPRESSES_UNCONFIGURED_RUNTIME");
-    adapter::weather.configured = adapter::weather.available = adapter::weather.has_value = true;
-    adapter::weather.outdoor_mean_2h_c                                                    = 7.25;
-    adapter::weather.solar_energy_2h_wh_m2                                                = 150.5;
-    adapter::weather.issued_unix_s  = 1700000060;
-    adapter::weather.fetched_unix_s = adapter::weather.decision_unix_s = 1700000100;
-    adapter::weather.last_attempt_unix_s                               = 1700000100;
-    adapter::weather.successes                                         = 2;
-    adapter::weather.errors                                            = 1;
-    adapter::weather.state                                             = "ready";
-    daik::s_last_weather_digest.clear();
-    sdk::reject_new_after_publish = true;
-    bool threw                    = false;
-    try {
-        daik::publish_weather_state(true);
-    } catch (const std::bad_alloc&) {
-        threw = true;
-    }
-    const bool refusal_armed = sdk::fail_next_new;
-    sdk::fail_next_new       = false;
-    require(sdk::publish_calls == 1 && sdk::published[0].accepted &&
-                sdk::published[0].topic.data() ==
-                    std::string(80, 'm') + "/weather/openmeteo/forecast" &&
-                sdk::published[0].qos == 0 && sdk::published[0].retain == 1,
-            "WEATHER_EMITS_OWN_RETAINED_FORECAST_TOPIC");
-    require(daik::s_last_weather_digest.matches(sdk::published[0].payload.data()),
-            "WEATHER_ACCEPTED_PAYLOAD_COMMITTED_TO_CACHE");
-    require(!threw && refusal_armed && sdk::failed_news == 0,
-            "WEATHER_CACHE_COMMIT_DOES_NOT_ALLOCATE_AFTER_SDK_ACCEPT");
-    {
-        daik::JsonGuard root(parse_wire(sdk::published[0]));
-        wire_number(root.get(), "schema", 1, "WEATHER_SCHEMA_ON_WIRE");
-        wire_text(root.get(), "provider", "open-meteo", "WEATHER_PROVIDER_ON_WIRE");
-        wire_text(root.get(), "model", "icon_seamless", "WEATHER_MODEL_ON_WIRE");
-        wire_number(root.get(), "configured", 1, "WEATHER_CONFIGURED_ON_WIRE");
-        wire_number(root.get(), "available", 1, "WEATHER_AVAILABILITY_ON_WIRE");
-        wire_number(root.get(), "fresh", 1, "WEATHER_FRESHNESS_ON_WIRE");
-        wire_number(root.get(), "outdoor_mean_2h_c", 7.25, "WEATHER_TEMPERATURE_ON_WIRE");
-        wire_number(root.get(), "solar_energy_2h_wh_m2", 150.5, "WEATHER_SOLAR_ENERGY_ON_WIRE");
-        wire_number(root.get(), "issued_unix_s", 1700000060, "WEATHER_ISSUE_TIME_ON_WIRE");
-        wire_number(root.get(), "fetched_unix_s", 1700000100, "WEATHER_FETCH_TIME_ON_WIRE");
-        wire_number(root.get(), "forecast_start_unix_s", 1700000100,
-                    "WEATHER_DECISION_TIME_ON_WIRE");
-        wire_number(root.get(), "successes", 2, "WEATHER_SUCCESS_COUNT_ON_WIRE");
-        wire_number(root.get(), "errors", 1, "WEATHER_ERROR_COUNT_ON_WIRE");
-        require(!cJSON_GetObjectItemCaseSensitive(root.get(), "latitude") &&
-                    !cJSON_GetObjectItemCaseSensitive(root.get(), "longitude"),
-                "WEATHER_FORECAST_WIRE_EXCLUDES_LOCATION_CONFIGURATION");
-    }
-    const daik::MqttPayloadDigest accepted_cache = daik::s_last_weather_digest;
-    daik::publish_weather_state(true);
-    require(sdk::publish_calls == 1, "WEATHER_UNCHANGED_ACCEPTED_PAYLOAD_SUPPRESSES_REPEAT");
-    adapter::weather.outdoor_mean_2h_c = 8.75;
-    adapter::weather.successes         = 3;
-    sdk::reject_next_publish           = true;
-    daik::publish_weather_state(true);
-    require(sdk::publish_calls == 2 && !sdk::published[1].accepted &&
-                daik::s_last_weather_digest == accepted_cache,
-            "WEATHER_REJECTED_SDK_PUBLISH_RETAINS_LAST_ACCEPTED_CACHE");
-    daik::publish_weather_state(true);
-    require(sdk::publish_calls == 3 && sdk::published[2].accepted &&
-                daik::s_last_weather_digest.matches(sdk::published[2].payload.data()),
-            "WEATHER_REJECTED_PAYLOAD_RETRIES_UNTIL_ACCEPTED");
-    {
-        daik::JsonGuard root(parse_wire(sdk::published[2]));
-        wire_number(root.get(), "outdoor_mean_2h_c", 8.75, "WEATHER_NEW_TEMPERATURE_ON_WIRE");
-        wire_number(root.get(), "successes", 3, "WEATHER_NEW_SUCCESS_COUNT_ON_WIRE");
-    }
-    const daik::MqttPayloadDigest new_cache = daik::s_last_weather_digest;
-    daik::publish_weather_state(false);
-    require(sdk::publish_calls == 3 && daik::s_weather_cleanup_requested.load() &&
-                daik::s_last_weather_digest == new_cache,
-            "WEATHER_DISABLE_REQUESTS_CLEANUP_WITHOUT_SYNTHETIC_FORECAST_OR_CACHE_RESET");
-    require(daik::s_mqtt_pub_ok == 2 && daik::s_mqtt_pub_fail == 1 && sdk::resets == 3 &&
-                json_witness::live == 0,
-            "WEATHER_ACCEPT_REJECT_COUNTERS_AND_JSON_OWNERSHIP_BALANCED");
-}
-void outgoing_curve() {
-    initial_config();
-    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    feed("room", R"({"temperature":20.5,"time":1700000100,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    daik::publish_heating_curve_telemetry(adapter::cfg);
-    require(sdk::publish_calls == 1 && sdk::published[0].accepted &&
-                sdk::published[0].topic.data() == std::string(80, 'm') + "/heating_curve" &&
-                sdk::published[0].qos == 0 && sdk::published[0].retain == 0,
-            "CURVE_TELEMETRY_USES_OWN_NONRETAINED_DOMAIN_TOPIC");
-    {
-        daik::JsonGuard root(parse_wire(sdk::published[0]));
-        wire_number(root.get(), "schema_version", 3, "CURVE_SCHEMA_VERSION_ON_WIRE");
-        cJSON* room = cJSON_GetObjectItemCaseSensitive(root.get(), "room");
-        require(cJSON_IsObject(room), "CURVE_ROOM_EVIDENCE_IS_OWN_OBJECT");
-        wire_text(room, "source_id", "living_room", "CURVE_ROOM_SOURCE_ID_ON_WIRE");
-        wire_number(room, "temperature_valid", 1, "CURVE_ROOM_TEMPERATURE_VALID_ON_WIRE");
-        wire_number(room, "setpoint_valid", 1, "CURVE_ROOM_SETPOINT_VALID_ON_WIRE");
-        wire_number(room, "control_eligible", 1, "CURVE_ROOM_ELIGIBILITY_ON_WIRE");
-        wire_number(room, "temperature_c", 20.5, "CURVE_ACCEPTED_ROOM_TEMPERATURE_ON_WIRE");
-        wire_number(room, "setpoint_c", 22, "CURVE_FIXED_ROOM_TARGET_ON_WIRE");
-        wire_number(room, "error_k", 1.5, "CURVE_RAW_ROOM_DIFFERENCE_ON_WIRE");
-        wire_number(room, "source_unix_s", 1700000100, "CURVE_SOURCE_TIME_ON_WIRE");
-        wire_number(room, "age_s", 0, "CURVE_FRESH_ROOM_AGE_ON_WIRE");
-        cJSON* diagnosis = cJSON_GetObjectItemCaseSensitive(root.get(), "diagnosis");
-        require(cJSON_IsObject(diagnosis), "CURVE_DIAGNOSIS_IS_INDEPENDENT_OBJECT");
-        wire_number(diagnosis, "method_version", 4, "CURVE_METHOD_VERSION_ON_WIRE");
-        wire_number(diagnosis, "armed", 0, "CURVE_UNEVALUATED_DIAGNOSIS_DOES_NOT_CLAIM_ARMED");
-    }
-    adapter::cfg.diagnostics_enabled = false;
-    daik::publish_heating_curve_telemetry(adapter::cfg);
-    require(sdk::publish_calls == 1, "CURVE_DISABLED_CONSENT_SUPPRESSES_PUBLICATION");
-    require(json_witness::live == 0 && sdk::locks == 0 && sdk::takes == sdk::gives,
-            "CURVE_TELEMETRY_RELEASES_JSON_AND_MUTEX_OWNERSHIP");
-}
-void curve_space_route_gate() {
-    initial_config();
-    adapter::cfg.mb_host    = "homehub-fixture";
-    adapter::modbus.enabled = adapter::modbus.connected = true;
-    adapter::modbus.profile                             = daik::ModbusProfile::HomeHub;
-    adapter::modbus.plant_gate_known = adapter::modbus.plant_gate_active = true;
-    adapter::modbus.heating_mode_known = adapter::modbus.heating_mode_active = true;
-    adapter::modbus.space_route_known                                        = true;
-    adapter::modbus.space_route_active = false; // Fresh input37=1: DHW, despite input53=1/mode38=1.
-    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    feed("room", R"({"temperature":20.5,"time":1700000100,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    const auto dhw = daik::evaluate_heating_curve(adapter::cfg, true);
-    require(dhw.armed && dhw.state == daik::logic::HeatingCurveState::Hold &&
-                dhw.reason == daik::logic::HeatingCurveReason::PlantInactive &&
-                dhw.plant_gate_known && !dhw.plant_gate_active && !dhw.sample_eligible &&
-                !dhw.has_current_room_error && !dhw.has_last_sample && dhw.sequence == 0 &&
-                dhw.samples == 0,
-            "CURVE_DHW_ROUTE_BLOCKS_SPACE_HEATING_SAMPLE");
-    daik::publish_heating_curve_telemetry(adapter::cfg);
-    require(sdk::publish_calls == 1 && sdk::published[0].accepted, "CURVE_DHW_TELEMETRY_PUBLISHED");
-    {
-        daik::JsonGuard root(parse_wire(sdk::published[0]));
-        cJSON*          room      = cJSON_GetObjectItemCaseSensitive(root.get(), "room");
-        cJSON*          diagnosis = cJSON_GetObjectItemCaseSensitive(root.get(), "diagnosis");
-        cJSON*          gates     = cJSON_GetObjectItemCaseSensitive(diagnosis, "gates");
-        wire_number(room, "control_eligible", 1, "CURVE_DHW_VETO_KEEPS_VALID_ROOM_SOURCE");
-        wire_number(diagnosis, "sample_eligible", 0, "CURVE_DHW_VETO_ON_WIRE");
-        wire_number(gates, "plant_known", 1, "CURVE_DHW_ROUTE_KNOWN_ON_WIRE");
-        wire_number(gates, "plant_active", 0, "CURVE_DHW_ROUTE_INACTIVE_ON_WIRE");
-    }
-    // mb_status() withdraws known when input37 is missing, invalid, expired or from an old session.
-    // Either leftover raw Boolean must remain unable to license a sample at this adapter boundary.
-    adapter::modbus.space_route_known = false;
-    for (bool stale_route_space : {false, true}) {
-        adapter::modbus.space_route_active = stale_route_space;
-        const auto unknown                 = daik::evaluate_heating_curve(adapter::cfg, true);
-        require(unknown.state == daik::logic::HeatingCurveState::Blocked &&
-                    unknown.reason == daik::logic::HeatingCurveReason::PlantGateUnknown &&
-                    !unknown.plant_gate_known && !unknown.plant_gate_active &&
-                    !unknown.sample_eligible && !unknown.has_last_sample && unknown.sequence == 0 &&
-                    unknown.samples == 0,
-                "CURVE_UNKNOWN_ROUTE_CANNOT_BORROW_RAW_SPACE_PERMISSION");
-    }
-    adapter::modbus.plant_gate_active = false;
-    const auto idle                   = daik::evaluate_heating_curve(adapter::cfg, true);
-    require(idle.state == daik::logic::HeatingCurveState::Hold &&
-                idle.reason == daik::logic::HeatingCurveReason::PlantInactive &&
-                !idle.sample_eligible && !idle.has_last_sample,
-            "CURVE_INACTIVE_OPERATION_STAYS_HOLD_WITH_UNKNOWN_ROUTE");
-    adapter::modbus.plant_gate_active = true;
-    adapter::modbus.space_route_known = adapter::modbus.space_route_active = true;
-    const auto space = daik::evaluate_heating_curve(adapter::cfg, true);
-    require(space.sample_eligible && space.has_current_room_error && space.has_last_sample &&
-                space.reason == daik::logic::HeatingCurveReason::ForecastUnavailable &&
-                space.last_sample_room_error_k == 1.5 && space.last_sample_unix_s == 1700000100 &&
-                space.sequence == 1 && space.samples == 1,
-            "CURVE_SPACE_ROUTE_RECORDS_WITH_VALID_INDEPENDENT_INPUTS");
-    // The native profile has the same input37 semantics. A due event must still be vetoed for DHW,
-    // and the veto must not consume the cadence or erase the earlier dated event.
-    adapter::modbus.profile = daik::ModbusProfile::Altherma4;
-    sdk::ticks += daik::logic::HEATING_CURVE_SAMPLE_CADENCE_MS;
-    feed("room", R"({"temperature":20.5,"time":1700001900,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    adapter::modbus.space_route_active = false;
-    const auto native_dhw              = daik::evaluate_heating_curve(adapter::cfg, true);
-    require(!native_dhw.sample_eligible && !native_dhw.has_current_room_error &&
-                native_dhw.reason == daik::logic::HeatingCurveReason::PlantInactive &&
-                native_dhw.has_last_sample && native_dhw.last_sample_unix_s == 1700000100 &&
-                native_dhw.sequence == 1 && native_dhw.samples == 1,
-            "CURVE_NATIVE_DHW_ROUTE_PRESERVES_PRIOR_EVENT_WITHOUT_NEW_SAMPLE");
-    adapter::modbus.space_route_active  = true;
-    adapter::modbus.heating_mode_active = false; // Native input38=0/None is known non-heating.
-    const auto native_none              = daik::evaluate_heating_curve(adapter::cfg, true);
-    require(!native_none.sample_eligible &&
-                native_none.reason == daik::logic::HeatingCurveReason::NonHeatingMode &&
-                native_none.sequence == 1 && native_none.samples == 1,
-            "CURVE_NATIVE_NONE_MODE_REMAINS_EXCLUDED");
-    adapter::modbus.heating_mode_active = true;
-    const auto resumed                  = daik::evaluate_heating_curve(adapter::cfg, true);
-    require(resumed.sample_eligible && resumed.last_sample_unix_s == 1700001900 &&
-                resumed.sequence == 2 && resumed.samples == 2,
-            "CURVE_DHW_VETO_DOES_NOT_CONSUME_ELIGIBLE_CADENCE");
-    require(json_witness::live == 0 && sdk::locks == 0 && sdk::takes == sdk::gives,
-            "CURVE_SPACE_ROUTE_TEST_RELEASES_JSON_AND_MUTEX_OWNERSHIP");
-}
-// One recorded event under the first scope, then the 30-minute cadence visibly holding.
-void curve_first_scope_event() {
-    adapter::modbus.enabled = adapter::modbus.connected = true;
-    adapter::modbus.plant_gate_known = adapter::modbus.plant_gate_active = true;
-    adapter::modbus.heating_mode_known = adapter::modbus.heating_mode_active = true;
-    adapter::modbus.space_route_known = adapter::modbus.space_route_active = true;
-    adapter::cfg.mb_host                                                   = "homehub-fixture";
-    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    feed("room", R"({"temperature":20.5,"time":1700000100,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    daik::evaluate_heating_curve(adapter::cfg, true);
-    sdk::ticks += 60 * 1000;
-    const auto held = daik::evaluate_heating_curve(adapter::cfg, true);
-    require(held.reason == daik::logic::HeatingCurveReason::SamplingInterval &&
-                held.sequence == 1 && daik::heating_curve_diagnosis_armed(adapter::cfg) &&
-                held.last_sample_unix_s == 1700000100 && held.last_sample_room_error_k == 1.5,
-            "CURVE_FIRST_SCOPE_EVENT_AND_CADENCE_ACTIVE");
-}
-// Skip the real task's evaluation stage through repeated allocation failures. Independent status
-// reads and the actual MQTT builder must age the same verdict without refreshing it or its events.
-void curve_evaluation_age() {
-    initial_config();
-    curve_first_scope_event();
-    adapter::hp.connected           = true;
-    adapter::hp.last_ok_s           = 0;
-    adapter::cfg.weather_enabled    = true;
-    adapter::weather.available      = true;
-    adapter::weather.has_value      = true;
-    adapter::weather.fetched_unix_s = 1700000000 + sdk::ticks / 1000;
-    daik::logic::HeatingCurveSnapshot baseline;
-    sdk::on_delay = [&](TickType_t delay) {
-        check_cycle(delay);
-        sdk::fail_locked_new = true;
-        const auto now       = daik::heating_curve_status();
-        require(sdk::fail_locked_new && sdk::locks == 0 && sdk::takes == sdk::gives,
-                "CURVE_AGED_READER_ALLOCATION_FREE_AND_LOCK_BALANCED");
-        sdk::fail_locked_new = false;
-        if (sdk::delays == 1) {
-            require(now.state == daik::logic::HeatingCurveState::Recording && now.sample_eligible,
-                    "CURVE_FRESH_OWNER_EVALUATION_RECORDS");
-            baseline = now;
-        } else if (sdk::delays <= 3) {
-            require(now.state == daik::logic::HeatingCurveState::Recording && now.sample_eligible,
-                    "CURVE_EVALUATION_AGE_BOUND_IS_INCLUSIVE");
-            if (sdk::delays == 3) {
-                ++sdk::ticks;
-                require(daik::heating_curve_status().reason ==
-                            daik::logic::HeatingCurveReason::EvaluationStale,
-                        "CURVE_EVALUATION_FIRST_MILLISECOND_EXPIRES");
-            }
-        } else if (sdk::delays <= 5) {
-            require(now.state == daik::logic::HeatingCurveState::Blocked &&
-                        now.reason == daik::logic::HeatingCurveReason::EvaluationStale &&
-                        !now.sample_eligible && !now.has_current_room_error &&
-                        !now.forecast_available && !now.plant_gate_known &&
-                        !now.heating_mode_known && !now.room_has_source_time && !now.room_age_known,
-                    "CURVE_FROZEN_STATE_EXPIRES_AFTER_THREE_CYCLES");
-            require(now.sequence == baseline.sequence && now.samples == baseline.samples &&
-                        now.evaluations == baseline.evaluations && now.holds == baseline.holds &&
-                        now.blocks == baseline.blocks && now.has_last_sample &&
-                        now.last_sample_unix_s == baseline.last_sample_unix_s &&
-                        now.last_sample_room_error_k == baseline.last_sample_room_error_k,
-                    "CURVE_STALE_READ_PRESERVES_EVENT_CADENCE_AND_COUNTERS");
-            daik::publish_heating_curve_telemetry(adapter::cfg);
-            daik::JsonGuard root(parse_wire(sdk::published[sdk::publish_calls - 1]));
-            cJSON*          diagnosis = cJSON_GetObjectItemCaseSensitive(root.get(), "diagnosis");
-            cJSON*          room      = cJSON_GetObjectItemCaseSensitive(root.get(), "room");
-            cJSON*          last      = cJSON_GetObjectItemCaseSensitive(diagnosis, "last_sample");
-            cJSON*          evidence = cJSON_GetObjectItemCaseSensitive(diagnosis, "room_evidence");
-            wire_number(diagnosis, "state", 4, "CURVE_STALE_PROJECTION_ON_MQTT_WIRE");
-            wire_number(diagnosis, "reason", 15, "CURVE_STALE_PROJECTION_ON_MQTT_WIRE");
-            wire_number(diagnosis, "sample_eligible", 0, "CURVE_STALE_PROJECTION_ON_MQTT_WIRE");
-            wire_number(room, "control_eligible", 1,
-                        "CURVE_STALE_DIAGNOSIS_KEEPS_FRESH_ROOM_SOURCE");
-            require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(evidence, "current_error_k")) &&
-                        cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(evidence, "source_unix_s")) &&
-                        cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(evidence, "age_s")),
-                    "CURVE_STALE_MQTT_WITHHOLDS_CURRENT_DIAGNOSIS_EVIDENCE");
-            wire_number(last, "sequence", baseline.sequence,
-                        "CURVE_STALE_MQTT_PRESERVES_DATED_EVENT");
-            wire_number(last, "unix_s", baseline.last_sample_unix_s,
-                        "CURVE_STALE_MQTT_PRESERVES_DATED_EVENT");
-        } else {
-            require(now.state == daik::logic::HeatingCurveState::Recording && now.sample_eligible &&
-                        now.reason == daik::logic::HeatingCurveReason::SamplingInterval &&
-                        now.sequence == baseline.sequence && now.samples == baseline.samples &&
-                        now.evaluations == baseline.evaluations + 1,
-                    "CURVE_OWNER_RESUMES_WITHOUT_DUPLICATE_EVENT");
-            require(sdk::failed_news == 4 && daik::mqtt_skip_stats().skipped == 4,
-                    "CURVE_REAL_TASK_SKIPPED_FOUR_EVALUATION_STAGES");
-            throw StopTask{};
-        }
-        // Four skipped stages, then a genuine owner evaluation must recover on the next cycle.
-        if (sdk::delays < 5) sdk::fail_next_new = true;
-    };
-    try {
-        sdk::task_fn(nullptr);
-    } catch (const StopTask&) {}
-    require(json_witness::live == 0 && sdk::locks == 0 && sdk::takes == sdk::gives,
-            "CURVE_AGE_FIXTURE_RELEASES_JSON_AND_MUTEX_OWNERSHIP");
-}
-
-// The boundary itself, as POST /set_diagnostics and /set_ref_temp invoke it: allocation-free,
-// lock-balanced, and the prior event is gone before any task cycle runs.
-void curve_boundary(void (*change)(), const char* forgotten_assertion) {
-    sdk::fail_next_new = true;
-    change();
-    const bool unspent = sdk::fail_next_new;
-    sdk::fail_next_new = false;
-    require(unspent && sdk::locks == 0 && sdk::takes == sdk::gives,
-            "CURVE_BOUNDARY_ALLOCATION_FREE_AND_LOCK_BALANCED");
-    const auto now = daik::heating_curve_status();
-    require(!now.has_last_sample && now.last_sample_unix_s == -1, forgotten_assertion);
-    require(now.sequence == 1 && now.samples == 1 && now.evaluations == 2,
-            "CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS");
-}
-// The first eligible reading of the new scope records at once; sequence and counters continue.
-void curve_new_scope_event(const char* topic, const char* payload, double error_k,
-                           const char* recorded_assertion) {
-    sdk::ticks += 4 * 60 * 1000; // five minutes after the first event, inside its old cadence
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    feed(topic, payload);
-    daik::service_reference_frames(adapter::cfg);
-    const auto s = daik::evaluate_heating_curve(adapter::cfg, true);
-    require(s.reason == daik::logic::HeatingCurveReason::ForecastUnavailable && s.has_last_sample &&
-                s.last_sample_room_error_k == error_k && s.last_sample_unix_s == 1700000400,
-            recorded_assertion);
-    require(s.sequence == 2 && s.samples == 2 && s.evaluations == 3,
-            "CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS");
-    daik::publish_heating_curve_telemetry(adapter::cfg);
-    require(sdk::publish_calls >= 1 && sdk::published[sdk::publish_calls - 1].accepted,
-            "CURVE_BOUNDARY_TELEMETRY_PUBLISHED");
-    daik::JsonGuard root(parse_wire(sdk::published[sdk::publish_calls - 1]));
-    cJSON*          diagnosis = cJSON_GetObjectItemCaseSensitive(root.get(), "diagnosis");
-    cJSON*          last      = cJSON_GetObjectItemCaseSensitive(diagnosis, "last_sample");
-    require(cJSON_IsObject(last), "CURVE_BOUNDARY_LAST_SAMPLE_ON_WIRE");
-    wire_number(last, "room_error_k", error_k, "CURVE_BOUNDARY_WIRE_EVENT_IS_NEW_SCOPE");
-    wire_number(last, "unix_s", 1700000400, "CURVE_BOUNDARY_WIRE_EVENT_TIME_IS_NEW_SCOPE");
-    wire_number(last, "sequence", 2, "CURVE_BOUNDARY_WIRE_SEQUENCE_CONTINUES");
-    require(sdk::locks == 0 && sdk::takes == sdk::gives, "CURVE_BOUNDARY_MUTEX_RELEASED");
-}
-void curve_consent_boundary() {
-    // Safe mode / failed mutex allocation: no sampler task exists, nothing is touched or locked.
-    daik::mqtt_reference_reconfigure();
-    const auto untouched = daik::heating_curve_status();
-    require(sdk::takes == 0 && untouched.state == daik::logic::HeatingCurveState::Off &&
-                !untouched.has_last_sample && untouched.sequence == 0,
-            "CURVE_BOUNDARY_WITHOUT_MUTEX_TOUCHES_NOTHING");
-    initial_config();
-    curve_first_scope_event();
-    // Opt-out and opt-in inside one task cycle: no disarmed evaluation ever runs in between.
-    curve_boundary(
-        [] {
-            adapter::cfg.diagnostics_enabled = false;
-            daik::mqtt_reference_reconfigure();
-            adapter::cfg.diagnostics_enabled = true;
-            daik::mqtt_reference_reconfigure();
-        },
-        "CURVE_CONSENT_BOUNDARY_FORGETS_PRIOR_EVENT_IMMEDIATELY");
-    curve_new_scope_event("room", R"({"temperature":18.0,"time":1700000400,"enabled":true})", 4.0,
-                          "CURVE_CONSENT_BOUNDARY_SAMPLES_NEW_SCOPE_AT_ONCE");
-}
-void curve_room_source_boundary() {
-    initial_config();
-    curve_first_scope_event();
-    curve_boundary(
-        [] {
-            adapter::cfg.ref_temp_topic = "room_b";
-            daik::mqtt_reference_reconfigure();
-        },
-        "CURVE_ROOM_SOURCE_BOUNDARY_FORGETS_PRIOR_EVENT_IMMEDIATELY");
-    curve_new_scope_event("room_b", R"({"temperature":19.0,"time":1700000400,"enabled":true})", 3.0,
-                          "CURVE_ROOM_SOURCE_BOUNDARY_SAMPLES_NEW_SOURCE_AT_ONCE");
-}
-// The HTTP opt-out/opt-in lands while the owner task is inside evaluate_heating_curve(): after it
-// read the old scope's (still fresh, still current) room status, before its evaluation lock. The
-// stale reads must not become the new scope's first event now that the cadence was forgotten.
-bool curve_injected = false;
-void curve_boundary_during_evaluation() {
-    initial_config();
-    curve_first_scope_event();
-    const daik::Config task_copy = adapter::cfg; // the owner task's per-cycle Config snapshot
-    adapter::on_env3_status      = [] {
-        curve_injected                   = true;
-        adapter::cfg.diagnostics_enabled = false;
-        daik::mqtt_reference_reconfigure();
-        adapter::cfg.diagnostics_enabled = true;
-        daik::mqtt_reference_reconfigure();
-    };
-    const int failed_before = sdk::failed_news;
-    sdk::fail_locked_new    = true; // any allocation while s_mtx is held fails the witness
-    daik::evaluate_heating_curve(task_copy, true);
-    const bool locked_allocation_free = sdk::fail_locked_new && sdk::failed_news == failed_before;
-    sdk::fail_locked_new              = false;
-    require(curve_injected && !adapter::on_env3_status,
-            "CURVE_RECONFIGURE_INJECTED_BETWEEN_READ_AND_EVALUATION");
-    require(locked_allocation_free && sdk::locks == 0 && sdk::takes == sdk::gives,
-            "CURVE_STALE_EVALUATION_ALLOCATION_FREE_AND_LOCK_BALANCED");
-    const auto now = daik::heating_curve_status();
-    require(!now.has_last_sample && now.last_sample_unix_s == -1,
-            "CURVE_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING");
-    require(now.sequence == 1 && now.samples == 1 && now.evaluations == 2,
-            "CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS");
-    curve_new_scope_event("room", R"({"temperature":18.0,"time":1700000400,"enabled":true})", 4.0,
-                          "CURVE_CONSENT_BOUNDARY_SAMPLES_NEW_SCOPE_AT_ONCE");
-}
-// POST /set_hp with a new HomeHub host, port or unit: the last event was admitted by the previous
-// endpoint's gates and carries its outdoor reading. Same boundary contract as a room-source change.
-void curve_homehub_boundary() {
-    daik::mqtt_heating_curve_homehub_reset();
-    const auto untouched = daik::heating_curve_status();
-    require(sdk::takes == 0 && untouched.state == daik::logic::HeatingCurveState::Off &&
-                !untouched.has_last_sample && untouched.sequence == 0,
-            "CURVE_HOMEHUB_BOUNDARY_WITHOUT_MUTEX_TOUCHES_NOTHING");
-    initial_config();
-    curve_first_scope_event();
-    curve_boundary([] { daik::mqtt_heating_curve_homehub_reset(); },
-                   "CURVE_HOMEHUB_BOUNDARY_FORGETS_PRIOR_EVENT_IMMEDIATELY");
-    curve_new_scope_event("room", R"({"temperature":18.0,"time":1700000400,"enabled":true})", 4.0,
-                          "CURVE_HOMEHUB_BOUNDARY_SAMPLES_NEW_ENDPOINT_AT_ONCE");
-}
-// The endpoint change lands after the evaluator read the previous endpoint's status and before its
-// evaluation lock: those reads must not become the new endpoint's first event.
-void curve_homehub_boundary_during_evaluation() {
-    initial_config();
-    curve_first_scope_event();
-    const daik::Config task_copy = adapter::cfg;
-    adapter::on_env3_status      = [] {
-        curve_injected = true;
-        daik::mqtt_heating_curve_homehub_reset();
-    };
-    const int failed_before = sdk::failed_news;
-    sdk::fail_locked_new    = true; // any allocation while s_mtx is held fails the witness
-    daik::evaluate_heating_curve(task_copy, true);
-    const bool locked_allocation_free = sdk::fail_locked_new && sdk::failed_news == failed_before;
-    sdk::fail_locked_new              = false;
-    require(curve_injected && !adapter::on_env3_status,
-            "CURVE_HOMEHUB_RESET_INJECTED_BETWEEN_READ_AND_EVALUATION");
-    require(locked_allocation_free && sdk::locks == 0 && sdk::takes == sdk::gives,
-            "CURVE_HOMEHUB_STALE_EVALUATION_ALLOCATION_FREE_AND_LOCK_BALANCED");
-    const auto now = daik::heating_curve_status();
-    require(!now.has_last_sample && now.last_sample_unix_s == -1,
-            "CURVE_HOMEHUB_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING");
-    require(now.sequence == 1 && now.samples == 1 && now.evaluations == 2,
-            "CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS");
-    // A new evaluation can already see the requested generation while the reset is still waiting
-    // for the owner mutex. Its otherwise fresh input must not reacquire the prior scope.
-    daik::s_heating_curve_homehub_epoch.fetch_add(1, std::memory_order_acq_rel);
-    const auto pending = daik::evaluate_heating_curve(adapter::cfg, true);
-    require(!pending.has_last_sample && pending.sequence == now.sequence &&
-                pending.samples == now.samples && pending.evaluations == now.evaluations,
-            "CURVE_PENDING_HOMEHUB_RESET_CANNOT_EVALUATE");
-}
-void curve_bins_scopes() {
-    initial_config();
-    adapter::hp.connected         = false; // X10A is deliberately offline throughout
-    adapter::modbus.profile       = daik::ModbusProfile::HomeHub;
-    adapter::modbus.plant_outdoor = daik::logic::outdoor_homehub_evidence(true, true, 0.0);
-    curve_first_scope_event();
-    daik::HeatingCurveBinsReport report;
-    const auto                   original = daik::heating_curve_status(&report);
-    require(original.samples == 1 && report.valid && report.target_c == 22.0 &&
-                report.homehub[1].samples == 1 && report.homehub[1].outdoor_sum_tenths == 0 &&
-                report.homehub[1].scope_samples == 1 && report.env3[1].samples == 0,
-            "CURVE_BINS_REPORT_CURRENT_HOMEHUB_ZERO");
-
-    const auto before = sdk::ticks;
-    sdk::ticks += 8 * 24 * 3600 * 1000;
-    daik::heating_curve_status(&report);
-    require(report.valid && report.homehub[1].scope_samples == 0,
-            "CURVE_BINS_REPORT_AGING_WITHOUT_EVALUATION");
-    sdk::ticks = before;
-    daik::heating_curve_status(&report);
-    require(report.valid && report.homehub[1].samples == 0,
-            "CURVE_BINS_REPORT_CLOCK_ROLLBACK_CANNOT_RESTORE_EXPIRED_BINS");
-
-    adapter::on_env3_status = [] { sdk::ticks = 0; };
-    const auto future_room  = daik::evaluate_heating_curve(adapter::cfg, false);
-    require(future_room.reason == daik::logic::HeatingCurveReason::RoomUnavailable &&
-                future_room.samples == original.samples,
-            "CURVE_BINS_ROOM_FRESHNESS_USES_THE_EVENT_CLOCK");
-
-    sdk::ticks = 1900 * 1000;
-    feed("room", R"({"temperature":20.5,"time":1700001900,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    daik::evaluate_heating_curve(adapter::cfg, false);
-    daik::heating_curve_status(&report);
-    require(report.valid && report.homehub[1].scope_samples == 1,
-            "CURVE_BINS_RECORDS_SECOND_SAMPLE_WITHOUT_X10A");
-
-    // Concrete Modbus profile promotion withdraws prior-profile bins before the next evaluation,
-    // clears outdoor_bins while preserving the 30-minute cadence, and then opens its own scope.
-    adapter::modbus.profile = daik::ModbusProfile::Altherma4;
-    daik::heating_curve_status(&report);
-    require(!report.valid, "CURVE_BINS_WITHDRAW_BEFORE_NEW_MODBUS_PROFILE_EVALUATION");
-
-    sdk::ticks += 1000;
-    feed("room", R"({"temperature":20.0,"time":1700001901,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    const auto within_cadence = daik::evaluate_heating_curve(adapter::cfg, false);
-    daik::heating_curve_status(&report);
-    require(within_cadence.reason == daik::logic::HeatingCurveReason::SamplingInterval &&
-                within_cadence.has_last_sample && within_cadence.samples == 2 && report.valid &&
-                report.homehub[1].scope_samples == 0,
-            "CURVE_NEW_MODBUS_PROFILE_CLEARS_BINS_WITHOUT_BREAKING_CADENCE");
-
-    sdk::ticks += daik::logic::HEATING_CURVE_SAMPLE_CADENCE_MS;
-    feed("room", R"({"temperature":20.0,"time":1700003701,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    const auto promoted = daik::evaluate_heating_curve(adapter::cfg, false);
-    daik::heating_curve_status(&report);
-    require(report.valid && promoted.samples == 3 && report.homehub[1].scope_samples == 1 &&
-                report.homehub[1].room_sum_tenths == 20,
-            "CURVE_NEW_MODBUS_PROFILE_OPENS_ITS_OWN_SCOPE");
-
-    // Inbound MQTT target updates end the bin scope immediately between evaluations.
-    adapter::cfg.ref_temp_fixed_setpoint_tenths = 0;
-    adapter::cfg.ref_temp_setpoint_path         = "setpoint";
-    daik::mqtt_reference_reconfigure();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    sdk::ticks += 1000;
-    feed("room", R"({"temperature":20.0,"setpoint":21.5,"time":1700003702,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    daik::evaluate_heating_curve(adapter::cfg, false);
-    daik::heating_curve_status(&report);
-    require(report.valid && report.target_c == 21.5 && report.homehub[1].scope_samples == 1,
-            "CURVE_MQTT_TARGET_ESTABLISHES_SCOPE");
-    feed("room", R"({"temperature":20.0,"setpoint":21.0,"time":1700003703,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    daik::heating_curve_status(&report);
-    require(report.valid && report.target_c == 21.0 && report.homehub[1].scope_samples == 0,
-            "CURVE_MQTT_TARGET_CHANGE_CLEARS_BINS_AT_ONCE");
-}
 void scalar_snapshot_helpers() {
     initial_config();
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
@@ -2359,100 +1373,102 @@ void discovery_topic_roundtrip() {
 void prepare_inbound() {
     initial_config();
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
     daik::service_circulation_subscription(adapter::cfg,
                                            daik::s_circulation_requested_epoch.load());
 }
 void fragment(const std::string& payload, int offset, int length, int total = -1) {
     esp_mqtt_event_t e{};
-    e.topic               = offset == 0 ? const_cast<char*>("room") : nullptr;
-    e.topic_len           = offset == 0 ? 4 : 0;
+    e.topic               = offset == 0 ? const_cast<char*>("circulation") : nullptr;
+    e.topic_len           = offset == 0 ? 11 : 0;
     e.data                = const_cast<char*>(payload.data() + offset);
     e.data_len            = length;
     e.total_data_len      = total < 0 ? static_cast<int>(payload.size()) : total;
     e.current_data_offset = offset;
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_DATA, &e);
 }
-const std::string room_payload = R"({"temperature":20,"time":1700000100,"enabled":true})";
+const std::string circulation_payload = R"({"power":20,"time":1700000100})";
 void              callback_fragments() {
     prepare_inbound();
-    fragment(room_payload, 0, 7);
-    require(sdk::queue.count == 0 && !daik::s_ref_status.has_value,
-                         "FRAGMENT_PREFIX_CANNOT_ENTER_SOURCE_OWNER");
-    fragment(room_payload, 7, static_cast<int>(room_payload.size()) - 7);
+    fragment(circulation_payload, 0, 7);
+    require(sdk::queue.count == 0 && !daik::s_circulation_status.has_value,
+            "FRAGMENT_PREFIX_CANNOT_ENTER_SOURCE_OWNER");
+    fragment(circulation_payload, 7, static_cast<int>(circulation_payload.size()) - 7);
     require(sdk::queue.count == 1, "COMPLETE_FRAGMENTED_FRAME_QUEUED_ONCE");
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.temperature_c == 20 && daik::s_ref_status.messages == 1,
-                         "FRAGMENTED_FRAME_REACHES_PRODUCTION_SOURCE_OWNER");
-    fragment(room_payload, 0, 7);
-    fragment(room_payload, 8, static_cast<int>(room_payload.size()) - 8);
-    require(!daik::s_ref_rx_active && sdk::queue.count == 0, "GAPPED_FRAGMENT_RETIRES_CAPTURE");
-    fragment(room_payload, 0, 7);
-    fragment(room_payload, 6, static_cast<int>(room_payload.size()) - 6);
-    require(!daik::s_ref_rx_active && sdk::queue.count == 0,
-                         "OVERLAPPING_FRAGMENT_RETIRES_CAPTURE");
-    feed("room", room_payload.c_str());
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.messages == 2, "CAPTURE_RECOVERS_AFTER_MALFORMED_FRAGMENT");
+    daik::service_circulation_frames(adapter::cfg);
+    require(daik::s_circulation_status.power_w == 20 && daik::s_circulation_status.messages == 1,
+            "FRAGMENTED_FRAME_REACHES_PRODUCTION_SOURCE_OWNER");
+    fragment(circulation_payload, 0, 7);
+    fragment(circulation_payload, 8, static_cast<int>(circulation_payload.size()) - 8);
+    require(!daik::s_inbound_rx_active && sdk::queue.count == 0, "GAPPED_FRAGMENT_RETIRES_CAPTURE");
+    fragment(circulation_payload, 0, 7);
+    fragment(circulation_payload, 6, static_cast<int>(circulation_payload.size()) - 6);
+    require(!daik::s_inbound_rx_active && sdk::queue.count == 0,
+            "OVERLAPPING_FRAGMENT_RETIRES_CAPTURE");
+    feed("circulation", circulation_payload.c_str());
+    daik::service_circulation_frames(adapter::cfg);
+    require(daik::s_circulation_status.messages == 2, "CAPTURE_RECOVERS_AFTER_MALFORMED_FRAGMENT");
 }
 void callback_payload_bounds() {
     prepare_inbound();
-    std::string maximum = room_payload;
-    maximum.append(daik::REF_TEMP_PAYLOAD_MAX - maximum.size(), ' ');
+    std::string maximum = circulation_payload;
+    maximum.append(daik::CIRCULATION_PAYLOAD_MAX - maximum.size(), ' ');
     fragment(maximum, 0, 500);
     fragment(maximum, 500, static_cast<int>(maximum.size()) - 500);
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.messages == 1 && daik::s_ref_status.temperature_c == 20,
+    daik::service_circulation_frames(adapter::cfg);
+    require(daik::s_circulation_status.messages == 1 && daik::s_circulation_status.power_w == 20,
             "EXACT_MAXIMUM_PAYLOAD_PASSES_COMPLETE_JSON_OWNER");
     maximum += ' ';
     fragment(maximum, 0, static_cast<int>(maximum.size()));
-    require(!daik::s_ref_rx_active && sdk::queue.count == 0,
+    require(!daik::s_inbound_rx_active && sdk::queue.count == 0,
             "OVERSIZED_PAYLOAD_NEVER_ENTERS_QUEUE");
 }
 void callback_epoch_cutover() {
     prepare_inbound();
-    fragment(room_payload, 0, 7);
-    daik::mqtt_reference_reconfigure();
-    fragment(room_payload, 7, static_cast<int>(room_payload.size()) - 7);
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    daik::service_reference_frames(adapter::cfg);
-    require(!daik::s_ref_status.has_value, "PREDECESSOR_FRAGMENT_EPOCH_CANNOT_SEED_SUCCESSOR");
-    feed("room", room_payload.c_str());
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.has_value, "SUCCESSOR_EPOCH_ACCEPTS_ITS_OWN_CAPTURE");
+    fragment(circulation_payload, 0, 7);
+    daik::mqtt_circulation_reconfigure(true);
+    fragment(circulation_payload, 7, static_cast<int>(circulation_payload.size()) - 7);
+    daik::service_circulation_subscription(adapter::cfg,
+                                           daik::s_circulation_requested_epoch.load());
+    daik::service_circulation_frames(adapter::cfg);
+    require(!daik::s_circulation_status.has_value,
+            "PREDECESSOR_FRAGMENT_EPOCH_CANNOT_SEED_SUCCESSOR");
+    feed("circulation", circulation_payload.c_str());
+    daik::service_circulation_frames(adapter::cfg);
+    require(daik::s_circulation_status.has_value, "SUCCESSOR_EPOCH_ACCEPTS_ITS_OWN_CAPTURE");
 }
 void callback_queue_full() {
     prepare_inbound();
-    for (size_t i = 0; i < daik::REF_QUEUE_DEPTH; ++i) feed("room", room_payload.c_str());
-    feed("room", R"({"temperature":21,"time":1700000101,"enabled":true})");
-    require(daik::s_ref_dropped.load() == 1 && !daik::s_ref_status.has_value,
+    for (size_t i = 0; i < daik::CIRCULATION_QUEUE_DEPTH; ++i)
+        feed("circulation", circulation_payload.c_str());
+    feed("circulation", R"({"power":21,"time":1700000101})");
+    require(daik::s_inbound_dropped.load() == 1 && !daik::s_circulation_status.has_value,
             "QUEUE_FULL_CALLBACK_ONLY_COUNTS_DROP_WITHOUT_OWNER_STATUS_WRITE");
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.messages == daik::REF_QUEUE_DEPTH &&
-                daik::s_ref_status.temperature_c == 20 && sdk::queue.count == 0,
+    daik::service_circulation_frames(adapter::cfg);
+    require(daik::s_circulation_status.messages == daik::CIRCULATION_QUEUE_DEPTH &&
+                daik::s_circulation_status.power_w == 20 && sdk::queue.count == 0,
             "QUEUE_OVERFLOW_PRESERVES_QUEUED_EVIDENCE_AND_NORMAL_DRAIN");
 
     // Max-size frames fill the static 3,584 B SPSC ring without padding waste; exceeding the ring
-    // fails closed and advances s_ref_dropped before wrap-around drain restores full capacity.
-    std::string padded = R"({"temperature":22,"time":1700000102,"enabled":true,"pad":")";
-    padded.append(daik::REF_TEMP_PAYLOAD_MAX - padded.size() - 2, 'x');
+    // fails closed and advances s_inbound_dropped before wrap-around drain restores full capacity.
+    std::string padded = R"({"power":22,"time":1700000102,"pad":")";
+    padded.append(daik::CIRCULATION_PAYLOAD_MAX - padded.size() - 2, 'x');
     padded += "\"}";
-    require(padded.size() == daik::REF_TEMP_PAYLOAD_MAX, "PADDED_MAX_FRAME_FITS_BOUND");
-    for (int i = 0; i < 3; ++i) feed("room", padded.c_str());
-    require(sdk::queue.count == 3 && daik::s_ref_dropped.load() == 1,
+    require(padded.size() == daik::CIRCULATION_PAYLOAD_MAX, "PADDED_MAX_FRAME_FITS_BOUND");
+    for (int i = 0; i < 3; ++i) feed("circulation", padded.c_str());
+    require(sdk::queue.count == 3 && daik::s_inbound_dropped.load() == 1,
             "THREE_MAX_FRAMES_FIT_SPSC_RING");
-    feed("room", padded.c_str());
-    require(sdk::queue.count == 3 && daik::s_ref_dropped.load() == 2,
+    feed("circulation", padded.c_str());
+    require(sdk::queue.count == 3 && daik::s_inbound_dropped.load() == 2,
             "RING_FULL_DROPS_FOURTH_MAX_FRAME");
-    daik::service_reference_frames(adapter::cfg);
+    daik::service_circulation_frames(adapter::cfg);
     require(sdk::queue.count == 0 &&
-                daik::s_ref_ring_consumed.load() == daik::s_ref_ring_produced &&
-                daik::s_ref_status.temperature_c == 22,
+                daik::s_inbound_ring_consumed.load() == daik::s_inbound_ring_produced &&
+                daik::s_circulation_status.power_w == 22,
             "RING_DRAIN_RELEASES_ALL_CONSUMED_BYTES");
-    feed("room", R"({"temperature":24,"time":1700000103,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.messages == daik::REF_QUEUE_DEPTH + 4 &&
-                daik::s_ref_status.temperature_c == 24,
+    feed("circulation", R"({"power":24,"time":1700000103})");
+    daik::service_circulation_frames(adapter::cfg);
+    require(daik::s_circulation_status.messages == daik::CIRCULATION_QUEUE_DEPTH + 4 &&
+                daik::s_circulation_status.power_w == 24,
             "RING_WRAP_PRESERVES_SUBSEQUENT_FRAME");
 
     // Overlapping network-heap pause owners must keep pause/withdrawal armed until the final owner
@@ -2468,7 +1484,7 @@ void callback_queue_full() {
     require(daik::s_transport_pause_state.load() == 0,
             "FINAL_PAUSE_OWNER_RELEASES_PAUSE_AND_WITHDRAWAL");
 
-    // Preempted OTA acquisition between withdraw() and pause() must survive an exiting Weather
+    // Preempted OTA acquisition between withdraw() and pause() must survive an exiting pause
     // owner without losing either pause_requested or the armed withdrawal intent.
     daik::mqtt_transport_pause_for_network_heap();
     daik::mqtt_transport_withdraw_online_on_pause();
@@ -2491,29 +1507,21 @@ void callback_queue_full() {
 }
 void callback_timestamp_order() {
     prepare_inbound();
-    feed("room", room_payload.c_str());
-    daik::service_reference_frames(adapter::cfg);
-    feed("room", R"({"temperature":"invalid","time":1700000101})");
-    daik::service_reference_frames(adapter::cfg);
-    feed("room", R"({"temperature":21,"time":1700000099,"enabled":true})");
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_source_time.last_unix_s == 1700000100 &&
-                daik::s_ref_status.temperature_c == 20 &&
-                daik::s_ref_status.rejection_reason == daik::ReferenceRoomReason::BackwardTimestamp,
+    feed("circulation", circulation_payload.c_str());
+    daik::service_circulation_frames(adapter::cfg);
+    feed("circulation", R"({"power":"invalid","time":1700000101})");
+    daik::service_circulation_frames(adapter::cfg);
+    feed("circulation", R"({"power":21,"time":1700000099})");
+    daik::service_circulation_frames(adapter::cfg);
+    require(daik::s_circulation_source_time.last_unix_s == 1700000100 &&
+                daik::s_circulation_status.power_w == 20 &&
+                daik::s_circulation_status.error.find("backward") != std::string::npos,
             "PRODUCTION_INVALID_PAYLOAD_CANNOT_RESET_TIMESTAMP_HIGH_WATER");
-    adapter::cfg.ref_temp_time_path.clear();
-    daik::mqtt_reference_reconfigure();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    feed("room", R"({"temperature":20,"enabled":true})", true);
-    daik::service_reference_frames(adapter::cfg);
-    const auto status    = daik::reference_temperature_status(adapter::cfg);
-    const auto freshness = daik::reference_room_freshness(
-        false, status.has_value, status.retained, status.has_source_time, status.source_unix_s,
-        status.received_ms, 1700000100, sdk::ticks, adapter::cfg.ref_temp_max_age_s);
-    require(status.has_value && !status.has_source_time && status.source_unix_s == -1 &&
-                status.retained && !freshness.fresh &&
-                std::strcmp(freshness.reason, "retained_without_timestamp") == 0,
-            "RETAINED_WITHOUT_SOURCE_TIME_CANNOT_FABRICATE_FRESH_ROOM_EVIDENCE");
+    feed("circulation", R"({"power":22})", true);
+    daik::service_circulation_frames(adapter::cfg);
+    require(daik::s_circulation_status.power_w == 20 &&
+                daik::s_circulation_status.error.find("Timestamp path") != std::string::npos,
+            "RETAINED_WITHOUT_SOURCE_TIME_CANNOT_FABRICATE_FRESH_CIRCULATION_EVIDENCE");
 }
 void begin_probe(uint32_t generation, uint32_t max_age_s = 10) {
     auto& probe      = daik::s_circulation_probe;
@@ -2528,11 +1536,11 @@ void probe_capture_generation() {
     prepare_inbound();
     feed("circulation", R"({"power":50,"time":1700000100})");
     begin_probe(42);
-    daik::service_reference_frames(adapter::cfg);
+    daik::service_circulation_frames(adapter::cfg);
     require(daik::s_circulation_probe.active && !daik::s_circulation_probe.passed,
             "PRETEST_QUEUED_FRAME_CANNOT_PROVE_SUCCESSOR_TEST");
     feed("circulation", R"({"power":50,"time":1700000100})");
-    daik::service_reference_frames(adapter::cfg);
+    daik::service_circulation_frames(adapter::cfg);
     require(daik::mqtt_circulation_test_proof_valid(42, daik::s_circulation_probe.config),
             "CURRENT_TEST_CAPTURE_PROVES_EXACT_MAPPING");
     require(!daik::mqtt_circulation_test_proof_valid(0, daik::s_circulation_probe.config),
@@ -2540,14 +1548,14 @@ void probe_capture_generation() {
     begin_probe(43);
     feed("circulation", R"({"power":50,"time":1700000100})");
     begin_probe(44);
-    daik::service_reference_frames(adapter::cfg);
+    daik::service_circulation_frames(adapter::cfg);
     require(!daik::s_circulation_probe.passed, "REPLACED_TEST_CAPTURE_CANNOT_PROVE_SUCCESSOR");
 }
 void probe_proof_expiry() {
     prepare_inbound();
     begin_probe(42);
     feed("circulation", R"({"power":50,"time":1700000098})", true);
-    daik::service_reference_frames(adapter::cfg);
+    daik::service_circulation_frames(adapter::cfg);
     require(daik::mqtt_circulation_test_proof_valid(42, daik::s_circulation_probe.config),
             "FRESH_RETAINED_OBSERVATION_CAN_PROVE_CURRENT_MAPPING");
     sdk::ticks += 8000;
@@ -2563,36 +1571,37 @@ void probe_proof_expiry() {
     begin_probe(43);
     feed("circulation", R"({"power":50,"time":1700000109})");
     sdk::ticks += 11000;
-    daik::service_reference_frames(adapter::cfg);
+    daik::service_circulation_frames(adapter::cfg);
     require(!daik::s_circulation_probe.passed, "QUEUE_DELAY_CANNOT_REFRESH_STALE_PROBE_EVIDENCE");
 }
 using daik::MqttCleanupDeliveryOutcome;
 using daik::MqttRetirementOwner;
 
 void cleanup_fixture() {
+    daik::s_weather_cleanup_requested = false; // scoped fixture, bypasses initial migration
     // These delivery fixtures operate the encoded custom namespace after its identity boundary.
     // Preserved-node retained admission is exercised separately through real event callbacks.
     daik::s_discovery_owner_required = false;
     daik::s_discovery_owner_state    = daik::DiscoveryOwnerState::Encoded;
-    daik::s_client                   = &sdk::client;
-    daik::s_mtx                      = &sdk::mutex;
-    daik::s_connected                = true;
-    daik::s_client_running           = true;
-    daik::s_mqtt_client_epoch        = 17;
-    daik::s_connected_client_epoch   = 17;
-    daik::s_prefix                   = "homeassistant";
-    daik::s_node                     = "daikin_altherma_esp32_install";
-    daik::s_board                    = "daikin_abcdef";
-    daik::s_base                     = "daikin-altherma-esp32-install";
-    daik::s_avail                    = "daikin-altherma-esp32-install/availability";
-    daik::s_x10a                     = "daikin-altherma-esp32-install/x10a";
-    daik::s_weather                  = "daikin-altherma-esp32-install/weather/openmeteo/forecast";
-    daik::s_modbus                   = "daikin-altherma-esp32-install/modbus";
-    daik::s_env3                     = "daikin-altherma-esp32-install/env3";
-    daik::s_legacy_state             = "daikin-altherma-esp32-install/state";
-    daik::s_retired_modbus_status    = "daikin-altherma-esp32-install/modbus/status";
-    daik::s_retired_weather          = "daikin-altherma-esp32-install/weather/forecast";
-    daik::s_crash                    = "daikin-altherma-esp32-install/crash";
+    daik::s_client                 = &sdk::client;
+    daik::s_mtx                    = &sdk::mutex;
+    daik::s_connected              = true;
+    daik::s_client_running         = true;
+    daik::s_mqtt_client_epoch      = 17;
+    daik::s_connected_client_epoch = 17;
+    daik::s_prefix                 = "homeassistant";
+    daik::s_node                   = "daikin_altherma_esp32_install";
+    daik::s_board                  = "daikin_abcdef";
+    daik::s_base                   = "daikin-altherma-esp32-install";
+    daik::s_avail                  = "daikin-altherma-esp32-install/availability";
+    daik::s_x10a                   = "daikin-altherma-esp32-install/x10a";
+    daik::s_retired_forecast         = "daikin-altherma-esp32-install/weather/openmeteo/forecast";
+    daik::s_modbus                 = "daikin-altherma-esp32-install/modbus";
+    daik::s_env3                   = "daikin-altherma-esp32-install/env3";
+    daik::s_legacy_state           = "daikin-altherma-esp32-install/state";
+    daik::s_retired_modbus_status  = "daikin-altherma-esp32-install/modbus/status";
+    daik::s_retired_weather        = "daikin-altherma-esp32-install/weather/forecast";
+    daik::s_crash                  = "daikin-altherma-esp32-install/crash";
 }
 
 void cleanup_event(int                        id,
@@ -2955,8 +1964,8 @@ void discovery_guard_retry_abandon(bool stop) {
     reset_cleanup_trace();
     cleanup_witness::early_ack = true;
     for (int cycles = 0; cycles < 80; ++cycles) daik::service_requested_topic_cleanup(adapter::cfg);
-    require(accepted_count(daik::s_weather, "") == 1 && accepted_count(daik::s_modbus, "") == 1 &&
-                accepted_count(daik::s_env3, "") == 1 &&
+    require(accepted_count(daik::s_retired_forecast, "") == 1 &&
+                accepted_count(daik::s_modbus, "") == 1 && accepted_count(daik::s_env3, "") == 1 &&
                 !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Weather) &&
                 !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Modbus) &&
                 !daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Env3),
@@ -3060,12 +2069,11 @@ std::string discovery_owned_input_payload(const std::string& fields) {
 void discovery_guard_ingress_burst() {
     discovery_guard_fixture();
     adapter::clock_shift_s = 100; // source fixture time, independent of the preflight's short clock
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
     daik::service_circulation_subscription(adapter::cfg,
                                            daik::s_circulation_requested_epoch.load());
     const std::string owned = discovery_guard_config();
     for (int phase = 0; phase < 2; ++phase) {
-        const uint32_t drops_before = daik::s_ref_dropped.load();
+        const uint32_t drops_before = daik::s_inbound_dropped.load();
         for (int i = 0, input = 0; i < 159; ++i) {
             const std::string topic = daik::s_prefix + "/sensor/" + daik::s_node + "/fixture_" +
                                       std::to_string(i) + "/config";
@@ -3077,22 +2085,15 @@ void discovery_guard_ingress_burst() {
             sdk::fail_next_new = false;
             if (i == 10 || i == 60 || i == 100) {
                 const std::string time = std::to_string(1700000100 + phase * 3 + input);
-                const std::string room = "{\"temperature\":" + std::to_string(20 + input) +
-                                         ",\"time\":" + time + ",\"enabled\":true}";
                 const std::string power =
                     "{\"power\":" + std::to_string(40 + input * 10) + ",\"time\":" + time + '}';
-                feed("room", room.c_str());
                 feed("circulation", power.c_str());
                 ++input;
             }
         }
-        require(sdk::queue.count == 6 && daik::s_ref_dropped.load() == drops_before,
-                "DISCOVERY_159_CONFIG_BURST_NEVER_DISPLACES_SIX_INTERLEAVED_INPUTS");
-        daik::service_reference_frames(adapter::cfg);
-        require(daik::s_ref_status.messages == static_cast<uint32_t>((phase + 1) * 3) &&
-                    daik::s_ref_status.temperature_c == 22 && daik::s_ref_status.errors == 0 &&
-                    daik::s_ref_status.source_unix_s == 1700000102 + phase * 3,
-                "DISCOVERY_BURST_PRESERVES_ROOM_VALUE_AND_SOURCE_TIMESTAMP_ORDER");
+        require(sdk::queue.count == 3 && daik::s_inbound_dropped.load() == drops_before,
+                "DISCOVERY_159_CONFIG_BURST_NEVER_DISPLACES_THREE_INTERLEAVED_INPUTS");
+        daik::service_circulation_frames(adapter::cfg);
         require(daik::s_circulation_status.messages == static_cast<uint32_t>((phase + 1) * 3) &&
                     daik::s_circulation_status.power_w == 60 &&
                     daik::s_circulation_status.errors == 0 &&
@@ -3111,21 +2112,11 @@ void discovery_guard_ingress_exact() {
     discovery_guard_fixture();
     adapter::clock_shift_s                  = 100;
     const std::string                prefix = daik::s_prefix + "/sensor/" + daik::s_node + '/';
-    const std::array<std::string, 5> topics{prefix + "room/config", prefix + "target/config",
-                                            prefix + "clock/config", prefix + "circulation/config",
-                                            prefix + "probe/config"};
-    const std::array<std::string, 5> payloads{
-        discovery_owned_input_payload("\"temperature\":22.5,\"enabled\":true"),
-        discovery_owned_input_payload("\"target\":24"),
-        discovery_owned_input_payload("\"time\":1700000100"),
+    const std::array<std::string, 2> topics{prefix + "circulation/config", prefix + "probe/config"};
+    const std::array<std::string, 2> payloads{
         discovery_owned_input_payload("\"power\":55,\"time\":1700000100"),
         discovery_owned_input_payload("\"power\":60,\"time\":1700000100")};
-    adapter::cfg.ref_temp_topic                 = topics[0];
-    adapter::cfg.ref_temp_fixed_setpoint_tenths = 0;
-    adapter::cfg.ref_temp_setpoint_topic        = topics[1];
-    adapter::cfg.ref_temp_setpoint_path         = "target";
-    adapter::cfg.ref_temp_time_topic            = topics[2];
-    adapter::cfg.circulation_topic              = topics[3];
+    adapter::cfg.circulation_topic              = topics[0];
     sdk::on_subscribe                           = [&topics, &payloads](const char* topic, int id) {
         if (id < 0) return;
         for (size_t i = 0; i < topics.size(); ++i) {
@@ -3138,26 +2129,19 @@ void discovery_guard_ingress_exact() {
             sdk::fail_next_new = false;
         }
     };
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
-    require(sdk::queue.count == 3, "DISCOVERY_EXACT_SAVED_REFERENCE_RECEIVES_EARLY_RETAINED_DATA");
     daik::service_circulation_subscription(adapter::cfg,
                                            daik::s_circulation_requested_epoch.load());
-    require(sdk::queue.count == 4,
+    require(sdk::queue.count == 1,
             "DISCOVERY_EXACT_SAVED_CIRCULATION_RECEIVES_EARLY_RETAINED_DATA");
     begin_probe(42);
-    daik::s_circulation_probe.config.topic = topics[4];
+    daik::s_circulation_probe.config.topic = topics[1];
     daik::service_circulation_probe_subscription(adapter::cfg);
-    require(sdk::queue.count == 5, "DISCOVERY_EXACT_ACTIVE_PROBE_RECEIVES_EARLY_RETAINED_DATA");
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.has_value && daik::s_ref_status.temperature_c == 22.5 &&
-                daik::s_ref_status.has_setpoint && daik::s_ref_status.setpoint_c == 24 &&
-                daik::s_ref_status.has_source_time &&
-                daik::s_ref_status.source_unix_s == 1700000100 && daik::s_ref_status.messages == 3,
-            "DISCOVERY_EXACT_ROOM_TARGET_AND_TIME_TOPICS_REACH_THE_REAL_AGGREGATOR");
+    require(sdk::queue.count == 2, "DISCOVERY_EXACT_ACTIVE_PROBE_RECEIVES_EARLY_RETAINED_DATA");
+    daik::service_circulation_frames(adapter::cfg);
     require(daik::s_circulation_status.has_value && daik::s_circulation_status.power_w == 55 &&
                 daik::s_circulation_status.messages == 1 && daik::s_circulation_probe.passed,
             "DISCOVERY_EXACT_SAVED_WITNESS_AND_PROBE_KEEP_DISTINCT_SOURCE_OWNERS");
-    require(daik::s_ref_dropped.load() == 0 && sdk::queue.count == 0 && sdk::locks == 0 &&
+    require(daik::s_inbound_dropped.load() == 0 && sdk::queue.count == 0 && sdk::locks == 0 &&
                 sdk::takes == sdk::gives,
             "DISCOVERY_EXPLICIT_INPUT_LIFECYCLE_RELEASES_QUEUE_AND_RAII_LOCK");
 }
@@ -3165,27 +2149,30 @@ void discovery_guard_ingress_exact() {
 void discovery_guard_ingress_epoch() {
     discovery_guard_fixture();
     adapter::clock_shift_s  = 100;
-    const std::string topic = daik::s_prefix + "/sensor/" + daik::s_node + "/room/config";
-    const std::string payload =
-        discovery_owned_input_payload("\"temperature\":20,\"time\":1700000100,\"enabled\":true");
-    adapter::cfg.ref_temp_topic = topic;
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    const std::string topic   = daik::s_prefix + "/sensor/" + daik::s_node + "/circulation/config";
+    const std::string payload = discovery_owned_input_payload("\"power\":20,\"time\":1700000100");
+    adapter::cfg.circulation_topic = topic;
+    daik::service_circulation_subscription(adapter::cfg,
+                                           daik::s_circulation_requested_epoch.load());
     feed(topic.c_str(), payload.c_str());
     require(sdk::queue.count == 1, "DISCOVERY_APPLIED_EXACT_INPUT_IS_CAPTURED");
-    daik::service_reference_frames(adapter::cfg);
-    daik::mqtt_reference_reconfigure();
+    daik::service_circulation_frames(adapter::cfg);
+    daik::mqtt_circulation_reconfigure(true);
     feed(topic.c_str(), payload.c_str());
-    require(sdk::queue.count == 0 && !daik::s_ref_status.has_value,
+    require(sdk::queue.count == 0 && !daik::s_circulation_status.has_value,
             "DISCOVERY_WITHDRAWN_INPUT_EPOCH_CANNOT_CONSUME_QUEUE_OR_RESTORE_OLD_VALUE");
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    daik::service_circulation_subscription(adapter::cfg,
+                                           daik::s_circulation_requested_epoch.load());
     feed(topic.c_str(), payload.c_str());
-    daik::service_reference_frames(adapter::cfg);
-    require(daik::s_ref_status.has_value, "DISCOVERY_CURRENT_SUCCESSOR_BINDING_RECEIVES_OWN_INPUT");
+    daik::service_circulation_frames(adapter::cfg);
+    require(daik::s_circulation_status.has_value,
+            "DISCOVERY_CURRENT_SUCCESSOR_BINDING_RECEIVES_OWN_INPUT");
     adapter::cfg.diagnostics_enabled = false;
-    daik::mqtt_reference_reconfigure();
-    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    daik::mqtt_circulation_reconfigure(true);
+    daik::service_circulation_subscription(adapter::cfg,
+                                           daik::s_circulation_requested_epoch.load());
     feed(topic.c_str(), payload.c_str());
-    require(sdk::queue.count == 0 && !daik::s_ref_status.has_value,
+    require(sdk::queue.count == 0 && !daik::s_circulation_status.has_value,
             "DISCOVERY_DISABLED_SAVED_MAPPING_IS_NOT_INGRESS_AUTHORITY");
 }
 
@@ -3211,8 +2198,7 @@ void discovery_guard_crash_task(bool notable) {
     };
     sdk::on_delay = [notable](TickType_t delay) {
         check_cycle(delay);
-        if (sdk::delays == 1)
-            feed("room", R"({"temperature":20,"time":1700000100,"enabled":true})");
+        if (sdk::delays == 1) feed("circulation", R"({"power":20,"time":1700000100})");
         if (sdk::delays < 46) return;
         require(daik::s_discovery_owner_state == daik::DiscoveryOwnerState::Blocked &&
                     !daik::discovery_mutation_allowed(),
@@ -3227,7 +2213,7 @@ void discovery_guard_crash_task(bool notable) {
                         !daik::s_crash_probe_active && !daik::s_retirement_delivery.busy(),
                     "DISCOVERY_BLOCKED_NORMAL_BOOT_STILL_ACK_CLEANS_OLD_RAW_CRASH");
         require(last_accepted(daik::s_heartbeat) && last_accepted(daik::s_avail) &&
-                    daik::s_ref_status.has_value && daik::s_ref_status.subscribed,
+                    daik::s_circulation_status.has_value && daik::s_circulation_status.subscribed,
                 "DISCOVERY_BLOCKED_TASK_KEEP_HEARTBEAT_AVAILABILITY_AND_INBOUND_LIVE");
         for (int i = 0; i < sdk::publish_calls; ++i)
             require(!daik::mqtt_discovery_namespace_topic(sdk::published[i].topic.data(),
@@ -3253,7 +2239,6 @@ void independent_sources_fixture() {
     adapter::cfg.env3_enabled    = true;
     adapter::cfg.board_user_set  = true;
     adapter::cfg.board_preset_id = daik::BoardPresetId::M5StackAtomS3Lite;
-    adapter::cfg.weather_enabled = true;
     adapter::modbus_enabled = adapter::modbus_live = true;
     adapter::modbus_generation                     = 8;
     daik::CachedValue row;
@@ -3266,18 +2251,12 @@ void independent_sources_fixture() {
     adapter::env.humidity_pct                   = 43;
     adapter::env.pressure_hpa                   = 1000;
     adapter::env.samples                        = 7;
-    adapter::weather.configured = adapter::weather.available = adapter::weather.has_value = true;
-    adapter::weather.outdoor_mean_2h_c                                                    = 7.25;
-    adapter::weather.solar_energy_2h_wh_m2                                                = 150.5;
-    adapter::weather.issued_unix_s  = 1700000060;
-    adapter::weather.fetched_unix_s = adapter::weather.decision_unix_s = 1700000100;
-    adapter::weather.state                                             = "ready";
     adapter::live_crash.reason   = static_cast<uint32_t>(daik::CrashReason::PANIC);
     adapter::live_crash.coredump = true;
     cleanup_witness::early_ack   = true;
     initial_config();
     // Inbound observations are independent of the X10A owner too.
-    feed("room", R"({"temperature":20,"time":1700000100,"enabled":true})");
+    feed("circulation", R"({"power":20,"time":1700000100})");
 }
 void require_independent_fresh() {
     const auto* mb  = last_accepted(daik::s_modbus);
@@ -3286,11 +2265,14 @@ void require_independent_fresh() {
             "NEVER_SEEN_X10A_PUBLISHES_TYPED_HOMEHUB_STATE");
     require(env && std::strstr(env->payload.data(), "\"temperature_c\":17.25") && env->retain == 1,
             "NEVER_SEEN_X10A_PUBLISHES_FRESH_ENV_STATE");
-    require(last_accepted(daik::s_weather) && last_accepted(daik::s_heartbeat) &&
-                last_accepted(daik::s_crash),
-            "NEVER_SEEN_X10A_PUBLISHES_WEATHER_HEARTBEAT_CRASH");
-    require(daik::s_ref_status.has_value && daik::s_ref_status.subscribed,
-            "NEVER_SEEN_X10A_SERVICES_REFERENCE_SUBSCRIPTION");
+    require(last_accepted(daik::s_heartbeat) && last_accepted(daik::s_crash),
+            "NEVER_SEEN_X10A_PUBLISHES_HEARTBEAT_AND_CRASH");
+    const auto* forecast = last_accepted(daik::s_retired_forecast);
+    require(forecast && forecast->length == 0 && forecast->retain == 1 && forecast->qos == 1 &&
+                forecast->enqueued,
+            "STARTUP_RETRACTS_RETIRED_FORECAST_WITH_TRACKED_TOMBSTONE");
+    require(daik::s_circulation_status.has_value && daik::s_circulation_status.subscribed,
+            "NEVER_SEEN_X10A_SERVICES_CIRCULATION_SUBSCRIPTION");
 }
 void transport_source_lifecycle() {
     independent_sources_fixture();
@@ -4537,11 +3519,7 @@ int main(int argc, char** argv) {
     try {
         cJSON_Hooks hooks{json_witness::allocate, json_witness::release};
         cJSON_InitHooks(&hooks);
-        if (std::strcmp(scenario, "room_history_observation") == 0)
-            room_history_observation();
-        else if (std::strcmp(scenario, "room_history_scope") == 0)
-            room_history_scope();
-        else if (std::strcmp(scenario, "discovery_guard_retry_deleted") == 0)
+        if (std::strcmp(scenario, "discovery_guard_retry_deleted") == 0)
             discovery_guard_retry_abandon(false);
         else if (std::strcmp(scenario, "discovery_guard_retry_stop") == 0)
             discovery_guard_retry_abandon(true);
@@ -4639,8 +3617,6 @@ int main(int argc, char** argv) {
             startup_preserves_concurrent_pause();
         else if (std::strcmp(scenario, "event_registration_failure") == 0)
             event_registration_failure();
-        else if (std::strcmp(scenario, "ref_oom_recovery") == 0)
-            ref_oom_recovery();
         else if (std::strcmp(scenario, "circulation_oom_recovery") == 0)
             circulation_oom_recovery();
         else if (std::strcmp(scenario, "failure_episodes") == 0)
@@ -4659,28 +3635,10 @@ int main(int argc, char** argv) {
             circulation_saved_reconnect_oom();
         else if (std::strcmp(scenario, "circulation_saved_replacement_failure") == 0)
             circulation_saved_replacement_failure();
-        else if (std::strcmp(scenario, "reference_saved_postsubscribe_oom") == 0)
-            reference_saved_postsubscribe_oom(false);
-        else if (std::strcmp(scenario, "reference_saved_final_owner_oom") == 0)
-            reference_saved_postsubscribe_oom(true);
-        else if (std::strcmp(scenario, "reference_saved_partial_retry") == 0)
-            reference_saved_partial_retry();
-        else if (std::strcmp(scenario, "reference_saved_prior_owner_cleanup") == 0)
-            reference_saved_prior_owner_failure(false);
-        else if (std::strcmp(scenario, "reference_saved_prior_owner_retry") == 0)
-            reference_saved_prior_owner_failure(true);
-        else if (std::strcmp(scenario, "reference_saved_reconnect_oom") == 0)
-            reference_saved_reconnect_oom();
-        else if (std::strcmp(scenario, "reference_saved_replacement_partial_failure") == 0)
-            reference_saved_replacement_partial_failure();
         else if (std::strcmp(scenario, "circulation_unsubscribe_rejection") == 0)
             circulation_unsubscribe_rejection(false);
         else if (std::strcmp(scenario, "circulation_replace_unsubscribe_rejection") == 0)
             circulation_unsubscribe_rejection(true);
-        else if (std::strcmp(scenario, "reference_unsubscribe_rejection") == 0)
-            reference_unsubscribe_rejection(false);
-        else if (std::strcmp(scenario, "reference_replace_unsubscribe_rejection") == 0)
-            reference_unsubscribe_rejection(true);
         else if (std::strcmp(scenario, "probe_unsubscribe_rejection") == 0)
             circulation_probe_unsubscribe_rejection(false);
         else if (std::strcmp(scenario, "probe_disabled_unsubscribe_rejection") == 0)
@@ -4699,26 +3657,6 @@ int main(int argc, char** argv) {
             sdk_event_stack_owner();
         else if (std::strcmp(scenario, "outgoing_heartbeat") == 0)
             outgoing_heartbeat();
-        else if (std::strcmp(scenario, "outgoing_weather") == 0)
-            outgoing_weather();
-        else if (std::strcmp(scenario, "outgoing_curve") == 0)
-            outgoing_curve();
-        else if (std::strcmp(scenario, "curve_space_route_gate") == 0)
-            curve_space_route_gate();
-        else if (std::strcmp(scenario, "curve_evaluation_age") == 0)
-            curve_evaluation_age();
-        else if (std::strcmp(scenario, "curve_consent_boundary") == 0)
-            curve_consent_boundary();
-        else if (std::strcmp(scenario, "curve_room_source_boundary") == 0)
-            curve_room_source_boundary();
-        else if (std::strcmp(scenario, "curve_boundary_during_evaluation") == 0)
-            curve_boundary_during_evaluation();
-        else if (std::strcmp(scenario, "curve_homehub_boundary") == 0)
-            curve_homehub_boundary();
-        else if (std::strcmp(scenario, "curve_homehub_boundary_during_evaluation") == 0)
-            curve_homehub_boundary_during_evaluation();
-        else if (std::strcmp(scenario, "curve_bins_scopes") == 0)
-            curve_bins_scopes();
         else if (std::strcmp(scenario, "scalar_snapshot_helpers") == 0)
             scalar_snapshot_helpers();
         else if (std::strcmp(scenario, "real_json_consumers") == 0)

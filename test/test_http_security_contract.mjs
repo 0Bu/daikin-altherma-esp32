@@ -72,11 +72,9 @@ assert.match(activeModels, /json_append_quoted\(j, row\.label\)/,
 assert.match(status, /models_active_requested\(req\)[\s\S]*h_active_model_values\(req\)/,
   "GET /models?active=1 must dispatch through the existing trusted-LAN model route");
 
-// All seven user-entered JSON selectors must use the redacting writer. The redaction audit covers
+// All user-entered JSON selectors must use the redacting writer. The redaction audit covers
 // count/list drift and never-wrapped new Config strings; this pins the current high-risk set by name.
 for (const member of [
-  "ref_temp_path", "ref_temp_setpoint_path", "ref_temp_time_path",
-  "ref_temp_enabled_path", "ref_temp_hvac_mode_path",
   "circulation_power_path", "circulation_time_path",
 ]) {
   assert.match(status, new RegExp(`jstr_r\\(c\\.${member}, redact\\)`),

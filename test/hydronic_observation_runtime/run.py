@@ -43,7 +43,7 @@ hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdige
 (out / "inputs.json").write_text(json.dumps(hashes, indent=2) + "\n")
 (out / "compiler.txt").write_text(subprocess.run([*compiler, "--version"], text=True,
                                                capture_output=True, timeout=30).stdout)
-cases = ["codec", "settling_durations", "seam_and_revisions", "restore_and_identity", "reset_and_claims",
+cases = ["codec", "minimum_windows", "settling_durations", "seam_and_revisions", "restore_and_identity", "reset_and_claims",
          "overlapping_archive_fragment", "overlap_shutdown_drain", "disjoint_earlier_archive_fragment",
          "shared_duration_archive_report", "shared_duration_archive_append", "sample_only_archive_edge",
          "sample_only_newer_archive_edge", "between_archived_hours", "future_archive_due",

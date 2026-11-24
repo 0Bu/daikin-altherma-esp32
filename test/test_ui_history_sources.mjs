@@ -61,10 +61,10 @@ assert.match(firmwareHistory, /void history_record\([^)]*\) \{\s*if \(!s_mtx\) r
 assert.match(firmwareHistory,
   /void history_record_circulation\(\)[\s\S]*advance_raster_locked\(now_us, bucket\);[\s\S]*fold_circulation_locked\(circulation\);/,
   "the MQTT witness must own a lightweight recorder that advances the common raster without X10A");
-const referenceFramesAt = mqtt.indexOf("service_reference_frames(ref_config);");
-const circulationHistoryAt = mqtt.indexOf("history_record_circulation();", referenceFramesAt);
+const circulationFramesAt = mqtt.indexOf("service_circulation_frames(cycle_config);");
+const circulationHistoryAt = mqtt.indexOf("history_record_circulation();", circulationFramesAt);
 const ordinaryPublishAt = mqtt.indexOf("if (gate.publish_cycle)", circulationHistoryAt);
-assert.ok(referenceFramesAt >= 0 && circulationHistoryAt > referenceFramesAt &&
+assert.ok(circulationFramesAt >= 0 && circulationHistoryAt > circulationFramesAt &&
   ordinaryPublishAt > circulationHistoryAt,
 "circulation history must tick on the independent subscriber path before X10A state publication");
 
@@ -234,7 +234,7 @@ vm.createContext(context);
 const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
-  "\nthis.__api = { t, hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, modbusHistoryHtml, env3HistHtml, scrubText, histReadout, histVisibleSeries," +
+  "\nthis.__api = { t, hasHist, hasModbusHist, histCacheKey, historyView, histHtml, modbusHistoryHtml, env3HistHtml, scrubText, histReadout, histVisibleSeries," +
   " histTipsHtml, scrubMove, scrubIndex, histPinToggle, histPinIndex, expireLiveHistoryPins, expiredHistSlots, readHistoryJson, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
@@ -817,80 +817,20 @@ assert.match(style,
   /\.vhist-source i\s*\{[^}]*border-top:\s*2px solid var\(--vhist-colour\)[^}]*color-mix\(/,
   "numeric legend samples must repeat the light-area/dark-upper-edge grammar");
 
-// The configured MQTT room instrument contributes its own observations, not an X10A replacement.
-// All three independent rasters share axes; an MQTT gap cannot borrow a device value at that time.
-const beforeRoomHistory = new Map(S.hist);
-const beforeRoomSource = S.status.reference_temperature;
-const beforeRoomRows = S.status.history.room_rows;
-S.status.reference_temperature = { configured: true, name: "Meross <img src=x onerror=alert(1)>",
-  topic: "fixture/room-a", temperature_path: "temperature", fresh: true, temperature_valid: true,
-  control_eligible: false, reason: "disabled" };
-S.status.history.room_rows = [{ id: "room_temp", label: S.status.reference_temperature.name }];
+// Genuine X10A and HomeHub room histories are still aligned and independently selectable.
 S.status.history.rows.push({ id: "room_temp", label: "Indoor ambient temp. (R1T)" });
 S.status.history.modbus_rows.push({ id: "room_temp", label: "Room temperature" });
 S.hist.set("room_temp", { gen: 1, dt: 300, unit: "°C", b0: 100, v: [200, 200, 200] });
 S.hist.set("modbus:room_temp", { gen: 1, dt: 300, unit: "°C", b0: 100, v: [205, 205, 205] });
-S.hist.set("room:room_temp", { gen: 1, dt: 300, unit: "°C", b0: 100, v: [235, null, 236] });
 const roomView = h.historyView("room_temp");
-assert.equal(roomView.series.length, 3);
-assert.equal(roomView.series[2].source, "room");
-assert.deepEqual(Array.from(roomView.series[2].v), [235, null, 236]);
-assert.match(h.scrubText(roomView, 0), /Meross .* · MQTT 23,5 °C/);
-assert.equal(h.scrubText(roomView, 1, false), "X10A 20,0 °C\nModbus 20,5 °C",
-  "a missing MQTT sample is omitted from the tooltip rather than printing missing prose");
-const roomHtml = h.histHtml("room_temp", "°C", "Raumtemperatur");
-assert.match(roomHtml, /20,0 – 23,6 °C/);
-assert.match(roomHtml, /vhist-source room/);
-assert.match(roomHtml, /Meross &lt;img src=x onerror=alert\(1\)&gt; · MQTT/);
-assert.doesNotMatch(roomHtml, /<img/);
-assert.match(roomHtml, /vhist-pt room/);
-assert.match(roomHtml, /vhist-now room/);
-assert.match(roomHtml, /vhist-mark vhist-live room/);
-assert.doesNotMatch(roomHtml, /Lücke|vhist-gap|vhist-idle/,
-  "the lower time axis must not display gap or resting explanations");
-{
-  const x = S.hist.get("room_temp"), mb = S.hist.get("modbus:room_temp");
-  const mqtt = S.hist.get("room:room_temp");
-  S.hist.set("modbus:room_temp", { ...mb, b0: null, t0: 1768720150 });
-  S.hist.set("room:room_temp", { err: true, v: [] });
-  const splitRoom = h.histHtml("room_temp", "°C", "Raumtemperatur");
-  assert.match(splitRoom, /data-source="x10a"/);
-  assert.match(splitRoom, /data-source="modbus"/);
-  assert.match(splitRoom, /MQTT · Verlauf nicht verfügbar/,
-    "a third failed instrument is still named below the independent charts");
-  S.hist.set("room_temp", x);
-  S.hist.set("modbus:room_temp", mb);
-  S.hist.set("room:room_temp", mqtt);
-}
-for (const cls of ["line", "area", "pt", "mark"])
-  assert.match(style, new RegExp(`\\.vhist-${cls}\\.room`), `${cls} must use the independent room colour`);
+assert.deepEqual(Array.from(roomView.series, (series) => series.source), ["x10a", "modbus"]);
+assert.equal(h.scrubText(roomView, 1, false), "X10A 20,0 °C\nModbus 20,5 °C");
 S.status.history.rows = S.status.history.rows.filter((r) => r.id !== "room_temp");
 S.status.history.modbus_rows = S.status.history.modbus_rows.filter((r) => r.id !== "room_temp");
-assert.equal(S.hist.has("room_temp"), true);
-assert.equal(S.hist.has("modbus:room_temp"), true);
-assert.deepEqual(Array.from(h.historyView("room_temp").series, (s) => s.source), ["room"],
-  "withdrawn source rows cannot revive cached X10A or HomeHub curves beside the independent room source");
-const roomOnlyHtml = h.histHtml("room_temp", "°C", "Raumtemperatur");
-assert.match(roomOnlyHtml, /data-source="room"/);
-assert.match(roomOnlyHtml, /vhist-source room/,
-  "an MQTT-only history must still name its physical source");
-assert.match(h.scrubText(h.historyView("room_temp"), 2), /23,6 °C$/);
-assert.doesNotMatch(h.scrubText(h.historyView("room_temp"), 2), /Meross/);
-h.histPinToggle("room_temp", 2);
-assert.match(h.histHtml("room_temp", "°C", "Raumtemperatur"), /vhist-mark vhist-pinned room/);
-S.histPin.delete("room_temp");
-S.hist.delete("room:room_temp");
-fetchedUrls = [];
-await h.ensureHistPair("room_temp");
-assert.deepEqual(fetchedUrls, ["/history?row=room_temp&source=room"],
-  "the independent source must fetch without an X10A or HomeHub room series");
-S.status.history.room_rows = [];
 assert.equal(h.histHtml("room_temp", "°C", "Raumtemperatur"), "",
-  "an unoffered room source cannot keep displaying its cached history");
-S.status.history.room_rows = beforeRoomRows;
-S.status.reference_temperature = beforeRoomSource;
-h.syncHistSources();
-S.hist = beforeRoomHistory;
+  "withdrawn room source rows cannot revive cached histories");
+S.hist.delete("room_temp");
+S.hist.delete("modbus:room_temp");
 
 // A derived curve keeps the UNION of its input rasters. Before this contract, taking the shortest
 // input collapsed an 11-hour chart to 1 or 8 hours after one register appeared/reset later.
@@ -1850,47 +1790,6 @@ for (const value of [410, 390]) {
 await currentDerived;
 assert.deepEqual(Array.from(S.hist.get("dt").v), [20], "the successor must derive only its own inputs");
 
-// MQTT room mapping and broker identity own the lifetime independently of X10A and HomeHub.
-S.status.history.room_rows = [{ id: "room_temp", label: "Example room" }];
-S.status.reference_temperature = { configured: true, name: "Example room", topic: "fixture/room-a",
-  temperature_path: "temperature", timestamp_topic: "fixture/time", timestamp_path: "time" };
-S.status.mqtt = { configured: true, broker: "mqtt://broker-a.invalid" };
-h.syncHistSources();
-S.hist.set("room:room_temp", { gen: 1, dt: 300, unit: "°C", b0: 100, v: [236] });
-S.histPin.set("room_temp", { i: 0, gen: 1 });
-S.status.reference_temperature.fresh = false;
-h.syncHistSources();
-assert.equal(S.hist.has("room:room_temp"), true,
-  "a transient stale sample cannot erase already measured history");
-S.status.reference_temperature.name = "Renamed room";
-S.status.history.room_rows[0].label = "Renamed room";
-h.syncHistSources();
-assert.equal(S.hist.has("room:room_temp"), true, "renaming does not change the measuring instrument");
-assert.match(h.histHtml("room_temp", "°C", "Raumtemperatur"), /Renamed room · MQTT/);
-S.status.reference_temperature.topic = "fixture/room-b";
-h.syncHistSources();
-assert.equal(S.hist.size, 0);
-assert.equal(S.histPin.size, 0, "a replaced MQTT instrument retires its old cursor");
-S.status.reference_temperature.topic = "fixture/room-a";
-h.syncHistSources();
-const oldRoom = h.ensureHist("room_temp", "room");
-const retiredRoom = pendingHistory.shift();
-S.status.mqtt.broker = "mqtt://broker-b.invalid"; h.syncHistSources();
-S.status.mqtt.broker = "mqtt://broker-a.invalid"; h.syncHistSources();
-const newRoom = h.ensureHist("room_temp", "room");
-finishHistory(retiredRoom, [200]);
-await oldRoom;
-assert.equal(S.hist.has("room:room_temp"), false, "late MQTT history cannot revive its old broker");
-assert.equal(S.histBusy.has("room:room_temp"), true, "old completion cannot release the new MQTT lease");
-finishHistory(pendingHistory.shift(), [237]);
-await newRoom;
-assert.deepEqual(Array.from(S.hist.get("room:room_temp").v), [237]);
-S.status.history.room_rows = [];
-S.status.reference_temperature.configured = false;
-h.syncHistSources();
-assert.equal(S.hist.size, 0, "deleting a room mapping retires its cached readings");
-assert.equal(h.histHtml("room_temp", "°C", "Raumtemperatur"), "");
-
 // Floating tooltips omit reserved shape scans; rendering a chart or pinned readout still scans
 // auxiliary phases at most once per view, and refreshed views update phase evidence cleanly.
 S.status.history = { rows: ["dhw_tank", "smart_grid_mode", "bsh_state"].map(id => ({id, label:id})),
@@ -2309,4 +2208,4 @@ try {
   S._modbus = prevModbus;
 }
 
-console.log("UI history sources: X10A, Modbus and MQTT room rings align, gap, render and fetch independently");
+console.log("UI history sources: X10A, Modbus and ENV III rings align, gap, render and fetch independently");

@@ -45,7 +45,7 @@ function replaceOnce(text, before, after, name) {
 try {
   const baseline = execute(compile(sourcePath, "production"), []);
   assert.equal(baseline.status, 0, `production OTA cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=88\b/);
+  assert.match(baseline.stdout, /PASS total=87\b/);
   console.log(baseline.stdout.trim());
 
   const mutations = [
@@ -251,7 +251,7 @@ try {
       before: "= provisioning_ap_active(),",
       after: "= (provisioning_ap_active(), false),",
     },
-    ...["poll", "mqtt", "mqtt_transport", "modbus", "syslog", "weather"].map((owner, index) => ({
+    ...["poll", "mqtt", "mqtt_transport", "modbus", "syslog"].map((owner, index) => ({
       name: `owner-ack-${owner}`, scenario: `quiesce_${index + 1}`,
       before: `if (!wait_for_${owner}_quiesce()) {`,
       after: `if ((wait_for_${owner}_quiesce(), false)) {`,
@@ -303,7 +303,7 @@ try {
       `${mutation.name}: only the specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production OTA runtime: 88 cases, ${mutations.length} negative controls; source sha256=`
+  console.log(`production OTA runtime: 87 cases, ${mutations.length} negative controls; source sha256=`
     + createHash("sha256").update(source).digest("hex"));
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });

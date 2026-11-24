@@ -15,10 +15,8 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# CPU clock: the S3 maximum instead of the SDK's 160 MHz default. HTTPS certificate-chain checks run
-# in software (no ECC accelerator), and Weather's TLS phase holds /values and the X10A/MQTT/Modbus
-# quiesce for its whole duration; that phase shrinks by about the clock ratio. Power management is
-# not enabled, so this is the fixed clock.
+# Run at the S3 maximum of 240 MHz for software TLS certificate verification. Power management is
+# disabled, so the CPU uses this fixed clock.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # Console over native USB-Serial/JTAG — present on esp32s3 (the XIAO
@@ -50,7 +48,7 @@ CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
 # Every received frame is copied into a dynamic RX buffer that stays allocated until lwIP's consumer
 # frees the pbuf (LWIP_L2_TO_L3_COPY is off); the bench driver used 1,700 bytes per buffer. With the
-# upstream mDNS queue of 16 and cap of 32, a bench Weather TLS handshake held up to 17 of them
+# upstream mDNS queue of 16 and cap of 32, a legacy bench TLS handshake held up to 17 of them
 # (28.2 KiB), almost all mDNS packets queued behind the starved mDNS task (see
 # CONFIG_MDNS_ACTION_QUEUE_LEN). The cap is that queue plus one full-size TCP receive window
 # (CONFIG_LWIP_TCP_WND_DEFAULT / CONFIG_LWIP_TCP_MSS = 8 segments) and at least the static RX count,
@@ -99,15 +97,14 @@ CONFIG_LWIP_DHCPS_STATIC_ENTRIES=n
 # per-socket buffers on a device whose contiguous heap is already the binding resource.
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=5760
 CONFIG_LWIP_TCP_WND_DEFAULT=11520
-# IPv4-only LAN networking: HTTP, Modbus TCP, syslog, SNTP, OTA, weather, and MQTT use AF_INET
-# exclusively; drop unused lwIP IPv6/ND6/MLD6/ICMP6 paths.
+
+# Disable IPv6: all firmware networking paths (HTTP server/client, MQTT, HomeHub Modbus, syslog,
+# SNTP and OTA) use IPv4 (AF_INET), and espressif/mdns builds IPv4-only cleanly under
+# #ifdef CONFIG_LWIP_IPV6, recovering flash headroom without affecting runtime features.
 CONFIG_LWIP_IPV6=n
-# Outgoing UDP (DHCP, DNS, mDNS, SNTP, syslog, ICMP) stays well below the 1500 B MTU and
-# IPv4 reassembly is already disabled; omit outgoing IPv4 packet fragmentation.
-CONFIG_LWIP_IP4_FRAG=n
 
 # Stack sizes — a comfortable main task stack for NVS + HTTP + the poll engine.
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=7168
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 
 # Catch a stack overflow AT THE FIRST WRITE past the limit, with a hardware watchpoint, instead of
 # at the next context switch. IDF's default is the CANARY check, and v1.0.12 is exactly the failure
@@ -126,9 +123,8 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_TAG_LEVEL_IMPL_NONE=y
 # Application never calls esp_log_level_set() at runtime; omit dynamic log-level lookup tables.
 CONFIG_LOG_DYNAMIC_LEVEL_CONTROL=n
-# No filesystem directories or /dev/null: certs/keys use CA bundle and NVS, so MBEDTLS_FS_IO is also omitted.
+# No filesystem directories: certs/keys use CA bundle and NVS, so MBEDTLS_FS_IO is also omitted.
 CONFIG_VFS_SUPPORT_DIR=n
-CONFIG_VFS_INITIALIZE_DEV_NULL=n
 CONFIG_ESP_PHY_ENABLE_VERSION_PRINT=n
 
 # WebSockets support: OFF, and stated explicitly rather than left to the Kconfig default, because
@@ -149,7 +145,7 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # Drop code paths this firmware never uses.
 # mbedTLS human-readable error-string tables — we only log numeric TLS codes (MQTTS/OTA). ~6 KB.
 CONFIG_MBEDTLS_ERROR_STRINGS=n
-# TLS client only: OTA, Weather and optional MQTTS connect out; the HTTP service is plain
+# TLS client only: OTA and optional MQTTS connect out. The HTTP service is plain
 # trusted-LAN HTTP and an HTTPS server is not adopted (ESP_IDF_MATRIX.md N07). Without the server
 # role mbedTLS drops its server handshake state machine.
 CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
@@ -165,7 +161,6 @@ CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS=n
 # size (1920.0 / 1948.0 KiB policy cap, 28.0 KiB policy headroom; 60 KiB free in 0x1f0000 after sig).
 CONFIG_MBEDTLS_AES_FEWER_TABLES=y
 CONFIG_MBEDTLS_CIPHER_MODE_CFB=n
-CONFIG_MBEDTLS_CIPHER_MODE_CTR=n
 CONFIG_MBEDTLS_CIPHER_MODE_OFB=n
 CONFIG_MBEDTLS_CIPHER_MODE_XTS=n
 # Omit unused X.509 debug info tables (`PK_WRITE_C` and `SSL_ALPN` remain required by IDF 6.1.1 wpa_supplicant and esp_http_client).
@@ -186,35 +181,17 @@ CONFIG_MBEDTLS_X509_CSR_PARSE_C=n
 CONFIG_MBEDTLS_SSL_CACHE_C=n
 CONFIG_MBEDTLS_HARDWARE_RSA_DS_PERIPHERAL=n
 CONFIG_ESP_TLS_USE_DS_PERIPHERAL=n
-# Client-only TLS verification never signs with RFC 6979 ECDSA, accepts TLS renegotiation, parses
-# compressed EC points, or falls back to non-PFS static RSA key exchange (ECDHE_RSA and
-# ECDHE_ECDSA remain enabled). CTR_DRBG supplies the TLS PRNG without HMAC_DRBG; hardware MPI
-# covers RSA up to 4096-bit without >4096-bit software MPI, and general MPI verifies NIST
-# P-256/P-384/P-521 and Curve25519 without unrolled NIST tables.
-CONFIG_MBEDTLS_ECDSA_DETERMINISTIC=n
-CONFIG_MBEDTLS_HMAC_DRBG_C=n
-CONFIG_MBEDTLS_SSL_RENEGOTIATION=n
-CONFIG_MBEDTLS_KEY_EXCHANGE_RSA=n
-CONFIG_MBEDTLS_ECP_NIST_OPTIM=n
-CONFIG_MBEDTLS_LARGE_KEY_SOFTWARE_MPI=n
-CONFIG_MBEDTLS_PK_PARSE_EC_COMPRESSED=n
-# All TLS sites use binary DER esp_crt_bundle_attach (never PEM), omitting PEM/base64 parsing
-# and its software AES fallback; AES runs via the ESP32-S3 hardware peripheral without small-block
-# software-AES fallback.
-CONFIG_MBEDTLS_PEM_PARSE_C=n
-CONFIG_MBEDTLS_AES_HW_SMALL_DATA_LEN_OPTIM=n
-# Keep CA verification for MQTTS, OTA and forecasts, but use ESP-IDF's common-root subset. It
+# Keep CA verification for MQTTS and OTA with ESP-IDF's common-root subset. It
 # retains roughly 99% public-root coverage at about half the flash cost of the full Mozilla set;
 # brokers chained only to a rare excluded root need a certificate chain rooted in this subset.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
 # Disable ESP-IDF 6.1.1's default cross-signed CA callback: it allocates a temporary
 # mbedtls_x509_crt, PSA public-key slot and issuer RDN list (~1+ KiB internal heap) on every
-# bundle-verified handshake, encroaching on Weather's measured 48/20 KiB gate (800 B live trough)
-# and adding an unmodeled callback path. Keep the 6.1 in-place esp_crt_verify_callback path.
+# bundle-verified handshake and adds a callback path. Keep the 6.1 in-place verification path.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=n
 # Allocate TLS RX/TX records only when needed, size them for the actual record, and return large
-# buffers to small cache buffers after use. ESP-IDF 6.1's dynamic-buffer port applies this to OTA,
-# weather and optional MQTTS and removes the connection-long 16 KiB RX + 4 KiB TX reservation.
+# buffers to small cache buffers after use. ESP-IDF 6.1 applies this to OTA and optional MQTTS,
+# removing the connection-long 16 KiB RX plus 4 KiB TX reservation.
 # Keep config/key/CA lifetime unchanged: freeing those after a handshake would require every
 # reconnect path to register them again and is a separate, riskier optimisation.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
@@ -222,12 +199,7 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n
 # Silent asserts & IDF check macros — keep the abort()/reboot or error return path intact while
 # omitting embedded format/assert string tables from ESP-IDF drivers (`main/` uses neither macro).
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
-# Omit embedded format/assert string tables from ESP-IDF drivers (`main/` uses neither macro).
 CONFIG_COMPILER_OPTIMIZATION_CHECKS_SILENT=y
-# Drop lwIP assertion branches/format strings (matching silent assertions) and unused SoftAP
-# DHCP client-hostname collection.
-CONFIG_LWIP_ESP_LWIP_ASSERT=n
-CONFIG_LWIP_DHCPS_REPORT_CLIENT_HOSTNAME=n
 # Keep WPA3-SAE + H2E for joined home networks, but omit modes this firmware never enters:
 # provisioning.cpp always creates an open setup AP, and the STA path neither uses OWE nor SAE-PK.
 # These explicit settings keep ESP-IDF 6.1's larger WiFi defaults inside the fixed OTA slot without
@@ -240,15 +212,6 @@ CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT=n
 # WPA2/WPA3-Enterprise network, so the supplicant's enterprise and Suite-B GMAC paths are unreachable.
 CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 CONFIG_ESP_WIFI_GMAC_SUPPORT=n
-# Omit Wi-Fi 7 RSN Override compatibility mode while keeping WPA2 + WPA3-SAE + H2E, and keep the
-# wall-powered controller out of disconnected Wi-Fi modem power-save.
-CONFIG_ESP_WIFI_WPA3_COMPATIBLE_SUPPORT=n
-CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=n
-# Omit unused per-packet esp_netif traffic accounting, hardware flash-encryption R/W (zero eFuses
-# are burned per docs/SECURITY.md), and JTAG/OpenOCD debugger hooks (flash core dumps stay on).
-CONFIG_ESP_NETIF_REPORT_DATA_TRAFFIC=n
-CONFIG_SPI_FLASH_ENABLE_ENCRYPTED_READ_WRITE=n
-CONFIG_ESP_DEBUG_OCDAWARE=n
 
 # The HomeHub lookup uses bounded one-shot mdns_query_ptr calls. It never registers the component's
 # interactive console or continuous mdns_browse_* daemon, so keep those optional 1.12.0 paths out of
@@ -259,8 +222,8 @@ CONFIG_MDNS_MULTIPLE_INSTANCE=n
 CONFIG_MDNS_PREDEF_NETIF_AP=n
 # The mDNS task runs at priority 1 and keeps every received packet, together with its WiFi RX
 # buffer, in this action queue until it gets the CPU. A higher-priority task that computes for
-# seconds (Weather's TLS certificate verification takes ~2.7 s) therefore filled the default
-# 16-entry queue (26.6 KiB of RX buffers on the bench). Use the component minimum. While the queue
+# seconds can fill the default 16-entry queue (26.6 KiB of RX buffers in a legacy bench TLS run).
+# Use the component minimum. While the queue
 # is full (after such starvation, or a burst of multicast answers to one query), mDNS drops
 # received packets (queriers resend), defers timed sends to the next timer tick, and fails a
 # one-shot query or hostname change started into it; the HomeHub search retries such an attempt

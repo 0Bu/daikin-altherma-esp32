@@ -24,7 +24,7 @@
 //      restore the ~50 KB of heap and the second netif this transport exists to avoid, silently,
 //      while every test above still passes.
 //   5. LEASE LIFECYCLE + OFF-LINK CLIENTS. GOT_IP is not a forever-latch: LOST_IP/link-down must
-//      revoke both the lease flag and wake bit, and OTA/weather/syslog/MQTT pre-flight must ask the
+//      revoke both the lease flag and wake bit, and OTA/syslog/MQTT pre-flight must ask the
 //      transport-neutral boundary rather than silently withholding wired service.
 //   6. FAILURE UNWIND. The positive probe leaves an SPI bus installed. Every later allocation or
 //      start failure must reverse all resources before WiFi fallback, including a failed start that
@@ -209,10 +209,7 @@ assert.ok(!/wifi_info\(\)\.connected/.test(ota),
 assert.ok(!/\.recovery_surface\s*=\s*wifi_configured\(\)/.test(ota),
   "no stored SSID must not invent a portal on a wired boot that deliberately kept it off");
 
-const weather = code("main/weather_forecast.cpp");
 const syslog = code("main/syslog.cpp");
-assert.ok(/net_is_up\(\)/.test(weather) && !/wifi_info\(\)\.connected/.test(weather),
-  "Open-Meteo reachability must be transport-neutral");
 assert.ok(/net_is_up\(\)/.test(syslog) && !/wifi_info\(\)\.connected/.test(syslog),
   "syslog reachability must be transport-neutral");
 
@@ -221,7 +218,7 @@ assert.ok(/net_is_up\(\)/.test(syslog) && !/wifi_info\(\)\.connected/.test(syslo
 const status = code("main/http_status.cpp");
 const config = code("main/http_config.cpp");
 const setMqttStart = config.indexOf("static esp_err_t set_mqtt(");
-const setMqttEnd = config.indexOf("static esp_err_t set_ref_temp(", setMqttStart);
+const setMqttEnd = config.indexOf("struct CirculationRequest", setMqttStart);
 assert.ok(setMqttStart >= 0 && setMqttEnd > setMqttStart,
   "the source contract must be able to isolate the MQTT save handler");
 const setMqtt = config.slice(setMqttStart, setMqttEnd);

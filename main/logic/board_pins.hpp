@@ -101,6 +101,11 @@ struct ReservedPins {
 // SPIIO4-7/DQS and are unsafe for anything else); false (Quad/Dual flash, no PSRAM or Quad PSRAM)
 // leaves them free. Defaults to true — the conservative, always-safe answer — so a caller that
 // forgets to pass it never gets an unsafe list.
+#if defined(__GNUC__) && !defined(__clang__)
+[[gnu::noinline, gnu::noclone]]
+#else
+[[gnu::noinline]]
+#endif
 inline BoardPins board_pins(const char* /*target*/ = nullptr, bool octal_spi = true) {
     // Octal builds additionally reserve GPIO33-37; everything else about the two lists is
     // identical.

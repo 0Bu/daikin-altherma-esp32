@@ -55,11 +55,6 @@ class CheckoutTests(unittest.TestCase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(PROJECT / name, destination)
         # Preserve the actual consumer expression and substitute only its fixture history pin.
-        runner = (PROJECT / "test/http_config_runtime/run.py").read_text()
-        runner, count = re.subn(r"original_commit = '[0-9a-f]{40}'",
-                               f"original_commit = '{self.witness_commit}'", runner)
-        self.assertEqual(count, 1)
-        self.write("test/http_config_runtime/run.py", runner.encode())
         deadline = (PROJECT / "test/test_http_deadline_runtime.mjs").read_text()
         deadline, count = re.subn(r'const originalCommit = "[0-9a-f]{40}"',
                                   f'const originalCommit = "{self.witness_commit}"', deadline)
@@ -132,18 +127,16 @@ class CheckoutTests(unittest.TestCase):
         local_checks.hydrate_release_trees(partial, self.env, tree, release_base)
         self.assertFalse({old_source, new_source} & self.missing(partial))
         # The caller's runtime-test file can differ from the candidate version.
-        (partial / "test/http_config_runtime/run.py").write_text("different witness binding\n")
+        (partial / "test/test_http_deadline_runtime.mjs").write_text("different witness binding\n")
         run = self.prepare(partial, "--source-tree", tree)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn(self.witness_commit, run.stdout)
-        self.assertIn(self.binary_blob, self.missing(partial))
+        self.assertTrue({self.witness_blob, self.binary_blob} <= self.missing(partial))
         with local_checks.frozen_checkout(partial, self.env, (tested, tree, release_base),
                                           container_visible=True) as (checkout, offline):
             self.assertEqual((checkout / path).read_bytes(), b"newly inherited formatter source\n")
             self.assertEqual(self.git(checkout, "show", f"HEAD^1:{path}", env=offline),
                              b"first archived formatter source\n")
-            self.assertEqual(self.git(checkout, "show", f"{self.witness_commit}:main/http_config.cpp",
-                                      env=offline), b"original configuration source\n")
             self.assertEqual(self.git(checkout, "show", f"{self.witness_commit}:main/http_deadline.cpp",
                                       env=offline), b"original deadline source\n")
 
@@ -168,15 +161,14 @@ class CheckoutTests(unittest.TestCase):
         self.assertTrue({self.witness_blob, self.deadline_blob, self.binary_blob} <= self.missing(partial))
         run = self.prepare(partial)
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn("hydrated " + self.witness_commit + ":main/http_config.cpp", run.stdout)
-        self.assertNotIn(self.witness_blob, self.missing(partial))
+        self.assertIn("hydrated " + self.witness_commit + ":main/http_deadline.cpp", run.stdout)
         self.assertNotIn(self.deadline_blob, self.missing(partial))
-        self.assertIn(self.binary_blob, self.missing(partial))
+        self.assertTrue({self.witness_blob, self.binary_blob} <= self.missing(partial))
         # No reachable remote, no lazy fetching: reads must use the already hydrated object.
         self.git(partial, "remote", "set-url", "origin", (self.directory / "unavailable").as_uri())
         offline = {**self.env, "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}
-        self.assertEqual(self.git(partial, "show", self.witness_commit + ":main/http_config.cpp",
-                                  env=offline), b"original configuration source\n")
+        self.assertEqual(self.git(partial, "show", self.witness_commit + ":main/http_deadline.cpp",
+                                  env=offline), b"original deadline source\n")
         self.assertNotEqual(self.git(partial, "cat-file", "-e", self.binary_blob,
                                      check=False, env=offline).returncode, 0)
         image = os.environ.get("DAIKIN_CI_CHECKOUT_DOCKER_IMAGE")
@@ -202,10 +194,10 @@ class CheckoutTests(unittest.TestCase):
                     "--security-opt", "no-new-privileges", "--user", "65534:65534",
                     "--env", "GIT_NO_LAZY_FETCH=1", "--entrypoint", "git", proof_image,
                     "-c", "safe.directory=/repository", "-C", "/repository", "show",
-                    self.witness_commit + ":main/http_config.cpp",
+                    self.witness_commit + ":main/http_deadline.cpp",
                 ], capture_output=True, timeout=30)
                 self.assertEqual(read.returncode, 0, read.stderr.decode(errors="replace"))
-                self.assertEqual(read.stdout, b"original configuration source\n")
+                self.assertEqual(read.stdout, b"original deadline source\n")
             finally:
                 cleanup = subprocess.run(["docker", "image", "rm", proof_image],
                                          capture_output=True, timeout=30)
@@ -216,8 +208,8 @@ class CheckoutTests(unittest.TestCase):
         clone = self.clone("partial", "--filter=blob:none")
         self.git(clone, "remote", "set-url", "origin", (self.directory / "unavailable").as_uri())
         self.assertNotEqual(self.prepare(clone).returncode, 0)
-        runner = clone / "test/http_config_runtime/run.py"
-        runner.write_text(runner.read_text().replace(":main/http_config.cpp", ":main/other.cpp"))
+        runner = clone / "test/test_http_deadline_runtime.mjs"
+        runner.write_text(runner.read_text().replace(":main/http_deadline.cpp", ":main/other.cpp"))
         run = self.prepare(clone)
         self.assertNotEqual(run.returncode, 0)
         self.assertIn("historical read changed", run.stderr)

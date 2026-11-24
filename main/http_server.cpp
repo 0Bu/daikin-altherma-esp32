@@ -23,9 +23,9 @@ void http_start() {
     // ESP_ERR_HTTPD_HANDLERS_FULL, and the casualty is whatever registers LAST, which is
     // deliberately the captive/SPA catch-all — so the symptom of a missing route would be deep
     // links breaking, not the new route 404ing. http_register() now logs a failed registration for
-    // that reason. Keep exact total 41, including the dev-only binary upload and
+    // that reason. Keep exact total 39, including the dev-only binary upload and
     // /set_gas_comparison.
-    cfg.max_uri_handlers = 41; // includes dev-only upload + /set_gas_comparison route
+    cfg.max_uri_handlers = 39; // includes the dev-only signed binary upload and /set_gas_comparison
     cfg.lru_purge_enable = true;
     // Covers header parsing, body reads and the SDK's own leftover purge. Each blocking receive
     // retains the SDK's five-second timeout. Ordinary requests get 30 s; admitted dev uploads

@@ -31,7 +31,6 @@ const mqtt = code("main/mqtt_ha.cpp");
 const poll = code("main/hp_poll.cpp");
 const modbus = code("main/hp_modbus.cpp");
 const syslog = code("main/syslog.cpp");
-const weather = code("main/weather_forecast.cpp");
 const mcp = code("main/mcp_server.cpp");
 const httpCommon = code("main/http_common.cpp");
 const httpServer = code("main/http_server.cpp");
@@ -254,7 +253,6 @@ const legacyRestoreManifestMaxMatch = manifestProvenance.match(
   /LEGACY_RESTORE_MANIFEST_MAX_BYTES\s*=\s*(\d+)/,
 );
 const healthTaskStackMatch = ota.match(/constexpr int\s+kHealthTaskStack\s*=\s*(\d+)/);
-const weatherTaskStackMatch = weather.match(/constexpr int\s+kTaskStack\s*=\s*(\d+)/);
 assert.ok(otaTaskStackMatch && healthTaskStackMatch,
   "the resident delivery and transient health-gate stack sizes must remain machine-readable");
 assert.equal(Number(otaManifestMaxMatch?.[1]), 2048,
@@ -267,8 +265,6 @@ assert.match(manifestProvenance,
 assert.match(manifestProvenance,
   /manifest_bytes\.decode\("ascii"\)[\s\S]*?if b"\\\\" in manifest_bytes:/,
   "the publisher must reject identity escapes that the supported restore parser cannot consume");
-assert.ok(weatherTaskStackMatch,
-  "the Weather TLS task stack size must remain machine-readable");
 
 const httpStack = Number(httpServer.match(/cfg\.stack_size\s*=\s*(\d+)\s*;/)?.[1]);
 assert.equal(httpStack, 10240, "HTTP must retain its reviewed 10 KiB task allocation");
@@ -284,7 +280,7 @@ assert.equal(mcpDepth, 16, "MCP depth must remain tied to its early-reject recur
 assert.match(jsonGuard,
   /inline\s+cJSON\*\s+json_parse_document\(std::string_view\s+payload\)\s*\{\s*if\s*\(!json_payload_is_object\(payload\)\)\s*return nullptr;\s*return\s+json_parse_bounded\(\s*payload,\s*\[\]\(const char\* bytes,\s*size_t length,\s*const char\*\* end\)\s*noexcept\s*\{\s*return cJSON_ParseWithLengthOpts\(bytes,\s*length,\s*end,\s*false\);\s*\},\s*\[\]\(cJSON\* root\)\s*noexcept\s*\{\s*cJSON_Delete\(root\);\s*\},\s*JSON_MAX_DEPTH\s*\);\s*\}/,
   "the bounded adapter must bind its fourth argument to the same source depth as the frame multipliers");
-for (const owner of ["hp", "mqtt", "board", "env3", "weather", "diagnostics", "circulation"]) {
+for (const owner of ["hp", "mqtt", "board", "env3", "diagnostics", "circulation"]) {
   const name = `httpd_config_${owner}`;
   const expectedOwners = [`config_${owner}`, "config_document",
     ...(owner === "circulation" ? ["circulation_parser"] : [])];
@@ -326,7 +322,7 @@ assert.deepEqual(stackBudgets.paths.main_modbus_discover_save.symbols,
   ["main_task", "boot_sequence", "modbus_discover", "config_save", "config_save_whole",
     "config_transaction", "config_nvs_blob"]);
 assert.equal(stackBudgets.paths.main_modbus_discover_save.base_bytes, 1536);
-assert.equal(stackBudgets.paths.main_modbus_discover_save.max_bytes, 6144);
+assert.equal(stackBudgets.paths.main_modbus_discover_save.max_bytes, 5120);
 assert.deepEqual(stackBudgets.paths.httpd_wifi_scan.symbols, ["http_scan", "wifi_scan"]);
 assert.deepEqual(stackBudgets.paths.httpd_wifi_scan.multipliers, {});
 assert.equal(stackBudgets.paths.httpd_wifi_scan.base_bytes, 1536 + 1024,
@@ -359,9 +355,9 @@ assert.equal(stackBudgets.symbols.cjson_delete.pattern, "^cJSON_Delete$");
 assert.equal(stackBudgets.symbols.cjson_parse_string.pattern, "^parse_string$");
 const namedHttpSymbols = {
   config_hp: ["set_hp", 3200], config_mqtt: ["set_mqtt", 2336],
-  config_board: ["set_board", 2176], config_env3: ["set_env3", 1856],
-  config_weather: ["set_weather", 1776], config_diagnostics: ["set_diagnostics", 1584],
-  config_circulation: ["set_circulation", 1136], circulation_parser: ["parse_circulation_request", 1408],
+  config_board: ["set_board", 2176], config_env3: ["set_env3", 1792],
+  config_diagnostics: ["set_diagnostics", 1536],
+  config_circulation: ["set_circulation", 992], circulation_parser: ["parse_circulation_request", 1408],
   hp_query_probe: ["hp_query_probe", 2736], mcp_parser: ["mcp_parse", 256],
   config_save: ["config_save", 32], config_save_link: ["config_save_link", 32],
   config_save_if_current: ["config_save_if_current", 32],
@@ -375,7 +371,7 @@ for (const [key, [name, maximum]] of Object.entries(namedHttpSymbols)) {
 }
 assert.equal(stackBudgets.symbols.config_transaction.pattern,
   "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairEb\\$constprop\\$[0-9]+$");
-assert.equal(stackBudgets.symbols.config_transaction.max_bytes, 1888,
+assert.equal(stackBudgets.symbols.config_transaction.max_bytes, 1600,
   "the real NvsBlobStore transaction must have a measured frame independent of the HTTP allowance");
 assert.match(config, /save_whole\([\s\S]*?config_save_transaction\([\s\S]*?config_save\([\s\S]*?save_whole\([\s\S]*?config_save_link\([\s\S]*?save_whole\(/,
   "both HTTP config wrappers must retain the measured shared persistence transaction path");
@@ -392,36 +388,6 @@ assert.ok(stackBudgets.paths.ota_task_manifest_fetch.max_bytes <=
 assert.ok(stackBudgets.paths.ota_health_gate.max_bytes <=
   Number(healthTaskStackMatch[1]) - minimumStackReserve,
 "the rollback-critical health-gate ELF ceiling must leave at least 1 KiB on its task stack");
-const weatherTaskBudget = stackBudgets.tasks.weather;
-assert.equal(weatherTaskBudget.stack_bytes, Number(weatherTaskStackMatch[1]),
-  "Weather path ceilings must bind the actual task allocation");
-assert.ok(weatherTaskBudget.reserve_bytes >= 1536,
-  "Weather must retain its reviewed 1536-byte task reserve");
-for (const pathName of ["weather_task_download", "weather_task_parse", "weather_task_tls",
-  "weather_task_tls_headers", "weather_task_tls_body"]) {
-  assert.ok(weatherTaskBudget.paths.includes(pathName),
-    `${pathName} must remain owned by the Weather task`);
-  assert.ok(stackBudgets.paths[pathName].max_bytes <=
-    Number(weatherTaskStackMatch[1]) - weatherTaskBudget.reserve_bytes,
-  `${pathName} must retain the reviewed Weather task reserve`);
-  if (pathName.startsWith("weather_task_tls")) {
-    assert.equal(stackBudgets.paths[pathName].base_bytes, 4608,
-      `${pathName} must include the complete reviewed SDK TLS envelope`);
-  }
-}
-assert.deepEqual(stackBudgets.paths.weather_task_download.symbols,
-  ["weather_task", "weather_cycle", "weather_fetch", "weather_download"]);
-assert.deepEqual(stackBudgets.paths.weather_task_parse.symbols,
-  ["weather_task", "weather_cycle", "weather_fetch", "weather_parse",
-   "cjson_parse_length_opts", "cjson_parse_value", "cjson_delete", "cjson_parse_string"]);
-assert.equal(stackBudgets.paths.weather_task_parse.multipliers.cjson_parse_value, 17);
-assert.equal(stackBudgets.paths.weather_task_parse.multipliers.cjson_delete, 17);
-assert.match(weather, /__attribute__\(\(noinline\)\) WeatherCycleWait weather_cycle\(/,
-  "the separately budgeted cycle must retain its real ELF frame");
-assert.equal(stackBudgets.paths.weather_task_download.base_bytes, 2048,
-  "Weather download must retain its reviewed TLS/IDF/exception allowance");
-assert.equal(stackBudgets.paths.weather_task_parse.base_bytes, 2048,
-  "Weather parse must retain its reviewed cJSON/exception allowance");
 assert.deepEqual(stackBudgets.paths.ota_health_gate.symbols, ["ota_health_task"]);
 assert.equal(stackBudgets.paths.ota_health_gate.base_bytes, 2048,
   "the health-gate path must retain its reviewed IDF/logging/exception allowance");
@@ -433,16 +399,8 @@ assert.match(httpOta,
 assert.match(httpOta,
   /,\\"heap_min_free_bytes\\":[\s\S]{0,160}?,\\"heap_min_largest_block_bytes\\":[\s\S]{0,240}?,\\"ota_stack_min_free_bytes\\":[\s\S]{0,180}?null/,
   "compact OTA status must expose heap dimensions and null-before-sample OTA stack evidence");
-assert.match(stackWatch, /enum class StackWatch[\s\S]*?\bModbus\b[\s\S]*?\bWeather\b[\s\S]*?\bOta\b[\s\S]*?\bCOUNT\b/,
-  "the shared allocation-free stack watcher must retain Weather and resident-worker OTA minima");
-assert.ok(occurrences(weather, "stack_watch_sample(StackWatch::Weather)") >= 2,
-  "Weather must sample after the real TLS/HTTP/JSON interval before HIL accepts it");
-assert.match(httpStatus,
-  /weather_forecast[\s\S]*?task_stack_min_free_bytes[\s\S]*?StackWatch::Weather/,
-  "Weather status must expose path-local stack evidence");
-assert.match(httpStatus,
-  /stack_min_free_bytes[\s\S]*?j \+= ",\\"weather\\":";[\s\S]*?StackWatch::Weather/,
-  "always-on status must expose Weather stack evidence to release HIL");
+assert.match(stackWatch, /enum class StackWatch[\s\S]*?\bModbus\b[\s\S]*?\bOta\b[\s\S]*?\bCOUNT\b/,
+  "the shared allocation-free stack watcher must retain resident-worker OTA minima");
 assert.match(ota,
   /OtaHeapSample\s+ota_heap_sample\(\)[\s\S]{0,180}?stack_watch_sample\(StackWatch::Ota\)/,
   "every existing OTA heap checkpoint must also sample the task's retrospective stack watermark");
@@ -626,12 +584,6 @@ assert.match(httpDeadline,
 assert.match(startCheck,
   /if \(!http_deadline_ready\(\)\) return 0;[\s\S]{0,500}?config_ota_channel\(\)[\s\S]{0,900}?start_locked/,
   "OTA checks must refuse before feed derivation and worker notification when the watchdog is unavailable");
-assert.match(weather,
-  /void weather_forecast_start\(\)[\s\S]{0,500}?!http_deadline_ready\(\)[\s\S]{0,500}?xTaskCreate\(weather_task/,
-  "Weather must refuse task creation when its boot-owned deadline watchdog is unavailable");
-assert.match(weather,
-  /bool download_json\(const WeatherConfigSnapshot& weather,[^{]+\{\s*if\s*\(!http_deadline_ready\(\)\)\s*\{\s*error\s*=\s*"deadline_unavailable";\s*return false;\s*\}\s*out\.clear\(\);\s*out\.reserve\(kPayloadMax\);/,
-  "Weather must recheck readiness before payload and HTTP/TLS allocation");
 const deadlineArmStart = httpDeadline.indexOf("esp_err_t HttpSocketDeadline::arm(");
 const deadlineDisarmStart = httpDeadline.indexOf("bool HttpSocketDeadline::disarm(");
 const deadlineArm = httpDeadline.slice(deadlineArmStart, deadlineDisarmStart);
@@ -728,32 +680,6 @@ assert.match(transferLoop,
 assert.match(transferLoop,
   /esp_http_client_read\(client,[\s\S]{0,220}?socket_deadline\.expired\(\)[\s\S]{0,180}?OtaTransferFailure::Timeout/,
   "a partial firmware-body return after socket shutdown must retain timeout diagnostics");
-assert.match(weather, /kDownloadDeadline\s*=\s*pdMS_TO_TICKS\(60000\)/,
-  "a trickling weather response must have a bounded operation deadline");
-assert.match(weather,
-  /socket_deadline\.arm\(client,\s*download_started,\s*kDownloadDeadline\)[\s\S]{0,260}?esp_http_client_fetch_headers\(client\)[\s\S]{0,160}?socket_deadline\.expired\(\)/,
-  "Weather headers must share the absolute socket watchdog");
-assert.match(weather,
-  /esp_http_client_read\(client,[\s\S]{0,180}?socket_deadline\.expired\(\)[\s\S]{0,120}?download_timeout/,
-  "a partial Weather body return after socket shutdown must retain timeout diagnostics");
-assert.match(weather,
-  /n\s*==\s*0[\s\S]{0,260}?http_body_complete\([\s\S]{0,180}?esp_http_client_is_complete_data_received\(client\)[\s\S]{0,180}?incomplete_payload[\s\S]{0,180}?ok\s*=\s*!out\.empty\(\)/,
-  "Weather must reject premature EOF before parsing a non-empty response prefix as fresh data");
-const weatherParseStart = weather.indexOf("bool parse_forecast(");
-const weatherParseEnd = weather.indexOf("\n}\n\nbool fetch_forecast", weatherParseStart);
-const weatherParse = weather.slice(weatherParseStart, weatherParseEnd);
-const cjsonParse = weatherParse.indexOf("cJSON_ParseWithLengthOpts(");
-const parseEndCheck = weatherParse.indexOf("json_suffix_is_whitespace(", cjsonParse);
-const trailingError = weatherParse.indexOf('error = "json_trailing_data"', parseEndCheck);
-assert.ok(cjsonParse >= 0 && parseEndCheck > cjsonParse && trailingError > parseEndCheck,
-  "Weather must reject non-whitespace bytes after the parsed JSON root");
-assert.match(weatherParse,
-  /if \(!parse_end[\s\S]{0,220}?\|\|\s*!json_suffix_is_whitespace\(/,
-  "the trailing-root check must participate directly in Weather's rejection condition");
-assert.match(weather,
-  /~HttpClientCleanup\(\)[\s\S]{0,260}?deadline\.disarm\(\)[\s\S]{0,180}?esp_http_client_close\(handle\)[\s\S]{0,120}?esp_http_client_cleanup\(handle\)/,
-  "Weather exception cleanup must join the watchdog before releasing the client/fd");
-
 const init = update.indexOf("esp_http_client_init(");
 const probeRead = update.indexOf("esp_http_client_read(", init);
 const begin = update.indexOf("esp_ota_begin(");
@@ -1211,15 +1137,14 @@ const pollTask = poll.slice(pollStart, pollEnd);
 assert.match(pollTask, /OtaQuiesceState\s+network_quiesce/,
   "the poll task must own an independent bounded network hold-off counter");
 const active = pollTask.indexOf("ota_download_active(");
-const weatherActive = pollTask.indexOf("weather_fetch_active(", active);
-const quiesce = pollTask.indexOf("ota_quiesce_step(network_quiesce, network_active)", weatherActive);
+const quiesce = pollTask.indexOf("ota_quiesce_step(network_quiesce, network_active)", active);
 const configRead = pollTask.includes("config_profile()")
   ? pollTask.indexOf("config_profile()")
   : pollTask.indexOf("config().profile");
 const pollOnce = pollTask.indexOf("poll_once(");
-assert.ok(active >= 0 && weatherActive > active && quiesce > weatherActive &&
+assert.ok(active >= 0 && quiesce > active &&
           configRead > quiesce && pollOnce > quiesce,
-  "the bounded OTA/weather hold must run before allocation-rich config and X10A polling");
+  "the bounded OTA hold must run before allocation-rich config and X10A polling");
 const holdEnd = pollTask.indexOf("continue;", quiesce);
 assert.ok(holdEnd > quiesce, "a held poll cycle must leave before constructing a snapshot");
 const hold = pollTask.slice(quiesce, holdEnd);
@@ -1246,7 +1171,7 @@ assert.match(pollAck,
   "no poll task is already quiescent; a running one must explicitly acknowledge the hold");
 
 const mqttAckStart = mqtt.indexOf("bool mqtt_publish_network_quiesced(");
-const mqttAckEnd = mqtt.indexOf("ReferenceTemperatureStatus reference_temperature_status(", mqttAckStart);
+const mqttAckEnd = mqtt.indexOf("void mqtt_transport_pause_for_network_heap(", mqttAckStart);
 assert.ok(mqttAckStart >= 0 && mqttAckEnd > mqttAckStart,
   "the lock-free MQTT acknowledgement boundary must remain identifiable");
 assert.match(mqtt.slice(mqttAckStart, mqttAckEnd),
@@ -1270,8 +1195,7 @@ assert.doesNotMatch(beforeConnect, /vTaskDelay|for\s*\(|while\s*\(/,
   "BEFORE_CONNECT holds MQTT_API_LOCK and must never wait against client_stop");
 const pauseStart = mqtt.indexOf(
   "static __attribute__((noinline)) void mqtt_transport_pause_if_requested(");
-const holdStart = mqtt.indexOf(
-  "static __attribute__((noinline)) bool mqtt_network_hold_step(", pauseStart);
+const holdStart = mqtt.search(/static __attribute__\(\(noinline\)\) bool\s+mqtt_network_hold_step\(/);
 const resumeStart = mqtt.indexOf(
   "static __attribute__((noinline)) bool mqtt_transport_resume_step(", holdStart);
 const resumeEnd = mqtt.indexOf("static std::string board_id(", resumeStart);
@@ -1312,7 +1236,7 @@ assert.match(mqtt,
   /void mqtt_transport_resume_after_network_heap\(\)\s*\{[\s\S]{0,420}?if\s*\(owners\s*==\s*1\)\s*next\s*&=\s*~TRANSPORT_PAUSE_WITHDRAW_ARMED;\s*if\s*\(s_transport_pause_state\.compare_exchange_weak\(/,
   "the final network lease owner must clear pause state and armed withdrawal intent in one atomic transition");
 assert.match(holdStep,
-  /ota_quiesce_step\(quiesce, network_busy\)[\s\S]{0,600}?mqtt_transport_pause_if_requested\(\)[\s\S]{0,180}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,120}?vTaskDelay\([\s\S]{0,100}?return true;/,
+  /ota_quiesce_step\(quiesce, ota_busy\)[\s\S]{0,600}?mqtt_transport_pause_if_requested\(\)[\s\S]{0,180}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,120}?vTaskDelay\([\s\S]{0,100}?return true;/,
   "the held MQTT helper must stop transport, acknowledge quiescence and leave before allocation");
 const mqttTaskStart = mqtt.indexOf("static void mqtt_task(");
 const mqttTaskEnd = mqtt.indexOf("static bool build_client(", mqttTaskStart);
@@ -1441,7 +1365,7 @@ assert.ok(transportPauseStart >= 0 && transportStop >= 0 &&
 assert.doesNotMatch(mqtt, /std::string\s+s_last_(?:modbus|weather|env3)_json\b/,
   "MQTT state deduplication must use fixed-size digests rather than heap-backed JSON string caches");
 assert.match(mqtt,
-  /s_ref_queue\s*=\s*xQueueCreate\(REF_QUEUE_DEPTH,\s*sizeof\(ReferenceMqttFrameQueued\)\)/,
+  /s_inbound_queue\s*=\s*xQueueCreate\(CIRCULATION_QUEUE_DEPTH,\s*sizeof\(CirculationMqttFrameQueued\)\)/,
   "inbound MQTT frames must share the static byte ring behind compact queue descriptors");
 const pollOnceBody = poll.slice(poll.indexOf("static void poll_once()"), pollStart);
 const pollStartBody = poll.slice(pollEnd, poll.indexOf("size_t hp_values_capacity(", pollEnd));
@@ -1458,9 +1382,8 @@ const modbusStartBody = modbus.slice(
 assert.match(modbusStartBody,
   /boot_cache\.reserve\(kMaxModbusCachedValues\)[\s\S]{0,160}?s_cache\.swap\(boot_cache\)/,
   "mb_start must pin the maximum HomeHub/Altherma4 cache capacity in lower DRAM before workers start");
-assert.ok(appMain.indexOf("daik::weather_forecast_start()") < appMain.indexOf("daik::mqtt_ha_start()") &&
-  appMain.indexOf("daik::mb_start()") < appMain.indexOf("daik::mqtt_ha_start()"),
-  "boot-permanent Weather and HomeHub workers must allocate before pausable esp-mqtt transport startup");
+assert.ok(appMain.indexOf("daik::mb_start()") < appMain.indexOf("daik::mqtt_ha_start()"),
+  "the boot-permanent HomeHub worker must allocate before pausable esp-mqtt transport startup");
 
 // The live plant also runs HomeHub and Syslog. Both used to allocate after the OTA flag rose:
 // HomeHub copied the string-owning Config and periodically reserved a fresh values vector; every
@@ -1472,15 +1395,13 @@ assert.ok(modbusTaskStart >= 0 && modbusTaskEnd > modbusTaskStart,
   "the HomeHub poll task must remain identifiable");
 const modbusTask = modbus.slice(modbusTaskStart, modbusTaskEnd);
 const modbusOtaHold = modbusTask.indexOf("ota_download_active()");
-const modbusWeatherHold = modbusTask.indexOf("weather_fetch_active()", modbusOtaHold);
-const modbusClaim = modbusTask.indexOf("MbNetworkActivity network_activity", modbusWeatherHold);
+const modbusClaim = modbusTask.indexOf("MbNetworkActivity network_activity", modbusOtaHold);
 const modbusRecheck = modbusTask.indexOf("ota_download_active()", modbusClaim);
 const modbusPollCall = modbusTask.indexOf("mb_poll_once()", modbusRecheck);
 const modbusPollStart = modbus.indexOf("static void mb_poll_once()");
 const modbusPollEnd = modbus.indexOf("static void mb_task_start_if_enabled()", modbusPollStart);
 const modbusPoll = modbus.slice(modbusPollStart, modbusPollEnd);
-assert.ok(modbusOtaHold >= 0 && modbusWeatherHold > modbusOtaHold &&
-          modbusClaim > modbusWeatherHold && modbusRecheck > modbusClaim &&
+assert.ok(modbusOtaHold >= 0 && modbusClaim > modbusOtaHold && modbusRecheck > modbusClaim &&
           modbusPollCall > modbusRecheck,
   "HomeHub must claim/recheck and stand aside before its Config copy and model-sized cycle allocation");
 assert.match(modbusTask.slice(modbusOtaHold, modbusPollCall),
@@ -1509,11 +1430,9 @@ assert.ok(syslogLoopAnchor >= 0 && syslogLoopStart > syslogLoopAnchor &&
           syslogConfig > syslogLoopStart,
   "the allocating Syslog loop must remain identifiable");
 const syslogOtaHold = syslog.indexOf("ota_download_active()", syslogLoopStart);
-const syslogWeatherHold = syslog.indexOf("weather_fetch_active()", syslogOtaHold);
-const syslogClaim = syslog.indexOf("SyslogNetworkActivity network_activity", syslogWeatherHold);
+const syslogClaim = syslog.indexOf("SyslogNetworkActivity network_activity", syslogOtaHold);
 const syslogRecheck = syslog.indexOf("ota_download_active()", syslogClaim);
-assert.ok(syslogOtaHold >= 0 && syslogWeatherHold > syslogOtaHold &&
-          syslogClaim > syslogWeatherHold && syslogRecheck > syslogClaim &&
+assert.ok(syslogOtaHold >= 0 && syslogClaim > syslogOtaHold && syslogRecheck > syslogClaim &&
           syslogRecheck < syslogConfig,
   "Syslog must claim/recheck and stand aside before Config, DNS, ping and socket allocation");
 assert.match(syslog.slice(syslogOtaHold, syslogConfig), /vTaskDelay\([\s\S]*?continue;/,
@@ -1524,20 +1443,6 @@ assert.match(syslog,
 assert.match(syslog,
   /bool\s+syslog_network_quiesced\(\)[\s\S]{0,120}?s_network_quiesced\.load\(std::memory_order_acquire\)/,
   "Syslog must expose an allocation-free cycle acknowledgement");
-const weatherNetworkStart = weather.search(/NetworkActivity\s+activity\(source_generation\)/);
-const weatherNetworkEnd = weather.indexOf("ok = fetch_forecast(", weatherNetworkStart);
-const weatherNetwork = weather.slice(weatherNetworkStart, weatherNetworkEnd);
-const weatherModbusWait = weatherNetwork.indexOf("!mb_network_quiesced()");
-const weatherSyslogWait = weatherNetwork.indexOf("!syslog_network_quiesced()", weatherModbusWait);
-const weatherModbusVerdict = weatherNetwork.search(
-  /modbus_quiesce_failed\s*=\s*!mb_network_quiesced\(\)/);
-const weatherSyslogVerdict = weatherNetwork.search(
-  /syslog_quiesce_failed\s*=\s*!syslog_network_quiesced\(\)/);
-assert.ok(weatherNetworkStart >= 0 && weatherNetworkEnd > weatherNetworkStart &&
-  weatherModbusWait >= 0 && weatherSyslogWait > weatherModbusWait &&
-  weatherModbusVerdict > weatherSyslogWait && weatherSyslogVerdict > weatherModbusVerdict,
-  "Weather TLS must wait for HomeHub and Syslog acknowledgements too");
-
 const pollBarrierStart = ota.indexOf("bool wait_for_poll_quiesce(");
 const pollBarrierEnd = ota.indexOf("bool wait_for_mqtt_quiesce(", pollBarrierStart);
 assert.ok(pollBarrierStart >= 0 && pollBarrierEnd > pollBarrierStart,
@@ -1553,13 +1458,12 @@ const mqttBarrierCall = task.indexOf("wait_for_mqtt_quiesce()", pollBarrierCall)
 const mqttTransportBarrierCall = task.indexOf("wait_for_mqtt_transport_quiesce()", mqttBarrierCall);
 const modbusBarrierCall = task.indexOf("wait_for_modbus_quiesce()", mqttTransportBarrierCall);
 const syslogBarrierCall = task.indexOf("wait_for_syslog_quiesce()", modbusBarrierCall);
-const weatherBarrierCall = task.indexOf("wait_for_weather_quiesce()", syslogBarrierCall);
 const updateCall = task.indexOf("run_update(");
 assert.ok(pollBarrierCall >= 0 && mqttBarrierCall > pollBarrierCall &&
           mqttTransportBarrierCall > mqttBarrierCall && modbusBarrierCall > mqttTransportBarrierCall &&
           syslogBarrierCall > modbusBarrierCall &&
-          weatherBarrierCall > syslogBarrierCall && updateCall > weatherBarrierCall,
-  "OTA must receive poll, MQTT publisher/transport, HomeHub, Syslog and weather acknowledgements before entering the install path");
+          updateCall > syslogBarrierCall,
+  "OTA must receive poll, MQTT publisher/transport, HomeHub and Syslog acknowledgements before entering the install path");
 assert.match(ota,
   /struct\s+OtaNetworkFlag[\s\S]{0,260}?mqtt_transport_pause_for_network_heap\(\)[\s\S]{0,260}?mqtt_transport_resume_after_network_heap\(\)[\s\S]{0,120}?s_network_active\.store\(false/,
   "the OTA network lease must pause esp-mqtt and request resume before releasing its own flag");
@@ -1568,26 +1472,8 @@ assert.match(ota,
   "the OTA lease must raise the availability withdrawal immediately before its MQTT pause request");
 assert.equal(occurrences(ota, "mqtt_transport_withdraw_online_on_pause()"), 1,
   "the OTA lease is the only OTA owner of the availability withdrawal");
-assert.doesNotMatch(weather, /mqtt_transport_withdraw_online_on_pause/,
-  "a Weather pause is never followed by a restart and must keep its gap without availability churn");
-const weatherLeaseStart = weather.indexOf("struct NetworkActivity {");
-const weatherLeaseEnd = weather.indexOf("\n};", weatherLeaseStart);
-const weatherLease = weather.slice(weatherLeaseStart, weatherLeaseEnd);
-const weatherPause = weatherLease.indexOf("mqtt_transport_pause_for_network_heap()");
-const weatherResume = weatherLease.indexOf("mqtt_transport_resume_after_network_heap()",
-                                           weatherPause);
-const weatherRelease = weatherLease.indexOf("release_admission()", weatherResume);
-const weatherPendingHandoff = weatherLease.indexOf("SourceAdmission::SourceChangePending",
-                                                    weatherRelease);
-const weatherIdleRelease = weatherLease.indexOf("SourceAdmission::Idle", weatherPendingHandoff);
-assert.ok(weatherLeaseStart >= 0 && weatherLeaseEnd > weatherLeaseStart && weatherPause >= 0 &&
-  weatherResume > weatherPause && weatherRelease > weatherResume &&
-  weatherPendingHandoff > weatherRelease && weatherIdleRelease > weatherPendingHandoff,
-  "the Weather network lease must pause/resume MQTT and then hand off or release admission");
-
 // The model-sized /values snapshot and the allocation-rich /status snapshot collided with the
-// fresh-boot OTA/Weather TLS windows on the 129-row plant. OTA is different from the short weather
-// fetch: status and values fail fast before their snapshots, while compact OTA status and the static
+// fresh-boot OTA TLS windows on the 129-row plant. Status and values fail fast before their snapshots, while compact OTA status and the static
 // diagnostic ring remain observable.
 const valuesSendStart = httpStatus.indexOf("esp_err_t http_send_values_json(");
 const valuesSendEnd = httpStatus.indexOf("static esp_err_t h_values(", valuesSendStart);
@@ -1595,69 +1481,13 @@ assert.ok(valuesSendStart >= 0 && valuesSendEnd > valuesSendStart,
   "the shared /values + MCP sender must remain identifiable");
 const valuesSend = httpStatus.slice(valuesSendStart, valuesSendEnd);
 const valuesOtaGate = valuesSend.indexOf("if (ota_download_active())");
-const valuesReader = valuesSend.indexOf("ValuesTlsReader reader;", valuesOtaGate);
-const valuesWait = valuesSend.indexOf("wait_for_values_tls_owner(reader)", valuesReader);
-const valuesSnapshot = valuesSend.indexOf("take_values_snapshot()", valuesWait);
+const valuesSnapshot = valuesSend.indexOf("take_values_snapshot()", valuesOtaGate);
 const valuesStream = valuesSend.indexOf("return finish_bounded_stream(j,", valuesSnapshot);
-assert.ok(valuesOtaGate >= 0 && valuesReader > valuesOtaGate && valuesWait > valuesReader &&
-          valuesSnapshot > valuesWait && valuesStream > valuesSnapshot,
-  "/values must refuse OTA, hold its Weather reader before the snapshot and stream, and finish its wait first");
-assert.match(valuesSend,
-  /if\s*\(ota_download_active\(\)\)\s*return network_tls_busy\(req\);\s*ValuesTlsReader reader;\s*if\s*\(!wait_for_values_tls_owner\(reader\)\s*\|\|\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);/,
-  "a refused TLS-phase wait and its final OTA recheck must precede the values snapshot allocation");
-assert.equal(occurrences(httpStatus, "wait_for_values_tls_owner("), 2,
-  "only the wait helper and the shared values sender may use the values-only gate");
+assert.ok(valuesOtaGate >= 0 && valuesSnapshot > valuesOtaGate && valuesStream > valuesSnapshot,
+  "/values must refuse OTA before constructing the snapshot or starting streaming");
 assert.match(httpStatus,
   /network_tls_busy\(httpd_req_t\* req\)[\s\S]*?503 Service Unavailable[\s\S]*?text\/plain[\s\S]*?network operation in progress/,
-  "the bounded refusal must stay a small explicit pre-response busy-503");
-assert.match(httpStatus,
-  /struct ValuesTlsReader \{[\s\S]{0,320}?~ValuesTlsReader\(\) \{ release\(\); \}\s*void release\(\) \{\s*if \(std::exchange\(admitted, false\)\) weather_values_reader_leave\(\);\s*\}/,
-  "an admitted /values reader must leave Weather's exclusion on every exit, including unwinding");
-const valuesWaitStart = httpStatus.indexOf("static bool wait_for_values_tls_owner(ValuesTlsReader& reader)");
-const valuesWaitEnd = httpStatus.indexOf("static esp_err_t network_tls_busy", valuesWaitStart);
-const valuesWaitHelper = httpStatus.slice(valuesWaitStart, valuesWaitEnd);
-const weatherRead = valuesWaitHelper.indexOf("const bool weather_tls = !weather_values_reader_enter()");
-const otaRead = valuesWaitHelper.indexOf("const bool ota_active  = ota_download_active()", weatherRead);
-const waitDecision = valuesWaitHelper.indexOf(
-  "http_values_wait_decision(\n            ota_active, weather_tls", otaRead);
-const readerAdmitted = valuesWaitHelper.indexOf("reader.admitted = true;", waitDecision);
-const readerReleased = valuesWaitHelper.indexOf("if (!weather_tls) weather_values_reader_leave();",
-  readerAdmitted);
-const readerRefused = valuesWaitHelper.indexOf("Refuse) return false;", readerReleased);
-assert.ok(valuesWaitStart >= 0 && valuesWaitEnd > valuesWaitStart && weatherRead >= 0 &&
-  otaRead > weatherRead && waitDecision > otaRead && readerAdmitted > waitDecision &&
-  readerReleased > readerAdmitted && readerRefused > readerReleased,
-  "the wait must enter Weather's count then read OTA, and release a counted reader it does not admit");
-assert.doesNotMatch(valuesWaitHelper, /weather_fetch_active\(\)/,
-  "/values must wait only for Weather's TLS phase, not for its lead and quiesce interval");
-const exclusion = read("main/logic/http_values_wait.hpp");
-assert.match(exclusion,
-  /bool try_enter_reader\(\) noexcept \{\s*readers_\.fetch_add\(1, std::memory_order_seq_cst\);\s*if \(!tls_\.load\(std::memory_order_seq_cst\)\) return true;\s*readers_\.fetch_sub\(1, std::memory_order_seq_cst\);/,
-  "a /values reader must be counted before it reads the TLS phase, sequentially consistent");
-assert.match(exclusion,
-  /void\s+begin_tls\(\) noexcept \{ tls_\.store\(true, std::memory_order_seq_cst\); \}/,
-  "Weather must raise its TLS phase sequentially consistent before reading the reader count");
-assert.match(exclusion,
-  /uint32_t readers\(\) const noexcept \{ return readers_\.load\(std::memory_order_seq_cst\); \}/,
-  "Weather's reader-count read must stay sequentially consistent, or it may pass its own phase store");
-const weatherPhaseStart = weather.indexOf("struct WeatherTlsPhase {");
-const weatherPhaseEnd = weather.indexOf("struct HttpClientCleanup", weatherPhaseStart);
-const weatherPhase = weather.slice(weatherPhaseStart, weatherPhaseEnd);
-assert.ok(weatherPhaseStart >= 0 && weatherPhaseEnd > weatherPhaseStart &&
-  weatherPhase.includes("WeatherTlsPhase() noexcept { s_values_tls.begin_tls(); }") &&
-  weatherPhase.includes("~WeatherTlsPhase() { s_values_tls.end_tls(); }") &&
-  /weather_values_quiesce_decision\(\s*s_values_tls\.readers\(\), elapsed_ms, kValuesQuiesceWaitMs\)/
-    .test(weatherPhase),
-  "Weather's TLS phase must be raised and lowered by scope and drain readers with a bounded wait");
-assert.match(weather,
-  /WeatherTlsPhase tls_phase;\s*values_quiesce_failed = !tls_phase\.values_quiesced\(\);\s*if \(!values_quiesce_failed\)\s*ok = fetch_forecast\(/,
-  "Weather must drain admitted /values readers after raising its TLS phase and before any HTTPS allocation");
-assert.match(weather, /syslog_quiesce_failed \? "syslog_busy"\s*:\s*"http_busy"/,
-  "a /values reader that never leaves must defer Weather as an explicit http_busy wait");
-assert.match(httpStatus, /kValuesTlsWait\s*=\s*pdMS_TO_TICKS\(4000\)/,
-  "the values wait must remain below the five-second live-gate request timeout");
-assert.match(httpStatus, /kValuesTlsRetry\s*=\s*pdMS_TO_TICKS\(250\)/,
-  "the values wait must yield in bounded 250-ms steps");
+  "OTA refusal must stay a small explicit pre-response busy-503");
 const statusStart = httpStatus.indexOf("static esp_err_t h_status(");
 const statusEnd = httpStatus.indexOf("struct ValuesSnapshot", statusStart);
 assert.ok(statusStart >= 0 && statusEnd > statusStart, "/status must remain identifiable");

@@ -820,7 +820,7 @@ void test_http_leftover_body_bounded_after_response(bool mutate_deadline) {
     CHECK(oversized.received <= daik::BODY_DISCARD_MAX_BYTES + 128);
 }
 
-void test_weather_rejects_incomplete_http_body(bool mutate_completion_gate) {
+void test_rejects_incomplete_http_body(bool mutate_completion_gate) {
     auto accepted = [&](int64_t claimed, size_t received, bool parser_complete) {
         return mutate_completion_gate ||
                daik::http_body_complete(claimed, received, parser_complete);
@@ -881,7 +881,7 @@ int main(int argc, char** argv) {
     bool mutate_http_header_deadline = false;
     bool mutate_http_body_deadline   = false;
     bool mutate_http_discard         = false;
-    bool mutate_weather_completion   = false;
+    bool mutate_http_completion      = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg(argv[i]);
         if (arg == "--mutate-nvs-atomicity")
@@ -894,8 +894,8 @@ int main(int argc, char** argv) {
             mutate_http_body_deadline = true;
         else if (arg == "--mutate-http-discard-deadline")
             mutate_http_discard = true;
-        else if (arg == "--mutate-weather-body-completion")
-            mutate_weather_completion = true;
+        else if (arg == "--mutate-http-body-completion")
+            mutate_http_completion = true;
         else {
             std::cerr << "unknown argument: " << arg << '\n';
             return 2;
@@ -927,8 +927,8 @@ int main(int argc, char** argv) {
          [=] { test_http_absolute_deadline_stops_trickling_body(mutate_http_body_deadline); }},
         {"HTTP leftover body bounded after response",
          [=] { test_http_leftover_body_bounded_after_response(mutate_http_discard); }},
-        {"Weather rejects incomplete HTTP body",
-         [=] { test_weather_rejects_incomplete_http_body(mutate_weather_completion); }},
+        {"HTTP rejects incomplete body",
+         [=] { test_rejects_incomplete_http_body(mutate_http_completion); }},
     };
 
     size_t failed = 0;

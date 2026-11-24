@@ -464,6 +464,11 @@ export async function assertCyclingChart(page, server, context) {
       await page.waitFor(`(() => { const h = document.querySelector(${JSON.stringify(ROW)})?.closest(".vitem")?.querySelector(".vdesc-inner")?.getBoundingClientRect().height; return typeof h === "number" && h < 1; })()`);
       assert.equal(await evaluate(page, sel => document.querySelector(sel).getAttribute("aria-expanded"), ROW),
         "false", context + ": releasing the old pointer cannot reopen the collapsed disclosure");
+      await page.waitFor(`(() => {
+        const row = document.querySelector("${ROW}");
+        return !S.scrub && !document.querySelector("${CHART}") &&
+          row.closest(".vitem").getAnimations({ subtree: true }).every(a => a.playState !== "running");
+      })()`);
       await tap(page, ROW);
       await page.waitFor(`document.querySelector('${CHART}') && !S.clickHold`);
       assert.deepEqual(await pinned(), [], context + ": the old release cannot pin a collapsed chart");

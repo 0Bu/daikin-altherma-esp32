@@ -77,9 +77,9 @@ assert_mutation_detected \
     "HTTP leftover body bounded after response" \
     "HTTP leftover-body discard deadline"
 assert_mutation_detected \
-    --mutate-weather-body-completion \
-    "Weather rejects incomplete HTTP body" \
-    "Weather incomplete-body rejection"
+    --mutate-http-body-completion \
+    "HTTP rejects incomplete body" \
+    "HTTP incomplete-body rejection"
 
 # The complete production OTA translation unit runs with SDK/service adapters. Its independent
 # cleanup, acceptance and worker/health-state mutations must fail the corresponding runtime oracle.
@@ -88,7 +88,7 @@ node test/test_ota_runtime.mjs
 # Complete WiFi/syslog production units exercise current leases, boot wakes and bounded logging.
 node test/test_network_runtime.mjs
 
-# Complete ENV III / Weather units exercise sensor/resource and forecast/source lifecycle.
+# Complete ENV III unit exercises sensor and resource lifecycle.
 node test/test_src_runtime.mjs
 
 # Real polling and accessory task entries execute with bounded SDK/service adapters.

@@ -1,4 +1,4 @@
-"""Exact, complete ELF-body decoding for ten reviewed local HTTP/config functions.
+"""Exact, complete ELF-body decoding for reviewed local HTTP functions.
 
 The main checker supplies its existing gap-free raw decoder and BudgetError.  This module adds
 no wildcard packed exception: the nm/ELF names, local function binding and display names below
@@ -23,11 +23,48 @@ _RAW_NAMES = {
     "daik::set_syslog(httpd_req*)": "_ZN4daikL10set_syslogEP9httpd_req",
     "daik::parse_circulation_request(httpd_req*, daik::CirculationRequest&)":
         "_ZN4daikL25parse_circulation_requestEP9httpd_reqRNS_18CirculationRequestE",
-    "daik::set_weather(httpd_req*)": "_ZN4daikL11set_weatherEP9httpd_req",
     "daik::set_board(httpd_req*)": "_ZN4daikL9set_boardEP9httpd_req",
     "daik::set_env3(httpd_req*)": "_ZN4daikL8set_env3EP9httpd_req",
+    "daik::set_gas_comparison(httpd_req*)": "_ZN4daikL18set_gas_comparisonEP9httpd_req",
     "daik::take_values_snapshot()": "_ZN4daikL20take_values_snapshotEv",
 }
+
+_FAULT_UNIT_STATUS = (
+    'daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >'
+    '(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)'
+    '::{lambda(unsigned short, unsigned short, daik::logic::FaultUnitOrigin, daik::logic::FaultTraceKind, bool)\x231}'
+    '::operator()(unsigned short, unsigned short, daik::logic::FaultUnitOrigin, daik::logic::FaultTraceKind, bool) const')
+
+# Status and value serializers can share a packed linker span after a layout change.
+# Admit only these matched local functions and decode each complete ELF body.
+_RAW_NAMES.update({
+    'daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)::{lambda(char const*, std::basic_string_view<char, std::char_traits<char> >)\x231}::operator()(char const*, std::basic_string_view<char, std::char_traits<char> >) const':
+        '_ZZN4daikL18append_status_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_bENKUlPKcSt17basic_string_viewIcSt11char_traitsIcEEE_clES7_SB_',
+    'daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)::{lambda(char const*, char const*)\x231}::operator()(char const*, char const*) const':
+        '_ZZN4daikL30append_status_fault_check_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_NS_17DiagnosticsSourceEbbbENKUlPKcS8_E_clES8_S8_',
+    'void daik::append_status_rfc3339<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, long long)':
+        '_ZN4daikL21append_status_rfc3339INS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_PKcbx',
+    'void daik::append_status_opt_quoted<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, std::basic_string_view<char, std::char_traits<char> >)':
+        '_ZN4daikL24append_status_opt_quotedINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_PKcbSt17basic_string_viewIcSt11char_traitsIcEE',
+    'daik::h_scan(httpd_req*)':
+        '_ZN4daikL6h_scanEP9httpd_req',
+    '_ZN4daikpLINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_NS_12RedactedJsonE$isra$0':
+        '_ZN4daikpLINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_NS_12RedactedJsonE$isra$0',
+    'daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)::{lambda(char const*, unsigned long long)\x231}::operator()(char const*, unsigned long long) const':
+        '_ZZN4daikL18append_status_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_bENKUlPKcyE_clES7_y',
+    'void daik::append_status_service_meta<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, daik::logic::RefrigerantServiceMetricSnapshot const&, daik::logic::RefrigerantServiceSource const&)':
+        '_ZN4daikL26append_status_service_metaINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_PKcRKNS_5logic32RefrigerantServiceMetricSnapshotERKNS8_24RefrigerantServiceSourceE',
+    'daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)::{lambda(char const*, int)\x231}::operator()(char const*, int) const':
+        '_ZZN4daikL18append_status_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_bENKUlPKciE_clES7_i',
+    'daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)::{lambda(char const*, unsigned long long)\x231}::operator()(char const*, unsigned long long) const':
+        '_ZZN4daikL30append_status_fault_check_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_NS_17DiagnosticsSourceEbbbENKUlPKcyE_clES8_y',
+    _FAULT_UNIT_STATUS:
+        '_ZZN4daikL30append_status_fault_check_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_NS_17DiagnosticsSourceEbbbENKUlttNS_5logic15FaultUnitOriginENS7_14FaultTraceKindEbE_clEttS8_S9_b',
+    'void daik::append_status_opt_uint<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, unsigned long long)':
+        '_ZN4daikL22append_status_opt_uintINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_PKcby',
+    'daik::h_active_model_values(httpd_req*)':
+        '_ZN4daikL21h_active_model_valuesEP9httpd_req',
+})
 CONFIG_PACKED_SYMBOLS = frozenset(_RAW_NAMES)
 _FUNCTION = re.compile(r"^\s*([0-9a-fA-F]+)\s+<(.+)>:\s*$")
 _INSTRUCTION = re.compile(r"^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F]+)(?:\s+(.*))?$")
@@ -104,7 +141,7 @@ def _code(data: bytes, nm_text: str, raw_name: str, address: int,
 
 def restore_packed_config(disassembly: str, data: bytes, elf: Path, objdump: str,
                           tool_output: Callable[[list[str]], str],
-                          raw_body: Callable[[str, int, bytes], str],
+                          raw_body: Callable[..., str],
                           error: type[Exception]) -> str:
     """Raw-decode every present reviewed body, even when its first ENTRY is already readable.
 
@@ -162,7 +199,7 @@ def restore_packed_config(disassembly: str, data: bytes, elf: Path, objdump: str
                 raw_file.write_bytes(code)
                 decoded = tool_output([objdump, "-D", "-b", "binary", "-m", "xtensa",
                                        f"--adjust-vma=0x{address:x}", str(raw_file)])
-                replacement = raw_body(decoded, address, code)
+                replacement = raw_body(decoded, address, code, allow_alignment=name == _FAULT_UNIT_STATUS)
                 first_line, newline, body = replacement.partition("\n")
                 expected = f"{address:08x} <daik::hp_detect_run()>:"
                 if first_line != expected or not newline:
@@ -178,7 +215,7 @@ def restore_packed_config(disassembly: str, data: bytes, elf: Path, objdump: str
     return "".join(lines)
 
 
-def self_test(error: type[Exception], raw_body: Callable[[str, int, bytes], str]) -> int:
+def self_test(error: type[Exception], raw_body: Callable[..., str]) -> int:
     """Execute the production adapter against deterministic tools, without subprocess calls."""
     address = 0x42001000
     objdump = "xtensa-esp32s3-elf-objdump"
@@ -264,10 +301,10 @@ def self_test(error: type[Exception], raw_body: Callable[[str, int, bytes], str]
     raw = (f"Disassembly of section .data:\n{address:08x} <.data>:\n"
            f"{address:x}: 366100 entry a1, 48\n{address + 3:x}: 1df0 retw.n\n")
 
-    def reject(label: str, expected: str, **options: object) -> None:
+    def reject(label: str, expected: str, *, symbol: str = name, **options: object) -> None:
         nonlocal controls
         try:
-            exercise(name, **options)
+            exercise(symbol, **options)
         except error as exc:
             assert expected in str(exc), (label, str(exc))
         else:
@@ -322,5 +359,21 @@ def self_test(error: type[Exception], raw_body: Callable[[str, int, bytes], str]
                    f"{address:x}: 366100 entry a1, 48\n"
                    f"{address + 3:x}: 101800 movsp a1, a8\n{address + 6:x}: 1df0 retw.n\n")
     reject("hidden interior MOVSP", "dynamic stack adjustment", body=dynamic, decoded=dynamic_raw)
+    padded = bytes.fromhex("3661008600000000001df0")
+    padded_raw = (f"Disassembly of section .data:\n{address:08x} <.data>:\n"
+                  f"{address:x}: 366100 entry a1, 48\n{address + 3:x}: 860000 j 0x{address + 9:x}\n"
+                  f"{address + 6:x}: 000000 ill\n{address + 9:x}: 1df0 retw.n\n")
+    restored, _ = exercise(_FAULT_UNIT_STATUS, body=padded, decoded=padded_raw)
+    assert "ill" not in restored and "entry a1, 48" in restored and "retw.n" in restored
+    reject("alignment for another symbol", "invalid raw instruction", body=padded, decoded=padded_raw)
+    for label, expected, changed in (
+        ("reachable zero word", "unconditional jump", padded_raw.replace(" j 0x", " beqz a8, 0x")),
+        ("target inside zero word", "lacks a decoded instruction",
+         padded_raw.replace(f"j 0x{address + 9:x}", f"j 0x{address + 7:x}")),
+        ("computed jump around zero word", "unreviewed control flow",
+         padded_raw.replace("retw.n", "jx a8")),
+        ("unknown opcode", "invalid raw instruction", padded_raw.replace("ill", "unknown")),
+    ):
+        reject(label, expected, symbol=_FAULT_UNIT_STATUS, body=padded, decoded=changed)
     assert restore_packed_config("", b"", elf, objdump, lambda _: "", raw_body, error) == ""
     return controls

@@ -2,14 +2,14 @@
 // ONE unwind-safe RAII guard for every FreeRTOS mutex in this firmware.
 //
 // WHY IT IS SHARED. AGENTS.md's "Memory, concurrency, and HTTP safety" section gives two ways to be
-// safe — keep the critical section non-allocating, or take the lock through an RAII guard — and this
-// is the second one. Nine files had grown their OWN copy of it (config, hp_poll, hp_modbus, mqtt_ha,
-// syslog, ota_update, history, checkup, weather_forecast), in TWO shapes that had already diverged:
-// seven discard the take's return value and unconditionally give back on destruction, two record
-// whether the take actually succeeded. Nothing chose between them and nothing could — a per-file
-// struct is invisible to the file next to it. The divergence is benign today (a blocking take on a
-// live mutex does not fail), but it means the two halves of the codebase disagree about what a
-// guard IS, and only one of the shapes can express the bounded acquire below at all.
+// safe — keep the critical section non-allocating, or take the lock through an RAII guard — and
+// this is the second one. Nine files had grown their OWN copy of it (config, hp_poll, hp_modbus,
+// mqtt_ha, syslog, ota_update, history, checkup), in TWO shapes that had already diverged: seven
+// discard the take's return value and unconditionally give back on destruction, two record whether
+// the take actually succeeded. Nothing chose between them and nothing could — a per-file struct is
+// invisible to the file next to it. The divergence is benign today (a blocking take on a live mutex
+// does not fail), but it means the two halves of the codebase disagree about what a guard IS, and
+// only one of the shapes can express the bounded acquire below at all.
 //
 // WHY IT MATTERS AT ALL. C++ exceptions are enabled here and std::bad_alloc is a REACHABLE failure,
 // not a theoretical one — the "Memory, concurrency, and HTTP safety" section of AGENTS.md is about
@@ -18,10 +18,10 @@
 // the device wedges into a watchdog reboot: strictly worse than the OOM it came from. A guard
 // releases on the normal return path AND while an exception unwinds.
 //
-// The name is deliberately project-scoped rather than a stock `LockGuard`/`MutexGuard` in the global
-// namespace: an identically-named type in any linked component would be a one-definition-rule clash,
-// which is ill-formed with no diagnostic required — a class of bug this firmware would find on the
-// device or not at all.
+// The name is deliberately project-scoped rather than a stock `LockGuard`/`MutexGuard` in the
+// global namespace: an identically-named type in any linked component would be a
+// one-definition-rule clash, which is ill-formed with no diagnostic required — a class of bug this
+// firmware would find on the device or not at all.
 //
 // TWO acquisition modes, so one type serves both contexts this firmware has:
 //

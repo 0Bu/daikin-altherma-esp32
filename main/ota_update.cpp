@@ -41,7 +41,6 @@
 #include "provisioning.hpp"
 #include "syslog.hpp"
 #include "stack_watch.hpp"
-#include "weather_forecast.hpp"
 #include "wifi.hpp"
 #include "arch/sys_arch.h"
 #include "esp_app_desc.h"
@@ -208,7 +207,7 @@ const char* ota_runtime_image_state_name(OtaRuntimeImageState state) {
 // proved that the small response is irrelevant to the binding allocation — TLS setup itself failed
 // while the MQTT publisher still competed for the largest contiguous block. The guard lives around
 // the whole task operation so every manifest/download exit and exception clears it in one place.
-// Unlike Weather, the lease also withdraws a connected publisher's retained `online` before the
+// The lease also withdraws a connected publisher's retained `online` before the
 // clean MQTT stop: an install restarts the board while that client is stopped. Both feed checks
 // and direct uploads acquire this lease (logic/mqtt_publish_gate.hpp).
 struct OtaNetworkFlag {
@@ -265,7 +264,6 @@ constexpr TickType_t kHeadroomRetryDelay  = pdMS_TO_TICKS(250);
 constexpr unsigned   kTransferHeadroomMaxAttempts   = 60; // 15 s
 constexpr unsigned   kValidationHeadroomMaxAttempts = 20; // 5 s
 constexpr TickType_t kPollQuiesceWait               = pdMS_TO_TICKS(15000);
-constexpr TickType_t kWeatherWait                   = pdMS_TO_TICKS(kHttpTimeoutMs + 5000);
 
 struct OtaHeapSample {
     size_t free_bytes;
@@ -513,11 +511,10 @@ void set_state(const char* state, const char* message = "") {
 
 [[gnu::noinline]] void set_error(const char* message) { set_state("error", message); }
 
-[[gnu::noinline]] bool quiesce_fail_diag(const char* name, bool weather = false) {
+[[gnu::noinline]] bool quiesce_fail_diag(const char* name) {
     const OtaHeapSample sample = ota_heap_sample();
-    diag_printf(weather ? "ota: %s did not quiesce (free=%u B largest=%u B)\n"
-                        : "ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n",
-                name, static_cast<unsigned>(sample.free_bytes),
+    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n", name,
+                static_cast<unsigned>(sample.free_bytes),
                 static_cast<unsigned>(sample.largest_internal_block));
     return false;
 }
@@ -537,19 +534,13 @@ void set_progress(int pct) {
 }
 
 [[gnu::noinline]] bool wait_for_quiesce(bool (*ready)(), const char* start_what,
-                                        const char* fail_name, TickType_t limit = kPollQuiesceWait,
-                                        bool weather = false) {
+                                        const char* fail_name,
+                                        TickType_t  limit = kPollQuiesceWait) {
     if (ready()) return true;
     quiesce_start_diag(start_what);
     const TickType_t started = xTaskGetTickCount();
     while (!ready() && xTaskGetTickCount() - started < limit) vTaskDelay(kAllocatorRetryDelay);
-    return ready() || quiesce_fail_diag(fail_name, weather);
-}
-
-bool wait_for_weather_quiesce() {
-    return wait_for_quiesce([]() { return !weather_fetch_active(); },
-                            "in-flight weather TLS client", "weather TLS client", kWeatherWait,
-                            true);
+    return ready() || quiesce_fail_diag(fail_name);
 }
 
 bool wait_for_poll_quiesce() {
@@ -1827,10 +1818,6 @@ void ota_task(void*) {
             OtaNetworkFlag active;
             vTaskDelay(kNetworkQuiesceLead);
             try {
-                // Weather uses the same TLS allocator.  Its task raises its own lock-free activity
-                // flag before the race-closing OTA re-check; an already-open request gets one HTTP
-                // timeout plus margin to unwind, while a new one observes this OTA flag and never
-                // starts.
                 if (!wait_for_poll_quiesce()) {
                     set_state("error", "Heat-pump polling is still using memory — retry shortly");
                 } else if (!wait_for_mqtt_quiesce()) {
@@ -1841,9 +1828,6 @@ void ota_task(void*) {
                     set_state("error", "HomeHub polling is still using memory — retry shortly");
                 } else if (!wait_for_syslog_quiesce()) {
                     set_state("error", "Syslog is still using memory — retry shortly");
-                } else if (!wait_for_weather_quiesce()) {
-                    set_state("error",
-                              "Another network operation is still using memory — retry shortly");
                 } else if (request.mode == OtaTaskMode::Upload) {
                     run_upload(request, upload);
                 } else if (update) {

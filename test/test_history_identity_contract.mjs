@@ -9,7 +9,6 @@ for (const [name, next] of [
   ["void history_reset()", "void history_reset_on_detect"],
   ["void history_reset_on_detect", "void history_modbus_reset"],
   ["void history_modbus_reset", "uint32_t history_modbus_generation"],
-  ["void history_room_reset", "void history_circulation_reset"],
   ["void history_circulation_reset", "void history_checkup_reset"],
 ]) {
   const body = functionBody(name, next);
@@ -18,7 +17,7 @@ for (const [name, next] of [
     name + " changes the browser epoch inside the sample lock");
 }
 for (const name of ["size_t history_snapshot(", "size_t history_modbus_snapshot(",
-  "size_t history_env3_snapshot(", "size_t history_room_snapshot("]) {
+  "size_t history_env3_snapshot("]) {
   const body = functionBody(name, "\nsize_t ");
   assert.ok(body.includes("uint32_t* epoch"));
   const lock = body.indexOf("Lock lk(s_mtx)");
@@ -35,8 +34,6 @@ assert.match(http, /history_snapshot_epoch != history_epoch\(\)/,
 assert.match(http,
   /if \(history_snapshot_epoch == 0\) \{[\s\S]{0,160}?history unavailable[\s\S]{0,200}?if \(history_snapshot_epoch != history_epoch\(\)\) \{[\s\S]{0,160}?history changed; retry/,
   "a missing snapshot identity must not be reported as a retryable history change");
-assert.match(http, /reference_temperature_status\(c\)/,
-  "status must bind the room sample to the same configuration snapshot");
 assert.match(http, /circulation_source_status\(c\)/);
 assert.equal((history.match(/circulation_generation = circulation_source_generation\(\)/g) || []).length, 2);
 assert.match(history, /circulation_generation != circulation_source_generation\(\)\) return/);
@@ -131,7 +128,6 @@ const resetOwners = [
   functionBody("void history_reset()", "void history_reset_on_detect"),
   functionBody("void history_reset_on_detect", "void history_modbus_reset"),
   functionBody("void history_modbus_reset", "uint32_t history_modbus_generation"),
-  functionBody("void history_room_reset", "void history_circulation_reset"),
   functionBody("void history_checkup_reset", "// The BOARD's own 24-hour trends"),
   functionBody("bool flash_journal_scan()", "esp_err_t flash_region_erased("),
   functionBody("bool history_flash_forget()", "static void history_flash_start()"),
@@ -395,8 +391,7 @@ for (const name of ["history_newest_age_s", "history_modbus_newest_age_s", "hist
 for (const [name, next, ring, commit] of [
   ["size_t history_snapshot(", "\nsize_t ", "P().ring[t].ring", "s_last_commit_us, s_last_commit_bucket"],
   ["size_t history_modbus_snapshot(", "\nsize_t ", "P().mb_ring[t]", "s_mb_last_commit_us, s_mb_last_commit_bucket"],
-  ["size_t history_env3_snapshot(", "\nsize_t ", "P().env3_ring[t]", "s_env3_last_commit_us, s_env3_last_commit_bucket"],
-  ["size_t history_room_snapshot(", "\n// Copied out under the lock", "R().ring", "s_room_last_commit_us, s_room_last_commit_bucket"],
+  ["size_t history_env3_snapshot(", "\n// Copied out under the lock", "P().env3_ring[t]", "s_env3_last_commit_us, s_env3_last_commit_bucket"],
 ]) {
   const body = functionBody(name, next);
   assert.match(body, /logic::HistoryMeta\* meta/);
@@ -419,7 +414,7 @@ for (const [name, next, ring, commit] of [
   const route = http.slice(routeAt, http.indexOf("static esp_err_t h_diag(", routeAt));
   assert.ok(routeAt >= 0 && route.length > 200, "the /history route body");
   assert.match(route, /logic::HistoryMeta\s+history_meta;/);
-  assert.equal((route.match(/&history_meta\)/g) || []).length, 4, "all four trend sources hand their meta back");
+  assert.equal((route.match(/&history_meta\)/g) || []).length, 3, "all three trend sources hand their meta back");
   assert.match(route, /history_commit_unix_s\(unix_s, wall_ms, esp_timer_get_time\(\),\s*history_meta\.newest_commit_us, newest\)/);
   assert.match(route, /b0\s*=\s*history_meta\.oldest_bucket/);
 }

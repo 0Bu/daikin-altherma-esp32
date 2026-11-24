@@ -45,7 +45,7 @@
 //
 // What is booked is what the liveness record below MEASURES: the previous boot's last sign of life
 // minus the raster boundary its newest commit closed, plus a fixed downtime allowance, plus the
-// uptime up to the claim. A raster that stalled while the device kept signing (an OTA or weather
+// uptime up to the claim. A raster that stalled while the device kept signing (an OTA
 // hold-off parks the X10A raster, a HomeHub task that stopped) therefore has its stall booked
 // at five-minute resolution, and keeps the samples it had; stalling alone does not refuse it.
 // Short interruptions can leave no visible gap. The count is capped at the
@@ -149,17 +149,19 @@ inline constexpr size_t   HISTORY_FLASH_ERASE_BYTES = 4096;
 inline constexpr size_t   HISTORY_FLASH_PAGE_BYTES = 256;
 inline constexpr size_t   HISTORY_JOURNAL_HEADER_BYTES = 64;
 inline constexpr size_t   HISTORY_FLASH_TOTAL_RINGS =
-    TREND_COUNT + HOMEHUB_HISTORY_COUNT + ENV3_HISTORY_COUNT + 1;
+    TREND_COUNT + HOMEHUB_HISTORY_COUNT + ENV3_HISTORY_COUNT;
 // The first three ids are the original v1 trend sources.  Checkup extends the SAME append stream
 // with one hourly diagnostic bucket; keeping the old ids and wire version intact means an update
 // can still restore every existing trend record instead of invalidating the journal it is fixing.
 inline constexpr size_t HISTORY_JOURNAL_SOURCE_COUNT = 5;
 
-enum class HistoryJournalSource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2, Checkup = 3, Room = 4 };
-
-// The independent room source has one fixed actual-temperature series; its schema does not change
-// when an unrelated X10A/HomeHub catalog grows. Existing source numbers and catalogs stay intact.
-inline constexpr uint32_t HISTORY_ROOM_SCHEMA = 0x52544d31u; // "RTM1": actual °C, last sample
+enum class HistoryJournalSource : uint8_t {
+    X10a        = 0,
+    Modbus      = 1,
+    Env3        = 2,
+    Checkup     = 3,
+    RetiredRoom = 4
+};
 
 inline constexpr size_t history_journal_source_rings(HistoryJournalSource src) {
     switch (src) {
@@ -170,9 +172,8 @@ inline constexpr size_t history_journal_source_rings(HistoryJournalSource src) {
         // HistorySample vector.  Its word count is supplied by checkup.cpp's wire contract at the
         // generic header matcher below, avoiding a dependency cycle between the two persist headers.
         case HistoryJournalSource::Checkup:
+        case HistoryJournalSource::RetiredRoom:
             return 0;
-        case HistoryJournalSource::Room:
-            return 1;
     }
     return 0;
 }
@@ -239,14 +240,16 @@ static_assert(offsetof(HistoryJournalHeader, commit) == 16,
               "commit offset is part of the power-loss protocol");
 
 inline bool history_journal_header_matches(const HistoryJournalHeader& h, uint32_t identity_fp,
-                                           uint16_t value_count, uint32_t dt_s) {
+                                           uint16_t value_count, uint32_t dt_s,
+                                           uint8_t expected_flags = 0) {
     if (h.magic != HISTORY_JOURNAL_MAGIC || h.version != HISTORY_JOURNAL_VERSION ||
-        h.commit != HISTORY_JOURNAL_COMMITTED || h.flags != 0 || h.catalog_fp != identity_fp ||
-        h.slot_bytes != HISTORY_JOURNAL_SLOT_BYTES || h.dt_s != dt_s ||
-        h.sequence == 0 || h.bucket == INT64_MIN || h.source >= HISTORY_JOURNAL_SOURCE_COUNT ||
-        h.rings[0] == 0 || h.rings[0] > HISTORY_MANIFEST_MAX_IDS ||
-        h.rings[1] == 0 || h.rings[1] > HISTORY_MANIFEST_MAX_IDS ||
-        h.rings[2] == 0 || h.rings[2] > HISTORY_MANIFEST_MAX_IDS)
+        h.commit != HISTORY_JOURNAL_COMMITTED || h.flags != expected_flags ||
+        h.catalog_fp != identity_fp || h.slot_bytes != HISTORY_JOURNAL_SLOT_BYTES ||
+        h.dt_s != dt_s || h.sequence == 0 || h.bucket == INT64_MIN ||
+        h.source >= HISTORY_JOURNAL_SOURCE_COUNT || h.rings[0] == 0 ||
+        h.rings[0] > HISTORY_MANIFEST_MAX_IDS || h.rings[1] == 0 ||
+        h.rings[1] > HISTORY_MANIFEST_MAX_IDS || h.rings[2] == 0 ||
+        h.rings[2] > HISTORY_MANIFEST_MAX_IDS)
         return false;
     return h.value_count == value_count && value_count > 0 &&
            static_cast<size_t>(value_count) * sizeof(HistorySample) <=
@@ -457,21 +460,14 @@ inline bool history_journal_header_matches_x10a_scoped(const HistoryJournalHeade
            history_journal_header_matches_scoped_layout(h, catalog_fp, HistoryJournalSource::X10a);
 }
 
-inline bool history_journal_room_header_structural_matches(const HistoryJournalHeader& h) {
-    if (h.source != static_cast<uint8_t>(HistoryJournalSource::Room) ||
-        h.flags != HISTORY_JOURNAL_FLAG_TARGET_SCOPED || history_journal_scope(h) == 0 ||
-        h.catalog_fp == 0 || h.rings[0] != 1 || h.rings[1] != 1 || h.rings[2] != 1)
+inline bool history_journal_retired_room_header_matches(const HistoryJournalHeader& h) {
+    if (h.source != static_cast<uint8_t>(HistoryJournalSource::RetiredRoom) ||
+        history_journal_scope(h) == 0 || h.catalog_fp == 0 || h.rings[0] != 1 || h.rings[1] != 1 ||
+        h.rings[2] != 1)
         return false;
-    HistoryJournalHeader plain = h;
-    plain.flags                = 0;
     // Preserve the physical append sequence even when this build cannot interpret the schema.
-    return history_journal_header_matches(plain, h.catalog_fp, 1, HISTORY_DT_S);
-}
-
-inline bool history_journal_room_header_matches(const HistoryJournalHeader& h, uint32_t identity) {
-    return identity != 0 && h.catalog_fp == HISTORY_ROOM_SCHEMA &&
-           history_journal_scope(h) == identity &&
-           history_journal_room_header_structural_matches(h);
+    return history_journal_header_matches(h, h.catalog_fp, 1, HISTORY_DT_S,
+                                          HISTORY_JOURNAL_FLAG_TARGET_SCOPED);
 }
 
 // CRC normalises the two fields changed after the body was assembled. This makes the exact same
@@ -962,31 +958,6 @@ template <typename Cfg> inline uint32_t history_circulation_identity(const Cfg& 
     return history_circulation_identity_clamp(config_crc32_final(crc));
 }
 
-// Actual-temperature evidence has a separate durable generation for delete/re-add and A -> B -> A
-// cutovers. Returns zero before first opt-in (`diagnostics_generation == 0`) or when unconfigured;
-// pausing diagnostics (`diagnostics_enabled == false`) at a non-zero generation preserves the
-// series identity. Display names, targets and thermostat gates cannot change the meaning of this
-// series.
-template <typename Cfg> inline uint32_t history_room_identity(const Cfg& c) {
-    if (c.diagnostics_generation == 0 || c.mqtt_uri.empty() || c.ref_temp_topic.empty()) return 0;
-    uint32_t crc           = history_fp_u32(CONFIG_CRC32_INIT, HISTORY_ROOM_SCHEMA);
-    crc                    = history_fp_u32(crc, c.diagnostics_generation);
-    crc                    = history_fp_u32(crc, c.ref_temp_generation);
-    crc                    = history_fp_str(crc, c.mqtt_uri.c_str());
-    crc                    = history_fp_str(crc, c.ref_temp_topic.c_str());
-    crc                    = history_fp_str(crc, c.ref_temp_path.c_str());
-    const bool mapped_time = !c.ref_temp_time_topic.empty() || !c.ref_temp_time_path.empty();
-    crc                    = history_fp_u32(crc, mapped_time ? 1u : 0u);
-    const char* time_topic = !mapped_time                    ? ""
-                             : c.ref_temp_time_topic.empty() ? c.ref_temp_topic.c_str()
-                                                             : c.ref_temp_time_topic.c_str();
-    crc                    = history_fp_str(crc, time_topic);
-    crc                    = history_fp_str(crc, c.ref_temp_time_path.c_str());
-    crc                    = history_fp_u32(crc, c.ref_temp_max_age_s);
-    const uint32_t out     = config_crc32_final(crc);
-    return out ? out : 1u;
-}
-
 // Stable identity of ONE stored series. The public trend id is the semantic anchor; the source and
 // every field which can change the meaning of its int16 sample are also included. Consequently a
 // label-only edit survives, while a locator/converter/unit/folding change starts only that series
@@ -1063,7 +1034,7 @@ inline uint32_t history_series_id(HistoryJournalSource src, size_t index) {
     case HistoryJournalSource::Env3:
         return index < ENV3_HISTORY_COUNT ? history_env3_series_id(ENV3_HISTORIES[index]) : 0;
     case HistoryJournalSource::Checkup:
-    case HistoryJournalSource::Room:
+    case HistoryJournalSource::RetiredRoom:
         return 0;
     }
     return 0;
@@ -1289,7 +1260,7 @@ inline const uint32_t* history_legacy_disinfection_id_list(HistoryJournalSource 
             count = sizeof(HISTORY_LEGACY_DISINFECTION_ENV3_IDS) / sizeof(uint32_t);
             return HISTORY_LEGACY_DISINFECTION_ENV3_IDS;
         case HistoryJournalSource::Checkup:
-        case HistoryJournalSource::Room:
+        case HistoryJournalSource::RetiredRoom:
             count = 0;
             return nullptr;
     }

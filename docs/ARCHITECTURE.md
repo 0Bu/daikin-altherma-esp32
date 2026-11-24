@@ -18,11 +18,10 @@ X10A UART → detection/profile → poll cache ─┬→ HTTP /values → device
 HomeHub TCP → independent register cache ──┬→ separate HTTP/MQTT observations
                                          └→ independent history and plant context
 ENV III I²C → accessory cache ──────────────┬→ status/MQTT/history
-MQTT room + circulation → bounded inputs ──┴→ read-only plant diagnosis and source history
-Open-Meteo HTTPS → optional forecast ─────────→ status/MQTT comparison evidence
+MQTT circulation → bounded witness input ───┴→ read-only plant diagnosis and source history
 ```
 
-X10A, HomeHub, ENV III and the MQTT room source have separate identity, cache, liveness and history.
+X10A, HomeHub, ENV III and MQTT circulation have separate identity, cache and liveness.
 A HomeHub reading never replaces X10A. Network transport (WiFi or Ethernet) carries these sources without changing
 what they mean. Presence, freshness, held-over state and validity are separate facts; absent input
 must not become zero, false or a fabricated source time.
@@ -41,8 +40,8 @@ tasks and transport.
 | Conversion and polling | `hp_convert.cpp`, `hp_poll.cpp` | converters, `ou_stale.hpp`, `state_dwell.hpp`, `raw_capture.hpp` |
 | HomeHub observations | `hp_modbus.cpp` | `modbus.hpp`, `modbus_plan.hpp`, `homehub_map.hpp` |
 | Local accessory | `env3.cpp` | `env3.hpp` |
-| MQTT publishing and external inputs | `mqtt_ha.cpp` | `ha_device.hpp`, `discovery.hpp`, `x10a_snapshot.hpp`, `mqtt_group.hpp`, `reference_temperature.hpp`, `circulation_source.hpp` |
-| Forecast and diagnosis | `weather_forecast.cpp`, `checkup.cpp`, MQTT sampler | `weather_forecast.hpp`, `checkup.hpp`, `heating_curve_diagnosis.hpp`, `instrument.hpp` |
+| MQTT publishing and circulation input | `mqtt_ha.cpp` | `ha_device.hpp`, `discovery.hpp`, `x10a_snapshot.hpp`, `mqtt_group.hpp`, `circulation_source.hpp` |
+| Plant checkup | `checkup.cpp` | `checkup.hpp`, `instrument.hpp` |
 | History and duration evidence | `history.cpp`, `state_dwell.cpp` | `history.hpp`, `history_persist.hpp`, `state_dwell.hpp` |
 | HTTP and MCP | `http_common.cpp`, `http_status.cpp`, `http_config.cpp`, `http_ota.cpp`, `mcp_server.cpp` | `http_surface.hpp`, `http_request.hpp`, `mcp.hpp`, `redact.hpp` |
 | OTA and absolute download deadlines | `ota_update.cpp`, `http_deadline.cpp`, `http_client_diag.cpp` | `ota_manifest.hpp`, `ota_headroom.hpp`, `ota_quiesce.hpp`, `ota_transport.hpp`, `ota_upload.hpp`, `health_gate.hpp` |
@@ -255,11 +254,8 @@ Future journal cursors are reported and never rewound; affected work waits for a
 checkup late-completion replay below re-appends hours deliberately; it is not a cursor repair.)
 Writes permit one slot retry and two abandoned sectors per failure episode, then retry at 60 seconds.
 
-X10A, HomeHub, ENV III and MQTT room temperature keep separate source rasters; board memory and the circulation
-witness share the X10A raster but keep RAM trends independent of heat-pump identity.
-The room raster runs on the MQTT task without X10A or HomeHub. Its independent sealed RAM store and
-journal records bind the broker, temperature/time mappings, maximum age and persisted source/consent
-generations. A rename or target-only edit preserves it; source removal/replacement retires it alone.
+X10A, HomeHub and ENV III keep separate source rasters. Board memory and the circulation witness
+share the X10A raster but keep RAM trends independent of heat-pump identity.
 X10A journal append requires a resolved identity and no pending source reset; a pending reset also
 skips that source's restoration. `b0` and negative `boot_b0` align monotonic buckets even before SNTP.
 See [the history API](API.md#get-history) for timestamp units and anchor availability. Missing samples
@@ -443,7 +439,7 @@ apply. See `tools/web_asset/` and the delivery and locale contracts in [test/REA
 
 Registration goes through the common exception boundary. The open setup AP exposes provisioning;
 the configured LAN exposes the full API. The surface follows whether that AP is running, not the
-radio's STA mode. The exact trusted-LAN route count of 41 is checked against registration; fields,
+radio's STA mode. The exact trusted-LAN route count of 39 is checked against registration; fields,
 route aliases, body limits and error behavior belong in [API.md](API.md).
 
 The common HTTP admission guard rejects every non-OTA route during active OTA, including assets
@@ -483,16 +479,14 @@ mutex, then checks profile, observation identity and revision before encoding wi
 Revision drift defers the cycle. Missing/held rows are skipped without constructing another vector.
 The 12 KiB payload limit is a refusal ceiling, not a permanent reservation. Release the local payload
 after synchronous QoS0 submission; commit the digest only after publish acceptance so `-1` is retried.
-HomeHub, Weather and ENV III state topics likewise retain only an 8-byte FNV-1a digest (`MqttPayloadDigest`) after accepted submission, inbound source frames share a 3.5 KiB SPSC byte ring behind an 8-descriptor queue, and competing network-heap pauses are reference-counted across Weather and OTA.
+HomeHub and ENV III state topics likewise keep an 8-byte FNV-1a digest (`MqttPayloadDigest`)
+after accepted submission. Inbound circulation frames use a 3.5 KiB SPSC byte ring behind an
+8-descriptor queue.
 
-Room and circulation inputs decode on the owning MQTT client. Configuration/source epochs reject
-queued frames from an earlier binding. A configured room timestamp mapping is the sole age authority;
-missing source time stays unavailable rather than falling back to arrival time.
-Their mappings may remain saved while
-diagnostics are off, but subscriptions and captured state are dormant/cleared. A room mapping saves
-directly; the circulation witness requires a current proof bound to behavioral fields. Retained
-MQTT without a valid source timestamp is not fresh evidence. Forecast and heating-curve documents
-carry explicit source and availability evidence and cannot issue a heat-pump write.
+The MQTT owner decodes circulation frames. Source epochs reject queued frames from an earlier
+binding. With diagnostics off, the saved mapping remains dormant and captured state clears.
+Saving the witness requires current proof bound to its behavioral fields. Retained MQTT without
+a valid source timestamp cannot establish freshness.
 
 <a id="network-transport-wifi-or-the-optional-wire"></a>
 <a id="wifi--lan-connectivity-reconnect--watchdog"></a>
@@ -545,35 +539,22 @@ binary reception and RSA validation never occupy the HTTP task. Its receive budg
 as specified in [API.md](API.md#ota-operation-contract). [SECURITY.md](SECURITY.md) owns trust and
 rollback conditions.
 
-OTA and Weather announce network ownership before TLS. MQTT stops its complete transport and
-acknowledges; X10A, HomeHub and Syslog stand aside before allocation-rich work. An in-flight Weather
-request gets a bounded unwind window; OTA wins future admission. A 1.1-second lead lets an existing
-publisher cycle finish. Weather then raises its TLS phase and drains admitted value snapshots
-(`/values`, MCP `get_hp_values`) and optional compressor traces (`/status`, MCP `get_status`).
-A trace releases its reader after serialization, or immediately when unavailable. Weather waits up
-to five seconds (else `http_busy`) before sampling heap. See the [trace omission rule](API.md#history-and-24-hour-checks).
-Stale quiesce flags have a bounded ten-minute cap, longer than valid OTA
+OTA announces network ownership before TLS. MQTT stops its complete transport and acknowledges.
+X10A, HomeHub and Syslog stand aside before allocation-rich work. A 1.1-second lead lets an existing
+publisher cycle finish. Stale quiesce flags have a bounded ten-minute cap, longer than valid OTA
 transfer and host observation budgets. MQTT restarts after stable headroom with exponential backoff
 on client-start failure. No model-sized HTTP/MQTT buffer remains allocated for the boot.
 
 OTA TLS requires four stable internal-heap samples of 56 KiB free and a 24 KiB largest block.
-Validation after transport/buffer cleanup requires two 24/12 KiB samples. Weather reserves its fixed
-8 KiB response, URL and error capacity before its final 48/20 KiB admission sample. A refused Weather
-fetch keeps the previous evidence unavailable for decisions and retries after five minutes.
-Weather reads only an allocation-free consent/location snapshot; request temporaries are destroyed
-before network ownership returns to MQTT and before the worker sleeps.
-Its 8 KiB task stack uses a 256-byte read buffer. The ELF gate composes the Weather callers,
-HTTP connection/read prefixes and full source-bound SDK TLS envelope, and separately bounds parsing and
-error paths, retaining at least 1 KiB on each path.
+Validation after transport and buffer cleanup requires two 24/12 KiB samples.
 
 `http_deadline.cpp` owns a boot-static absolute socket watchdog. After successful open, a timer
 covers headers and body within the original monotonic deadline; expiry wakes a preallocated worker
 that performs socket shutdown. The HTTP owner joins it before close, redirect or Range reuse.
 Pre-socket DNS/TCP/TLS/request setup remains limited by the client's timeout and a post-open budget
 check. Boot priming requires two identical nonnull thread-semaphore lookups, so failed SDK
-thread-local registration cannot masquerade as readiness. Timer/task/prime failure disables OTA and
-Weather downloads for that boot. Later saves
-cannot relabel a missing worker as waiting.
+thread-local registration cannot masquerade as readiness. Timer, task or priming failure disables
+OTA downloads for that boot.
 
 Only allocator-shaped TLS setup failure gets one cleaned-up setup retry. A validated known-length
 firmware prefix may resume at most three times, inside the same generation and five-minute budget,
@@ -649,12 +630,11 @@ at service creation sites.
 | 6 | `http_abs_dl` | Boot-static absolute socket deadline worker |
 | 5 | `hp_poll`, `captive_dns` | X10A owner; setup-only DNS |
 | 4 | `mqtt_pub`, `hp_modbus`, `env3`, `wifi_wd`, `eth_fb`, `ota`, `ota_health` | Sources/network; OTA delivery boot-resident, health worker pending-image only |
-| 3 | `syslog_task`, `weather`, `recovery_btn` | Optional forwarding/button; Weather idle worker on ordinary non-safe boots |
+| 3 | `syslog_task`, `recovery_btn` | Optional forwarding and hardware recovery button |
 | 2 | `status_led` | Cosmetic status |
 
-Unconfigured HomeHub/ENV III creates no source task. Weather keeps an idle worker until both consent
-and location activate it. These are different absence lifecycles, covered by the source-absence
-matrix. Task loops catch `std::exception` and all other throws around the body, log once, preserve
+Unconfigured HomeHub and ENV III create no source task. The source-absence matrix checks their
+independent lifecycles. Task loops catch `std::exception` and all other throws around the body, log once, preserve
 last good state and continue with the normal delay. Event/timer callbacks must not throw or allocate.
 
 ## Memory constraints
@@ -669,12 +649,11 @@ pointers; materialize strings outside their status lock. A task catch cannot res
 
 Received WiFi frames are heap allocations too: the driver copies each into a dynamic RX buffer that
 lives until lwIP's consumer frees the pbuf. mDNS runs at priority 1 and queues every received
-packet, so a higher-priority task that computes for seconds, such as Weather's TLS certificate
-verification, parks mDNS traffic in the heap. `sdkconfig.defaults` bounds that backlog with the
+packet. A higher-priority task can delay processing and keep mDNS traffic in the heap.
+`sdkconfig.defaults` bounds that backlog with the
 minimum mDNS action queue and caps dynamic RX buffers at that queue length plus one full-size TCP
 receive window; its comments carry the derivation, its limits and the measurement with the upstream
-values. The Weather headroom gate comment in `main/logic/weather_forecast.hpp` carries the
-measurement with the bounded values.
+values.
 
 Diagnosis bucket storage is 1,920 bytes for 23 completed hours and one pending hour. Completed-run
 totals and outdoor sample counts use 32 bits; fifteen hourly clocks use 12-bit fields clamped at
@@ -688,8 +667,7 @@ static-memory and call-path budgets.
 
 Static assertions cap each DHW ring and snapshot at 416 bytes. `/status` allocates
 the snapshot before the checkup mutex and copies it with verdict/cycling detail under that same
-lock, without allocating there. Cycling and DHW share one `ValuesTlsReader` admission lease until
-both buffers are released; redaction, TLS reservation or allocation failure omits optional detail.
+lock, without allocating there. Redaction or allocation failure omits optional detail.
 No DHW window array is added to the shared `CheckupReport` or its callers' stacks.
 
 <a id="the-stack-the-second-budget-and-how-it-was-measured"></a>
@@ -703,8 +681,7 @@ The poll sweep stays inlined in its task so their locals share one frame; an out
 the ELF gate instead of silently escaping the modeled call path.
 Parser budgets count all accepted recursion frames. Startup persistence, payload construction,
 network writes and smaller application tasks have separate paths. WiFi initialization returns
-before credential persistence; heartbeat, Weather and heating-curve builders return before
-synchronous network writes.
+before credential persistence. The heartbeat builder returns before synchronous network writes.
 
 The HTTP task has 10,240 bytes with a reviewed 2,048-byte margin; its status serializer uses the
 reviewed `-Os` compilation scope.

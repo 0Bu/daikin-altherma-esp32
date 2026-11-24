@@ -1583,11 +1583,27 @@ def required_uptime(status: dict[str, Any], label: str) -> int:
     return value
 
 
+def status_schema_version(status: dict[str, Any]) -> int:
+    version = status.get("status_schema_version", 1)
+    if type(version) is not int or version not in (1, 2):
+        fail("unrecognized device status schema")
+    if version == 2 and "weather_forecast" in status:
+        fail("device status schema 2 must omit the retired Weather source")
+    return version
+
+
+def require_status_schema(status: dict[str, Any], expected: int, phase: str) -> None:
+    if status_schema_version(status) != expected:
+        fail(f"{phase} status schema changed")
+
+
 def production_weather_configured(status: dict[str, Any], expected: bool | None = None) -> bool:
-    weather = status.get("weather_forecast")
-    configured = weather.get("configured") if isinstance(weather, dict) else None
-    if not isinstance(configured, bool):
-        fail("production Weather status has no boolean configured state")
+    configured = False
+    if status_schema_version(status) == 1:
+        weather = status.get("weather_forecast")
+        configured = weather.get("configured") if isinstance(weather, dict) else None
+        if not isinstance(configured, bool):
+            fail("production Weather status has no boolean configured state")
     if expected is not None and configured is not expected:
         fail("production Weather configuration changed during promotion")
     return configured
@@ -1615,11 +1631,14 @@ def production_promotion_snapshot_ready(
         fail("production X10A must remain live while waiting for promotion readiness "
              f"({x10a_evidence(status, baseline_counters)})")
     weather = status.get("weather_forecast")
-    if not isinstance(weather, dict) or not isinstance(weather.get("fetching"), bool):
+    legacy_weather = status_schema_version(status) == 1
+    if legacy_weather and (
+        not isinstance(weather, dict) or not isinstance(weather.get("fetching"), bool)
+    ):
         fail("production weather status has no boolean fetching state before promotion")
     if status.get("mqtt", {}).get("connected") is not True:
         return uptime, False, "MQTT is disconnected"
-    if weather["fetching"] is not False:
+    if legacy_weather and weather["fetching"] is not False:
         return uptime, False, "Weather TLS is active"
     return uptime, True, "ready"
 
@@ -1628,9 +1647,10 @@ def wait_for_production_promotion_readiness(
     endpoint: ResolvedHttpEndpoint, initial: dict[str, Any], *, host: str, mac: str,
     version: str, elf: str,
 ) -> dict[str, Any]:
-    """Wait boundedly for a stable MQTT-connected, Weather-idle pre-write baseline."""
+    """Wait for stable MQTT readiness and an idle Weather client on legacy firmware."""
     expected_weather_configured = production_weather_configured(initial)
     baseline_counters = board_counters(initial)
+    schema = status_schema_version(initial)
     last_uptime = required_uptime(initial, "initial production promotion status")
     deadline = time.monotonic() + MQTT_RECOVERY_TIMEOUT_S
     status: dict[str, Any] | None = initial
@@ -1639,6 +1659,7 @@ def wait_for_production_promotion_readiness(
     while True:
         if status is not None:
             validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+            require_status_schema(status, schema, "production readiness")
             production_weather_configured(status, expected_weather_configured)
             last_uptime, ready, last_reason = production_promotion_snapshot_ready(
                 status, baseline_counters=baseline_counters, last_uptime=last_uptime,
@@ -1759,6 +1780,7 @@ def wait_for_post_stress_mqtt_recovery(
     version: str, elf: str, uptimes: list[int], expected_weather_configured: bool | None = None,
 ) -> dict[str, Any]:
     """Allow bounded recovery if MQTT was paused for TLS at the pressure window boundary."""
+    schema = status_schema_version(initial)
     if initial.get("mqtt", {}).get("connected") is True:
         return initial
     deadline = time.monotonic() + MQTT_RECOVERY_TIMEOUT_S
@@ -1782,6 +1804,7 @@ def wait_for_post_stress_mqtt_recovery(
             time.sleep(0.1)
             continue
         validate_identity(recovered, host=host, mac=mac, version=version, elf=elf)
+        require_status_schema(recovered, schema, f"{host} post-stress MQTT recovery")
         if expected_weather_configured is not None:
             production_weather_configured(recovered, expected_weather_configured)
         uptimes.append(required_uptime(recovered, f"{host} post-stress MQTT status"))
@@ -1801,6 +1824,7 @@ def stress_board(
     require_pending_image: bool = False,
     preserve_saved_channel: bool = False,
     pin_weather_config: bool = False,
+    expected_status_schema: int | None = None,
 ) -> dict[str, Any]:
     if (hil_manifest_url is None) != (hil_firmware_base_url is None):
         fail("stress HIL feed expectation must be a complete pair")
@@ -1810,11 +1834,16 @@ def stress_board(
 
     def validate_pressure_identity(status: dict[str, Any]) -> None:
         validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+        require_status_schema(status, schema, f"{host} pressure")
         if pin_weather_config:
             production_weather_configured(status, require_weather)
 
     pinned_endpoint = resolve_http_endpoint(host)
     started = request_status_deadline(pinned_endpoint, timeout=HTTP_TIMEOUT_S)
+    schema = status_schema_version(started)
+    if expected_status_schema is not None:
+        require_status_schema(started, expected_status_schema, f"{host} initial pressure")
+    require_weather = require_weather and schema == 1
     validate_pressure_identity(started)
     if preserve_saved_channel:
         require_saved_channel(started, expected_channel)
@@ -2882,6 +2911,7 @@ def confirm_ota_probation(
     *, host: str, mac: str, version: str, elf: str, stress: dict[str, Any],
     saved_channel: str | None = None, require_x10a: bool = False,
     expected_weather_configured: bool | None = None,
+    expected_status_schema: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Confirm the same stressed boot without losing its counters or accepting a hidden reboot."""
     endpoint = resolve_http_endpoint(host)
@@ -2893,6 +2923,8 @@ def confirm_ota_probation(
     def validate_confirmation_status(status: dict[str, Any]) -> int:
         nonlocal last_uptime, last_timeout
         validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+        if expected_status_schema is not None:
+            require_status_schema(status, expected_status_schema, f"{host} probation")
         if saved_channel is not None:
             require_saved_channel(status, saved_channel)
         if expected_weather_configured is not None:
@@ -2962,13 +2994,13 @@ def confirm_bench_probation(
 
 def confirm_production_probation(
     *, host: str, mac: str, version: str, elf: str, stress: dict[str, Any], saved_channel: str,
-    weather_configured: bool,
+    weather_configured: bool, status_schema: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Require a disarmed production boot and return the exact final liveness/identity witness."""
     return confirm_ota_probation(
         host=host, mac=mac, version=version, elf=elf, stress=stress,
         saved_channel=saved_channel, require_x10a=True,
-        expected_weather_configured=weather_configured,
+        expected_weather_configured=weather_configured, expected_status_schema=status_schema,
     )
 
 
@@ -3395,6 +3427,18 @@ def persistence_snapshot(
                 f"expected {expected!r}"
             )
     return snapshot
+
+
+def release_hil_persistence_paths(schema: int, paths: list[str]) -> list[str]:
+    if schema == 1:
+        return paths
+    return [path for path in paths if not path.startswith("weather_forecast.")]
+
+
+def candidate_stack_tasks(status: dict[str, Any], tasks: list[str]) -> list[str]:
+    if status_schema_version(status) == 1:
+        return tasks
+    return [task for task in tasks if task != "weather"]
 
 
 class HistoryEvidenceUnavailable(GateError):
@@ -4273,11 +4317,13 @@ def run_release_hil(
         fail("release-HIL board is not on its independently pinned bootstrap version/ELF")
     validate_identity(before, host=host, mac=mac, version=old_version, elf=old_elf)
     require_release_hil_channel(before, lab["channel"])
+    bootstrap_schema = status_schema_version(before)
+    bootstrap_paths = release_hil_persistence_paths(bootstrap_schema, lab["persistence_paths"])
     baseline_counters = board_counters(before)
     if any(baseline_counters[key] != 0 for key in ("heap_restarts", "mqtt_skipped", "poll_skipped")):
         fail(f"release-HIL board already reports allocation failures: {baseline_counters}")
     persistent = persistence_snapshot(
-        before, lab["persistence_paths"], lab["persistence_canaries"],
+        before, bootstrap_paths, lab["persistence_canaries"],
     )
     history_preflight = wait_hil_history(
         initial_endpoint, host=host, mac=mac, version=old_version, elf=old_elf,
@@ -4308,12 +4354,16 @@ def run_release_hil(
             trigger_watchdog_cycle()
         rolled_back = wait_for_identity(host, mac, old_version, old_elf)
         require_release_hil_channel(rolled_back, lab["channel"])
+        require_status_schema(rolled_back, bootstrap_schema, "release-HIL bootstrap rollback")
         if rolled_back.get("history", {}).get("persist") != "power_cycle":
             fail("release-HIL rollback restart did not report the history power-cycle boundary")
         if persistence_snapshot(
-            rolled_back, lab["persistence_paths"], lab["persistence_canaries"],
+            rolled_back, bootstrap_paths, lab["persistence_canaries"],
         ) != persistent:
             fail("release-HIL configuration changed across pending-image rollback")
+        candidate_schema = status_schema_version(first_status)
+        if candidate_schema < bootstrap_schema:
+            fail("release-HIL candidate status schema regressed from bootstrap")
 
         require_feed_active()
         with pending_image_power_watchdog(lab, power_token) as (
@@ -4329,6 +4379,7 @@ def run_release_hil(
             )
             if required_uptime(second_status, "release-HIL approved candidate") > 45:
                 fail("release-HIL candidate missed its pre-commit watchdog approval boundary")
+            require_status_schema(second_status, candidate_schema, "release-HIL pending candidate")
             require_commit_watchdog_active()
             approve_commit_candidate()
         health = wait_for_bench_health_window(
@@ -4341,6 +4392,9 @@ def run_release_hil(
         validate_identity(
             committed_status, host=host, mac=mac, version=version, elf=elf,
         )
+        require_status_schema(committed_status, candidate_schema, "release-HIL committed candidate")
+        candidate_paths = release_hil_persistence_paths(candidate_schema, bootstrap_paths)
+        candidate_persistent = {key: persistent[key] for key in candidate_paths}
         wait_for_ota_image_state(committed_endpoint, rollback_pending=False)
         history_before_cold = wait_hil_history(
             committed_endpoint, host=host, mac=mac, version=version, elf=elf,
@@ -4350,13 +4404,15 @@ def run_release_hil(
         release_hil_power_cycle(lab, power_token)
         cold = wait_for_identity(host, mac, version, elf)
         require_release_hil_channel(cold, lab["channel"])
+        require_status_schema(cold, candidate_schema, "release-HIL cold restart")
         cold_endpoint = resolve_http_endpoint(host)
         cold_pinned = request_status_deadline(cold_endpoint, timeout=HTTP_TIMEOUT_S)
         validate_identity(cold_pinned, host=host, mac=mac, version=version, elf=elf)
+        require_status_schema(cold_pinned, candidate_schema, "release-HIL pinned cold restart")
         wait_for_ota_image_state(cold_endpoint, rollback_pending=False)
         if persistence_snapshot(
-            cold, lab["persistence_paths"], lab["persistence_canaries"],
-        ) != persistent:
+            cold, candidate_paths, lab["persistence_canaries"],
+        ) != candidate_persistent:
             fail("release-HIL configuration changed across committed-image cold restart")
         if cold.get("history", {}).get("persist") != "power_cycle":
             fail("release-HIL cold restart did not report the history power-cycle boundary")
@@ -4388,22 +4444,25 @@ def run_release_hil(
                 bootstrap_status, "release-HIL candidate-writer bootstrap",
             ) > 45:
                 fail("release-HIL candidate-writer rollback missed its watchdog boundary")
+            require_status_schema(bootstrap_status, bootstrap_schema, "release-HIL candidate-writer bootstrap")
             require_writer_watchdog_active()
             trigger_writer_watchdog_cycle()
         writer_rollback = wait_for_identity(host, mac, version, elf)
         require_release_hil_channel(writer_rollback, lab["channel"])
+        require_status_schema(writer_rollback, candidate_schema, "release-HIL candidate-writer rollback")
         if writer_rollback.get("history", {}).get("persist") != "power_cycle":
             fail("release-HIL candidate-writer rollback did not cross a power-cycle boundary")
         writer_endpoint = resolve_http_endpoint(host)
         writer_pinned = request_status_deadline(writer_endpoint, timeout=HTTP_TIMEOUT_S)
         validate_identity(writer_pinned, host=host, mac=mac, version=version, elf=elf)
         require_release_hil_channel(writer_pinned, lab["channel"])
+        require_status_schema(writer_pinned, candidate_schema, "release-HIL pinned candidate-writer rollback")
         writer_image_state = wait_for_ota_image_state(
             writer_endpoint, rollback_pending=False,
         )
         if persistence_snapshot(
-            writer_pinned, lab["persistence_paths"], lab["persistence_canaries"],
-        ) != persistent:
+            writer_pinned, candidate_paths, lab["persistence_canaries"],
+        ) != candidate_persistent:
             fail("release-HIL configuration changed across candidate-writer rollback")
 
         require_feed_active()
@@ -4411,6 +4470,7 @@ def run_release_hil(
             host=host, mac=mac, version=version, elf=elf,
             require_x10a=lab["require_x10a"], require_weather=lab["require_weather"],
             expected_app_sha256=app_sha256, expected_channel=lab["channel"],
+            expected_status_schema=candidate_schema,
             hil_manifest_url=lab["manifest_url"],
             hil_firmware_base_url=lab["firmware_base_url"],
         )
@@ -4418,8 +4478,10 @@ def run_release_hil(
         final = request_status_deadline(final_endpoint, timeout=HTTP_TIMEOUT_S)
         validate_identity(final, host=host, mac=mac, version=version, elf=elf)
         require_release_hil_channel(final, lab["channel"])
+        if status_schema_version(final) != candidate_schema:
+            fail("release-HIL candidate status schema changed during final stress")
         stack = require_stack_evidence(
-            final, lab["required_stack_tasks"], lab["min_stack_free_bytes"],
+            final, candidate_stack_tasks(final, lab["required_stack_tasks"]), lab["min_stack_free_bytes"],
         )
     return {
         "artifact": {
@@ -4653,6 +4715,30 @@ def self_test() -> None:
         baseline_counters=promotion_counters, last_uptime=10,
     )
     assert not promotion_ready and promotion_reason == "Weather TLS is active"
+    production_ready = {**promotion_status, "mqtt": {"connected": True}}
+    retired_weather = {key: value for key, value in production_ready.items()
+                       if key != "weather_forecast"}
+    for invalid_status in (
+        retired_weather, {**retired_weather, "status_schema_version": True},
+        {**retired_weather, "status_schema_version": 3},
+        {**production_ready, "status_schema_version": 2},
+    ):
+        try:
+            production_promotion_snapshot_ready(
+                invalid_status, baseline_counters=board_counters(production_ready), last_uptime=1,
+            )
+        except GateError:
+            pass
+        else:
+            raise AssertionError("promotion accepted ambiguous Weather retirement evidence")
+    retired_weather["status_schema_version"] = 2
+    assert production_promotion_snapshot_ready(
+        retired_weather, baseline_counters=board_counters(production_ready), last_uptime=1,
+    )[1]
+    persistence = ["mqtt.base", "weather_forecast.configured", "env3.enabled"]
+    assert release_hil_persistence_paths(1, persistence) == persistence
+    assert release_hil_persistence_paths(2, persistence) == ["mqtt.base", "env3.enabled"]
+    assert candidate_stack_tasks(retired_weather, ["httpd", "mqtt", "weather"]) == ["httpd", "mqtt"]
     _, promotion_ready, promotion_reason = production_promotion_snapshot_ready(
         {**promotion_status, "uptime_s": 11, "mqtt": {"connected": True}},
         baseline_counters=promotion_counters, last_uptime=10,
@@ -6204,6 +6290,7 @@ def main() -> int:
         version=args.expected_current_version, elf=str(production_before.get("app_elf_sha256", "")),
     )
     saved_channel = require_saved_channel(production_before)
+    writer_schema = status_schema_version(production_before)
     weather_configured = production_weather_configured(production_before)
     production_before = wait_for_production_promotion_readiness(
         production_status_endpoint, production_before,
@@ -6212,6 +6299,7 @@ def main() -> int:
         elf=str(production_before.get("app_elf_sha256", "")),
     )
     require_saved_channel(production_before, saved_channel)
+    require_status_schema(production_before, writer_schema, "production pre-write readiness")
     production_weather_configured(production_before, weather_configured)
     require_official_manifest_snapshot(args.manifest_url, manifest_sha256,
                                       args.expected_source_sha, args.expected_version,
@@ -6229,6 +6317,7 @@ def main() -> int:
                       version=args.expected_current_version,
                       elf=str(production_before.get("app_elf_sha256", "")))
     require_saved_channel(before_write, saved_channel)
+    require_status_schema(before_write, writer_schema, "production pre-write")
     production_weather_configured(before_write, weather_configured)
     production_transfer: dict[str, Any] = {}
     journal_checkpoint("production_write_attempted", production={
@@ -6260,10 +6349,15 @@ def main() -> int:
         writer_elf=str(production_before.get("app_elf_sha256", "")),
     )
     journal_checkpoint("production_transfer_verified", production={"transfer_verified": True})
-    production_weather_configured(returned, weather_configured)
+    target_schema = status_schema_version(returned)
+    if target_schema < writer_schema:
+        fail("production OTA returned an older status schema")
+    target_weather_configured = weather_configured and target_schema == 1
+    production_weather_configured(returned, target_weather_configured)
     production_evidence = stress_board(
         host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf,
-        require_x10a=True, require_weather=weather_configured, pin_weather_config=True,
+        require_x10a=True, require_weather=target_weather_configured, pin_weather_config=True,
+        expected_status_schema=target_schema,
         expected_app_sha256=args.expected_app_sha256, expected_channel=saved_channel,
         preserve_saved_channel=True, **official_feed_override(args.manifest_url),
     )
@@ -6273,7 +6367,7 @@ def main() -> int:
     production_probation, final_status = confirm_production_probation(
         host=production["host"], mac=production["mac"], version=args.expected_version,
         elf=elf, stress=production_evidence, saved_channel=saved_channel,
-        weather_configured=weather_configured,
+        weather_configured=target_weather_configured, status_schema=target_schema,
     )
     journal_checkpoint("production_probation_confirmed", production={
         "probation_confirmed": True, "probation_after": production_probation,
@@ -6283,7 +6377,8 @@ def main() -> int:
         version=args.expected_version, elf=elf,
     )
     require_saved_channel(final_status, saved_channel)
-    production_weather_configured(final_status, weather_configured)
+    require_status_schema(final_status, target_schema, "production final")
+    production_weather_configured(final_status, target_weather_configured)
     retained = verify_retained_x10a(final_status)
     journal_checkpoint("production_retained_passed", production={
         "retained_passed": True, "retained_x10a": retained,

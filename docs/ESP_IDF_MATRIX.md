@@ -41,7 +41,7 @@ component or direct managed dependency keys audited by `scripts/run-esp-idf-matr
 |---|---|---|---|---|---|---|
 | U01 | Build system, ESP32-S3 target and reproducible application metadata | ✅ Direct | IDF core | One `main` component, C++17, 8 MiB flash, a fixed 240 MHz CPU clock for software certificate checks and a target/version-pinned build with reproducible application metadata; a release dispatch performs one signed build | [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults), [`dependencies.lock`](../dependencies.lock) | [Build system](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-guides/build-system.html) |
 | U02 | FreeRTOS kernel | ✅ Direct | IDF core | Tasks, queues, semaphores, event groups, stack high-water marks, a boot-static socket-deadline worker and ELF frame/path budgets | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`stack_watch.cpp`](../main/stack_watch.cpp), [`check-stack-budget.py`](../scripts/check-stack-budget.py) | [FreeRTOS](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/freertos.html) |
-| U03 | System, heap, logging and MAC APIs | ✅ Direct | IDF core | Reset/restart state, boot-local random identity, internal-heap telemetry, static compile-time INFO logs and MAC-derived identity | [`main.cpp`](../main/main.cpp), [`heap_guard.cpp`](../main/heap_guard.cpp), [`net.cpp`](../main/net.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [System API](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/misc_system_api.html), [memory allocation](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/mem_alloc.html), [logging](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/log.html) |
+| U03 | System, heap, logging and MAC APIs | ✅ Direct | IDF core | Reset/restart state, boot-local random identity, internal-heap telemetry, logs and MAC-derived identity | [`main.cpp`](../main/main.cpp), [`heap_guard.cpp`](../main/heap_guard.cpp), [`net.cpp`](../main/net.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [System API](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/misc_system_api.html), [memory allocation](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/mem_alloc.html), [logging](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/log.html) |
 | U04 | High-resolution timer and Task Watchdog | ✅ Direct | `esp_timer` | Poll timing, deadlines, one boot-created absolute HTTP timer plus static notifier task, and watchdog coverage for blocking workers | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [ESP Timer](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/esp_timer.html), [watchdogs](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/wdts.html) |
 | U05 | Non-volatile storage | ✅ Direct | `nvs_flash` | Atomic configuration/link cache, separate bounded retirement provenance; initialization errors preserve the partition | [`nvs_storage.cpp`](../main/nvs_storage.cpp), [`config.cpp`](../main/config.cpp), [`mqtt_retirement_store.cpp`](../main/mqtt_retirement_store.cpp), [`logic/mqtt_retirement_store.hpp`](../main/logic/mqtt_retirement_store.hpp) | [NVS Flash](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/storage/nvs_flash.html) |
 | U06 | Partition API and custom flash layout | ✅ Direct | `esp_partition` | Raw power-loss-safe history journal, coredump streaming and running-slot lookup | [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) | [Partition API](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/storage/partition.html) |
@@ -51,12 +51,12 @@ component or direct managed dependency keys audited by `scripts/run-esp-idf-matr
 | U10 | lwIP sockets, ICMP echo and SNTP | ✅ Direct | `lwip` | Captive DNS, read-only Modbus TCP, syslog, ping, SNTP, boot-primed OTA sockets and download interruption (IPv4-only, `CONFIG_LWIP_IPV6=n`) | [`captive_dns.cpp`](../main/captive_dns.cpp), [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`sntp_time.cpp`](../main/sntp_time.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`ota_update.cpp`](../main/ota_update.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [lwIP](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-guides/lwip.html), [ICMP echo](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/icmp_echo.html), [ESP-NETIF SNTP](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/network/esp_netif_programming.html#sntp-service) |
 | U11 | External W5500 Ethernet over SPI | ✅ Direct + 📦 Managed | `esp_eth`, `esp_driver_spi`, `espressif/w5500` | Optional wired transport detected at boot; W5500 MAC/PHY comes from the registry component | [`net.cpp`](../main/net.cpp), [`idf_component.yml`](../main/idf_component.yml) | [Ethernet](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/network/esp_eth.html), [W5500 component](https://components.espressif.com/components/espressif/w5500) |
 | U12 | HTTP server | ✅ Direct | `esp_http_server` | 10 KiB worker with 2 KiB ELF path reserve; LAN/API and restricted AP, typed bounded ingress/streams, redaction and async OTA request ownership. Receive budgets are 30 s normally or 300 s for admitted dev uploads, plus one five-second receive | [`http_server.cpp`](../main/http_server.cpp), [`http_common.cpp`](../main/http_common.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`redact.hpp`](../main/logic/redact.hpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [HTTP server](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_http_server.html) |
-| U13 | HTTP client, TLS and certificate bundle | ✅ Direct + 🧩 Backend | `esp_http_client`, `esp-tls` | HTTPS OTA/weather downloads, verified public-root TLS transport and public socket access for joined header/body deadline enforcement after open | [`ota_update.cpp`](../main/ota_update.cpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [HTTP client](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_http_client.html), [ESP-TLS](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_tls.html), [certificate bundle](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_crt_bundle.html) |
+| U13 | HTTP client, TLS and certificate bundle | ✅ Direct + 🧩 Backend | `esp_http_client`, `esp-tls` | HTTPS OTA downloads, verified public-root TLS transport and public socket access for joined header/body deadline enforcement after open | [`ota_update.cpp`](../main/ota_update.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [HTTP client](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_http_client.html), [ESP-TLS](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_tls.html), [certificate bundle](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_crt_bundle.html) |
 | U14 | MQTT client | ✅ Direct + 📦 Managed | `mqtt`, `espressif/mqtt` | Checked callbacks, bounded recovery/queues, retained ownership admission, expiring proofs and PUBACK/expiry retirement | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`mqtt_discovery_owner.hpp`](../main/logic/mqtt_discovery_owner.hpp), [`mqtt_cleanup.hpp`](../main/logic/mqtt_cleanup.hpp), [`sdkconfig.defaults`](../sdkconfig.defaults), [`idf_component.yml`](../main/idf_component.yml) | [ESP-MQTT component](https://components.espressif.com/components/espressif/mqtt) |
 | U15 | Multicast DNS | ✅ Direct + 📦 Managed | `mdns`, `espressif/mdns` | Device HTTP service advertisement and bounded one-shot HomeHub discovery; the unused interactive console and continuous browse daemon are omitted | [`net.cpp`](../main/net.cpp), [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [mDNS component](https://components.espressif.com/components/espressif/mdns) |
-| U16 | cJSON | ✅ Direct + 📦 Managed | `espressif/cjson` | Depth-16, single-document config/MQTT/weather parsing; large output remains streamed | [`json_guard.hpp`](../main/json_guard.hpp), [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp) | [cJSON component](https://components.espressif.com/components/espressif/cjson) |
+| U16 | cJSON | ✅ Direct + 📦 Managed | `espressif/cjson` | Depth-16, single-document config and MQTT parsing; large output remains streamed | [`json_guard.hpp`](../main/json_guard.hpp), [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp) | [cJSON component](https://components.espressif.com/components/espressif/cjson) |
 | U17 | OTA, app-image format, signed-image validation and rollback | ✅ Direct + 🧩 Backend | `app_update`, `esp_app_format`, `bootloader_support` | Static delivery worker and aligned 4096-byte health stack; feed leases or dev-only local uploads share bounded ownership, descriptor/digest/signature checks and inactive-slot activation. Boot-local stack/image-state evidence supports separate rollback/cold-cycle and official promotion checks | [`ota_update.cpp`](../main/ota_update.cpp), [`ota_upload.hpp`](../main/logic/ota_upload.hpp), [`ota_hil_feed.hpp`](../main/logic/ota_hil_feed.hpp), [`stack_watch.hpp`](../main/stack_watch.hpp), [`sdkconfig.defaults`](../sdkconfig.defaults), [`production-ota-gate.py`](../scripts/production-ota-gate.py) | [OTA](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/ota.html), [application image format](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/app_image_format.html) |
-| U18 | Mbed TLS and PSA Crypto | ✅ Direct + 🧩 Backend | `mbedtls` | Client-only TLS with dynamic record buffers (omitting server, PEM parsing, renegotiation, static RSA key exchange, compressed EC parsing, NIST fast-reduction tables, >4096-bit software MPI, small-block software-AES fallback, deterministic ECDSA and HMAC-DRBG paths), direct PSA SHA-256 OTA binding and host verification of the signed-image RSA-PSS trust anchor | [`ota_update.cpp`](../main/ota_update.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults), [`check-signing-key-continuity.py`](../scripts/check-signing-key-continuity.py) | [Mbed TLS support](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/mbedtls.html) |
+| U18 | Mbed TLS and PSA Crypto | ✅ Direct + 🧩 Backend | `mbedtls` | Dynamic TLS record buffers, direct PSA SHA-256 OTA binding and host verification of the signed-image RSA-PSS trust anchor | [`ota_update.cpp`](../main/ota_update.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults), [`check-signing-key-continuity.py`](../scripts/check-signing-key-continuity.py) | [Mbed TLS support](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/mbedtls.html) |
 | U19 | UART driver | ✅ Direct | `esp_driver_uart` | X10A 9600 8E1 link; checked flush/TX/wait/read results | [`hp_comm.cpp`](../main/hp_comm.cpp) | [UART](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/peripherals/uart.html) |
 | U20 | I2C master driver | ✅ Direct | `esp_driver_i2c` | Optional ENV III sensor bus using the current master-bus/device API | [`env3.cpp`](../main/env3.cpp) | [I2C](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/peripherals/i2c.html) |
 | U21 | GPIO driver | ✅ Direct | `esp_driver_gpio` | Plain status LED, recovery button and runtime pin configuration | [`status_led.cpp`](../main/status_led.cpp), [`recovery_button.cpp`](../main/recovery_button.cpp) | [GPIO](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/peripherals/gpio.html) |
@@ -136,14 +136,12 @@ to a used feature row.
 | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT` | `5760` | U10 |
 | `CONFIG_LWIP_TCP_WND_DEFAULT` | `11520` | U10 |
 | `CONFIG_LWIP_IPV6` | `n` | U10 |
-| `CONFIG_LWIP_IP4_FRAG` | `n` | U10 |
-| `CONFIG_ESP_MAIN_TASK_STACK_SIZE` | `7168` | U02 |
+| `CONFIG_ESP_MAIN_TASK_STACK_SIZE` | `6144` | U02 |
 | `CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK` | `y` | U02 |
 | `CONFIG_LOG_DEFAULT_LEVEL_INFO` | `y` | U03 |
 | `CONFIG_LOG_TAG_LEVEL_IMPL_NONE` | `y` | U03 |
 | `CONFIG_LOG_DYNAMIC_LEVEL_CONTROL` | `n` | U03 |
 | `CONFIG_VFS_SUPPORT_DIR` | `n` | U03 |
-| `CONFIG_VFS_INITIALIZE_DEV_NULL` | `n` | U03 |
 | `CONFIG_HTTPD_WS_SUPPORT` | `n` | U12 |
 | `CONFIG_HTTPD_ENABLE_EVENTS` | `n` | U12 |
 | `CONFIG_COMPILER_OPTIMIZATION_SIZE` | `y` | U01 |
@@ -153,7 +151,6 @@ to a used feature row.
 | `CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS` | `n` | U18 |
 | `CONFIG_MBEDTLS_AES_FEWER_TABLES` | `y` | U18 |
 | `CONFIG_MBEDTLS_CIPHER_MODE_CFB` | `n` | U18 |
-| `CONFIG_MBEDTLS_CIPHER_MODE_CTR` | `n` | U18 |
 | `CONFIG_MBEDTLS_CIPHER_MODE_OFB` | `n` | U18 |
 | `CONFIG_MBEDTLS_CIPHER_MODE_XTS` | `n` | U18 |
 | `CONFIG_MBEDTLS_X509_REMOVE_INFO` | `y` | U18 |
@@ -173,34 +170,18 @@ to a used feature row.
 | `CONFIG_MBEDTLS_SSL_CACHE_C` | `n` | U18 |
 | `CONFIG_MBEDTLS_HARDWARE_RSA_DS_PERIPHERAL` | `n` | U18 |
 | `CONFIG_ESP_TLS_USE_DS_PERIPHERAL` | `n` | U13 |
-| `CONFIG_MBEDTLS_ECDSA_DETERMINISTIC` | `n` | U18 |
-| `CONFIG_MBEDTLS_HMAC_DRBG_C` | `n` | U18 |
-| `CONFIG_MBEDTLS_SSL_RENEGOTIATION` | `n` | U18 |
-| `CONFIG_MBEDTLS_KEY_EXCHANGE_RSA` | `n` | U18 |
-| `CONFIG_MBEDTLS_ECP_NIST_OPTIM` | `n` | U18 |
-| `CONFIG_MBEDTLS_LARGE_KEY_SOFTWARE_MPI` | `n` | U18 |
-| `CONFIG_MBEDTLS_PK_PARSE_EC_COMPRESSED` | `n` | U18 |
-| `CONFIG_MBEDTLS_PEM_PARSE_C` | `n` | U18 |
-| `CONFIG_MBEDTLS_AES_HW_SMALL_DATA_LEN_OPTIM` | `n` | U18 |
 | `CONFIG_MBEDTLS_DYNAMIC_BUFFER` | `y` | U18 |
 | `CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA` | `n` | U18 |
 | `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN` | `y` | U13 |
 | `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY` | `n` | U13 |
 | `CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT` | `y` | U01 |
 | `CONFIG_COMPILER_OPTIMIZATION_CHECKS_SILENT` | `y` | U01 |
-| `CONFIG_LWIP_ESP_LWIP_ASSERT` | `n` | U10 |
-| `CONFIG_LWIP_DHCPS_REPORT_CLIENT_HOSTNAME` | `n` | U10 |
 | `CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA` | `n` | U08 |
 | `CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_SOFTAP` | `n` | U08 |
 | `CONFIG_ESP_WIFI_ENABLE_SAE_PK` | `n` | U08 |
 | `CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT` | `n` | U08 |
 | `CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT` | `n` | U08 |
 | `CONFIG_ESP_WIFI_GMAC_SUPPORT` | `n` | U08 |
-| `CONFIG_ESP_WIFI_WPA3_COMPATIBLE_SUPPORT` | `n` | U08 |
-| `CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE` | `n` | U08 |
-| `CONFIG_ESP_NETIF_REPORT_DATA_TRAFFIC` | `n` | U09 |
-| `CONFIG_SPI_FLASH_ENABLE_ENCRYPTED_READ_WRITE` | `n` | U01 |
-| `CONFIG_ESP_DEBUG_OCDAWARE` | `n` | U03 |
 | `CONFIG_ESP_PHY_ENABLE_VERSION_PRINT` | `n` | U08 |
 | `CONFIG_MDNS_ENABLE_CONSOLE_CLI` | `n` | U15 |
 | `CONFIG_MDNS_ENABLE_BROWSE` | `n` | U15 |

@@ -209,8 +209,7 @@ assert.doesNotMatch(adoptFn, /now_us/, "persist_adopt knows only the claim");
 const seed = body(history, "bool seed_source_timeline_locked(");
 assert.match(seed, /uint32_t bucket = logic::history_bucket\(now_us\);/,
   "a recorder without an open bucket starts at the current monotonic boundary");
-for (const [source, prefix] of [["X10a", "s_"], ["Modbus", "s_mb_"],
-  ["Env3", "s_env3_"], ["Room", "s_room_"]]) {
+for (const [source, prefix] of [["X10a", "s_"], ["Modbus", "s_mb_"], ["Env3", "s_env3_"]]) {
   assert.ok(seed.includes(`case HistorySource::${source}: if (${prefix}have_bucket) bucket = ${prefix}bucket; break;`),
     `the flash seed preserves the pending ${source} bucket`);
 }

@@ -15,7 +15,7 @@ Clang keeps every assertion and the full UBSan instrumentation; no null-check ov
 suppression is used. The sanitized runner also compiles a deliberate signed overflow into a copied
 setter and requires a nonzero exit with the matching UBSan diagnostic before that setter can pass.
 
-The fixture covers all 54 documented fields and all 13 setters. X10A and HomeHub use separate
+The fixture covers the documented configuration fields and setters. X10A and HomeHub use separate
 `/set_hp` rows because they own different durable entries. Every row exercises valid, invalid and
 missing inputs, route-owned write failures, response JSON, runtime changes and reboot behavior.
 It also tests unchanged requests, valid byte boundaries, quotes/backslashes/Unicode, object roots,
@@ -26,14 +26,12 @@ Unknown fields retain the existing forward-compatible behavior.
 |---|---|---|
 | WiFi | SSID 1–32 bytes; pass empty or 8–63 bytes; absent pass means open network | Service save and reboot; re-save rearms trial |
 | MQTT | String fields, boolean credential clear, base/URI rules and broker preflight; absent broker disables, empty credentials keep, absent base keeps | Service save and reboot; unchanged skips probe/save |
-| Reference temperature | String mappings, fixed-target precision/bounds, integer age; absent topic disables; old single-topic fallback preserved | Service save and live rebind; unchanged still rebinds |
 | Circulation | String mappings, numeric thresholds/age/confirmation and current proof; absent topic disables without proof | Service save and live source update |
-| Diagnostics | Required boolean consent; unchanged is a no-op | Service save, new generation (random draw from 0, then +1) and live producer resets |
+| Diagnostics | Optional boolean consent and preferred source; at least one field required | Service save and live application. First opt-in assigns the persisted generation. Pause and resume keep it and advance the runtime consent epoch. |
 | X10A | Optional profile and exact integer GPIO patch; board/protocol/pin validation; mixed HomeHub request rejected | Link-only save, bounded stale retries and live resets |
 | HomeHub | Optional string host/integer port/unit; host ≤512 bytes, port 1–65535, unit 1–247 | Service save and separate Modbus/history/retained cleanup |
 | Syslog | String host, integer port/range; absent host disables, port defaults 514 | Service save and reboot; unchanged is a no-op |
 | NTP | String server; absent/empty restores compile-time default on load | Service save and reboot; unchanged is a no-op |
-| Weather | Strict string coordinates and optional boolean refresh; both absent/empty disable | Service save and live transaction, or nonpersistent refresh token |
 | Board | Optional typed identity/peripherals/ENV fields, board/pin/preflight rules | Service save; identity-only needs no reboot, hardware changes reboot |
 | ENV III | Optional boolean enable/integer SDA/SCL patch, same preflight as board | Service save and reboot for a real change |
 | OTA channel | Required supported string enum | Service save, applied on next check, no reboot |
@@ -58,26 +56,18 @@ the reset then owns the restart. An unlatched window still restarts, and a latch
 
 The consent-generation group starts from the default generation 0 with a fixture-controlled
 `esp_random()` adapter. The first opt-in must persist that exact draw in the service entry, RAM and
-the live checkup producer; each re-toggle advances by one without a new draw, an unchanged request
-draws nothing, and a zero draw still yields a non-zero generation. Compiling mutants that pass 0 instead of the draw,
-discard the draw's value or take a fresh draw on every transition must fail this group.
+the live checkup producer. Pause and resume keep the persisted generation without a new draw.
+An unchanged request draws nothing, and a zero draw still yields a non-zero generation. Compiling
+mutants that pass 0 instead of the draw,
+discard the draw's value or take a fresh draw on every enable must fail this group.
 
-Room-history lifetime cases execute the actual room, broker and consent setters: replacement,
-deletion and re-adding advance durable identity, while renaming, target edits and unchanged retries
-preserve it. A failed save must preserve both the stored generation and runtime history; the existing
-allocation witness still forbids allocating after the first durable write.
-
-The immutable original HTTP source at `e99da78f38901cfc1421cec7f74e44dbbb632486` must pass positive
-setters and fail the two specific regressions: a present wrong type taking missing-field semantics,
-and a fractional integer being truncated. It predates the two-argument generation helper, so the
-runner rewrites its one call with entropy 1, which reproduces the original one-argument result for
-every generation; the evidence records both the original and the adapted source hash. Additional
-compiling mutants independently remove type, missing-value, persistence, runtime ordering, probe,
-domain, query, ingress, post-delay reset, reconciliation and generation-entropy defenses. Both
-compiler runs retain seventeen groups, 5,581 assertions and 28 compiling controls; the original
-thirteen groups retain all 5,233 assertions. The additional groups cover integration with detection,
-reset, consent and room-history generations. Only the selected assertion counts as rejection;
-compilation failures, crashes and timeouts never do.
+Compiling controls alter the complete current translation units. The `ignore_present_types` and
+`truncate_integer` controls reproduce the configuration type regressions in the `wrong_types`
+and `integer_fields` groups. Other controls remove defenses for missing values, persistence,
+reconfiguration after a failed circulation write, probe admission, source domains, query and
+body framing, reset during the restart delay, link reconciliation and generation entropy. Both
+compiler runs exercise the same groups and controls. Only the selected assertion counts as
+rejection. Compilation failures, crashes and timeouts fail the harness.
 
 Unique temporary output directories retain `evidence.json`, `commands.txt`, binaries, mutation
 sources and `inputs.sha256`. The baseline manifest hashes every non-system compile input and rejects

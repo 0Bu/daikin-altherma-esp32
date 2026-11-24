@@ -61,24 +61,19 @@ constexpr int64_t history_t0(int64_t now_unix, uint32_t age, size_t n, uint32_t 
 #include "logic/mcp.hpp"
 
 namespace fixture {
-inline std::string                    oracle;
-inline daik::Config                   current;
-inline std::vector<daik::CachedValue> rows, modbus_rows;
-inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
-inline bool                           ota = false, weather = false, modbus_live = false;
-inline bool                           ota_brief_busy  = false;
-inline const char*                    ota_brief_state = "idle";
-// Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
-inline int                              values_readers = 0, values_readers_peak = 0;
-inline bool                                   refuse_values_admission = false, clock_synced = true;
+inline std::string                            oracle;
+inline daik::Config                           current;
+inline std::vector<daik::CachedValue>         rows, modbus_rows;
+inline daik::HpValuesIdentity                 identity{"generic", 0x1234, 7, 11};
+inline bool                                   ota = false, modbus_live = false;
+inline bool                                   ota_brief_busy            = false;
+inline const char*                            ota_brief_state           = "idle";
+inline bool                                   clock_synced              = true;
 inline httpd_req_t*                           active_request            = nullptr;
 inline bool                             config_unreadable         = false;
 inline bool                             change_history_epoch      = false;
 inline bool                             history_restored          = false;
 inline uint32_t                         epoch                     = 42;
-inline uint32_t                         room_identity             = 0;
-inline bool                             room_snapshot_unavailable = false;
-inline unsigned                         room_snapshot_calls       = 0;
 inline int                              failure = 0, stage_race = 0;
 inline unsigned                         stack_samples = 0;
 inline unsigned                         wifi_calls    = 0;
@@ -90,16 +85,14 @@ inline daik::CheckupStopContextReport   stop_report{};
 inline daik::CheckupHydronicReport      hydronic_report{};
 inline int                              flow_min_tenths = -1;
 inline daik::logic::DefrostStartReport  defrost_start{};
-inline daik::HeatingCurveBinsReport     curve_bins;
-inline bool                             curve_bins_available = false;
 inline daik::logic::CheckupCyclingHours       cycling_hours{};
 inline daik::logic::CheckupCyclingTrace       cycling_trace{};
 inline daik::logic::CheckupRunContextSnapshot cycling_run_contexts{};
 inline bool                                   cycling_run_contexts_present = false;
 inline daik::logic::DhwLossTimeline           dhw_timelines[2]{};
 inline unsigned                               dhw_snapshot_calls[2]{}, checkup_report_calls = 0;
-inline bool                                   dhw_evidence_case = false, dhw_lease_witness = false;
-inline unsigned                               dhw_lease_witnesses = 0, dhw_snapshot_chunks = 0;
+inline bool                                   dhw_evidence_case   = false;
+inline unsigned                               dhw_snapshot_chunks = 0;
 inline daik::CheckupFaultStatus         fault_status{};
 inline daik::logic::CheckupFaultTrace   fault_trace{};
 inline bool                             fault_trace_present = false;
@@ -138,16 +131,11 @@ void reset() {
     current.profile                         = "generic";
     current.wifi_ssid                       = "Café \"quoted\"\\line\n";
     current.mqtt_base                       = "daikin-altherma-esp32";
-    ota = weather = modbus_live = change_history_epoch = history_restored = false;
-    values_readers = values_readers_peak = 0;
-    refuse_values_admission              = false;
+    ota = modbus_live = change_history_epoch = history_restored = false;
     clock_synced                         = true;
     active_request                       = nullptr;
     config_unreadable                    = false;
     epoch                                = 42;
-    room_identity                        = 0;
-    room_snapshot_unavailable            = false;
-    room_snapshot_calls                  = 0;
     failure = stage_race = 0;
     stack_samples = wifi_calls = 0;
     scan_count = scan_failure = 0;
@@ -157,16 +145,14 @@ void reset() {
     hydronic_report            = {};
     flow_min_tenths            = -1;
     defrost_start                = {};
-    curve_bins                   = {};
-    curve_bins_available         = false;
     cycling_hours                = {};
     cycling_trace                = {};
     cycling_run_contexts         = {};
     cycling_run_contexts_present = false;
     for (auto& timeline : dhw_timelines) timeline.clear();
     dhw_snapshot_calls[0] = dhw_snapshot_calls[1] = checkup_report_calls = 0;
-    dhw_evidence_case = dhw_lease_witness = false;
-    dhw_lease_witnesses = dhw_snapshot_chunks = 0;
+    dhw_evidence_case                                                    = false;
+    dhw_snapshot_chunks                                                  = 0;
     fault_status                              = {};
     fault_trace.reset();
     working_figure_x10a        = {};
@@ -224,6 +210,7 @@ esp_err_t invoke(httpd_req_t& req, const char* uri, esp_err_t (*handler)(httpd_r
     sdk::largest_allocation = 0;
     sdk::fail_allocation    = fail_at;
     trace_caps_calls = trace_caps_failures = largest_caps_allocation = 0;
+    dhw_snapshot_chunks                                              = 0;
     sdk::track_allocations  = true;
     active_request                                                   = &req;
     const auto result       = daik::handle_then_settle_body(&req);
@@ -258,19 +245,6 @@ void maximum_scan() {
         scan_rows[i].ssid[32] = '\0';
         scan_rows[i].rssi = static_cast<int8_t>(i == 0 ? -128 : i == 18 ? 0 : i == 19 ? 127 : -i);
     }
-}
-void configure_room() {
-    current.diagnostics_enabled    = true;
-    current.diagnostics_generation = 7;
-    current.mqtt_uri               = "mqtt://fixture.invalid";
-    current.ref_temp_name          = "Example sensor";
-    // Deliberately synthetic UTF-8, quote, backslash and newline bytes test JSON wire escaping.
-    current.ref_temp_name += " Café \"quote\"\\line\n";
-    current.ref_temp_topic      = "fixture/room/state";
-    current.ref_temp_path       = "temperature";
-    current.ref_temp_generation = 17;
-    room_identity               = daik::logic::history_room_identity(current);
-    check(room_identity != 0, "configured room must have its own history identity");
 }
 void configure_stop_context() {
     stop_report                 = {};
@@ -427,42 +401,24 @@ CrashInfo                   diag_crash_info() { return {}; }
 CrashInfo                   diag_crash_info_live() { return {}; }
 bool                        diag_crash_coredump_present() { return false; }
 void                        diag_printf(const char*, ...) {}
-Env3Status                  env3_status() { return {}; }
+Env3Status                  env3_status() {
+    if (!fixture::current.env3_enabled) return {};
+    Env3Status sample;
+    sample.started       = true;
+    sample.connected     = true;
+    sample.fresh         = true;
+    sample.temperature_c = 8.5f;
+    sample.humidity_pct  = 71.25f;
+    sample.pressure_hpa  = 1016.75f;
+    sample.samples       = 1;
+    sample.error         = "";
+    return sample;
+}
 MqttStatus                  mqtt_status() { return {}; }
 MqttSkipStats               mqtt_skip_stats() { return {}; }
 uint32_t                    mqtt_retirement_evidence() noexcept { return 0; }
-ReferenceTemperatureStatus  reference_temperature_status(const Config&) { return {}; }
-logic::HeatingCurveSnapshot heating_curve_status(HeatingCurveBinsReport* out) {
-    if (out) {
-        *out       = fixture::curve_bins;
-        out->valid = fixture::curve_bins_available;
-    }
-    return {};
-}
-CirculationSourceStatus circulation_source_status(const Config&) { return {}; }
-CirculationPumpSample   circulation_pump_sample() { return {}; }
-WeatherForecastStatus   weather_forecast_status() { return {}; }
-bool                    weather_fetch_active() { return fixture::weather; }
-bool                    weather_values_reader_enter() noexcept {
-    if (fixture::weather || fixture::refuse_values_admission) return false;
-    fixture::values_readers_peak =
-        std::max(fixture::values_readers_peak, ++fixture::values_readers);
-    return true;
-}
-void weather_values_reader_leave() noexcept {
-    if (fixture::dhw_lease_witness && fixture::values_readers == 1) {
-        // The existing first-chunk hook fires before the diagnosis snapshot. Observe the last
-        // reader's release instead: multiple DHW chunks must already be on this real transport.
-        // Fault's nested reader may leave sooner, but must not release this shared chart lease.
-        const auto* req = fixture::active_request;
-        fixture::check(req && req->chunks >= fixture::dhw_snapshot_chunks + 2 &&
-                           req->response.find("\"start_s\":86369") != std::string::npos &&
-                           req->response.find("\"rate_k_h\":0.0") != std::string::npos,
-                       "shared chart reader left before bounded DHW windows streamed");
-        ++fixture::dhw_lease_witnesses;
-    }
-    --fixture::values_readers;
-}
+CirculationSourceStatus     circulation_source_status(const Config&) { return {}; }
+CirculationPumpSample       circulation_pump_sample() { return {}; }
 SyslogStatus syslog_status() { return {}; }
 HpStats      hp_stats() { return {}; }
 uint32_t     hp_skipped_cycles() { return 0; }
@@ -472,6 +428,7 @@ logic::RefrigerantServiceSnapshot refrigerant_service_status() {
 }
 ModbusStatus                      mb_status() {
     ModbusStatus s;
+    s.enabled   = fixture::modbus_live;
     s.connected = fixture::modbus_live;
     return s;
 }
@@ -539,26 +496,6 @@ size_t history_env3_snapshot(size_t t, logic::HistorySample* out, size_t max, ui
                              logic::HistoryMeta* meta) {
     return history_snapshot(t, out, max, epoch, meta);
 }
-size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t expected_identity,
-                             uint32_t* epoch, logic::HistoryMeta* meta) {
-    ++fixture::room_snapshot_calls;
-    if (epoch) *epoch = 0;
-    if (meta) *meta = {};
-    if (fixture::room_snapshot_unavailable || !expected_identity ||
-        expected_identity != fixture::room_identity)
-        return 0;
-    const size_t n = std::min<size_t>(max, logic::HISTORY_SAMPLES);
-    for (size_t i = 0; i < n; ++i)
-        out[i] = i % 4 == 1 ? logic::HISTORY_NO_READING : static_cast<int16_t>(201 + i % 50);
-    if (epoch) *epoch = fixture::epoch;
-    if (meta) {
-        meta->newest_age_s     = 17;
-        meta->oldest_bucket    = 700;
-        meta->newest_commit_us = sdk::now - 17000000;
-    }
-    if (fixture::change_history_epoch) ++fixture::epoch;
-    return n;
-}
 TimeStatus time_status() {
     TimeStatus s;
     s.synced    = fixture::clock_synced;
@@ -587,8 +524,6 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     if (trace) *trace = fixture::cycling_trace;
     if (persist) *persist = fixture::checkup_persist;
     if (dhw_trace) {
-        fixture::check(fixture::values_readers == 1,
-                       "DHW snapshot was copied without the one shared chart reader");
         const auto slot = source == DiagnosticsSource::Modbus ? 1 : 0;
         ++fixture::dhw_snapshot_calls[slot];
         *dhw_trace = fixture::dhw_timelines[slot];
@@ -681,8 +616,6 @@ bool checkup_cycling_run_contexts(daik::logic::CheckupRunContextSnapshot& out, u
         out.reset();
         return false;
     }
-    fixture::check(fixture::values_readers == 1,
-                   "cycling run contexts overlap the completed chart reader");
     fixture::check(boot_s == fixture::cycling_trace.boot_s &&
                        timeline_unix_s == fixture::cycling_trace.unix_s,
                    "cycling run contexts are not in the emitted chart's time frame");
@@ -714,7 +647,6 @@ int main(int argc, char** argv) {
         oracle = name;
         reset();
         fn();
-        check(values_readers == 0, "a /values reader stayed in Weather's TLS exclusion");
         ++count;
         std::printf("PASS %s\n", name);
     };
@@ -729,6 +661,10 @@ int main(int argc, char** argv) {
             auto req = request();
             check(invoke(req, uri, handler) == ESP_OK, "completed handler failed");
             successful(req);
+            if (handler == daik::h_history)
+                check(req.response.find(R"("label":"Supply Café \"quote\"\\line\n")") !=
+                          std::string::npos,
+                      "ordinary history label lost its JSON escaping");
             emit(req, uri);
         }
     });
@@ -810,15 +746,6 @@ int main(int argc, char** argv) {
         check(result == ESP_OK, "status must survive optional trace allocation failure");
         successful(constrained);
         emit(constrained, "cycling-trace-oom");
-        check(values_readers == 0, "trace allocation failure leaked a Weather reader");
-        auto weather_busy      = request();
-        weather                = true;
-        const auto busy_result = invoke(weather_busy, "/status", daik::h_status);
-        weather                = false;
-        check(busy_result == ESP_OK, "Weather must not block the hourly status");
-        successful(weather_busy);
-        check(values_readers == 0, "Weather refusal leaked a reader");
-        emit(weather_busy, "cycling-trace-weather");
         cycling_trace                     = {};
         cycling_hours.hours[0]            = {};
         cycling_hours.hours[0].provenance = Slot::Expired;
@@ -897,11 +824,10 @@ int main(int argc, char** argv) {
                          mcp ? framed : daik::h_status) == ESP_OK,
                   "DHW status or shared MCP builder failed");
             successful(req);
-            check(values_readers == 0 && checkup_report_calls == reports + 1 &&
-                      last_checkup_report_source == source &&
+            check(checkup_report_calls == reports + 1 && last_checkup_report_source == source &&
                       dhw_snapshot_calls[slot] == snapshots + (copied ? 1 : 0) &&
                       dhw_snapshot_calls[1 - slot] == other_snapshots,
-                  "DHW snapshot mixed sources, copied after refusal, or leaked its reader");
+                  "DHW snapshot mixed sources, was copied more than once, or bypassed admission");
             const auto row = checkup_wire(req, "dhw_loss");
             check((row.find("\"timeline\":") != std::string_view::npos) == visible,
                   "DHW timeline must be an optional object, not null, empty or leaked on refusal");
@@ -915,10 +841,9 @@ int main(int argc, char** argv) {
             return req;
         };
 
-        dhw_lease_witness = true; // Cycling's absent wall anchor must not drop the DHW lease.
-        auto maximum      = send("dhw-x10a", true, true);
-        dhw_lease_witness = false;
-        check(dhw_lease_witnesses == 1, "DHW streaming lease witness was not exercised");
+        auto maximum = send("dhw-x10a", true, true);
+        check(maximum.chunks >= dhw_snapshot_chunks + 2,
+              "the maximum DHW response must emit multiple bounded chunks after the snapshot");
         const auto maximum_row = checkup_wire(maximum, "dhw_loss");
         check(
             maximum_row.find("{\"start_s\":86369,\"end_s\":90000,\"rate_k_h\":0.0,"
@@ -943,10 +868,10 @@ int main(int argc, char** argv) {
               "maximum DHW detail was truncated, synthesized, or not one bounded snapshot");
         std::printf("DHW records=%zu row_bytes=%zu chunks=%u max_chunk=%zu "
                     "largest_allocation=%zu largest_caps_allocation=%zu snapshot_bytes=%zu "
-                    "lease_witnesses=%u\n",
+                    "snapshot_chunks=%u\n",
                     records, maximum_row.size(), maximum.chunks, maximum.max_chunk,
                     sdk::largest_allocation, largest_caps_allocation, sizeof(Timeline),
-                    dhw_lease_witnesses);
+                    dhw_snapshot_chunks);
         send("dhw-mcp-x10a", true, true, true);
         current.diagnostics_source = daik::DiagnosticsSource::Modbus;
         send("dhw-modbus", true, true);
@@ -1008,26 +933,13 @@ int main(int argc, char** argv) {
                   checkup_wire(dhw_oom, "cycling").find("\"timeline\":{") != std::string_view::npos,
               "DHW-only OOM removed the independently available cycling timeline");
         send("dhw-mcp-only-oom", false, false, true);
-        fail_trace_size   = sizeof(Trace);
-        dhw_lease_witness = true;
-        auto cycling_oom  = send("dhw-cycling-oom", true, true);
-        dhw_lease_witness = false;
-        check(trace_caps_failures == 1 && dhw_lease_witnesses == 2 &&
+        fail_trace_size  = sizeof(Trace);
+        auto cycling_oom = send("dhw-cycling-oom", true, true);
+        check(trace_caps_failures == 1 && cycling_oom.chunks >= dhw_snapshot_chunks + 2 &&
                   checkup_wire(cycling_oom, "cycling").find("\"timeline\":") ==
                       std::string_view::npos,
-              "cycling-only OOM dropped the surviving DHW snapshot or shared reader");
+              "cycling-only OOM dropped or truncated the surviving DHW snapshot");
         fail_trace_size = 0;
-        weather         = true;
-        send("dhw-weather", false, false);
-        check(trace_caps_calls == 0 && fixture_ticks == 0,
-              "Weather refusal waited or allocated optional trace buffers");
-        weather                 = false;
-        refuse_values_admission = true;
-        send("dhw-refused-admission", false, false);
-        check(trace_caps_calls == 0 && fixture_ticks == 0,
-              "refused values admission still allocated or waited for DHW detail");
-        send("dhw-mcp-refused-admission", false, false, true);
-        refuse_values_admission = false;
         send("dhw-recovered", true, true);
         allocation_sweep("/status", daik::h_status);
         chunk_sweep("/status", daik::h_status);
@@ -1068,45 +980,6 @@ int main(int argc, char** argv) {
               "unreadable diagnosis status failed");
         successful(req);
         emit(req, "checkup-persist-unknown");
-    });
-    run("heating_curve_bins_wire", [] {
-        current.diagnostics_enabled            = true;
-        current.mqtt_uri                       = "mqtt://fixture";
-        current.ref_temp_topic                 = "room";
-        current.ref_temp_path                  = "temperature";
-        current.ref_temp_fixed_setpoint_tenths = 215;
-        current.mb_host                        = "homehub-fixture";
-        curve_bins_available                   = true;
-        curve_bins.target_c                    = 21.5;
-        curve_bins.homehub[0].scope_samples    = 3;
-        auto& bin                              = curve_bins.homehub[1];
-        bin.samples                            = 2;
-        bin.first_unix_s                       = 1700000000;
-        bin.last_unix_s                        = 1700001800;
-        bin.room_min_tenths                    = -7;
-        bin.room_max_tenths                    = 7;
-        bin.outdoor_sum_tenths                 = 20;
-        bin.outdoor_max_tenths                 = 20;
-        auto req                               = request();
-        check(invoke(req, "/status", daik::h_status) == ESP_OK, "curve bins status failed");
-        check(req.response.find("\"outdoor_bins\":{\"target_c\":21.500000,\"scope_samples\":3") !=
-                  std::string::npos,
-              "curve bins retain the scope and denominator");
-        check(req.response.find("\"room_min_tenths\":-7,\"room_max_tenths\":7") !=
-                  std::string::npos,
-              "curve bins preserve signed range");
-        check(req.response.find("\"env3\":[null,null,null,null]") != std::string::npos,
-              "missing ENV III bins are not zero");
-        req = request();
-        check(invoke(req, "/status?redact=1", daik::h_status) == ESP_OK,
-              "redacted bins status failed");
-        check(req.response.find("\"outdoor_bins\"") == std::string::npos,
-              "redacted status omits exact outdoor-bin evidence");
-        curve_bins_available = false;
-        req                  = request();
-        check(invoke(req, "/status", daik::h_status) == ESP_OK, "unavailable bins status failed");
-        check(req.response.find("\"outdoor_bins\":null") != std::string::npos,
-              "unavailable scope has no fabricated bins");
     });
     run("stop_context_absent", [] {
         for (const bool confirmed : {false, true}) {
@@ -1385,132 +1258,58 @@ int main(int argc, char** argv) {
         check(req.response.find("\"t0\":1999913999,") != std::string::npos,
               "the wall time and persisted bucket must stay before the UTC boundary");
     });
-    run("room_history_completed", [] {
-        configure_room();
-        current.profile = "auto";
-        rows.clear();
-        for (const bool renamed : {false, true}) {
-            if (renamed) current.ref_temp_name = "Living room";
-            const unsigned calls = room_snapshot_calls;
-            auto           req   = request();
-            check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK,
-                  "independent MQTT room history failed");
-            successful(req);
-            check(room_snapshot_calls == calls + 1 &&
-                      req.response.find("\"id\":\"room_temp\"") != std::string::npos &&
-                      req.response.find("\"source\":\"room\"") != std::string::npos,
-                  "room route borrowed another instrument's snapshot or attribution");
-            check(req.response.find(renamed ? "Living room" : "\\\"quote\\\"\\\\line\\n") !=
-                      std::string::npos,
-                  "configured room label was stale or not JSON escaped");
-            emit(req, renamed ? "room-history-renamed" : "room-history");
-        }
-    });
-    run("room_history_refusals", [] {
-        const char* inactive_names[] = {"room-disabled-diagnostics", "room-disabled-broker",
-                                        "room-disabled-mapping"};
-        for (int missing = 0; missing < 3; ++missing) {
-            configure_room();
-            if (missing == 0) current.diagnostics_enabled = false;
-            if (missing == 1) current.mqtt_uri.clear();
-            if (missing == 2) current.ref_temp_topic.clear();
-            const unsigned calls = room_snapshot_calls;
-            auto           req   = request();
-            check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK &&
-                      req.status == "404 Not Found" && room_snapshot_calls == calls &&
-                      req.emission_attempts == 0,
-                  "inactive room configuration reached its history snapshot");
-            emit(req, inactive_names[missing]);
-        }
-        configure_room();
-        auto           req   = request();
-        const unsigned calls = room_snapshot_calls;
-        check(invoke(req, "/history?row=leaving_water&source=room", daik::h_history) == ESP_OK &&
-                  req.status == "404 Not Found" && room_snapshot_calls == calls,
-              "room source accepted another instrument's trend id");
-        emit(req, "room-unknown-row");
-        req = request();
-        check(invoke(req, "/history?row=room_temp&source=mqtt", daik::h_history) == ESP_OK &&
-                  req.status == "400 Bad Request" && room_snapshot_calls == calls,
-              "room route accepted the circulation-only MQTT attribution as a source");
-        emit(req, "room-unknown-source");
-        room_snapshot_unavailable = true;
-        req                       = request();
-        check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK &&
-                  req.status == "503 Service Unavailable" && req.emission_attempts == 0,
-              "unavailable room snapshot emitted a plausible empty curve");
-        emit(req, "room-unavailable");
-        room_snapshot_unavailable = false;
-        room_identity ^= 1u;
-        req = request();
-        check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK &&
-                  req.status == "503 Service Unavailable" && req.emission_attempts == 0,
-              "room history identity mismatch escaped before-send refusal");
-        emit(req, "room-identity-refusal");
-        configure_room();
-        change_history_epoch = true;
-        req                  = request();
-        check(invoke(req, "/history?row=room_temp&source=room", daik::h_history) == ESP_OK &&
-                  req.status == "503 Service Unavailable" && req.emission_attempts == 0,
-              "room history mixed two epochs before send");
-        emit(req, "room-epoch-refusal");
-    });
-    run("room_history_stream_failures", [] {
-        configure_room();
-        allocation_sweep("/history?row=room_temp&source=room", daik::h_history);
-        chunk_sweep("/history?row=room_temp&source=room", daik::h_history);
-    });
-    run("room_history_status_labels", [] {
-        configure_room();
+    run("retired_sources_status_and_history", [] {
+        current.diagnostics_enabled = true;
+        current.mb_host             = "fixture-homehub.invalid";
+        current.board_user_set      = true;
+        current.board_preset_id     = daik::BoardPresetId::M5StackAtomS3Lite;
+        current.env3_enabled        = true;
+        modbus_live                 = true;
         for (const bool redact : {false, true}) {
             auto req = request();
             check(invoke(req, redact ? "/status?redact=1" : "/status", daik::h_status) == ESP_OK,
-                  "status failed with configured room history");
+                  "status failed with configured HomeHub and ENV III");
             successful(req);
-            emit(req, redact ? "room-status-redacted" : "room-status-plain");
+            check(req.response.starts_with("{\"status_schema_version\":2,"),
+                  "status omitted or changed its explicit schema version");
+            emit(req, redact ? "retired-status-redacted" : "retired-status-plain");
         }
-        current.ref_temp_topic.clear();
+        for (const auto& [name, uri] :
+             {std::pair{"retired-room-history", "/history?row=room_temp&source=room"},
+              std::pair{"invalid-mqtt-history", "/history?row=room_temp&source=mqtt"},
+              std::pair{"truncated-history-source",
+                        "/history?row=leaving_water&source=modbus-extra"}}) {
+            auto req = request();
+            check(invoke(req, uri, daik::h_history) == ESP_OK && req.status == "400 Bad Request" &&
+                      req.emission_attempts == 0,
+                  "a retired or invalid history source reached streaming");
+            emit(req, name);
+        }
         auto req = request();
-        check(invoke(req, "/status?redact=1", daik::h_status) == ESP_OK,
-              "status failed with removed room history");
+        check(invoke(req, "/history?row=env3_temperature&source=env3", daik::h_history) == ESP_OK,
+              "ENV III history must remain independently reachable");
         successful(req);
-        emit(req, "room-status-absent");
-    });
-    run("weather_and_ota_admission", [] {
-        auto req = request();
-        check(invoke(req, "/values", daik::h_values) == ESP_OK && fixture_ticks == 0 &&
-                  values_readers_peak == 1 && values_readers == 0,
-              "an idle Weather TLS phase delayed /values or left its reader counted");
-        weather       = true;
-        fixture_delay = [](TickType_t) { fixture::weather = false; };
-        req           = request();
-        check(invoke(req, "/values", daik::h_values) == ESP_OK && fixture_ticks == 250,
-              "short Weather wait changed");
-        weather       = true;
-        fixture_delay = nullptr;
-        req           = request();
-        check(invoke(req, "/values", daik::h_values) == ESP_OK &&
-                  req.status == "503 Service Unavailable" && fixture_ticks == 4250,
-              "Weather wait is unbounded");
-        // The TLS phase ends while OTA starts: the next pass counts the reader, OTA refuses it, and
-        // the count must be released or every later Weather cycle defers as http_busy.
-        weather             = true;
-        values_readers_peak = 0;
-        fixture_delay       = [](TickType_t) {
-            fixture::weather = false;
-            fixture::ota     = true;
-        };
+        emit(req, "retained-env3-history");
         req = request();
-        check(invoke(req, "/values", daik::h_values) == ESP_OK &&
-                  req.status == "503 Service Unavailable" && values_readers_peak == 1 &&
-                  values_readers == 0,
-              "a reader counted and then refused for OTA stayed in Weather's TLS exclusion");
-        fixture_delay = nullptr;
-        ota           = true;
-        req           = request();
-        check(invoke(req, "/status", daik::h_status) == ESP_OK &&
-                  req.status == "503 Service Unavailable" && req.emission_attempts == 0,
-              "OTA status admission reached serializer");
+        check(invoke(req, "/history?row=room_temp&source=modbus", daik::h_history) == ESP_OK,
+              "HomeHub room history must remain independently reachable");
+        successful(req);
+        emit(req, "retained-homehub-room-history");
+    });
+    run("ota_admission", [] {
+        auto req = request();
+        check(invoke(req, "/values", daik::h_values) == ESP_OK && fixture_ticks == 0,
+              "idle values request waited for an unrelated network operation");
+        successful(req);
+        ota                                                                = true;
+        const std::pair<const char*, esp_err_t (*)(httpd_req_t*)> routes[] = {
+            {"/values", daik::h_values}, {"/status", daik::h_status}};
+        for (const auto& [uri, handler] : routes) {
+            req = request();
+            check(invoke(req, uri, handler) == ESP_OK && req.status == "503 Service Unavailable" &&
+                      req.emission_attempts == 0 && fixture_ticks == 0,
+                  "OTA admission waited or reached a non-OTA serializer");
+        }
     });
     run("general_exception", [] {
         failure           = 1;

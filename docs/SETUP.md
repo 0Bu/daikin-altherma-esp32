@@ -105,7 +105,7 @@ collect a [bug report](REPORTING.md).
 - **ENV III:** on a supported M5Stack preset, use **ESP32 → Hardware → Outdoor sensor**.
   [BOARDS.md](BOARDS.md#m5stack-env-iii-outdoor-temperature-humidity-and-pressure) explains pin conflicts.
 - **Plant diagnostics:** enable it under **Settings → Firmware**. It is off by default. Then
-  configure the optional room, circulation and forecast inputs described in [PLANT.md](PLANT.md).
+  configure the optional circulation witness described in [PLANT.md](PLANT.md).
 
 To update later, tap the firmware version in the header or **Settings → Firmware**. Read the offered
 version, channel and changelog before confirming. An unreachable or invalid feed is a check error,

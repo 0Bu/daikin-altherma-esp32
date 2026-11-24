@@ -71,12 +71,8 @@ Cross-site Fetch Metadata is rejected with HTTP **403**.
 [SECURITY.md](SECURITY.md) owns these LAN/browser boundaries.
 
 During OTA TLS the entire MCP POST returns **503 text/plain** before parsing or snapshot allocation:
-`Network TLS operation in progress; retry shortly`. Outside OTA, `get_hp_values` waits behind Weather
-TLS in 250 ms steps for at most four seconds; exhaustion returns **503 text/plain**,
-`network operation in progress`, before any result byte. These busy responses are transport errors,
-not JSON-RPC objects. Retry the complete read-only call later. During Weather TLS, `get_status`
-can succeed without the [optional compressor timeline](API.md#history-and-24-hour-checks).
-All route invocations retain the shared allocation-failure boundary.
+`Network TLS operation in progress; retry shortly`. This is an HTTP transport error. Retry the
+complete read-only call later. All route invocations retain the shared allocation-failure boundary.
 
 ## Wire example
 

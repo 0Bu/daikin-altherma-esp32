@@ -89,7 +89,9 @@ def build(source, name):
 
 baseline = build(SOURCE, "baseline")
 cases = ["empty_boot", "mixed_scan", "retry_indexed_read", "corrupt_crc", "corrupt_source", "corrupt_version",
-         "corrupt_width", "corrupt_payload", "torn_commit", "append_commit", "commit_rejected",
+         "corrupt_width", "corrupt_payload", "corrupt_minimum_metadata_crc",
+         "corrupt_minimum_metadata_span", "corrupt_minimum_metadata_bits", "torn_commit",
+         "append_commit", "commit_rejected",
          "commit_error_after_accept", "readback_failure", "shutdown_drain", "wrap_slot",
          "scan_read_failure", "early_forget", "stop_commit_rejected", "stop_fence_commit_rejected",
          "core_ahead_independence", "request_rejections"]

@@ -17,7 +17,6 @@ idf_component_register(
         "nvs_storage.cpp"
         "net.cpp"
         "wifi.cpp"
-        "weather_forecast.cpp"
         "hp_comm.cpp"
         "hp_convert.cpp"
         "hp_detect.cpp"

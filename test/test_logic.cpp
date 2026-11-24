@@ -49,9 +49,7 @@
 #include "logic/detect_backoff.hpp"
 #include "logic/detect_identity.hpp"
 #include "logic/discovery.hpp"
-#include "logic/heating_curve_bins.hpp"
-#include "logic/heating_curve_diagnosis.hpp"
-#include "logic/heating_curve_mqtt.hpp"
+
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
 #include "logic/cycling_run_context.hpp"
@@ -114,14 +112,13 @@
 #include "logic/cop_scope.hpp"
 #include "logic/mqtt_base.hpp"
 #include "logic/mqtt_uri.hpp"
-#include "logic/reference_temperature.hpp"
 #include "logic/gas_comparison.hpp"
+#include "logic/mqtt_source.hpp"
+#include "logic/mqtt_weather_retirement.hpp"
 #include "logic/refrigerant_service.hpp"
-#include "logic/weather_forecast.hpp"
-#include "logic/weather_config.hpp"
+
 #include "logic/x10a_snapshot.hpp"
-#include "logic/weather_mqtt.hpp"
-#include "logic/open_meteo.hpp"
+
 #include "logic/modbus.hpp"
 #include "logic/modbus_plan.hpp"
 #include "logic/modbus_snapshot.hpp"
@@ -132,7 +129,7 @@
 #include "logic/env3.hpp"
 #include "logic/mcp.hpp"
 #include "logic/http_surface.hpp"
-#include "logic/http_values_wait.hpp"
+
 #include "logic/registers.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/syslog_policy.hpp"
@@ -1733,16 +1730,9 @@ static void test_config_model() {
         CHECK(padded[0] == 'h' && padded[1] == 'i' && padded[2] == '\0' && padded[15] == '\0');
         wifi_config_field_copy(nullptr, sizeof(padded), std::string("hi"));
         wifi_config_field_copy(padded, 0, std::string("hi"));
-        Config fixed_hc;
-        fixed_hc.diagnostics_enabled            = true;
-        fixed_hc.mb_host                        = "hub.local";
-        fixed_hc.mqtt_uri                       = "mqtt://broker.local";
-        fixed_hc.ref_temp_topic                 = "room/temp";
-        fixed_hc.ref_temp_path                  = "t";
-        fixed_hc.ref_temp_fixed_setpoint_tenths = 210;
-        CHECK(heating_curve_diagnosis_armed(fixed_hc));
-        fixed_hc.env3_enabled = false;
-        CHECK(config_board_reserved_pins(fixed_hc).claims(fixed_hc.rx_pin));
+        Config fixed_pins;
+        fixed_pins.env3_enabled = false;
+        CHECK(config_board_reserved_pins(fixed_pins).claims(fixed_pins.rx_pin));
     }
 
     // Fresh is the one automatic-search state. A completed empty decision is disabled forever; a
@@ -2049,8 +2039,10 @@ struct ConfigTxStore {
     std::map<std::string, std::vector<uint8_t>> durable;
     std::map<std::string, int>                  fail_with;
     std::vector<std::string>                    attempts;
+    bool                                        disarm_fail_alloc = false;
 
     int write_blob(const char* key, const uint8_t* data, size_t len) {
+        if (disarm_fail_alloc) g_logic_fail_alloc = 0;
         attempts.emplace_back(key);
         const auto failing = fail_with.find(key);
         if (failing != fail_with.end()) return failing->second;
@@ -2146,17 +2138,6 @@ static void test_config_transaction() {
         c.mqtt_user                      = "mu";
         c.mqtt_pass                      = "mp";
         c.mqtt_base                      = "base/topic";
-        c.ref_temp_name                  = "Living room";
-        c.ref_temp_topic                 = "t/room";
-        c.ref_temp_path                  = "$.temp";
-        c.ref_temp_time_path             = "$.ts";
-        c.ref_temp_setpoint_topic        = "t/set";
-        c.ref_temp_time_topic            = "t/time";
-        c.ref_temp_fixed_setpoint_tenths = 215;
-        c.ref_temp_setpoint_path         = "$.set";
-        c.ref_temp_enabled_path          = "$.on";
-        c.ref_temp_hvac_mode_path        = "$.mode";
-        c.ref_temp_max_age_s             = 321;
         c.circulation_name               = "DHW circulation pump";
         c.circulation_topic              = "t/pump";
         c.circulation_power_path         = "$.w";
@@ -2165,9 +2146,6 @@ static void test_config_transaction() {
         c.circulation_on_tenths_w        = 111;
         c.circulation_off_tenths_w       = 22;
         c.circulation_confirm_s          = 33;
-        c.weather_enabled                = true;
-        c.weather_latitude_e6            = 12345678;
-        c.weather_longitude_e6           = 23456789;
         c.diagnostics_enabled            = true;
         c.diagnostics_generation         = 17;
         c.env3_enabled                   = true;
@@ -2195,18 +2173,11 @@ static void test_config_transaction() {
         CHECK(b.wifi_rollback_active && b.wifi_rolled_back);
         CHECK(b.mqtt_uri == "mqtt://u" && b.mqtt_user == "mu" && b.mqtt_pass == "mp");
         CHECK(b.mqtt_base == "base/topic");
-        CHECK(b.ref_temp_name == "Living room" && b.ref_temp_topic == "t/room");
-        CHECK(b.ref_temp_path == "$.temp" && b.ref_temp_time_path == "$.ts");
-        CHECK(b.ref_temp_setpoint_topic == "t/set" && b.ref_temp_time_topic == "t/time");
-        CHECK(b.ref_temp_fixed_setpoint_tenths == 215u && b.ref_temp_setpoint_path == "$.set");
-        CHECK(b.ref_temp_enabled_path == "$.on" && b.ref_temp_hvac_mode_path == "$.mode");
-        CHECK(b.ref_temp_max_age_s == 321u);
+        CHECK(b.ref_temp_topic.empty() && !b.weather_enabled);
         CHECK(b.circulation_name == "DHW circulation pump" && b.circulation_topic == "t/pump");
         CHECK(b.circulation_power_path == "$.w" && b.circulation_time_path == "$.pts");
         CHECK(b.circulation_max_age_s == 99u && b.circulation_on_tenths_w == 111u);
         CHECK(b.circulation_off_tenths_w == 22u && b.circulation_confirm_s == 33u);
-        CHECK(b.weather_enabled && b.weather_latitude_e6 == 12345678);
-        CHECK(b.weather_longitude_e6 == 23456789);
         CHECK(b.diagnostics_enabled && b.diagnostics_generation == 17u);
         CHECK(b.env3_enabled && b.env3_sda == 7 && b.env3_scl == 8);
         CHECK(b.board_preset_id == static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite));
@@ -2709,35 +2680,27 @@ static void test_config_transaction() {
 
     // OOM before the first durable write leaves RAM and store untouched and unwinds cleanly.
     {
-        struct StagingGuardStore {
-            ConfigTxStore& inner;
-            int            write_blob(const char* key, const uint8_t* data, size_t len) {
-                g_logic_fail_alloc = 0;
-                return inner.write_blob(key, data, len);
-            }
-        };
         Config        live = config_tx_live();
         ConfigTxStore store;
         store.seed(live);
-        StagingGuardStore guard{store};
-        const auto        durable_before = store.durable;
-        const auto        live_before    = config_tx_state(live);
-        Config            req            = live;
-        req.wifi_ssid                    = "long-ssid-over-sso-buffer-123456";
-        req.wifi_pass                    = "long-pass-over-sso-buffer-123456";
-        req.mqtt_uri                     = "mqtts://long-broker-over-sso.example.com";
-        req.ref_temp_name                = std::string(36, 'r');
-        req.syslog_host                  = "long-syslog-host-over-sso-buffer12";
-        req.ntp_server                   = "long-ntp-server-over-sso-buffer123";
-        req.mb_host                      = "long-mb-host-over-sso-buffer123456";
-        req.tariff_currency              = "USD-long-currency-over-sso-buffer";
-        size_t oom_caught                = 0;
+        store.disarm_fail_alloc   = true;
+        const auto durable_before = store.durable;
+        const auto live_before    = config_tx_state(live);
+        Config     req            = live;
+        req.wifi_ssid             = "long-ssid-over-sso-buffer-123456";
+        req.wifi_pass             = "long-pass-over-sso-buffer-123456";
+        req.mqtt_uri              = "mqtts://long-broker-over-sso.example.com";
+        req.syslog_host           = "long-syslog-host-over-sso-buffer12";
+        req.ntp_server            = "long-ntp-server-over-sso-buffer123";
+        req.mb_host               = "long-mb-host-over-sso-buffer123456";
+        req.tariff_currency       = "USD-long-currency-over-sso-buffer";
+        size_t oom_caught         = 0;
         for (size_t k = 1; k <= 64; ++k) {
             store.attempts.clear();
             g_logic_fail_alloc = k;
             bool threw         = false;
             try {
-                (void)config_save_transaction(live, req, false, guard);
+                (void)config_save_transaction(live, req, false, store);
             } catch (const std::bad_alloc&) {
                 threw = true;
                 oom_caught++;
@@ -2749,6 +2712,34 @@ static void test_config_transaction() {
             CHECK(config_tx_state(live) == live_before);
         }
         CHECK(oom_caught >= 8);
+
+        const GasComparisonBlob gas_req{3600, 1200, "USD-long-currency-over-sso-buffer"};
+        live  = config_tx_live();
+        store = ConfigTxStore{};
+        store.seed(live);
+        store.disarm_fail_alloc   = true;
+        const auto gas_durable    = store.durable;
+        const auto gas_live       = config_tx_state(live);
+        size_t     gas_oom_caught = 0;
+        for (size_t k = 1; k <= 16; ++k) {
+            store.attempts.clear();
+            g_logic_fail_alloc = k;
+            bool threw         = false;
+            try {
+                (void)config_save_gas_comparison_transaction(live, gas_req, store);
+            } catch (const std::bad_alloc&) {
+                threw = true;
+                gas_oom_caught++;
+            }
+            g_logic_fail_alloc = 0;
+            if (!threw) break;
+            CHECK(store.attempts.empty());
+            CHECK(store.durable == gas_durable);
+            CHECK(config_tx_state(live) == gas_live);
+            CHECK(live.elec_price_tenth_mill == 0 && live.gas_price_tenth_mill == 0 &&
+                  live.tariff_currency == "EUR");
+        }
+        CHECK(gas_oom_caught >= 1);
     }
 }
 
@@ -2903,11 +2894,7 @@ static void test_config_factory_seed() {
     current.mqtt_pass              = "mqtt-pass";
     current.mqtt_base              = "daikin-altherma-esp32/plant";
     current.syslog_port            = 1514;
-    current.ref_temp_topic         = "home/room";
     current.circulation_topic      = "home/pump";
-    current.weather_enabled        = true;
-    current.weather_latitude_e6    = 12345678;
-    current.weather_longitude_e6   = 23456789;
     current.diagnostics_enabled    = true;
     current.diagnostics_generation = 4;
     current.ui_lang                = UiLang::De;
@@ -3323,6 +3310,13 @@ static void test_config_board_pin_canonical_absent() {
     const ReservedPins r = config_board_reserved_pins(s, eth);
     for (int pin : {44, 43, 2, 1, 5, 6, 7, 8}) CHECK(r.claims(pin));
     CHECK(!r.claims(21) && !r.claims(-1));
+    s.led_gpio = s.env3_sda;
+    CHECK(!board_hw_valid(s, why, 48, false) && why == "led_gpio is in use by ENV III");
+    s.led_gpio = 21;
+    s.btn_gpio = s.env3_scl;
+    CHECK(!board_hw_valid(s, why, 48, false) && why == "btn_gpio is in use by ENV III");
+    s.btn_gpio = 41;
+    CHECK(board_hw_valid(s, why, 48, false));
     // The preset rows honour that extra reservation. No shipped preset puts its indicator or
     // button on a W5500 pad, so today the pads withhold nothing; a pad under the XIAO's GPIO21
     // proves the extra set reaches the filter.
@@ -5217,31 +5211,7 @@ static void test_ota_headroom() {
     CHECK(!ota_changelog_tls_headroom_ok(64u * 1024u, 24u * 1024u - 1));
 }
 
-// The weather fetch's own headroom gate (private issue 10 D) — same predicate shape as the OTA
-// gate above, but with evidence-based floors that reject the measured 15.9 KiB fragmentation
-// trough, admit the production board's repeatable 22 KiB post-quiesce block and preserve aggregate
-// reserve around the fetch's measured transient claim (composition: the gate's header comment).
-static void test_weather_fetch_headroom() {
-    CHECK(WEATHER_FETCH_MIN_FREE_BYTES == 48u * 1024u);
-    CHECK(WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES == 20u * 1024u);
-
-    CHECK(weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES,
-                                    WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES));
-    CHECK(weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES + 1,
-                                    WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES + 1));
-    // Two natural production retries after all host pressure ended: aggregate reserve was healthy,
-    // while MQTT quiescence repeatedly left the same 22,528-byte largest internal block.
-    CHECK(weather_fetch_headroom_ok(61168u, 22528u));
-    CHECK(weather_fetch_headroom_ok(60972u, 22528u));
-
-    // The live fragmentation trough from the issue: plenty of aggregate bytes, but the largest
-    // block does not leave enough room for the complete TLS/HTTP setup — retry later.
-    CHECK(!weather_fetch_headroom_ok(59u * 1024u, WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES - 1));
-    CHECK(!weather_fetch_headroom_ok(64u * 1024u, 16u * 1024u - 128u));
-    // Aggregate exhaustion is refused even with a large block free.
-    CHECK(!weather_fetch_headroom_ok(WEATHER_FETCH_MIN_FREE_BYTES - 1, 32u * 1024u));
-    CHECK(!weather_fetch_headroom_ok(0, 0));
-
+static void test_mqtt_ingress_bounds() {
     CHECK(mqtt_fragment_fits(0, 3, 5, 0, 5, 1024));
     CHECK(mqtt_fragment_fits(3, 2, 5, 3, 5, 1024));
     CHECK(mqtt_fragment_fits(5, 0, 5, 5, 5, 1024));
@@ -5392,50 +5362,6 @@ static void test_weather_fetch_headroom() {
     end_offset = 1;
     CHECK(json_parse_bounded(view, parse, destroy) == nullptr);
     CHECK(deletes == 5);
-}
-
-// /values waits boundedly behind the short Weather TLS allocator, but a newly active OTA owner must
-// pre-empt that wait immediately. Otherwise the sole HTTP worker stays parked while /status and
-// /ota/status queue behind it. Pin the transition as well as the exact inclusive Weather timeout.
-static void test_http_values_wait() {
-    using logic::HttpValuesWaitDecision;
-    CHECK(logic::http_values_wait_decision(false, false, 0, 4000) == HttpValuesWaitDecision::Ready);
-    CHECK(logic::http_values_wait_decision(true, false, 0, 4000) == HttpValuesWaitDecision::Refuse);
-    CHECK(logic::http_values_wait_decision(false, true, 3999, 4000) ==
-          HttpValuesWaitDecision::Wait);
-    CHECK(logic::http_values_wait_decision(true, true, 3999, 4000) ==
-          HttpValuesWaitDecision::Refuse);
-    CHECK(logic::http_values_wait_decision(false, true, 4000, 4000) ==
-          HttpValuesWaitDecision::Refuse);
-    CHECK(logic::http_values_wait_decision(false, false, 4000, 4000) ==
-          HttpValuesWaitDecision::Ready);
-}
-
-// /values may run through Weather's lead, but its snapshot must never overlap the TLS phase. Each
-// side announces itself before reading the other, so a reader is either refused or counted before
-// Weather's heap sample; a refused reader leaves no count behind, and Weather's wait is bounded.
-static void test_values_tls_exclusion() {
-    using logic::WeatherValuesQuiesceDecision;
-    logic::ValuesTlsExclusion x;
-    CHECK(!x.tls_active() && x.readers() == 0);
-    CHECK(x.try_enter_reader() && x.readers() == 1); // admitted during the lead
-    x.begin_tls();
-    CHECK(x.tls_active() && x.readers() == 1);        // Weather sees the earlier reader
-    CHECK(!x.try_enter_reader() && x.readers() == 1); // a new reader is refused, not counted
-    x.leave_reader();
-    CHECK(x.readers() == 0);
-    x.end_tls();
-    CHECK(!x.tls_active() && x.try_enter_reader() && x.readers() == 1);
-    x.leave_reader();
-    CHECK(x.readers() == 0);
-    CHECK(logic::weather_values_quiesce_decision(0, 0, 5000) ==
-          WeatherValuesQuiesceDecision::Ready);
-    CHECK(logic::weather_values_quiesce_decision(0, 5000, 5000) ==
-          WeatherValuesQuiesceDecision::Ready);
-    CHECK(logic::weather_values_quiesce_decision(1, 4999, 5000) ==
-          WeatherValuesQuiesceDecision::Wait);
-    CHECK(logic::weather_values_quiesce_decision(1, 5000, 5000) ==
-          WeatherValuesQuiesceDecision::Busy);
 }
 
 // The initial feed must be absolute HTTPS; redirects may use an ordinary relative reference but
@@ -5639,7 +5565,7 @@ static void test_heartbeat() {
           "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
           "\"heap_restarts\":2,"
           "\"httpd_stack_min_free_bytes\":1872,\"poll_stack_min_free_bytes\":520,"
-          "\"mqtt_stack_min_free_bytes\":null,\"weather_stack_min_free_bytes\":null,"
+          "\"mqtt_stack_min_free_bytes\":null,"
           "\"reset_reason\":\"panic\",\"reset_reason_code\":4,\"reset_fault\":1,"
           "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
           "\"wifi_mac\":\"02:00:00:00:00:01\",\"wifi_bssid\":\"02:00:00:00:00:02\","
@@ -5797,21 +5723,17 @@ static void test_heartbeat() {
     // chart this exists to make readable. A null field is DROPPED by a metrics consumer, which is
     // the honest outcome: no sample rather than a false one.
     CHECK(j.find("\"mqtt_stack_min_free_bytes\":null,") != std::string::npos);
-    CHECK(j.find("\"weather_stack_min_free_bytes\":null,") != std::string::npos);
     CHECK(j.find("\"modbus_stack_min_free_bytes\":null,") != std::string::npos);
     CHECK(j.find("\"mqtt_stack_min_free_bytes\":0,") == std::string::npos);
-    CHECK(j.find("\"weather_stack_min_free_bytes\":0,") == std::string::npos);
     CHECK(j.find("\"modbus_stack_min_free_bytes\":0,") == std::string::npos);
     // A sampled slot is a bare NUMBER, not a string, and the first sample wins even when it is
     // lower than everything after it (append_stack_bytes is the one rendering rule for all five).
     {
         HeartbeatFields sf;
         sf.httpd_stack_min_free_bytes   = 1; // one byte: real, and the closest to the boundary
-        sf.weather_stack_min_free_bytes = 1024;
         sf.modbus_stack_min_free_bytes  = 731;
         const std::string sj            = build_heartbeat_json(sf);
         CHECK(sj.find("\"httpd_stack_min_free_bytes\":1,") != std::string::npos);
-        CHECK(sj.find("\"weather_stack_min_free_bytes\":1024,") != std::string::npos);
         CHECK(sj.find("\"modbus_stack_min_free_bytes\":731,") != std::string::npos);
         CHECK(sj.find("\"httpd_stack_min_free_bytes\":\"") == std::string::npos);
         // Unsampled tasks in the SAME payload still read null, so one running task cannot make the
@@ -5847,7 +5769,7 @@ static void test_heartbeat() {
     // on `modbus_stack_min_free_words` until the arithmetic was checked: a 6144-byte task cannot
     // have 2660 words free. Pin the spelling in BOTH directions so neither can drift back.
     CHECK(j.find("_stack_min_free_words") == std::string::npos);
-    for (const char* f : {"httpd", "poll", "mqtt", "weather", "modbus"}) {
+    for (const char* f : {"httpd", "poll", "mqtt", "modbus"}) {
         const std::string key = std::string("\"") + f + "_stack_min_free_bytes\":";
         CHECK(j.find(key) != std::string::npos);
     }
@@ -5855,9 +5777,8 @@ static void test_heartbeat() {
     // maintainer reads across firmware versions, not a fact a device owner acts on, and five
     // permanently-flat diagnostic entities are five more things to rule out — the test that retired
     // "WiFi Quality" and "Device Time".
-    for (const char* path :
-         {"httpd_stack_min_free_bytes", "poll_stack_min_free_bytes", "mqtt_stack_min_free_bytes",
-          "weather_stack_min_free_bytes", "modbus_stack_min_free_bytes"}) {
+    for (const char* path : {"httpd_stack_min_free_bytes", "poll_stack_min_free_bytes",
+                             "mqtt_stack_min_free_bytes", "modbus_stack_min_free_bytes"}) {
         for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++)
             CHECK(std::string(HEARTBEAT_SENSORS[i].json_path) != path);
     }
@@ -5872,99 +5793,10 @@ static void test_heartbeat() {
     // fact use numeric 1/0 so a metrics consumer keeps them.
     CHECK(j.find("\"modbus_connected\":0,") != std::string::npos);
     CHECK(j.find("\"modbus_connected\":false") == std::string::npos); // number, not a dropped bool
-    // Room-source and heating-curve domain data have their own topic and grouped payload. Nothing
-    // from that contract may leak back into the technical heartbeat.
+    // Retired room data has no heartbeat fields.
     CHECK(j.find("room_source") == std::string::npos);
     CHECK(j.find("room_temperature") == std::string::npos);
     CHECK(j.find("heating_curve") == std::string::npos);
-    CHECK(heating_curve_topic(base) == "daikin-altherma-esp32/heating_curve");
-    HeatingCurveMqttFields cf;
-    cf.room_temperature_valid            = true;
-    cf.room_setpoint_valid               = true;
-    cf.room_control_eligible             = true;
-    cf.room_has_source_time              = true;
-    cf.room_age_known                    = true;
-    cf.room_temperature_c                = 20.5;
-    cf.room_setpoint_c                   = 22.0;
-    cf.room_error_k                      = 1.5;
-    cf.room_source_unix_s                = 1785830400;
-    cf.room_age_s                        = 17;
-    cf.room_reason_code                  = static_cast<uint8_t>(ReferenceRoomReason::Eligible);
-    cf.room_messages                     = 42;
-    cf.room_errors                       = 2;
-    cf.room_rejections                   = 7;
-    cf.method_version                    = 2;
-    cf.armed                             = true;
-    cf.state                             = 3;
-    cf.reason                            = 10;
-    cf.sample_eligible                   = true;
-    cf.forecast_available                = true;
-    cf.outdoor_available                 = true;
-    cf.outdoor_source                    = logic::OutdoorSource::Env3;
-    cf.has_last_sample_outdoor           = true;
-    cf.last_sample_outdoor_temperature_c = -4.25;
-    cf.last_sample_outdoor_source        = logic::OutdoorSource::Env3;
-    cf.plant_outdoor_available           = true;
-    cf.plant_outdoor_source              = logic::OutdoorSource::HomeHub;
-    cf.has_last_sample_plant_outdoor     = true;
-    cf.last_sample_plant_outdoor_temperature_c = -5.5;
-    cf.last_sample_plant_outdoor_source        = logic::OutdoorSource::HomeHub;
-    cf.plant_gate_known                        = true;
-    cf.plant_gate_active                       = true;
-    cf.heating_mode_known                      = true;
-    cf.heating_mode_active                     = true;
-    cf.has_current_room_error                  = true;
-    cf.has_last_sample                         = true;
-    cf.has_diagnosis_room_source_time          = true;
-    cf.diagnosis_room_age_known                = true;
-    cf.current_room_error_k                    = -2.9;
-    cf.last_sample_room_error_k                = -2.8;
-    cf.diagnosis_room_source_unix_s            = 1770000000;
-    cf.diagnosis_room_age_s                    = 12;
-    cf.last_sample_unix_s                      = 1770000001;
-    cf.sequence                                = 7;
-    cf.evaluations                             = 12;
-    cf.samples                                 = 7;
-    cf.holds                                   = 2;
-    cf.blocks                                  = 3;
-    const std::string cj                       = build_heating_curve_mqtt_json(cf);
-    CHECK(cj == "{\"schema_version\":3,\"room\":{"
-                "\"source_id\":\"living_room\",\"calibration_k\":0,"
-                "\"temperature_valid\":1,\"setpoint_valid\":1,\"control_eligible\":1,"
-                "\"temperature_c\":20.500000,\"setpoint_c\":22.000000,\"error_k\":1.500000,"
-                "\"source_unix_s\":1785830400,\"age_s\":17,\"reason_code\":0,"
-                "\"counters\":{\"messages\":42,\"errors\":2,\"rejections\":7}},"
-                "\"diagnosis\":{\"method_version\":2,\"armed\":1,\"state\":3,\"reason\":10,"
-                "\"sample_eligible\":1,\"forecast_available\":1,\"outdoor_available\":1,"
-                "\"outdoor_source\":\"env3\",\"outdoor_source_code\":3,"
-                "\"plant_outdoor_available\":1,\"plant_outdoor_source\":\"homehub\","
-                "\"plant_outdoor_source_code\":2,"
-                "\"gates\":{\"plant_known\":1,\"plant_active\":1,"
-                "\"heating_mode_known\":1,\"heating_mode_active\":1},"
-                "\"room_evidence\":{\"current_error_k\":-2.900000,"
-                "\"source_unix_s\":1770000000,\"age_s\":12},"
-                "\"last_sample\":{\"room_error_k\":-2.800000,"
-                "\"outdoor_temperature_c\":-4.250000,\"outdoor_source\":\"env3\","
-                "\"outdoor_source_code\":3,\"plant_outdoor_temperature_c\":-5.500000,"
-                "\"plant_outdoor_source\":\"homehub\",\"plant_outdoor_source_code\":2,"
-                "\"unix_s\":1770000001,"
-                "\"sequence\":7},\"counters\":{\"evaluations\":12,\"samples\":7,"
-                "\"holds\":2,\"blocks\":3}}}");
-    CHECK(cj.find("lwt_controller_") == std::string::npos);
-    const std::string empty_curve = build_heating_curve_mqtt_json(HeatingCurveMqttFields{});
-    CHECK(empty_curve.find("\"temperature_c\":null") != std::string::npos);
-    CHECK(empty_curve.find("\"setpoint_c\":null") != std::string::npos);
-    CHECK(empty_curve.find("\"current_error_k\":null") != std::string::npos);
-    CHECK(empty_curve.find("\"room_error_k\":null") != std::string::npos);
-    // No sensor -> null, never 0: a metrics consumer must not read absence as a freezing day.
-    CHECK(empty_curve.find("\"outdoor_available\":0") != std::string::npos);
-    CHECK(empty_curve.find("\"outdoor_temperature_c\":null") != std::string::npos);
-    CHECK(empty_curve.find("\"plant_outdoor_available\":0") != std::string::npos);
-    CHECK(empty_curve.find("\"plant_outdoor_temperature_c\":null") != std::string::npos);
-    CHECK(empty_curve.find("\"plant_outdoor_source\":\"none\"") != std::string::npos);
-    CHECK(empty_curve.find("\"unix_s\":null") != std::string::npos);
-    CHECK(empty_curve.find("true") == std::string::npos);
-    CHECK(empty_curve.find("false") == std::string::npos);
     HeartbeatFields mf;
     mf.modbus_enabled              = true;
     mf.modbus_connected            = true;
@@ -10873,7 +10705,7 @@ static void test_http_body_discard() {
         DiscardScript huge;
         huge.chunks.push_back(BodyChunk{BodyRecv::Data, BODY_DISCARD_MAX_BYTES + 1});
         CHECK(!run_discard(huge));
-        CHECK(BODY_DISCARD_MAX_BYTES == 8192); // /set_ref_temp's body buffer, the largest route's
+        CHECK(BODY_DISCARD_MAX_BYTES == 8192); // bounded unread-body settlement limit
     }
 
     // THE regression: a peer announcing a large Content-Length and trickling one byte inside every
@@ -11774,6 +11606,8 @@ static void test_redact() {
     // The newline is not part of the value — a fail-closed span must not eat it, or the whole ring
     // collapses into one line and the redacted /diag is unreadable.
     CHECK(redact_diag_line("sntp: time synced (pool.ntp.o\n") == "sntp: time synced (<redacted>\n");
+    CHECK(redact_diag_line("[previous status)] sntp: time synced (pool.ntp.o\r\n") ==
+          "[previous status)] sntp: time synced (<redacted>\r\n");
     CHECK(redact_diag_line("syslog: target set to logs.example.lan:514\n") ==
           "syslog: target set to <redacted>\n");
 
@@ -11810,14 +11644,6 @@ static void test_redact() {
     CHECK(nested.find("evil.host") == std::string::npos);
     CHECK(nested == "sntp: time synced (<redacted>)");
 
-    for (const auto mode : {"off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"}) {
-        CHECK(report_hvac_mode_public(mode));
-        CHECK(redact_identifier(mode, !report_hvac_mode_public(mode)) == mode);
-    }
-    for (const auto mode : {"", "PRIVATE-HVAC", "Heat", "heat\nPRIVATE", "hëat", "fan"}) {
-        CHECK(!report_hvac_mode_public(mode));
-        CHECK(redact_identifier(mode, !report_hvac_mode_public(mode)) == (mode[0] ? REDACTED : ""));
-    }
     CHECK(redact_identifier_view("", true).empty());
     CHECK(redact_identifier_view("https://private.example/secret", true) == REDACTED);
     CHECK(redact_identifier_view("https://private.example/secret", false) ==
@@ -12669,41 +12495,6 @@ static void test_config_blob_strings_fit() {
     CHECK(validate(cfg, why));
 }
 
-static void test_weather_config_snapshot() {
-    Config cfg;
-    auto   snapshot = weather_config_snapshot(cfg);
-    CHECK(!snapshot.weather_enabled && !snapshot.diagnostics_enabled);
-    cfg.diagnostics_enabled    = true;
-    cfg.weather_enabled        = true;
-    cfg.diagnostics_generation = UINT32_MAX;
-    cfg.weather_latitude_e6    = 12345678;
-    cfg.weather_longitude_e6   = 23456789;
-    snapshot                   = weather_config_snapshot(cfg);
-    cfg.weather_enabled        = false;
-    cfg.diagnostics_generation = 0;
-    cfg.weather_latitude_e6    = 0;
-    CHECK(snapshot.diagnostics_enabled && snapshot.weather_enabled);
-    CHECK(snapshot.diagnostics_generation == UINT32_MAX);
-    CHECK(snapshot.weather_latitude_e6 == 12345678);
-    CHECK(snapshot.weather_longitude_e6 == 23456789);
-}
-
-static void test_open_meteo_epoch_seconds() {
-    int64_t seconds = -7;
-    CHECK(open_meteo_epoch_seconds(0.0, seconds) && seconds == 0);
-    CHECK(open_meteo_epoch_seconds(1791784800.0, seconds) && seconds == 1791784800);
-    CHECK(open_meteo_epoch_seconds(std::nextafter(0x1p63, 0.0), seconds));
-    CHECK(seconds == INT64_MAX - 1023);
-    for (const double invalid :
-         {0x1p63, static_cast<double>(INT64_MAX), -1.0, 0.5,
-          std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
-          std::numeric_limits<double>::quiet_NaN()}) {
-        seconds = -7;
-        CHECK(!open_meteo_epoch_seconds(invalid, seconds));
-        CHECK(seconds == -7);
-    }
-}
-
 static void test_env3() {
     const uint8_t crc_bytes[2] = {0xbe, 0xef};
     CHECK(env3_sht_crc(crc_bytes, 2) == 0x92);
@@ -12876,239 +12667,71 @@ static void test_env3() {
     CHECK(env3_presets_offerable(presets, ENV3_PRESETS_MAX, seeed, false) == 0);
 }
 
-static void test_reference_binding_epochs() {
-    daik::ReferenceSourceBinding original{"Room A", "temp/a",  "t.c",  "set/a", "s.c", "time/a",
-                                          "epoch",  "enabled", "hvac", 0,       true};
-    CHECK(daik::reference_binding_matches(original, original));
-    std::string_view daik::ReferenceSourceBinding::*fields[] = {
-        &daik::ReferenceSourceBinding::name,
-        &daik::ReferenceSourceBinding::topic,
-        &daik::ReferenceSourceBinding::temperature_path,
-        &daik::ReferenceSourceBinding::setpoint_topic,
-        &daik::ReferenceSourceBinding::setpoint_path,
-        &daik::ReferenceSourceBinding::timestamp_topic,
-        &daik::ReferenceSourceBinding::timestamp_path,
-        &daik::ReferenceSourceBinding::enabled_path,
-        &daik::ReferenceSourceBinding::hvac_mode_path,
-    };
-    for (auto field : fields) {
-        auto changed   = original;
-        changed.*field = "replacement";
-        CHECK(!daik::reference_binding_matches(original, changed));
-    }
-    auto changed                  = original;
-    changed.fixed_setpoint_tenths = 215;
-    CHECK(!daik::reference_binding_matches(original, changed));
-    changed                 = original;
-    changed.capture_enabled = false;
-    CHECK(!daik::reference_binding_matches(original, changed));
-    CHECK(daik::reference_binding_matches(original, changed, false, false));
-    changed.name = "Room B";
-    CHECK(!daik::reference_binding_matches(original, changed, false));
-    CHECK(daik::reference_binding_matches(original, changed, false, false));
-    changed.timestamp_path = "other_epoch";
-    CHECK(!daik::reference_binding_matches(original, changed, false, false));
-    CHECK(!daik::reference_epoch_current(0, 0, 0));
-    CHECK(daik::reference_epoch_current(3, 3, 3));
-    CHECK(!daik::reference_epoch_current(2, 3, 3));
-    CHECK(!daik::reference_epoch_current(3, 2, 3));
-    CHECK(!daik::reference_epoch_current(2, 2, 3));
-    auto legacy                    = original;
-    legacy.setpoint_topic          = "";
-    legacy.timestamp_topic         = "";
-    auto explicit_topic            = original;
-    explicit_topic.setpoint_topic  = original.topic;
-    explicit_topic.timestamp_topic = original.topic;
-    CHECK(
-        daik::reference_binding_matches(daik::reference_effective_binding(legacy), explicit_topic));
-    legacy.timestamp_path = "";
-    CHECK(daik::reference_effective_binding(legacy).timestamp_topic.empty());
-    legacy.fixed_setpoint_tenths = 215;
-    CHECK(daik::reference_effective_binding(legacy).setpoint_topic.empty());
-}
-
-static void test_reference_temperature_config() {
-    const char* why = nullptr;
-    CHECK(reference_temperature_config_valid("Example sensor", "fixture/room-temperature/status",
-                                             "temperature.tC", "", "", "", "", 600, &why));
-    CHECK(reference_temperature_config_valid(
-        "Meross", "meross/mts200b/id/state", "thermostat.current_temperature_c",
-        "thermostat.target_temperature_c", "thermostat.read_at", "thermostat.enabled",
-        "thermostat.hvac_mode", 600, &why));
-    CHECK(reference_temperature_config_valid("Example temperature sensor",
-                                             "fixture/room-temperature/status", "tC", "", "", 200,
-                                             "", "", "", "", 600, &why));
-    CHECK(reference_temperature_config_valid("Example sleeping sensor",
-                                             "fixture/sleeping-sensor/status", "", "", "", 220, "",
-                                             "", "", "", 600, &why));
-    CHECK(reference_temperature_config_valid("Split thermostat", "room/current", "value",
-                                             "room/target", "value", 0, "room/time", "read_at", "",
-                                             "", 600, &why));
-    CHECK(reference_temperature_config_valid("Unverified split thermostat", "room/current",
-                                             "temperature..value", "room/target", "target..value",
-                                             0, "room/time", "read..at", "", "", 600, &why));
-    CHECK(!reference_temperature_config_valid("Ambiguous target", "room/current", "value",
-                                              "room/target", "value", 200, "room/time", "read_at",
-                                              "", "", 600, &why));
-    CHECK(std::string(why) == "Target temperature must be either a fixed value or an MQTT mapping");
-    CHECK(!reference_temperature_config_valid("Cold target", "room/current", "value", "", "", 49,
-                                              "room/time", "read_at", "", "", 600, &why));
-    CHECK(std::string(why) == "Fixed target temperature must be between 5 and 35 degrees C");
-    CHECK(!reference_temperature_config_valid("Wildcard time", "room/current", "value", "", "", 200,
-                                              "room/+/time", "read_at", "", "", 600, &why));
-    CHECK(reference_temperature_config_valid("", "", "", "", "", "", "", 600, &why));
-    CHECK(!reference_temperature_config_valid("x", "sensors/+/temperature", "temperature.tC",
-                                              "target", "read_at", "", "", 600, &why));
-    CHECK(std::string(why) == "MQTT topic must be exact (no + or # wildcard)");
-    CHECK(!reference_temperature_config_valid("x", "/sensors/room", "temperature.tC", "target",
-                                              "read_at", "", "", 600, &why));
-    CHECK(!reference_temperature_config_valid("x", "sensors/room/", "temperature.tC", "target",
-                                              "read_at", "", "", 600, &why));
-    CHECK(reference_temperature_config_valid("x", "sensors/room", "temperature..tC", "target..c",
-                                             "read..at", "", "", 600, &why));
-    CHECK(reference_temperature_config_valid("x", "sensors/room", "temperature. tC", "target",
-                                             "read_at", "", "", 600, &why));
-    CHECK(!reference_temperature_config_valid("x", "sensors/room",
-                                              std::string(REF_TEMP_PATH_MAX + 1, 'x'), "target",
-                                              "read_at", "", "", 600, &why));
-    CHECK(std::string(why) == "JSON path is too long");
-    CHECK(!reference_temperature_config_valid("x", "sensors/room", "temperature.tC", "target",
-                                              "read_at", "", "", 9, &why));
-    CHECK(std::string(why) == "Maximum age must be between 10 and 3600 seconds");
-    CHECK(!reference_temperature_config_valid(std::string(REF_TEMP_NAME_MAX + 1, 'x'),
-                                              "sensors/room", "temperature.tC", "target", "read_at",
-                                              "", "", 600, &why));
-    CHECK(!reference_json_path_valid("bad\npath", &why));
-
+static void test_mqtt_source() {
+    CHECK(!daik::mqtt_source_epoch_current(0, 0, 0));
+    CHECK(daik::mqtt_source_epoch_current(3, 3, 3));
+    CHECK(!daik::mqtt_source_epoch_current(2, 3, 3));
+    CHECK(!daik::mqtt_source_epoch_current(3, 2, 3));
+    CHECK(!daik::mqtt_source_epoch_current(2, 2, 3));
     int64_t unix_s = -1;
-    CHECK(reference_parse_rfc3339("2026-08-02T08:35:12.792902415Z", unix_s));
+    CHECK(mqtt_source_parse_rfc3339("2026-08-02T08:35:12.792902415Z", unix_s));
     CHECK(unix_s == 1785659712);
     int64_t offset_s = -1;
-    CHECK(reference_parse_rfc3339("2026-08-02T10:35:12+02:00", offset_s));
+    CHECK(mqtt_source_parse_rfc3339("2026-08-02T10:35:12+02:00", offset_s));
     CHECK(offset_s == unix_s);
-    CHECK(reference_parse_rfc3339("2024-02-29T12:04:56Z", unix_s));
-    CHECK(!reference_parse_rfc3339("2023-02-29T12:04:56Z", unix_s));
-    CHECK(!reference_parse_rfc3339("2026-08-02T08:35:12", unix_s)); // timezone is mandatory
-    CHECK(!reference_parse_rfc3339("2026-08-02T08:35:12.1234567890Z", unix_s));
+    CHECK(mqtt_source_parse_rfc3339("2024-02-29T12:04:56Z", unix_s));
+    CHECK(!mqtt_source_parse_rfc3339("2023-02-29T12:04:56Z", unix_s));
+    CHECK(!mqtt_source_parse_rfc3339("2026-08-02T08:35:12", unix_s)); // timezone is mandatory
+    CHECK(!mqtt_source_parse_rfc3339("2026-08-02T08:35:12.1234567890Z", unix_s));
 
-    ReferenceFreshness fresh = reference_freshness(true, true, true, 1000, 0, 1030, 0, 600);
+    MqttSourceFreshness fresh = mqtt_source_freshness(true, true, true, 1000, 0, 1030, 0, 600);
     CHECK(fresh.fresh && fresh.age_known && fresh.age_s == 30);
-    ReferenceFreshness stale = reference_freshness(true, true, true, 1000, 0, 1701, 0, 600);
+    MqttSourceFreshness stale = mqtt_source_freshness(true, true, true, 1000, 0, 1701, 0, 600);
     CHECK(!stale.fresh && stale.age_known && stale.age_s == 701 &&
           std::string(stale.reason) == "stale");
-    ReferenceFreshness replay = reference_freshness(true, true, false, -1, 5000, 2000, 6000, 600);
+    MqttSourceFreshness replay =
+        mqtt_source_freshness(true, true, false, -1, 5000, 2000, 6000, 600);
     CHECK(!replay.fresh && !replay.age_known &&
           std::string(replay.reason) == "retained_without_timestamp");
-    ReferenceFreshness live = reference_freshness(true, false, false, -1, 5000, -1, 65000, 600);
+    MqttSourceFreshness live = mqtt_source_freshness(true, false, false, -1, 5000, -1, 65000, 600);
     CHECK(live.fresh && live.age_s == 60);
-    ReferenceFreshness unsynced = reference_freshness(true, false, true, 1000, 0, -1, 0, 600);
+    MqttSourceFreshness unsynced = mqtt_source_freshness(true, false, true, 1000, 0, -1, 0, 600);
     CHECK(!unsynced.fresh && std::string(unsynced.reason) == "clock_unsynced");
-    ReferenceFreshness future = reference_freshness(true, false, true, 1100, 0, 1000, 0, 600);
+    MqttSourceFreshness future = mqtt_source_freshness(true, false, true, 1100, 0, 1000, 0, 600);
     CHECK(!future.fresh && std::string(future.reason) == "future_timestamp");
     const auto extreme_clock =
-        reference_freshness(true, false, true, INT64_MAX, 0, INT64_MAX, 0, 600);
+        mqtt_source_freshness(true, false, true, INT64_MAX, 0, INT64_MAX, 0, 600);
     CHECK(extreme_clock.fresh && extreme_clock.age_known && extreme_clock.age_s == 0);
     const auto extreme_future =
-        reference_freshness(true, false, true, INT64_MAX, 0, INT64_MAX - 61, 0, 600);
+        mqtt_source_freshness(true, false, true, INT64_MAX, 0, INT64_MAX - 61, 0, 600);
     CHECK(!extreme_future.fresh && std::string(extreme_future.reason) == "future_timestamp");
     const auto tolerated_future =
-        reference_freshness(true, false, true, INT64_MAX, 0, INT64_MAX - 60, 0, 600);
+        mqtt_source_freshness(true, false, true, INT64_MAX, 0, INT64_MAX - 60, 0, 600);
     CHECK(tolerated_future.fresh && tolerated_future.age_s == 0);
     const auto negative_source =
-        reference_freshness(true, false, true, INT64_MIN, 0, INT64_MAX, 0, 600);
+        mqtt_source_freshness(true, false, true, INT64_MIN, 0, INT64_MAX, 0, 600);
     CHECK(!negative_source.fresh && !negative_source.age_known &&
           std::string(negative_source.reason) == "missing_source_time");
-    const auto epoch_source = reference_freshness(true, false, true, 0, 0, INT64_MAX, 0, 600);
+    const auto epoch_source = mqtt_source_freshness(true, false, true, 0, 0, INT64_MAX, 0, 600);
     CHECK(!epoch_source.fresh && epoch_source.age_s == static_cast<uint64_t>(INT64_MAX));
+}
 
-    ReferenceRoomRaw raw;
-    raw.configured                     = true;
-    raw.has_temperature                = true;
-    raw.temperature_c                  = 20.5;
-    raw.has_source_time                = true;
-    raw.setpoint_mapped                = true;
-    raw.has_setpoint                   = true;
-    raw.setpoint_c                     = 22.0;
-    raw.enabled_mapped                 = true;
-    raw.has_enabled                    = true;
-    raw.enabled                        = true;
-    raw.hvac_mode_mapped               = true;
-    raw.has_hvac_mode                  = true;
-    raw.hvac_mode                      = "heat";
-    const ReferenceRoomSample eligible = reference_room_sample(raw, fresh);
-    CHECK(eligible.temperature_valid && eligible.setpoint_valid && eligible.control_eligible);
-    CHECK(eligible.has_room_error && eligible.room_error_k == 1.5);
-    CHECK(eligible.reason == ReferenceRoomReason::Eligible);
-    CHECK(std::string(reference_room_reason_name(eligible.reason)) == "eligible");
+static void test_checkup_outdoor_evidence() {
+    using namespace daik::logic;
+    CHECK(std::string_view(outdoor_source_name(OutdoorSource::X10a)) == "x10a");
+    CHECK(std::string_view(outdoor_source_name(OutdoorSource::HomeHub)) == "homehub");
+    CHECK(std::string_view(outdoor_source_name(OutdoorSource::None)) == "none");
+    CHECK(std::string_view(outdoor_source_name(static_cast<OutdoorSource>(255))) == "none");
 
-    raw.enabled                        = false;
-    const ReferenceRoomSample disabled = reference_room_sample(raw, fresh);
-    CHECK(disabled.temperature_valid && disabled.setpoint_valid && !disabled.control_eligible);
-    CHECK(!disabled.has_room_error && disabled.reason == ReferenceRoomReason::Disabled);
-    raw.enabled   = true;
-    raw.hvac_mode = "cool";
-    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::NonHeatingMode);
-    raw.hvac_mode    = "heat";
-    raw.has_setpoint = false;
-    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::MissingSetpoint);
-    raw.has_setpoint = true;
-    raw.setpoint_c   = 36.0;
-    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::SetpointOutOfRange);
-    raw.setpoint_c    = 22.0;
-    raw.temperature_c = 4.9;
-    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::TemperatureOutOfRange);
-    raw.temperature_c                      = 20.5;
-    raw.has_source_time                    = false;
-    const ReferenceRoomSample live_arrival = reference_room_sample(raw, live);
-    CHECK(live_arrival.control_eligible && live_arrival.reason == ReferenceRoomReason::Eligible);
-    CHECK(reference_room_sample(raw, replay).reason ==
-          ReferenceRoomReason::RetainedWithoutTimestamp);
-    raw.has_source_time = true;
-    CHECK(reference_room_sample(raw, stale).reason == ReferenceRoomReason::Stale);
-    raw.payload_valid  = false;
-    raw.payload_reason = ReferenceRoomReason::BackwardTimestamp;
-    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::BackwardTimestamp);
-    raw.payload_valid = true;
-
-    // MQTT-05/a: a mapped source timestamp is the only age authority. A live temperature whose
-    // separate timestamp topic has not delivered must not age from MQTT arrival, so it can neither
-    // read as fresh nor produce a room error; once the time arrives the ordinary rules apply.
-    CHECK(!reference_source_time_mapped("", ""));
-    CHECK(reference_source_time_mapped("room/clock", ""));
-    CHECK(reference_source_time_mapped("", "ts"));
-    const ReferenceFreshness awaiting_time =
-        reference_room_freshness(true, true, false, false, -1, 5000, 1000, 65000, 600);
-    CHECK(!awaiting_time.fresh && !awaiting_time.age_known && awaiting_time.age_s == 0);
-    CHECK(std::string(awaiting_time.reason) == "missing_source_time");
-    CHECK(reference_room_freshness_reason(awaiting_time.reason) ==
-          ReferenceRoomReason::MissingSourceTime);
-    raw.has_source_time                     = false;
-    const ReferenceRoomSample awaiting_room = reference_room_sample(raw, awaiting_time);
-    CHECK(!awaiting_room.temperature_valid && !awaiting_room.control_eligible);
-    CHECK(!awaiting_room.has_room_error);
-    CHECK(awaiting_room.reason == ReferenceRoomReason::MissingSourceTime);
-    // Unmapped time keeps the live-arrival rule; a mapped time that arrived keeps the source rule.
-    const ReferenceFreshness unmapped_live =
-        reference_room_freshness(false, true, false, false, -1, 5000, -1, 65000, 600);
-    CHECK(unmapped_live.fresh && unmapped_live.age_s == 60);
-    const ReferenceFreshness mapped_arrived =
-        reference_room_freshness(true, true, true, true, 1000, 0, 1030, 0, 600);
-    CHECK(mapped_arrived.fresh && mapped_arrived.age_known && mapped_arrived.age_s == 30);
-    const ReferenceFreshness mapped_empty =
-        reference_room_freshness(true, false, false, false, -1, 0, 1000, 0, 600);
-    CHECK(!mapped_empty.fresh && std::string(mapped_empty.reason) == "no_value");
-
-    // MQTT-05/b: code 0 is reserved for an eligible sample. A rejected payload whose producer left
-    // the reason at Eligible still reports a rejection reason; a specific reason passes through.
-    raw.has_source_time                    = true;
-    raw.payload_valid                      = false;
-    raw.payload_reason                     = ReferenceRoomReason::Eligible;
-    const ReferenceRoomSample stale_reason = reference_room_sample(raw, fresh);
-    CHECK(!stale_reason.control_eligible && !stale_reason.has_room_error);
-    CHECK(stale_reason.reason == ReferenceRoomReason::InvalidPayload);
-    raw.payload_reason = ReferenceRoomReason::MissingSourceTime;
-    CHECK(reference_room_sample(raw, fresh).reason == ReferenceRoomReason::MissingSourceTime);
-    raw.payload_valid = true;
+    CHECK(outdoor_evidence_valid(outdoor_x10a_evidence(true, true, true, 3.0)));
+    CHECK(!outdoor_x10a_evidence(false, true, true, 3.0).available);
+    CHECK(!outdoor_x10a_evidence(true, false, true, 3.0).available);
+    CHECK(!outdoor_x10a_evidence(true, true, false, 3.0).available);
+    CHECK(outdoor_evidence_valid(outdoor_homehub_evidence(true, true, 3.0)));
+    CHECK(!outdoor_homehub_evidence(true, false, 3.0).available);
+    CHECK(!outdoor_homehub_evidence(true, true, NAN).available);
+    CHECK(!outdoor_evidence_valid({true, OutdoorSource::HomeHub, NAN}));
+    CHECK(!outdoor_evidence_valid({true, OutdoorSource::None, 3.0}));
 }
 
 static void test_circulation_source() {
@@ -13185,1158 +12808,6 @@ static void test_circulation_source() {
     CHECK(tracker.confirmed == CirculationPowerState::On);
     tracker.observe(0.0, 130'000, 30, 10, 60);
     CHECK(tracker.confirmed == CirculationPowerState::Off);
-}
-
-static void test_heating_curve_bins() {
-    using namespace daik::logic;
-    constexpr int64_t day     = HEATING_CURVE_SECONDS_PER_DAY;
-    constexpr auto    hub     = OutdoorSource::HomeHub;
-    constexpr auto    env     = OutdoorSource::Env3;
-    const auto        plant   = [](double c) { return outdoor_homehub_evidence(true, true, c); };
-    const auto        local   = [](double c) { return outdoor_env3_evidence(true, true, c); };
-    const double      unknown = std::numeric_limits<double>::quiet_NaN();
-    HeatingCurveBins  bins;
-
-    CHECK(!std::isfinite(bins.target_c()));
-    bins.record(day, 0.5, plant(0), local(0));
-    CHECK(bins.summary(hub, 1, day).samples == 0);
-    bins.observe_target(21.0);
-    bins.record(day, -1.0, plant(-0.01), local(9.0));
-    bins.record(day + 1800, 1.0, plant(0.0), local(10.0));
-    bins.record(day + 3600, 1.0, plant(5.0), {});
-    bins.record(day + 5400, -1.0, plant(10.0), plant(10.0)); // wrong source for second axis
-    bins.record(2 * day, -1.0, plant(0.5), local(5.0));
-    const auto middle = bins.summary(hub, 1, 2 * day);
-    CHECK(middle.samples == 2 && middle.scope_samples == 5);
-    CHECK(middle.first_unix_s == day + 1800 && middle.last_unix_s == 2 * day);
-    // Opposite room errors (-1.0 K and +1.0 K) yield mean 0.0 K while preserving [-1.0 K, +1.0 K]
-    // spread.
-    CHECK(middle.room_sum_tenths == 0 && middle.room_min_tenths == -10 &&
-          middle.room_max_tenths == 10);
-    CHECK(middle.outdoor_sum_tenths == 5 && middle.outdoor_min_tenths == 0 &&
-          middle.outdoor_max_tenths == 5);
-    CHECK(bins.summary(hub, 0, 2 * day).samples == 1);
-    CHECK(bins.summary(hub, 2, 2 * day).samples == 1);
-    CHECK(bins.summary(hub, 3, 2 * day).samples == 1);
-    CHECK(bins.summary(env, 0, 2 * day).samples == 0);
-    CHECK(bins.summary(env, 2, 2 * day).outdoor_sum_tenths == 140);
-    CHECK(bins.summary(env, 3, 2 * day).samples == 1);
-    CHECK(bins.summary(OutdoorSource::X10a, 1, 2 * day).samples == 0);
-    CHECK(bins.summary(hub, HEATING_CURVE_BIN_COUNT, 2 * day).samples == 0);
-
-    // Rolling 24-hour X10A compressor-stop windows are rejected when source identity is
-    // unproven/mismatched or when their UTC horizon does not overlap the 7-day bin's span.
-    CHECK(!heating_curve_stop_window_overlaps({}, true, day, 2 * day));
-    CHECK(!heating_curve_stop_window_overlaps(middle, false, day + 1800, 2 * day));
-    CHECK(!heating_curve_stop_window_overlaps(middle, true, -1, 2 * day));
-    CHECK(!heating_curve_stop_window_overlaps(middle, true, 2 * day, day + 1800));
-    CHECK(!heating_curve_stop_window_overlaps(middle, true, 6 * day,
-                                              7 * day)); // later 24 h stop window
-    CHECK(!heating_curve_stop_window_overlaps(middle, true, 0,
-                                              day + 1799)); // earlier 24 h stop window
-    CHECK(heating_curve_stop_window_overlaps(middle, true, day + 1700,
-                                             day + 1800));                     // exact start touch
-    CHECK(heating_curve_stop_window_overlaps(middle, true, 2 * day, 3 * day)); // exact end touch
-    CHECK(heating_curve_stop_window_overlaps(middle, true, day + 2400,
-                                             day + 7200)); // interior overlap
-    HeatingCurveBinSummary malformed_bin = middle;
-    malformed_bin.first_unix_s           = -1;
-    CHECK(!heating_curve_stop_window_overlaps(malformed_bin, true, day, 2 * day));
-    malformed_bin              = middle;
-    malformed_bin.first_unix_s = middle.last_unix_s + 1;
-    CHECK(!heating_curve_stop_window_overlaps(malformed_bin, true, day, 3 * day));
-
-    CHECK(bins.summary(hub, 1, 8 * day - 1).samples == 2);
-    CHECK(bins.summary(hub, 1, 8 * day).samples == 1);
-    CHECK(bins.summary(hub, 1, 9 * day).samples == 0);
-    bins.record(8 * day, 0.0, plant(4.99), {});
-    const auto ring = bins.summary(hub, 1, 8 * day);
-    CHECK(ring.samples == 2 && ring.first_unix_s == 2 * day);
-    CHECK(ring.outdoor_max_tenths == 50 && ring.room_max_tenths == 0);
-    CHECK(bins.summary(hub, 1, -1).samples == 0);
-    CHECK(bins.summary(hub, 1, 8 * day - 1).samples == 0);
-    bins.observe_clock(7 * day);
-    CHECK(bins.target_c() == 21.0 && bins.summary(hub, 1, 8 * day).samples == 0);
-    bins.record(7 * day, 0.0, plant(0.0), {});
-    bins.observe_target(unknown);
-    bins.observe_target(21.0);
-    CHECK(bins.summary(hub, 1, 7 * day).samples == 1);
-    bins.observe_target(21.5);
-    CHECK(bins.target_c() == 21.5 && bins.summary(hub, 1, 7 * day).samples == 0);
-    bins.observe_target(21.0);
-    CHECK(bins.summary(hub, 1, 7 * day).samples == 0); // a returned target starts an empty scope
-    bins.record(-1, 0.0, plant(0.0), local(0.0));
-    CHECK(bins.summary(hub, 1, 7 * day).scope_samples == 0);
-    bins.record(7 * day, unknown, plant(0.0), {});
-    bins.record(7 * day, 0.0, plant(4000.0), local(unknown));
-    bins.record(7 * day, 0.0, {false, hub, 0.0}, local(-4000.0));
-    const auto no_axis = bins.summary(hub, 1, 7 * day);
-    CHECK(no_axis.samples == 0 && no_axis.scope_samples == 2);
-    CHECK(bins.summary(env, 0, 7 * day).samples == 0);
-    bins.record(7 * day, 0.0, plant(0.0), local(0.0));
-    bins.observe_clock(-1);
-    CHECK(bins.target_c() == 21.0 && bins.summary(env, 1, 7 * day).samples == 0);
-
-    bins.record(10 * day, 0.0, plant(2.0), {true, env, unknown});
-    bins.record(10 * day + 1800, -0.5, plant(1.0), {});
-    bins.record(10 * day + 3600, 0.5, plant(3.0), {});
-    bins.record(11 * day, -1.0, plant(0.5), {});
-    bins.record(11 * day + 1800, 1.0, plant(4.0), {});
-    const auto range = bins.summary(hub, 1, 11 * day + 1800);
-    CHECK(range.samples == 5 && range.last_unix_s == 11 * day + 1800);
-    CHECK(range.room_min_tenths == -10 && range.room_max_tenths == 10);
-    CHECK(range.outdoor_min_tenths == 5 && range.outdoor_max_tenths == 40);
-    CHECK(bins.summary(env, 1, 11 * day + 1800).samples == 0);
-
-    const uint16_t limit = std::numeric_limits<uint16_t>::max();
-    for (uint32_t i = 0; i <= limit; ++i) bins.record(13 * day + i, -3276.7, plant(3276.7), {});
-    const auto full = bins.summary(hub, 3, 14 * day - 1);
-    CHECK(full.samples == limit && full.last_unix_s == 13 * day + limit - 1);
-    CHECK(full.room_sum_tenths == -32767LL * limit && full.outdoor_sum_tenths == 32767LL * limit);
-    bins.forget();
-    CHECK(!std::isfinite(bins.target_c()) && bins.summary(hub, 3, 14 * day).samples == 0);
-}
-
-static void test_heating_curve_diagnosis() {
-    using namespace daik::logic;
-
-    // Bit order: operation known, operation active, route known, route space.
-    // Known quiet/DHW holds; incomplete evidence blocks. Only the final tuple admits a sample.
-    constexpr HeatingCurvePlantGate expected[] = {
-        {false, false}, {true, false}, {false, false}, {false, false},
-        {true, false},  {true, false}, {true, false},  {true, false},
-        {false, false}, {true, false}, {false, false}, {false, false},
-        {false, false}, {true, false}, {false, false}, {true, true},
-    };
-    for (unsigned bits = 0; bits < 16; ++bits) {
-        const auto gate =
-            heating_curve_space_operation_gate(bits & 1, bits & 2, bits & 4, bits & 8);
-        CHECK(gate.known == expected[bits].known);
-        CHECK(gate.active == expected[bits].active);
-    }
-
-    auto ready = [] {
-        HeatingCurveInputs in;
-        in.armed                 = true;
-        in.room_control_eligible = true;
-        in.room_error_k          = 0.6;
-        in.x10a_connected        = true;
-        in.homehub_connected     = true;
-        in.plant_gate_known      = true;
-        in.plant_gate_active     = true;
-        in.heating_mode_known    = true;
-        in.heating_mode_active   = true;
-        in.forecast_available    = true;
-        in.now_ms                = 0;
-        in.now_unix_s            = 1770000000;
-        in.room_has_source_time  = true;
-        in.room_source_unix_s    = 1234;
-        in.room_age_known        = true;
-        in.room_age_s            = 5;
-        return in;
-    };
-
-    // Only admitted events contribute to the bins, without requiring X10A connectivity. A missing
-    // outdoor axis leaves the room event and denominator intact without inheriting an older
-    // reading.
-    {
-        HeatingCurveDiagnosis binned;
-        HeatingCurveInputs    bi = ready();
-        bi.x10a_connected        = false;
-        bi.room_target_c         = 21.0;
-        bi.plant_generation      = 17;
-        bi.plant_profile         = 0; // initial Modbus probing locks in once resolved
-        bi.outdoor               = outdoor_env3_evidence(true, true, 6.5);
-        bi.plant_outdoor         = outdoor_homehub_evidence(true, true, 4.0);
-        const auto homehub       = [&] {
-            return binned.outdoor_bins().summary(OutdoorSource::HomeHub, 1, bi.now_unix_s);
-        };
-        const auto env3 = [&] {
-            return binned.outdoor_bins().summary(OutdoorSource::Env3, 2, bi.now_unix_s);
-        };
-        const auto first = binned.evaluate(bi);
-        CHECK(first.reason == HeatingCurveReason::SampleRecorded && first.samples == 1);
-        CHECK(binned.outdoor_bins_generation() == 17 && binned.outdoor_bins_profile() == 0 &&
-              binned.outdoor_bins().target_c() == 21.0);
-        CHECK(homehub().samples == 1 && homehub().scope_samples == 1 &&
-              homehub().room_sum_tenths == 6 && homehub().outdoor_sum_tenths == 40);
-        CHECK(env3().samples == 1 && env3().scope_samples == 1 && env3().outdoor_sum_tenths == 65);
-
-        bi.now_ms        = 1000;
-        bi.plant_profile = 1; // probing settles to HomeHub without discarding the session's sample
-        bi.now_unix_s++;
-        bi.room_error_k     = 1.25;
-        bi.outdoor          = outdoor_env3_evidence(true, true, 10.0);
-        const auto repeated = binned.evaluate(bi);
-        CHECK(repeated.reason == HeatingCurveReason::SamplingInterval && repeated.samples == 1 &&
-              repeated.last_sample_room_error_k == first.last_sample_room_error_k);
-        CHECK(binned.outdoor_bins_profile() == 1 && homehub().scope_samples == 1 &&
-              env3().samples == 1 &&
-              binned.outdoor_bins().summary(OutdoorSource::Env3, 3, bi.now_unix_s).samples == 0);
-
-        bi.now_ms               = HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s           = first.last_sample_unix_s + 1800;
-        bi.plant_outdoor        = {};
-        bi.outdoor              = {};
-        const auto axis_missing = binned.evaluate(bi);
-        CHECK(axis_missing.reason == HeatingCurveReason::SampleRecorded &&
-              axis_missing.samples == 2 && axis_missing.last_sample_room_error_k == 1.25 &&
-              !axis_missing.has_last_sample_outdoor && !axis_missing.has_last_sample_plant_outdoor);
-        CHECK(homehub().scope_samples == 2 && homehub().samples == 1 && env3().samples == 1);
-
-        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s += 1800;
-        bi.plant_generation = 0;
-        CHECK(binned.evaluate(bi).samples == 3);
-        CHECK(binned.outdoor_bins_generation() == 17 && homehub().scope_samples == 2);
-
-        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s += 1800;
-        bi.plant_generation = 17;
-        bi.room_target_c    = std::numeric_limits<double>::quiet_NaN();
-        CHECK(binned.evaluate(bi).samples == 4);
-        CHECK(binned.outdoor_bins().target_c() == 21.0 && homehub().scope_samples == 2);
-    }
-
-    // Target, UTC, HomeHub generation and concrete Modbus profile boundaries clear bins
-    // immediately, including while holding or inside cadence.
-    {
-        HeatingCurveDiagnosis binned;
-        HeatingCurveInputs    bi = ready();
-        bi.room_target_c         = 21.0;
-        bi.plant_generation      = 17;
-        bi.plant_profile         = 1;
-        bi.plant_outdoor         = outdoor_homehub_evidence(true, true, 4.0);
-        const auto count         = [&](int64_t now_unix_s) {
-            return binned.outdoor_bins().summary(OutdoorSource::HomeHub, 1, now_unix_s).samples;
-        };
-        const auto first = binned.evaluate(bi);
-        CHECK(count(bi.now_unix_s) == 1);
-
-        binned.observe_bin_target(21.5);
-        CHECK(binned.outdoor_bins().target_c() == 21.5 && count(bi.now_unix_s) == 0);
-        binned.observe_bin_target(21.0);
-        CHECK(binned.outdoor_bins().target_c() == 21.0 && count(bi.now_unix_s) == 0 &&
-              binned.snapshot().last_sample_unix_s == first.last_sample_unix_s);
-        bi.now_ms++;
-        CHECK(binned.evaluate(bi).reason == HeatingCurveReason::SamplingInterval);
-
-        bi.now_ms = HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s += 1800;
-        const auto second = binned.evaluate(bi);
-        CHECK(second.samples == 2 && count(bi.now_unix_s) == 1);
-        bi.now_ms++;
-        bi.now_unix_s--;
-        const auto rollback = binned.evaluate(bi);
-        CHECK(rollback.reason == HeatingCurveReason::SamplingInterval && rollback.samples == 2 &&
-              rollback.sequence == second.sequence &&
-              rollback.evaluations == second.evaluations + 1 &&
-              rollback.last_sample_unix_s == second.last_sample_unix_s);
-        CHECK(count(second.last_sample_unix_s) == 0 && binned.outdoor_bins().target_c() == 21.0);
-
-        bi.now_ms     = 2 * HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s = second.last_sample_unix_s + 1800;
-        CHECK(binned.evaluate(bi).samples == 3 && count(bi.now_unix_s) == 1);
-        binned.observe_bin_clock(bi.now_unix_s +
-                                 HEATING_CURVE_BIN_DAYS * HEATING_CURVE_SECONDS_PER_DAY);
-        binned.observe_bin_clock(bi.now_unix_s);
-        CHECK(count(bi.now_unix_s) == 0 && binned.snapshot().last_sample_unix_s == bi.now_unix_s);
-
-        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s += 1800;
-        CHECK(binned.evaluate(bi).samples == 4 && count(bi.now_unix_s) == 1);
-        const int64_t last_event = bi.now_unix_s;
-        bi.plant_gate_active     = false;
-        bi.now_ms++;
-        bi.now_unix_s = -1;
-        CHECK(binned.evaluate(bi).reason == HeatingCurveReason::PlantInactive);
-        CHECK(count(last_event) == 0 && binned.snapshot().last_sample_unix_s == last_event);
-
-        bi.plant_gate_active = true;
-        bi.now_ms            = 4 * HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s        = last_event + 1800;
-        CHECK(binned.evaluate(bi).samples == 5 && count(bi.now_unix_s) == 1);
-
-        // Endpoint generation change clears both last sample/cadence and bins even while
-        // disconnected.
-        bi.plant_generation  = 18;
-        bi.homehub_connected = false;
-        bi.now_ms++;
-        bi.now_unix_s++;
-        const auto replaced = binned.evaluate(bi);
-        CHECK(replaced.reason == HeatingCurveReason::HomeHubUnavailable && replaced.samples == 5 &&
-              !replaced.has_last_sample);
-        CHECK(binned.outdoor_bins_generation() == 18 && count(bi.now_unix_s) == 0);
-
-        bi.homehub_connected = true;
-        bi.now_ms++;
-        bi.now_unix_s++;
-        CHECK(binned.evaluate(bi).samples == 6 && count(bi.now_unix_s) == 1);
-
-        // Concrete Modbus profile change (HomeHub -> Altherma4) on the same endpoint clears bins
-        // immediately while preserving the prior event and 30-minute cadence.
-        bi.plant_profile = 2;
-        bi.now_ms++;
-        bi.now_unix_s++;
-        const auto promoted_hold = binned.evaluate(bi);
-        CHECK(promoted_hold.reason == HeatingCurveReason::SamplingInterval &&
-              promoted_hold.samples == 6 && promoted_hold.has_last_sample &&
-              binned.outdoor_bins_profile() == 2 && count(bi.now_unix_s) == 0);
-
-        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s += 1800;
-        const auto promoted = binned.evaluate(bi);
-        CHECK(
-            promoted.samples == 7 && binned.outdoor_bins_profile() == 2 &&
-            count(bi.now_unix_s) == 1 &&
-            binned.outdoor_bins().summary(OutdoorSource::HomeHub, 1, bi.now_unix_s).scope_samples ==
-                1);
-
-        bi.room_target_c = 20.5;
-        bi.now_ms++;
-        CHECK(binned.evaluate(bi).reason == HeatingCurveReason::SamplingInterval);
-        CHECK(binned.outdoor_bins().target_c() == 20.5 && count(bi.now_unix_s) == 0);
-
-        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s += 1800;
-        CHECK(binned.evaluate(bi).samples == 8 && count(bi.now_unix_s) == 1);
-        binned.forget_samples();
-        CHECK(binned.outdoor_bins_generation() == 0 && binned.outdoor_bins_profile() == 0 &&
-              !std::isfinite(binned.outdoor_bins().target_c()) && count(bi.now_unix_s) == 0);
-        CHECK(!binned.snapshot().has_last_sample && binned.snapshot().samples == 8 &&
-              binned.snapshot().sequence == 8);
-    }
-
-    // Current diagnosis expires independently of the 30-minute event cadence, even when every
-    // consumer keeps reading it. Time zero is a real evaluation time, not an uninitialized marker.
-    {
-        HeatingCurveDiagnosis frozen;
-        CHECK(noexcept(frozen.snapshot_at(0)));
-        const auto never = frozen.snapshot_at(INT64_MAX);
-        CHECK(never.state == HeatingCurveState::Off &&
-              never.reason == HeatingCurveReason::Disabled);
-        CHECK(heating_curve_reported_reason(true, never.state, never.reason) ==
-              HeatingCurveReason::SamplerInactive);
-        HeatingCurveInputs fi = ready();
-        fi.outdoor            = outdoor_env3_evidence(true, true, -4.5);
-        fi.plant_outdoor      = outdoor_homehub_evidence(true, true, -3.25);
-        const auto first      = frozen.evaluate(fi);
-        CHECK(frozen.snapshot_at(0).sample_eligible);
-        CHECK(frozen.snapshot_at(HEATING_CURVE_EVALUATION_MAX_AGE_MS).sample_eligible);
-        for (int64_t read_at : {HEATING_CURVE_EVALUATION_MAX_AGE_MS + 1, int64_t{9000}, int64_t{-1},
-                                int64_t{INT64_MAX}}) {
-            const auto aged = frozen.snapshot_at(read_at);
-            CHECK(aged.armed && aged.state == HeatingCurveState::Blocked &&
-                  aged.reason == HeatingCurveReason::EvaluationStale);
-            CHECK(std::string(heating_curve_reason_name(aged.reason)) == "evaluation_stale");
-            CHECK(!aged.sample_eligible && !aged.has_current_room_error &&
-                  !aged.forecast_available && !aged.plant_gate_known && !aged.plant_gate_active &&
-                  !aged.heating_mode_known && !aged.heating_mode_active);
-            CHECK(!aged.has_outdoor_temperature && aged.outdoor_source == OutdoorSource::None &&
-                  !aged.has_plant_outdoor_temperature &&
-                  aged.plant_outdoor_source == OutdoorSource::None);
-            CHECK(!aged.room_has_source_time && aged.room_source_unix_s == -1 &&
-                  !aged.room_age_known && aged.room_age_s == 0);
-            CHECK(aged.has_last_sample && aged.last_sample_unix_s == first.last_sample_unix_s &&
-                  aged.last_sample_room_error_k == first.last_sample_room_error_k &&
-                  aged.has_last_sample_outdoor &&
-                  aged.last_sample_outdoor_source == OutdoorSource::Env3 &&
-                  aged.last_sample_outdoor_temperature_c == -4.5 &&
-                  aged.has_last_sample_plant_outdoor &&
-                  aged.last_sample_plant_outdoor_source == OutdoorSource::HomeHub &&
-                  aged.last_sample_plant_outdoor_temperature_c == -3.25);
-            CHECK(aged.sequence == first.sequence && aged.samples == first.samples &&
-                  aged.evaluations == first.evaluations && aged.holds == first.holds &&
-                  aged.blocks == first.blocks);
-        }
-        CHECK(frozen.snapshot().state == HeatingCurveState::Recording);
-        CHECK(frozen.snapshot().sample_eligible); // A read cannot mutate the owner's sampler.
-        fi.now_ms = 9001;
-        fi.now_unix_s += 9;
-        const auto resumed = frozen.evaluate(fi);
-        CHECK(resumed.reason == HeatingCurveReason::SamplingInterval &&
-              resumed.sequence == first.sequence && resumed.samples == first.samples &&
-              resumed.evaluations == first.evaluations + 1);
-        CHECK(frozen.snapshot_at(9001).sample_eligible);
-        CHECK(frozen.snapshot_at(9000).reason == HeatingCurveReason::EvaluationStale);
-        CHECK(frozen.snapshot_at(12001).sample_eligible);
-        CHECK(frozen.snapshot_at(12002).reason == HeatingCurveReason::EvaluationStale);
-        frozen.forget_samples();
-        const auto replaced = frozen.snapshot_at(9001);
-        CHECK(replaced.reason == HeatingCurveReason::EvaluationStale && !replaced.sample_eligible &&
-              !replaced.has_last_sample && replaced.sequence == first.sequence &&
-              replaced.evaluations == resumed.evaluations);
-        fi.now_ms = 9002;
-        CHECK(frozen.evaluate(fi).sequence == first.sequence + 1);
-        fi.armed = false;
-        frozen.evaluate(fi);
-        const auto disabled = frozen.snapshot_at(INT64_MAX);
-        CHECK(disabled.state == HeatingCurveState::Off &&
-              disabled.reason == HeatingCurveReason::Disabled && !disabled.sample_eligible &&
-              !disabled.has_last_sample);
-    }
-    // HOLD and BLOCK are genuine fresh evaluations too, although their early-return paths do not
-    // update the event/clock anchor. A first sample without forecast expires in exactly the same
-    // way.
-    {
-        HeatingCurveDiagnosis states;
-        HeatingCurveInputs    si = ready();
-        si.plant_gate_active     = false;
-        CHECK(states.evaluate(si).state == HeatingCurveState::Hold);
-        si.now_ms = 3001;
-        states.evaluate(si);
-        CHECK(states.snapshot_at(6001).state == HeatingCurveState::Hold);
-        CHECK(states.snapshot_at(6002).reason == HeatingCurveReason::EvaluationStale);
-        si.now_ms            = 6003;
-        si.homehub_connected = false;
-        CHECK(states.evaluate(si).reason == HeatingCurveReason::HomeHubUnavailable);
-        CHECK(states.snapshot_at(9003).reason == HeatingCurveReason::HomeHubUnavailable);
-        CHECK(states.snapshot_at(9004).reason == HeatingCurveReason::EvaluationStale);
-        si                    = ready();
-        si.now_ms             = 9005;
-        si.forecast_available = false;
-        CHECK(states.evaluate(si).state == HeatingCurveState::Degraded);
-        CHECK(states.snapshot_at(12006).reason == HeatingCurveReason::EvaluationStale);
-        CHECK(states.snapshot_at(12006).samples == 1);
-        si.now_ms = -1;
-        CHECK(states.evaluate(si).reason == HeatingCurveReason::ClockInvalid);
-        CHECK(states.snapshot_at(0).reason == HeatingCurveReason::EvaluationStale);
-    }
-
-    HeatingCurveDiagnosis      diagnosis;
-    HeatingCurveInputs         in; // default: no room source configured, so nothing is armed
-    const HeatingCurveSnapshot off = diagnosis.evaluate(in);
-    CHECK(!off.armed && off.state == HeatingCurveState::Off);
-    CHECK(off.reason == HeatingCurveReason::Disabled && !off.has_last_sample);
-    CHECK(off.evaluations == 0);
-    CHECK(diagnosis.evaluate(in).evaluations == 0); // unarmed diagnosis analyses nothing
-
-    in                          = ready();
-    HeatingCurveSnapshot sample = diagnosis.evaluate(in);
-    CHECK(sample.state == HeatingCurveState::Recording &&
-          sample.reason == HeatingCurveReason::SampleRecorded);
-    CHECK(sample.sample_eligible && sample.has_current_room_error && sample.has_last_sample);
-    CHECK(approx(sample.current_room_error_k, 0.6) && approx(sample.last_sample_room_error_k, 0.6));
-    CHECK(sample.last_sample_unix_s == 1770000000 && sample.sequence == 1 && sample.samples == 1 &&
-          sample.room_source_unix_s == 1234 && sample.room_age_s == 5);
-    // No ENV III configured: the event records, and the outdoor axis is ABSENT rather than 0 C.
-    CHECK(!sample.has_outdoor_temperature && !sample.has_last_sample_outdoor);
-
-    in.now_ms = 1000;
-    in.now_unix_s++;
-    in.room_error_k              = 1.2345;
-    HeatingCurveSnapshot cadence = diagnosis.evaluate(in);
-    CHECK(cadence.state == HeatingCurveState::Recording &&
-          cadence.reason == HeatingCurveReason::SamplingInterval);
-    CHECK(cadence.sample_eligible && approx(cadence.current_room_error_k, 1.2345));
-    CHECK(cadence.has_last_sample && approx(cadence.last_sample_room_error_k, 0.6) &&
-          cadence.sequence == 1 && cadence.samples == 1);
-
-    // The stored value is the exact raw error — no deadband, rounding, clamp or slew operation.
-    in.now_ms       = HEATING_CURVE_SAMPLE_CADENCE_MS;
-    in.now_unix_s   = 1770001800;
-    in.room_error_k = -2.3456;
-    sample          = diagnosis.evaluate(in);
-    CHECK(sample.reason == HeatingCurveReason::SampleRecorded && sample.sequence == 2);
-    CHECK(approx(sample.last_sample_room_error_k, -2.3456) &&
-          sample.last_sample_unix_s == 1770001800);
-
-    // The optional ENV III outdoor axis (#env3). It is CONTEXT, never a gate, and the value stored
-    // with an event is the one that stood AT the event.
-    {
-        HeatingCurveDiagnosis outdoor;
-        HeatingCurveInputs    oi = ready();
-        oi.outdoor               = outdoor_env3_evidence(true, true, -4.25);
-        HeatingCurveSnapshot s   = outdoor.evaluate(oi);
-        CHECK(s.reason == HeatingCurveReason::SampleRecorded);
-        CHECK(s.has_outdoor_temperature && approx(s.outdoor_temperature_c, -4.25));
-        CHECK(s.has_last_sample_outdoor && approx(s.last_sample_outdoor_temperature_c, -4.25));
-
-        // Live value moves between events; the recorded event keeps the temperature it was taken
-        // at.
-        oi.now_ms = 1000;
-        oi.now_unix_s++;
-        oi.outdoor = outdoor_env3_evidence(true, true, 3.5);
-        s          = outdoor.evaluate(oi);
-        CHECK(s.reason == HeatingCurveReason::SamplingInterval);
-        CHECK(approx(s.outdoor_temperature_c, 3.5) &&
-              approx(s.last_sample_outdoor_temperature_c, -4.25));
-
-        // Sensor lost before the NEXT event: the event still records, and the stale outdoor value
-        // is CLEARED rather than carried forward under a fresh timestamp.
-        oi.now_ms       = HEATING_CURVE_SAMPLE_CADENCE_MS;
-        oi.now_unix_s   = 1770001800;
-        oi.outdoor      = {};
-        oi.room_error_k = 0.9;
-        s               = outdoor.evaluate(oi);
-        CHECK(s.reason == HeatingCurveReason::SampleRecorded && s.sequence == 2);
-        CHECK(approx(s.last_sample_room_error_k, 0.9));
-        CHECK(!s.has_outdoor_temperature && !s.has_last_sample_outdoor &&
-              s.last_sample_outdoor_temperature_c == 0.0);
-
-        // A non-finite reading is absent, not a number: NaN must never reach a recorded event.
-        HeatingCurveDiagnosis nan_case;
-        HeatingCurveInputs    ni = ready();
-        ni.outdoor =
-            OutdoorEvidence{true, OutdoorSource::Env3, std::numeric_limits<double>::quiet_NaN()};
-        s = nan_case.evaluate(ni);
-        CHECK(s.reason == HeatingCurveReason::SampleRecorded);
-        CHECK(!s.has_outdoor_temperature && !s.has_last_sample_outdoor);
-
-        // NEVER a gate: with the sensor present but every other input identical, the state, reason
-        // and counters must match the run without it — otherwise a board without ENV III would
-        // sample differently from one with it.
-        HeatingCurveDiagnosis with, without;
-        HeatingCurveInputs    wi     = ready();
-        wi.outdoor                   = outdoor_env3_evidence(true, true, 7.0);
-        const HeatingCurveSnapshot a = with.evaluate(wi);
-        const HeatingCurveSnapshot b = without.evaluate(ready());
-        CHECK(a.state == b.state && a.reason == b.reason && a.armed == b.armed);
-        CHECK(a.sample_eligible == b.sample_eligible && a.sequence == b.sequence &&
-              a.samples == b.samples && a.holds == b.holds && a.blocks == b.blocks);
-        CHECK(approx(a.last_sample_room_error_k, b.last_sample_room_error_k));
-
-        // Plant and accessory axes remain independent and name their own provenance. Losing either
-        // on the next event clears only that source's event value; neither changes eligibility.
-        HeatingCurveDiagnosis both_sources;
-        HeatingCurveInputs    bi = ready();
-        bi.outdoor               = outdoor_env3_evidence(true, true, 6.5);
-        bi.plant_outdoor         = outdoor_homehub_evidence(true, true, 5.75);
-        s                        = both_sources.evaluate(bi);
-        CHECK(s.has_last_sample_outdoor && s.last_sample_outdoor_source == OutdoorSource::Env3);
-        CHECK(s.has_last_sample_plant_outdoor &&
-              s.last_sample_plant_outdoor_source == OutdoorSource::HomeHub);
-        CHECK(approx(s.last_sample_plant_outdoor_temperature_c, 5.75));
-        bi.now_ms = HEATING_CURVE_SAMPLE_CADENCE_MS;
-        bi.now_unix_s += 1800;
-        bi.plant_outdoor = {};
-        s                = both_sources.evaluate(bi);
-        CHECK(s.reason == HeatingCurveReason::SampleRecorded && s.has_last_sample_outdoor);
-        CHECK(!s.has_last_sample_plant_outdoor &&
-              s.last_sample_plant_outdoor_source == OutdoorSource::None);
-
-        // Disarming clears the event, and the outdoor value must not outlive it either.
-        HeatingCurveInputs         off_in; // unarmed
-        const HeatingCurveSnapshot cleared = with.evaluate(off_in);
-        CHECK(!cleared.has_last_sample && !cleared.has_last_sample_outdoor &&
-              cleared.last_sample_outdoor_temperature_c == 0.0);
-    }
-
-    // The shared outdoor freshness contract. X10A page 0x20 is NOT fresh merely because its row
-    // answered or `held` happened to be false: unknown/stopped RPS both refuse it. HomeHub input 44
-    // instead follows the current TCP session, and ENV III follows its own fresh+plausible pair.
-    {
-        CHECK(!outdoor_x10a_evidence(true, false, false, 4.0).available);
-        CHECK(!outdoor_x10a_evidence(true, true, false, 4.0).available);
-        const OutdoorEvidence x10a = outdoor_x10a_evidence(true, true, true, -3.5);
-        CHECK(x10a.available && x10a.source == OutdoorSource::X10a &&
-              approx(x10a.temperature_c, -3.5));
-        CHECK(!outdoor_homehub_evidence(true, false, 8.0).available);
-        CHECK(outdoor_homehub_evidence(true, true, 8.0).source == OutdoorSource::HomeHub);
-        CHECK(!outdoor_env3_evidence(true, false, 8.0).available);
-        CHECK(outdoor_env3_evidence(true, true, 8.0).source == OutdoorSource::Env3);
-        CHECK(!outdoor_homehub_evidence(true, true, std::numeric_limits<double>::quiet_NaN())
-                   .available);
-    }
-
-    HeatingCurveDiagnosis degraded_diagnosis;
-    in                            = ready();
-    in.forecast_available         = false;
-    HeatingCurveSnapshot degraded = degraded_diagnosis.evaluate(in);
-    CHECK(degraded.state == HeatingCurveState::Degraded &&
-          degraded.reason == HeatingCurveReason::ForecastUnavailable);
-    CHECK(degraded.has_last_sample && approx(degraded.last_sample_room_error_k, 0.6));
-
-    HeatingCurveDiagnosis gates;
-    in                   = ready();
-    in.homehub_connected = false;
-    CHECK(gates.evaluate(in).reason == HeatingCurveReason::HomeHubUnavailable);
-    in                  = ready();
-    in.plant_gate_known = false;
-    CHECK(gates.evaluate(in).reason == HeatingCurveReason::PlantGateUnknown);
-    in                        = ready();
-    in.plant_gate_active      = false;
-    HeatingCurveSnapshot hold = gates.evaluate(in);
-    CHECK(hold.state == HeatingCurveState::Hold &&
-          hold.reason == HeatingCurveReason::PlantInactive);
-    CHECK(!hold.sample_eligible && hold.holds == 1);
-    in                    = ready();
-    in.heating_mode_known = false;
-    CHECK(gates.evaluate(in).reason == HeatingCurveReason::HeatingModeUnknown);
-    in                     = ready();
-    in.heating_mode_active = false;
-    CHECK(gates.evaluate(in).reason == HeatingCurveReason::NonHeatingMode);
-    in                       = ready();
-    in.room_control_eligible = false;
-    CHECK(gates.evaluate(in).reason == HeatingCurveReason::RoomUnavailable);
-    in                = ready();
-    in.x10a_connected = false;
-    {
-        const HeatingCurveSnapshot modbus_only = gates.evaluate(in);
-        CHECK(modbus_only.sample_eligible &&
-              modbus_only.reason == HeatingCurveReason::SampleRecorded);
-    }
-    CHECK(std::string(heating_curve_reason_name(HeatingCurveReason::X10aUnavailable)) ==
-          "x10a_unavailable");
-    CHECK(static_cast<int>(HeatingCurveReason::X10aUnavailable) == 6);
-    in            = ready();
-    in.now_unix_s = -1;
-    CHECK(gates.evaluate(in).reason == HeatingCurveReason::ClockInvalid);
-
-    // THE ORDER OF THOSE GATES IS ITSELF THE CONTRACT: an idle plant is HOLD even when the room
-    // source is ineligible, because outside the heating season BOTH are true at once — a room
-    // thermostat switched off for the summer is not control-eligible — and answering
-    // "room input unavailable" turns a plant resting exactly as it should into a standing fault.
-    // The reference installation reported thousands of blocks in August with nothing wrong.
-    HeatingCurveDiagnosis seasonal;
-    in                                = ready();
-    in.plant_gate_active              = false;
-    in.room_control_eligible          = false;
-    const HeatingCurveSnapshot summer = seasonal.evaluate(in);
-    CHECK(summer.state == HeatingCurveState::Hold &&
-          summer.reason == HeatingCurveReason::PlantInactive);
-    CHECK(summer.holds == 1 && summer.blocks == 0);
-    // While the plant IS heating the same ineligible source is a real block, and still says so.
-    in                                 = ready();
-    in.room_control_eligible           = false;
-    const HeatingCurveSnapshot heating = seasonal.evaluate(in);
-    CHECK(heating.state == HeatingCurveState::Blocked &&
-          heating.reason == HeatingCurveReason::RoomUnavailable);
-    // A down HomeHub outranks the gate it is the only source of: an unknown gate is never read as
-    // an idle plant.
-    in                   = ready();
-    in.homehub_connected = false;
-    in.plant_gate_active = false;
-    CHECK(seasonal.evaluate(in).reason == HeatingCurveReason::HomeHubUnavailable);
-
-    // A transient plant/data block must not create a fresh event on recovery. The absolute event
-    // timestamp + boot-local sequence stay durable until the 30-minute sampling interval expires.
-    HeatingCurveDiagnosis recovery;
-    in              = ready();
-    in.room_error_k = 3.0;
-    CHECK(recovery.evaluate(in).sequence == 1);
-    in.now_ms            = 1000;
-    in.homehub_connected = false;
-    CHECK(recovery.evaluate(in).state == HeatingCurveState::Blocked &&
-          recovery.snapshot().reason == HeatingCurveReason::HomeHubUnavailable);
-    in                               = ready();
-    in.now_ms                        = 2000;
-    in.room_error_k                  = -3.0;
-    HeatingCurveSnapshot after_block = recovery.evaluate(in);
-    CHECK(after_block.reason == HeatingCurveReason::SamplingInterval && after_block.sequence == 1 &&
-          approx(after_block.last_sample_room_error_k, 3.0));
-    in.now_ms            = 3000;
-    in.plant_gate_active = false;
-    CHECK(recovery.evaluate(in).state == HeatingCurveState::Hold);
-    in              = ready();
-    in.now_ms       = 4000;
-    in.room_error_k = 3.0;
-    CHECK(recovery.evaluate(in).reason == HeatingCurveReason::SamplingInterval);
-    in.now_ms = 1999;
-    CHECK(recovery.evaluate(in).reason == HeatingCurveReason::ClockInvalid);
-
-    // Deleting the required source disarms and clears sample memory. Re-configuring records at
-    // once, while the sequence/counters remain useful boot-local evidence.
-    HeatingCurveDiagnosis rearm;
-    in = ready();
-    CHECK(rearm.evaluate(in).sequence == 1);
-    in.armed  = false;
-    in.now_ms = 10;
-    CHECK(rearm.evaluate(in).state == HeatingCurveState::Off && !rearm.snapshot().has_last_sample);
-    in        = ready();
-    in.now_ms = 20;
-    CHECK(rearm.evaluate(in).sequence == 2 && rearm.snapshot().has_last_sample);
-
-    // A consent or room-source boundary forgets the previous scope's event and cadence without a
-    // disarmed evaluation in between (opt-out and opt-in inside one task cycle). Counters and the
-    // sequence continue (a reset reads as a reboot), and the new scope's first eligible reading
-    // records at once instead of waiting out the old 30-minute interval.
-    HeatingCurveDiagnosis boundary;
-    in              = ready();
-    in.room_error_k = 1.5;
-    in.outdoor      = outdoor_env3_evidence(true, true, -3.0);
-    CHECK(boundary.evaluate(in).sequence == 1 && boundary.snapshot().has_last_sample_outdoor);
-    in.now_ms = 1000;
-    CHECK(boundary.evaluate(in).reason == HeatingCurveReason::SamplingInterval);
-    boundary.forget_samples();
-    const HeatingCurveSnapshot forgotten = boundary.snapshot();
-    CHECK(!forgotten.has_last_sample && !forgotten.has_last_sample_outdoor &&
-          forgotten.last_sample_unix_s == -1 && forgotten.last_sample_room_error_k == 0.0);
-    CHECK(forgotten.sequence == 1 && forgotten.samples == 1 && forgotten.evaluations == 2);
-    in.now_ms       = 300000; // five minutes later, inside the forgotten cadence
-    in.now_unix_s   = 1770000300;
-    in.room_error_k = 4.0;
-    in.outdoor      = OutdoorEvidence{};
-    const HeatingCurveSnapshot rescoped = boundary.evaluate(in);
-    CHECK(rescoped.reason == HeatingCurveReason::SampleRecorded && rescoped.sequence == 2 &&
-          rescoped.samples == 2 && rescoped.evaluations == 3);
-    CHECK(approx(rescoped.last_sample_room_error_k, 4.0) &&
-          rescoped.last_sample_unix_s == 1770000300 && !rescoped.has_last_sample_outdoor);
-
-    // ARMING requires the explicit master diagnostics opt-in plus every visible source dependency.
-    // This remains independent of the retired controller mode: there is no /set_dynamic_lwt and no
-    // actuator. Explicitly deleting HomeHub disarms the dependent sampler too.
-    Config dependencies;
-    CHECK(!heating_curve_diagnosis_armed(dependencies));
-    dependencies.mqtt_uri               = "mqtt://broker";
-    dependencies.ref_temp_topic         = "room";
-    dependencies.ref_temp_path          = "current";
-    dependencies.ref_temp_setpoint_path = "target";
-    dependencies.ref_temp_time_path     = "read_at";
-    dependencies.mb_host                = "homehub.local";
-    CHECK(!heating_curve_diagnosis_armed(dependencies)); // diagnostics are opt-in
-    dependencies.diagnostics_enabled = true;
-    CHECK(heating_curve_diagnosis_armed(dependencies)); // forecast location is optional
-    Config arrival_timed = dependencies;
-    arrival_timed.ref_temp_time_path.clear();
-    CHECK(heating_curve_diagnosis_armed(arrival_timed)); // live non-retained MQTT arrival is enough
-    dependencies.weather_enabled = true;
-    CHECK(heating_curve_diagnosis_armed(dependencies));
-    dependencies.mb_host = "";
-    CHECK(!heating_curve_diagnosis_armed(dependencies)); // explicit HomeHub opt-out disarms it
-    dependencies.mb_host = "homehub.local";
-    for (std::string Config::*field : {&Config::mqtt_uri, &Config::ref_temp_topic,
-                                       &Config::ref_temp_path, &Config::ref_temp_setpoint_path}) {
-        Config one = dependencies;
-        (one.*field).clear();
-        CHECK(!heating_curve_diagnosis_armed(one)); // any deleted required input disarms it
-    }
-    Config no_weather          = dependencies;
-    no_weather.weather_enabled = false;
-    CHECK(heating_curve_diagnosis_armed(no_weather));
-    // DIAG-01/b: leaving the default (also a rejected config blob's fallback) takes the caller's
-    // entropy, never a fixed 1 that an older interval's surviving journal records already carry.
-    volatile uint32_t default_generation = 0, draw = 0x5eed1234u; // runtime values: real branches
-    CHECK(diagnostics_next_generation(default_generation, draw) == 0x5eed1234u);
-    CHECK(diagnostics_next_generation(0, 0) == 1); // a zero draw still leaves the default
-    CHECK(diagnostics_next_generation(41, draw) == 42);
-    CHECK(diagnostics_next_generation(UINT32_MAX, draw) == 1);
-
-    // ── The snapshot the evaluator never touched ────────────────────────────────────────────────
-    // The sampler lives on the MQTT publish task, which safe mode never creates (main.cpp skips
-    // every optional consumer). /status still derives `armed` from the configuration at request
-    // time, so it published armed=true beside the evaluator's default Off/Disabled — and "disabled"
-    // is the evaluator's word for "no room source is mapped", which is exactly what the reader has
-    // already done. The UI, keying on the state, then told them to set up the source configured one
-    // row below.
-    CHECK(
-        heating_curve_sampler_inactive(true, HeatingCurveState::Off, HeatingCurveReason::Disabled));
-    CHECK(
-        heating_curve_reported_reason(true, HeatingCurveState::Off, HeatingCurveReason::Disabled) ==
-        HeatingCurveReason::SamplerInactive);
-    CHECK(std::string(heating_curve_reason_name(HeatingCurveReason::SamplerInactive)) ==
-          "sampler_inactive");
-    CHECK(static_cast<unsigned>(HeatingCurveReason::SamplerInactive) == 14);
-
-    // NOT armed + Off/Disabled is the ordinary unconfigured device (and, since arming also requires
-    // a broker, a fully-mapped room source whose broker was cleared). It keeps the evaluator's
-    // word.
-    CHECK(!heating_curve_sampler_inactive(false, HeatingCurveState::Off,
-                                          HeatingCurveReason::Disabled));
-    CHECK(heating_curve_reported_reason(false, HeatingCurveState::Off,
-                                        HeatingCurveReason::Disabled) ==
-          HeatingCurveReason::Disabled);
-    // A RUNNING evaluator assigns s_.armed before any gate, so it can never produce armed + Off;
-    // every state it does produce must pass through untouched, whatever the configuration says
-    // about arming.
-    for (bool armed_cfg : {false, true}) {
-        for (HeatingCurveState st : {HeatingCurveState::Recording, HeatingCurveState::Hold,
-                                     HeatingCurveState::Degraded, HeatingCurveState::Blocked}) {
-            for (HeatingCurveReason rs :
-                 {HeatingCurveReason::SampleRecorded, HeatingCurveReason::SamplingInterval,
-                  HeatingCurveReason::RoomUnavailable, HeatingCurveReason::HomeHubUnavailable,
-                  HeatingCurveReason::PlantInactive, HeatingCurveReason::NonHeatingMode}) {
-                CHECK(heating_curve_reported_reason(armed_cfg, st, rs) == rs);
-            }
-        }
-    }
-}
-
-static void test_weather_forecast_contract() {
-    int64_t fetched = -1, decision = -1;
-    CHECK(reference_parse_rfc3339("2026-08-03T10:30:00Z", fetched));
-    CHECK(reference_parse_rfc3339("2026-08-03T11:00:00Z", decision));
-    WeatherForecastSample sample{1,   "open-meteo", "icon_seamless", -1, fetched, decision,
-                                 5.4, 82.0};
-    WeatherValidation     valid = weather_validate(sample, fetched + 20);
-    CHECK(valid.valid && std::string(valid.reason) == "ok");
-    auto extreme           = sample;
-    extreme.fetched_unix_s = extreme.decision_unix_s = INT64_MAX;
-    CHECK(weather_validate(extreme, INT64_MAX).valid);
-    CHECK(std::string(weather_validate(extreme, INT64_MAX - 61).reason) == "future_fetch");
-    extreme.decision_unix_s = INT64_MAX - 61;
-    CHECK(std::string(weather_validate(extreme, INT64_MAX).reason) == "invalid_decision_time");
-    extreme.fetched_unix_s  = INT64_MAX - 3601;
-    extreme.decision_unix_s = INT64_MAX;
-    CHECK(std::string(weather_validate(extreme, INT64_MAX).reason) == "invalid_decision_time");
-    extreme.fetched_unix_s = INT64_MIN;
-    CHECK(std::string(weather_validate(extreme, INT64_MAX).reason) == "missing_timestamp");
-
-    WeatherLocationParse location = weather_location_parse("12.345678", "23.456789");
-    CHECK(location.valid && location.enabled && location.latitude_e6 == 12345678 &&
-          location.longitude_e6 == 23456789);
-    CHECK(weather_coordinate_format_e6(location.latitude_e6) == "12.345678");
-    CHECK(weather_coordinate_format_e6(-1) == "-0.000001");
-    CHECK(weather_location_parse("12,345678", "23,456789").valid);
-    int32_t parsed_coordinate = 0;
-    CHECK(weather_coordinate_parse_e6("-12,5", WEATHER_LATITUDE_MIN_E6, WEATHER_LATITUDE_MAX_E6,
-                                      parsed_coordinate) &&
-          parsed_coordinate == -12500000);
-    CHECK(!weather_coordinate_parse_e6("", WEATHER_LATITUDE_MIN_E6, WEATHER_LATITUDE_MAX_E6,
-                                       parsed_coordinate));
-    CHECK(!weather_coordinate_parse_e6("12345678901234567", WEATHER_LONGITUDE_MIN_E6,
-                                       WEATHER_LONGITUDE_MAX_E6, parsed_coordinate));
-    CHECK(!weather_coordinate_parse_e6("181", WEATHER_LONGITUDE_MIN_E6, WEATHER_LONGITUDE_MAX_E6,
-                                       parsed_coordinate));
-    CHECK(!weather_coordinate_parse_e6("12.", WEATHER_LATITUDE_MIN_E6, WEATHER_LATITUDE_MAX_E6,
-                                       parsed_coordinate));
-    CHECK(weather_location_parse("", "").valid && !weather_location_parse("", "").enabled);
-    CHECK(!weather_location_parse("52.5", "").valid);
-    CHECK(!weather_location_parse("90.000001", "13.4").valid);
-    CHECK(!weather_location_parse("52.5", "180.000001").valid);
-    CHECK(!weather_location_parse("52.5e0", "13.4").valid);
-    CHECK(!weather_location_parse("+52.5", "13.4").valid);
-    CHECK(!weather_location_parse("52.5&x=1", "13.4").valid);
-    CHECK(!weather_location_parse("52.1234567", "13.4").valid);
-    CHECK(weather_location_e6_valid(true, 90000000, -180000000));
-    CHECK(weather_location_e6_valid(false, 0, 0));
-    CHECK(!weather_location_e6_valid(false, 1, 0));
-    CHECK(!weather_location_e6_valid(false, 0, 1));
-    CHECK(!weather_location_e6_valid(true, WEATHER_LATITUDE_MIN_E6 - 1, 0));
-    CHECK(!weather_location_e6_valid(true, WEATHER_LATITUDE_MAX_E6 + 1, 0));
-    CHECK(!weather_location_e6_valid(true, 0, WEATHER_LONGITUDE_MIN_E6 - 1));
-    CHECK(!weather_location_e6_valid(true, 0, WEATHER_LONGITUDE_MAX_E6 + 1));
-    CHECK(weather_reason_valid("fetch_failed"));
-    CHECK(weather_reason_valid("payload_invalid"));
-    CHECK(weather_reason_valid("incomplete_horizon"));
-    CHECK(!weather_reason_valid("provider said something arbitrary"));
-
-    for (WeatherTaskStartState state :
-         {WeatherTaskStartState::NotStarted, WeatherTaskStartState::Available,
-          WeatherTaskStartState::DeadlineUnavailable, WeatherTaskStartState::TaskStartFailed}) {
-        CHECK(!weather_task_failure(false, true, state));
-        CHECK(!weather_task_failure(true, false, state));
-    }
-    // Keep these two values runtime-visible so coverage proves both the successful worker state and
-    // the defensive unknown-enum fallback rather than constant-folding the constexpr helper.
-    volatile uint8_t task_state_raw = static_cast<uint8_t>(WeatherTaskStartState::Available);
-    CHECK(!weather_task_failure(true, true, static_cast<WeatherTaskStartState>(task_state_raw)));
-    task_state_raw = static_cast<uint8_t>(WeatherTaskStartState::DeadlineUnavailable);
-    WeatherTaskFailure task_failure =
-        weather_task_failure(true, true, static_cast<WeatherTaskStartState>(task_state_raw));
-    CHECK(task_failure && std::string(task_failure.reason) == "deadline_unavailable" &&
-          std::string(task_failure.error) == "deadline_unavailable");
-    task_state_raw = static_cast<uint8_t>(WeatherTaskStartState::TaskStartFailed);
-    task_failure =
-        weather_task_failure(true, true, static_cast<WeatherTaskStartState>(task_state_raw));
-    CHECK(task_failure && std::string(task_failure.reason) == "task_start_failed" &&
-          std::string(task_failure.error) == "out_of_memory");
-    task_state_raw = static_cast<uint8_t>(WeatherTaskStartState::NotStarted);
-    task_failure =
-        weather_task_failure(true, true, static_cast<WeatherTaskStartState>(task_state_raw));
-    CHECK(task_failure && std::string(task_failure.reason) == "task_unavailable" &&
-          std::string(task_failure.error) == "task_unavailable");
-    task_state_raw = 0xff;
-    task_failure =
-        weather_task_failure(true, true, static_cast<WeatherTaskStartState>(task_state_raw));
-    CHECK(task_failure && std::string(task_failure.reason) == "task_unavailable" &&
-          std::string(task_failure.error) == "task_unavailable");
-
-    uint64_t refresh_started = 0, refresh_completed = 0, refresh_success = 0;
-    CHECK(weather_refresh_claim(1, refresh_completed, refresh_started) == 1);
-    CHECK(refresh_started == 1);
-    // Interleaving: A commits its value, a source transaction then cancels the still-open token,
-    // and A's late finish must not turn that final cancellation into success for B.
-    weather_refresh_cancel_outstanding(1, refresh_completed);
-    CHECK(refresh_completed == 1 && refresh_success == 0);
-    CHECK(
-        !weather_refresh_complete(1, refresh_started, 1, true, refresh_completed, refresh_success));
-    CHECK(refresh_completed == 1 && refresh_success == 0);
-    CHECK(weather_refresh_claim(1, refresh_completed, refresh_started) == 0);
-    CHECK(weather_refresh_claim(2, refresh_completed, refresh_started) == 2);
-    CHECK(
-        weather_refresh_complete(2, refresh_started, 2, true, refresh_completed, refresh_success));
-    CHECK(refresh_completed == 2 && refresh_success == 2);
-    weather_refresh_cancel_outstanding(2, refresh_completed);
-    CHECK(refresh_completed == 2 && refresh_success == 2);
-    CHECK(
-        !weather_refresh_complete(2, refresh_started, 0, true, refresh_completed, refresh_success));
-    CHECK(
-        !weather_refresh_complete(3, refresh_started, 3, true, refresh_completed, refresh_success));
-
-    // OTA serialization is not a Weather result. Releasing the attempt without completion leaves
-    // the exact token outstanding, so the same request can be reclaimed and causally succeed.
-    refresh_started = refresh_completed = refresh_success = 0;
-    CHECK(weather_refresh_claim(1, refresh_completed, refresh_started) == 1);
-    CHECK(weather_refresh_defer(1, refresh_started, 1, refresh_completed));
-    CHECK(refresh_started == 1 && refresh_completed == 0 && refresh_success == 0);
-    CHECK(weather_refresh_claim(1, refresh_completed, refresh_started) == 1);
-    CHECK(
-        weather_refresh_complete(1, refresh_started, 1, true, refresh_completed, refresh_success));
-    CHECK(refresh_completed == 1 && refresh_success == 1);
-    CHECK(!weather_refresh_defer(1, refresh_started, 1, refresh_completed));
-    CHECK(!weather_refresh_defer(1, refresh_started, 0, 0));
-    CHECK(!weather_refresh_defer(2, refresh_started, 1, 0));
-    CHECK(!weather_refresh_defer(1, 2, 1, 0));
-    refresh_started = refresh_completed = refresh_success = 0;
-    CHECK(weather_refresh_claim(2, refresh_completed, refresh_started) == 2);
-    CHECK(weather_refresh_defer(2, refresh_started, 2, refresh_completed));
-    weather_refresh_cancel_outstanding(2, refresh_completed);
-    CHECK(weather_refresh_claim(2, refresh_completed, refresh_started) == 0);
-    CHECK(
-        !weather_refresh_complete(2, refresh_started, 2, true, refresh_completed, refresh_success));
-    CHECK(refresh_completed == 2 && refresh_success == 0);
-
-    WeatherForecastSample bad = sample;
-    bad.version               = 2;
-    CHECK(!weather_validate(bad).valid &&
-          std::string(weather_validate(bad).reason) == "unsupported_version");
-    bad          = sample;
-    bad.provider = "another-provider";
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_provider");
-    bad                = sample;
-    bad.fetched_unix_s = -1;
-    CHECK(std::string(weather_validate(bad).reason) == "missing_timestamp");
-    bad                 = sample;
-    bad.decision_unix_s = -1;
-    CHECK(std::string(weather_validate(bad).reason) == "missing_timestamp");
-    bad       = sample;
-    bad.model = "best_match";
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_model");
-    bad                 = sample;
-    bad.decision_unix_s = bad.fetched_unix_s + 3601;
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_decision_time");
-    bad                 = sample;
-    bad.fetched_unix_s  = fetched + WEATHER_FUTURE_TOLERANCE_S + 1;
-    bad.decision_unix_s = bad.fetched_unix_s;
-    CHECK(std::string(weather_validate(bad, fetched).reason) == "future_fetch");
-    bad                   = sample;
-    bad.outdoor_mean_2h_c = std::nan("");
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_outdoor_mean");
-    bad                   = sample;
-    bad.outdoor_mean_2h_c = WEATHER_OUTDOOR_MIN_C - 0.1;
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_outdoor_mean");
-    bad                   = sample;
-    bad.outdoor_mean_2h_c = WEATHER_OUTDOOR_MAX_C + 0.1;
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_outdoor_mean");
-    bad                       = sample;
-    bad.solar_energy_2h_wh_m2 = -0.1;
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_solar_energy");
-    bad                       = sample;
-    bad.solar_energy_2h_wh_m2 = std::nan("");
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_solar_energy");
-    bad                       = sample;
-    bad.solar_energy_2h_wh_m2 = WEATHER_SOLAR_MAX_WH_M2 + 0.1;
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_solar_energy");
-    bad              = sample;
-    bad.hourly_count = 1;
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_hourly_count");
-    bad              = sample;
-    bad.hourly_count = WEATHER_HOURLY_CAP + 1;
-    CHECK(std::string(weather_validate(bad).reason) == "invalid_hourly_count");
-
-    WeatherFreshness no_value = weather_freshness(false, -1, fetched);
-    CHECK(!no_value.fresh && !no_value.age_known && no_value.age_s == 0 &&
-          std::string(no_value.reason) == "no_value");
-    WeatherFreshness fresh = weather_freshness(true, 1000, 1000 + WEATHER_MAX_AGE_S);
-    CHECK(fresh.fresh && fresh.age_known && fresh.age_s == WEATHER_MAX_AGE_S);
-    WeatherFreshness tolerated_future = weather_freshness(true, 1050, 1000);
-    CHECK(tolerated_future.fresh && tolerated_future.age_known && tolerated_future.age_s == 0);
-    WeatherFreshness stale = weather_freshness(true, 1000, 1001 + WEATHER_MAX_AGE_S);
-    CHECK(!stale.fresh && stale.age_known && std::string(stale.reason) == "stale");
-    WeatherFreshness future = weather_freshness(true, 1100, 1000);
-    CHECK(!future.fresh && std::string(future.reason) == "future_fetch");
-    WeatherFreshness unsynced = weather_freshness(true, 1000, -1);
-    CHECK(!unsynced.fresh && std::string(unsynced.reason) == "clock_unsynced");
-
-    const auto extreme_clock = weather_freshness(true, INT64_MAX, INT64_MAX);
-    CHECK(extreme_clock.fresh && extreme_clock.age_known && extreme_clock.age_s == 0);
-    const auto extreme_future = weather_freshness(true, INT64_MAX, INT64_MAX - 61);
-    CHECK(!extreme_future.fresh && std::string(extreme_future.reason) == "future_fetch");
-    const auto extreme_tolerated_future = weather_freshness(true, INT64_MAX, INT64_MAX - 60);
-    CHECK(extreme_tolerated_future.fresh && extreme_tolerated_future.age_s == 0);
-    const auto negative_fetch = weather_freshness(true, INT64_MIN, INT64_MAX);
-    CHECK(!negative_fetch.fresh && !negative_fetch.age_known &&
-          std::string(negative_fetch.reason) == "missing_timestamp");
-    const auto epoch_fetch = weather_freshness(true, 0, INT64_MAX);
-    CHECK(!epoch_fetch.fresh && epoch_fetch.age_s == static_cast<uint64_t>(INT64_MAX));
-
-    WeatherMqttSnapshot mqtt;
-    mqtt.configured             = true;
-    mqtt.available              = true;
-    mqtt.has_value              = true;
-    mqtt.outdoor_mean_2h_c      = 5.4;
-    mqtt.solar_energy_2h_wh_m2  = 82.0;
-    mqtt.fetched_unix_s         = 1000;
-    mqtt.forecast_start_unix_s  = 1200;
-    mqtt.last_attempt_unix_s    = 999;
-    mqtt.successes              = 4;
-    mqtt.state                  = "ok";
-    mqtt.reason                 = "fresh";
-    const std::string mqtt_json = build_weather_mqtt_json(mqtt, 1100);
-    CHECK(weather_forecast_topic("daikin") == "daikin/weather/openmeteo/forecast");
-    CHECK(weather_mqtt_action(false, false) == WeatherMqttAction::CleanupRetained);
-    CHECK(weather_mqtt_action(false, true) == WeatherMqttAction::CleanupRetained);
-    CHECK(weather_mqtt_action(true, false) == WeatherMqttAction::Suppress);
-    CHECK(weather_mqtt_action(true, true) == WeatherMqttAction::Publish);
-    const std::string current_weather = weather_forecast_topic("daikin");
-    CHECK(retained_cleanup_candidate(current_weather, current_weather.data(),
-                                     static_cast<int>(current_weather.size()), true, 7, 0));
-    const std::string retired_weather = retired_weather_forecast_topic("daikin");
-    CHECK(retired_weather == "daikin/weather_forecast");
-    CHECK(retained_cleanup_candidate(retired_weather, retired_weather.data(),
-                                     static_cast<int>(retired_weather.size()), true, 7, 0));
-    CHECK(mqtt_json.find("\"provider\":\"open-meteo\"") != std::string::npos);
-    CHECK(mqtt_json.find("\"model\":\"icon_seamless\"") != std::string::npos);
-    CHECK(mqtt_json.find("\"available\":1,\"fresh\":1,\"has_value\":1") != std::string::npos);
-    CHECK(mqtt_json.find("\"issued_unix_s\":null") != std::string::npos);
-    CHECK(mqtt_json.find("\"fetched_unix_s\":1000") != std::string::npos);
-    CHECK(mqtt_json.find("\"forecast_start_unix_s\":1200") != std::string::npos);
-    CHECK(mqtt_json.find("\"valid_until_unix_s\":6400") != std::string::npos);
-    CHECK(mqtt_json.find("\"outdoor_mean_2h_c\":5.400000") != std::string::npos);
-    CHECK(mqtt_json.find("latitude") == std::string::npos);
-    CHECK(mqtt_json.find("longitude") == std::string::npos);
-
-    // HA Discovery is intentionally absent. These are only frozen cleanup targets for configs
-    // published by the previous build; their ids must never be repurposed.
-    CHECK(RETIRED_WEATHER_HA_SENSOR_COUNT == 4);
-    CHECK(
-        retired_weather_discovery_topic("homeassistant", "daikin", RETIRED_WEATHER_HA_SENSORS[0]) ==
-        "homeassistant/sensor/daikin/weather_forecast_outdoor_mean_2h/config");
-    CHECK(
-        retired_weather_discovery_topic("homeassistant", "daikin", RETIRED_WEATHER_HA_SENSORS[1]) ==
-        "homeassistant/sensor/daikin/weather_forecast_solar_energy_2h/config");
-    CHECK(
-        retired_weather_discovery_topic("homeassistant", "daikin", RETIRED_WEATHER_HA_SENSORS[2]) ==
-        "homeassistant/binary_sensor/daikin/weather_forecast_available/config");
-    CHECK(
-        retired_weather_discovery_topic("homeassistant", "daikin", RETIRED_WEATHER_HA_SENSORS[3]) ==
-        "homeassistant/binary_sensor/daikin/weather_forecast_fresh/config");
-
-    // An old value remains available for forensic history after a provider error, but it cannot
-    // masquerade as decision-ready data: both availability signals fail closed immediately, even
-    // while the historical value remains younger than the ordinary age limit.
-    mqtt.available                = false;
-    mqtt.state                    = "error";
-    mqtt.reason                   = "fetch_failed";
-    mqtt.error                    = "http_503";
-    mqtt.errors                   = 1;
-    const std::string failed_json = build_weather_mqtt_json(mqtt, 1101);
-    CHECK(failed_json.find("\"available\":0,\"fresh\":0,\"has_value\":1") != std::string::npos);
-    CHECK(failed_json.find("\"freshness_reason\":\"fetch_failed\"") != std::string::npos);
-    CHECK(failed_json.find("\"error\":\"http_503\"") != std::string::npos);
-    CHECK(failed_json.find("\"outdoor_mean_2h_c\":5.400000") != std::string::npos);
-
-    mqtt.available = true;
-    mqtt.state     = "ok";
-    mqtt.reason    = "fresh";
-    mqtt.error.clear();
-    const std::string stale_json = build_weather_mqtt_json(mqtt, 6401);
-    CHECK(stale_json.find("\"available\":0,\"fresh\":0,\"has_value\":1") != std::string::npos);
-    CHECK(stale_json.find("\"freshness_reason\":\"stale\"") != std::string::npos);
-
-    WeatherMqttSnapshot disabled;
-    // The encoder remains total for diagnostics/unit tests, but mqtt_ha.cpp never publishes this
-    // synthetic disabled document: WeatherMqttAction::CleanupRetained owns that state instead.
-    const std::string disabled_json = build_weather_mqtt_json(disabled, -1);
-    CHECK(disabled_json.find("\"configured\":0") != std::string::npos);
-    CHECK(disabled_json.find("\"available\":0,\"fresh\":0,\"has_value\":0") != std::string::npos);
-    CHECK(disabled_json.find("\"freshness_reason\":\"not_configured\"") != std::string::npos);
-    CHECK(disabled_json.find("\"fetched_unix_s\":null") != std::string::npos);
-    CHECK(disabled_json.find("\"outdoor_mean_2h_c\":null") != std::string::npos);
-
-    WeatherForecastSample same = sample;
-    CHECK(!weather_timestamp_moved_backward(same, sample)); // duplicate delivery is idempotent
-    WeatherForecastSample older = sample;
-    older.fetched_unix_s--;
-    CHECK(weather_timestamp_moved_backward(older, sample));
-    older = sample;
-    older.decision_unix_s--;
-    CHECK(weather_timestamp_moved_backward(older, sample));
-    WeatherForecastSample issued_previous = sample;
-    WeatherForecastSample issued_older    = sample;
-    issued_previous.issued_unix_s         = 100;
-    issued_older.issued_unix_s            = 99;
-    CHECK(weather_timestamp_moved_backward(issued_older, issued_previous));
-    issued_older.issued_unix_s = -1;
-    CHECK(!weather_timestamp_moved_backward(issued_older, issued_previous));
-
-    // At 10:30 the next decision instant is 11:00. Open-Meteo's values at 12:00 and 13:00
-    // represent the following two one-hour bins; W/m² means sum numerically to two-hour Wh/m².
-    std::vector<int64_t> times;
-    for (const char* timestamp : {"2026-08-03T10:00:00Z", "2026-08-03T11:00:00Z",
-                                  "2026-08-03T12:00:00Z", "2026-08-03T13:00:00Z"}) {
-        int64_t value = -1;
-        CHECK(reference_parse_rfc3339(timestamp, value));
-        times.push_back(value);
-    }
-    const std::vector<double> temperature{6.0, 7.0, 8.0, 10.0};
-    const std::vector<double> humidity{81.0, 79.0, 76.0, 72.0};
-    const std::vector<double> pressure{1002.0, 1003.0, 1004.0, 1005.0};
-    const std::vector<double> shortwave{0.0, 50.0, 100.0, 200.0};
-    WeatherForecastSample     derived;
-    WeatherValidation dv = open_meteo_derive_forecast(times, temperature, humidity, pressure,
-                                                      shortwave, fetched, derived);
-    CHECK(dv.valid);
-    CHECK(derived.provider == "open-meteo" && derived.model == "icon_seamless");
-    CHECK(derived.issued_unix_s == -1 && derived.decision_unix_s == decision);
-    CHECK(std::abs(derived.outdoor_mean_2h_c - 9.0) < 0.001);
-    CHECK(std::abs(derived.solar_energy_2h_wh_m2 - 300.0) < 0.001);
-    CHECK(derived.hourly_count == 3);
-    CHECK(derived.hourly_unix_s[0] == decision);
-    CHECK(std::abs(derived.hourly_temperature_c[2] - 10.0) < 0.001);
-    CHECK(std::abs(derived.hourly_humidity_pct[1] - 76.0) < 0.001);
-    CHECK(std::abs(derived.hourly_pressure_hpa[0] - 1003.0) < 0.001);
-    WeatherForecastSample invalid_hourly  = derived;
-    invalid_hourly.hourly_humidity_pct[0] = 101.0;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_humidity");
-    invalid_hourly                  = derived;
-    invalid_hourly.hourly_unix_s[0] = decision + 1;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_time");
-    invalid_hourly = derived;
-    invalid_hourly.hourly_unix_s[1] += 1;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_time");
-    invalid_hourly                  = derived;
-    invalid_hourly.hourly_unix_s[0] = INT64_MIN;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_time");
-    invalid_hourly                  = derived;
-    invalid_hourly.fetched_unix_s   = INT64_MAX;
-    invalid_hourly.decision_unix_s  = INT64_MAX;
-    invalid_hourly.hourly_unix_s[0] = INT64_MAX;
-    invalid_hourly.hourly_unix_s[1] = INT64_MIN;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_time");
-    invalid_hourly                         = derived;
-    invalid_hourly.hourly_temperature_c[0] = std::nan("");
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_temperature");
-    invalid_hourly                         = derived;
-    invalid_hourly.hourly_temperature_c[0] = WEATHER_OUTDOOR_MIN_C - 0.1;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_temperature");
-    invalid_hourly                         = derived;
-    invalid_hourly.hourly_temperature_c[0] = WEATHER_OUTDOOR_MAX_C + 0.1;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_temperature");
-    invalid_hourly                        = derived;
-    invalid_hourly.hourly_humidity_pct[0] = std::nan("");
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_humidity");
-    invalid_hourly                        = derived;
-    invalid_hourly.hourly_humidity_pct[0] = WEATHER_HUMIDITY_MIN_PCT - 0.1;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_humidity");
-    invalid_hourly                        = derived;
-    invalid_hourly.hourly_pressure_hpa[0] = std::nan("");
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_pressure");
-    invalid_hourly                        = derived;
-    invalid_hourly.hourly_pressure_hpa[0] = WEATHER_PRESSURE_MIN_HPA - 0.1;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_pressure");
-    invalid_hourly                        = derived;
-    invalid_hourly.hourly_pressure_hpa[0] = WEATHER_PRESSURE_MAX_HPA + 0.1;
-    CHECK(std::string(weather_validate(invalid_hourly).reason) == "invalid_hourly_pressure");
-    std::vector<double> short_payload{0.0, 1.0};
-    CHECK(std::string(open_meteo_derive_forecast(times, temperature, humidity, pressure,
-                                                 short_payload, fetched, derived)
-                          .reason) == "payload_shape_invalid");
-    times[2] += 1;
-    CHECK(std::string(open_meteo_derive_forecast(times, temperature, humidity, pressure, shortwave,
-                                                 fetched, derived)
-                          .reason) == "non_hourly_horizon");
 }
 
 static void test_mcp() {
@@ -14764,14 +13235,29 @@ static void test_http_surface() {
     const HttpSurface lan = HttpSurface::TrustedLan;
 
     // Trusted LAN exposes the full API — every route, either method.
-    for (const char* p : {"/",           "/index.html",     "/favicon.ico",
-                          "/locale.js",  "/scan",           "/status",
-                          "/values",     "/diag",           "/diag/clear",
-                          "/coredump",   "/coredump/clear", "/crash/dismiss",
-                          "/models",     "/set_wifi",       "/set_mqtt",
-                          "/set_ntp",    "/set_weather",    "/set_hp",
-                          "/detect",     "/ota/check",      "/ota/update",
-                          "/ota/upload", "/ota/changelog",  "/mcp"}) {
+    for (const char* p : {"/",
+                          "/index.html",
+                          "/favicon.ico",
+                          "/locale.js",
+                          "/scan",
+                          "/status",
+                          "/values",
+                          "/diag",
+                          "/diag/clear",
+                          "/coredump",
+                          "/coredump/clear",
+                          "/crash/dismiss",
+                          "/models",
+                          "/set_wifi",
+                          "/set_mqtt",
+                          "/set_ntp",
+                          "/set_hp",
+                          "/detect",
+                          "/ota/check",
+                          "/ota/update",
+                          "/ota/upload",
+                          "/ota/changelog",
+                          "/mcp"}) {
         CHECK(http_surface_serves(lan, p, false));
         CHECK(http_surface_serves(lan, p, true));
     }
@@ -15830,6 +14316,10 @@ static void test_history() {
         CHECK(n == 2);
         CHECK(runs[0][0] == 1 && runs[0][1] == 2);
         CHECK(runs[1][0] == 5 && runs[1][1] == 1); // a NO_READING breaks a held run, not joins it
+        uint16_t limited[2][2] = {{0, 0}, {42, 42}};
+        CHECK(history_held_runs(a, 6, limited, 1) == 1);
+        CHECK(limited[0][0] == 1 && limited[0][1] == 2);
+        CHECK(limited[1][0] == 42 && limited[1][1] == 42);
         // Boundaries: a run that starts at 0 and one that runs to the end.
         const HistorySample b[] = {HISTORY_HELD_OVER, HISTORY_HELD_OVER};
         CHECK(history_held_runs(b, 2, runs, 8) == 1);
@@ -26210,82 +24700,15 @@ static void test_checkup_journal_rebuild_in_place() {
 // rather than an absent one, so the tests are written against the ways a restore can be wrong while
 // looking right: adopted after a power cycle, adopted across a catalog change, or placed at the
 // wrong instant on the axis.
-static void test_room_history() {
-    using namespace daik::logic;
-    CHECK(history_room_sample(false, 23.6) == HISTORY_NO_READING);
-    CHECK(history_room_sample(true, 23.6) == 236);
-    CHECK(history_room_sample(true, 23.64) == 236);
-    CHECK(history_room_sample(true, 23.66) == 237);
-    CHECK(history_room_sample(true, -0.16) == -2);
-    CHECK(history_room_sample(true, 0.0) == 0);
-    CHECK(history_room_sample(true, std::numeric_limits<double>::quiet_NaN()) ==
-          HISTORY_NO_READING);
-    CHECK(history_room_sample(true, std::numeric_limits<double>::infinity()) == HISTORY_NO_READING);
-    CHECK(history_room_sample(true, -3276.7) == HISTORY_NO_READING);
-    CHECK(history_room_sample(true, 3276.8) == HISTORY_NO_READING);
-    CHECK(history_room_sample(true, -3276.6) == -32766);
-    CHECK(history_room_sample(true, 3276.7) == INT16_MAX);
-
-    Config c;
-    CHECK(history_room_identity(c) == 0);
-    c.diagnostics_enabled    = true;
-    c.diagnostics_generation = 8;
-    CHECK(history_room_identity(c) == 0);
-    c.mqtt_uri = "mqtt://broker.example";
-    CHECK(history_room_identity(c) == 0);
-    c.ref_temp_topic        = "fixture/room";
-    c.ref_temp_path         = "temperature";
-    c.ref_temp_generation   = 5;
-    const uint32_t identity = history_room_identity(c);
-    CHECK(identity != 0);
-    Config renamed                         = c;
-    renamed.ref_temp_name                  = "Example sensor";
-    renamed.ref_temp_fixed_setpoint_tenths = 215;
-    renamed.ref_temp_setpoint_topic        = "fixture/target";
-    renamed.ref_temp_setpoint_path         = "target";
-    renamed.ref_temp_enabled_path          = "enabled";
-    renamed.ref_temp_hvac_mode_path        = "mode";
-    CHECK(history_room_identity(renamed) == identity);
-    auto   changed = [&](const Config& other) { CHECK(history_room_identity(other) != identity); };
-    Config other   = c;
-    other.ref_temp_generation++;
-    changed(other);
-    other = c;
-    other.diagnostics_generation++;
-    changed(other);
-    other = c;
-    other.mqtt_uri += "2";
-    changed(other);
-    other = c;
-    other.ref_temp_topic += "2";
-    changed(other);
-    other = c;
-    other.ref_temp_path += "2";
-    changed(other);
-    other                     = c;
-    other.ref_temp_time_topic = "fixture/time";
-    changed(other);
-    other                    = c;
-    other.ref_temp_time_path = "time";
-    changed(other);
-    Config explicit_time_topic              = other;
-    explicit_time_topic.ref_temp_time_topic = explicit_time_topic.ref_temp_topic;
-    CHECK(history_room_identity(explicit_time_topic) == history_room_identity(other));
-    other = c;
-    other.ref_temp_max_age_s++;
-    changed(other);
-    other                     = c;
-    other.diagnostics_enabled = false;
-    CHECK(history_room_identity(other) == identity);
-    other.diagnostics_generation = 0;
-    CHECK(history_room_identity(other) == 0);
-
+static void test_retired_room_journal_record() {
+    using namespace logic;
+    constexpr uint32_t   identity = 135u;
     HistoryJournalHeader h{};
     h.magic       = HISTORY_JOURNAL_MAGIC;
     h.version     = HISTORY_JOURNAL_VERSION;
-    h.source      = static_cast<uint8_t>(HistoryJournalSource::Room);
+    h.source      = static_cast<uint8_t>(HistoryJournalSource::RetiredRoom);
     h.flags       = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
-    h.catalog_fp  = HISTORY_ROOM_SCHEMA;
+    h.catalog_fp  = 0x52544d31u; // historical "RTM1"
     h.commit      = HISTORY_JOURNAL_COMMITTED;
     h.value_count = 1;
     h.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
@@ -26294,14 +24717,12 @@ static void test_room_history() {
     h.dt_s        = HISTORY_DT_S;
     h.rings[0] = h.rings[1] = h.rings[2] = 1;
     history_journal_set_scope(h, identity);
-    CHECK(history_journal_room_header_structural_matches(h));
-    CHECK(history_journal_room_header_matches(h, identity));
-    CHECK(!history_journal_room_header_matches(h, identity ^ 1u));
-    CHECK(!history_journal_room_header_matches(h, 0));
+    CHECK(history_journal_retired_room_header_matches(h));
+    CHECK(!history_journal_header_matches(h, h.catalog_fp, 1, HISTORY_DT_S));
     CHECK(!history_journal_trend_header_structural_matches(h));
     CHECK(!history_journal_manifest_header_matches(h));
     auto rejects = [&](HistoryJournalHeader bad) {
-        CHECK(!history_journal_room_header_structural_matches(bad));
+        CHECK(!history_journal_retired_room_header_matches(bad));
     };
     auto bad   = h;
     bad.source = 3;
@@ -26319,8 +24740,7 @@ static void test_room_history() {
     }
     bad = h;
     bad.catalog_fp ^= 1u;
-    CHECK(history_journal_room_header_structural_matches(bad));
-    CHECK(!history_journal_room_header_matches(bad, identity));
+    CHECK(history_journal_retired_room_header_matches(bad));
     bad.catalog_fp = 0;
     rejects(bad);
     bad             = h;
@@ -26421,7 +24841,7 @@ static void test_history_persist() {
     CHECK(history_fp_u32(CONFIG_CRC32_INIT, 1) != history_fp_u32(CONFIG_CRC32_INIT, 256));
 
     // --- the official 8 MB append journal -------------------------------------------------------
-    CHECK(HISTORY_FLASH_TOTAL_RINGS == 80);
+    CHECK(HISTORY_FLASH_TOTAL_RINGS == 79);
     CHECK(HISTORY_FLASH_PARTITION_BYTES == 4u * 1024u * 1024u);
     CHECK(HISTORY_FLASH_ERASE_BYTES == 4096);
     CHECK(HISTORY_JOURNAL_HEADER_BYTES == 64);
@@ -26439,9 +24859,9 @@ static void test_history_persist() {
     CHECK(history_journal_source_rings(HistoryJournalSource::Env3) == 3);
     CHECK(history_journal_source_rings(HistoryJournalSource::Checkup) == 0);
     CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 5);
-    CHECK(history_journal_source_rings(HistoryJournalSource::Room) == 1);
+    CHECK(history_journal_source_rings(HistoryJournalSource::RetiredRoom) == 0);
     CHECK(static_cast<unsigned>(HistoryJournalSource::Checkup) == 3);
-    CHECK(static_cast<unsigned>(HistoryJournalSource::Room) == 4);
+    CHECK(static_cast<unsigned>(HistoryJournalSource::RetiredRoom) == 4);
     CHECK(history_journal_slot_offset(17) == 17 * 256);
     CHECK(history_journal_sector_first_slot(17) == 16);
     CHECK(history_journal_next_sector_slot(15) == 16);
@@ -26584,6 +25004,11 @@ static void test_history_persist() {
     CHECK(!history_journal_header_matches(jh, fp)); // body alone is never committed
     jh.commit = HISTORY_JOURNAL_COMMITTED;
     CHECK(history_journal_header_matches(jh, fp));
+    for (size_t source = 0; source < 3; ++source) {
+        HistoryJournalHeader wrong_layout = jh;
+        ++wrong_layout.rings[source];
+        CHECK(!history_journal_header_matches(wrong_layout, fp));
+    }
     CHECK(jh.crc == history_journal_crc(jh, journal_values, TREND_COUNT));
     journal_values[7]++;
     CHECK(jh.crc != history_journal_crc(jh, journal_values, TREND_COUNT));
@@ -26611,6 +25036,10 @@ static void test_history_persist() {
     CHECK(!history_journal_header_matches_scoped(mh, fp, hub_a ^ 1u));
     CHECK(history_journal_header_matches_scoped_layout(
         mh, fp, HistoryJournalSource::Modbus)); // old targets still advance the physical head
+    HistoryJournalHeader wrong_homehub_layout = mh;
+    --wrong_homehub_layout.rings[1];
+    CHECK(!history_journal_header_matches_scoped_layout(wrong_homehub_layout, fp,
+                                                        HistoryJournalSource::Modbus));
     CHECK(!history_journal_header_matches(mh, fp));
     mh.flags = 0;
     CHECK(!history_journal_header_matches_scoped(mh, fp, hub_a));
@@ -27021,7 +25450,7 @@ static void test_history_persist() {
     CHECK(history_restore_next_source_ring(kModbusFirst - 1) == kModbusFirst);
     CHECK(history_restore_next_source_ring(kModbusFirst) == kEnv3First);
     CHECK(history_restore_next_source_ring(kEnv3First - 1) == kEnv3First);
-    CHECK(history_restore_next_source_ring(kEnv3First) == HISTORY_FLASH_TOTAL_RINGS - 1);
+    CHECK(history_restore_next_source_ring(kEnv3First) == HISTORY_FLASH_TOTAL_RINGS);
     CHECK(history_restore_next_source_ring(HISTORY_FLASH_TOTAL_RINGS - 1) ==
           HISTORY_FLASH_TOTAL_RINGS);
     for (size_t ring = 0; ring < HISTORY_FLASH_TOTAL_RINGS; ++ring) {
@@ -27035,7 +25464,7 @@ static void test_history_persist() {
             ring = history_restore_next_source_ring(ring);
             steps++;
         }
-        CHECK(ring == HISTORY_FLASH_TOTAL_RINGS && steps == 4);
+        CHECK(ring == HISTORY_FLASH_TOTAL_RINGS && steps == 3);
     }
 
     // --- the splice -----------------------------------------------------------------------------
@@ -27186,10 +25615,8 @@ static void test_history_identity() {
         CHECK(same([](Config& c) { c.circulation_name = "DHW circulation"; }));
         CHECK(same([](Config& c) { c.mqtt_uri = "mqtts://other-broker.local:8883"; }));
         CHECK(same([](Config& c) { c.mqtt_base = "daikin-altherma-esp32-bench"; }));
-        CHECK(same([](Config& c) { c.ref_temp_topic = "zigbee2mqtt/room"; }));
         CHECK(same([](Config& c) { c.profile = "generic"; }));
         CHECK(same([](Config& c) { c.mb_host = "homehub.local"; }));
-        CHECK(same([](Config& c) { c.weather_enabled = true; }));
     }
     // Zero means "no witness": pre-opt-in (`diagnostics_generation == 0`), or not configured.
     // Pausing (`diagnostics_enabled == false`) at a non-zero generation preserves identity.
@@ -35376,6 +33803,7 @@ static void test_hourly_wire_and_population() {
     p.spread                      = {10000, 10000, 10000};
     p.flow                        = {10000, 10000, 10000};
     p.command                     = {40450, 40450, 40450};
+    p.flow_min_evidence           = hydronic_minimum_slot(p.last_accepted_unix_us);
     CHECK(hydronic_hourly_valid(p, bucket));
     CHECK(HYDRONIC_PAYLOAD_BYTES == 124 && HYDRONIC_WORDS == 62);
     CHECK(HYDRONIC_PAYLOAD_BYTES <= HISTORY_JOURNAL_PAYLOAD_BYTES);
@@ -35385,22 +33813,36 @@ static void test_hourly_wire_and_population() {
 
     std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES + 1> bytes;
     bytes.fill(0xa5);
-    hydronic_encode(p, bytes.data());
+    HistoryJournalHeader h{};
+    h.bucket = bucket;
+    std::memset(h.pad, 0xff, sizeof(h.pad));
+    hydronic_encode(p, bytes.data(), h);
     CHECK(bytes[0] == 1 && bytes[1] == 2 && bytes[2] == 3 && bytes[3] == 4);
     CHECK(bytes[122] == HYDRONIC_DUR_FIRST && bytes[123] == 0);
+    CHECK(h.pad[7] == 0xff && h.pad[8] == 1 && h.pad[9] == 0 && h.pad[10] == 0xff);
     CHECK(bytes[HYDRONIC_PAYLOAD_BYTES] == 0xa5);
     HydronicHourlyPayload decoded;
-    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
     CHECK(decoded.samples == 1 && decoded.command_samples == 1);
     CHECK(decoded.duration_edges == HYDRONIC_DUR_FIRST);
     CHECK(decoded.command.sum_milli == 40450 && decoded.first_accepted_unix_us == p.last_unix_us);
-    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, bucket, decoded));
-    CHECK(!hydronic_decode(nullptr, HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
-    bytes[HYDRONIC_PAYLOAD_BYTES - 1] = 1;
-    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
-    bytes[HYDRONIC_PAYLOAD_BYTES - 1] = 0;
-    bytes[122]                        = 0x80;
-    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(decoded.flow_min_evidence == 1);
+    h.pad[8] = h.pad[9] = 0xff;
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    CHECK(decoded.flow.min_milli == 10000 &&
+          decoded.flow_min_evidence == HYDRONIC_MINIMUM_LOCATION_MISSING);
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, h, decoded));
+    CHECK(!hydronic_decode(nullptr, HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    h.pad[8] = 1;
+    h.pad[9] = 1; // a claimed bin after the last admitted sample
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    h.pad[9] = 0x80; // a reserved bit in a nonlegacy marker
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    h.pad[8] = h.pad[9] = 0;
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    h.pad[8]   = 1;
+    bytes[122] = 0x80;
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
 
     auto q          = p;
     q.first_unix_us = p.last_unix_us;
@@ -35413,8 +33855,8 @@ static void test_hourly_wire_and_population() {
     q.command                                          = {};
     q.limitations                                      = HydronicCommandUnavailable;
     CHECK(hydronic_hourly_valid(q, bucket));
-    hydronic_encode(q, bytes.data());
-    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    hydronic_encode(q, bytes.data(), h);
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
     CHECK(decoded.spread.sum_milli == -500 && decoded.spread.min_milli == -500);
     auto merged = p;
     CHECK(hydronic_hourly_merge(merged, q));
@@ -35435,20 +33877,20 @@ static void test_hourly_wire_and_population() {
     duplicate.duration_edges = HYDRONIC_DUR_BOTH;
     CHECK(hydronic_hourly_valid(overlap, bucket) && hydronic_hourly_valid(duplicate, bucket));
     std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES> original{}, preserved{};
-    hydronic_encode(p, original.data());
+    hydronic_encode(p, original.data(), h);
     for (const auto& conflicting : {overlap, duplicate}) {
         auto untouched = p;
         CHECK(!hydronic_hourly_merge(untouched, conflicting));
-        hydronic_encode(untouched, preserved.data());
-        CHECK(original == preserved);
+        hydronic_encode(untouched, preserved.data(), h);
+        CHECK(original == preserved && untouched.flow_min_evidence == p.flow_min_evidence);
     }
     auto timed_edge = p;
     // A hole leaves one spare tick in the span even though both fragments own the shared tick.
     timed_edge.duration_edges = HYDRONIC_DUR_BOTH;
     CHECK(hydronic_hourly_valid(timed_edge, bucket));
-    hydronic_encode(timed_edge, original.data());
+    hydronic_encode(timed_edge, original.data(), h);
     CHECK(!hydronic_hourly_merge(timed_edge, q));
-    hydronic_encode(timed_edge, preserved.data());
+    hydronic_encode(timed_edge, preserved.data(), h);
     CHECK(original == preserved);
     auto point          = p;
     point.first_unix_us = point.last_unix_us;
@@ -35459,6 +33901,26 @@ static void test_hourly_wire_and_population() {
     CHECK(hydronic_hourly_merge(point_merge, point));
     CHECK(point_merge.samples == 2 && point_merge.observed_us == SECOND &&
           point_merge.duration_edges == HYDRONIC_DUR_FIRST);
+    auto later = point;
+    later.first_unix_us += 600 * SECOND;
+    later.last_unix_us = later.first_accepted_unix_us = later.last_accepted_unix_us =
+        later.first_unix_us;
+    later.flow_min_evidence = hydronic_minimum_slot(later.first_unix_us);
+    CHECK(later.flow_min_evidence == 4 && hydronic_hourly_valid(later, bucket));
+    auto tie = point;
+    CHECK(hydronic_hourly_merge(tie, later) && tie.flow_min_evidence == (1 | 4));
+    tie                   = point;
+    tie.flow_min_evidence = HYDRONIC_MINIMUM_LOCATION_MISSING;
+    CHECK(hydronic_hourly_merge(tie, later));
+    CHECK(tie.flow_min_evidence == (HYDRONIC_MINIMUM_LOCATION_MISSING | 4));
+    later.flow              = {9000, 9000, 9000};
+    auto lower              = point;
+    lower.flow_min_evidence = HYDRONIC_MINIMUM_LOCATION_MISSING;
+    CHECK(hydronic_hourly_merge(lower, later) && lower.flow_min_evidence == 4 &&
+          lower.flow.min_milli == 9000);
+    CHECK(hydronic_minimum_slot(-1) == 0 && hydronic_minimum_slot(300 * SECOND - 1) == 1 &&
+          hydronic_minimum_slot(300 * SECOND) == 2 &&
+          hydronic_minimum_slot(OBSERVATION_HOUR_US - 1) == (1 << 11));
     auto one_tick           = point;
     one_tick.observed_us    = 1;
     one_tick.duration_edges = HYDRONIC_DUR_BOTH;
@@ -35467,9 +33929,9 @@ static void test_hourly_wire_and_population() {
     CHECK(!hydronic_hourly_valid(one_tick, bucket));
     auto reverse = q;
     CHECK(hydronic_hourly_merge(reverse, p));
-    hydronic_encode(reverse, original.data());
-    hydronic_encode(merged, preserved.data());
-    CHECK(original == preserved);
+    hydronic_encode(reverse, original.data(), h);
+    hydronic_encode(merged, preserved.data(), h);
+    CHECK(original == preserved && reverse.flow_min_evidence == merged.flow_min_evidence);
     auto wrong = q;
     wrong.identity.schema_fp++;
     const auto sum_before = merged.flow.sum_milli;
@@ -35502,13 +33964,16 @@ static void test_hourly_wire_and_population() {
     fence.kind          = HydronicHourlyKind::Fence;
     fence.first_unix_us = fence.last_unix_us = p.last_unix_us;
     CHECK(hydronic_hourly_valid(fence, bucket));
-    hydronic_encode(fence, bytes.data());
-    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    hydronic_encode(fence, bytes.data(), h);
+    CHECK(h.pad[8] == 0 && h.pad[9] == 0);
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
     CHECK(decoded.first_accepted_unix_us == -1 && decoded.last_accepted_unix_us == -1);
+    h.pad[8] = h.pad[9] = 0xff;
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    CHECK(decoded.kind == HydronicHourlyKind::Fence && !decoded.flow_min_evidence);
     CHECK(hydronic_signed64(UINT64_MAX) == -1 && hydronic_signed64(1ULL << 63) == INT64_MIN);
     CHECK(hydronic_signed32(UINT32_MAX) == -1 && hydronic_signed32(1u << 31) == INT32_MIN);
 
-    HistoryJournalHeader h{};
     h.magic       = HISTORY_JOURNAL_MAGIC;
     h.version     = HISTORY_JOURNAL_VERSION;
     h.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
@@ -35523,6 +33988,9 @@ static void test_hourly_wire_and_population() {
     h.rings[1]    = HOMEHUB_HISTORY_COUNT;
     h.rings[2]    = ENV3_HISTORY_COUNT;
     CHECK(hydronic_header_recognizable(h) && hydronic_header_matches(h));
+    h.value_count -= 1;
+    CHECK(hydronic_header_recognizable(h) && !hydronic_header_matches(h));
+    h.value_count = HYDRONIC_WORDS;
     CHECK(hydronic_append_owned(h));
     CHECK(!observation_append_owned(h));
     h.catalog_fp = 3490136859u; // preceding H1 fingerprint without explicit duration edges
@@ -36446,16 +34914,11 @@ int main() {
     test_config_store();
     test_config_blob_strings_fit();
     test_env3();
-    test_reference_binding_epochs();
-    test_reference_temperature_config();
+    test_mqtt_source();
+    test_checkup_outdoor_evidence();
     test_circulation_source();
     test_gas_comparison();
     test_working_figure();
-    test_heating_curve_bins();
-    test_heating_curve_diagnosis();
-    test_weather_config_snapshot();
-    test_open_meteo_epoch_seconds();
-    test_weather_forecast_contract();
     test_mcp();
     test_net_link();
     test_http_surface();
@@ -36526,9 +34989,7 @@ int main() {
     test_altherma4();
     test_ota_quiesce();
     test_ota_headroom();
-    test_weather_fetch_headroom();
-    test_http_values_wait();
-    test_values_tls_exclusion();
+    test_mqtt_ingress_bounds();
     test_http_deadline();
     test_ota_transport();
     test_heartbeat();
@@ -36574,7 +35035,7 @@ int main() {
     test_checkup_persist();
     test_fault_trace();
     test_checkup_decoder_identity();
-    test_room_history();
+    test_retired_room_journal_record();
     test_checkup_journal_revisions();
     test_checkup_planned_restart_seal();
     test_checkup_journal_rebuild_in_place();

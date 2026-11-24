@@ -543,6 +543,13 @@ function wireFaultChart(host) {
 
 function wireTrendScrub(gv) {
   gv.addEventListener("click", (e) => {
+    const minimum = e.target.closest("[data-flow-min-show]");
+    if (minimum) {
+      e.stopPropagation();
+      const plot = minimum.closest(".vhist")?.querySelector("[data-hist=flow]");
+      if (plot) selectFlowMinimum(plot);
+      return;
+    }
     const button = e.target.closest("[data-hist-series]");
     if (!button) return;
     e.stopPropagation();
@@ -562,8 +569,7 @@ function wireTrendScrub(gv) {
     const view = scrubView(plot);
     const i = scrubIndex(plot, e.clientX, view);
     if (i < 0 || plot.closest(".vitem:not(.open)")) return;
-    // A forecast's visible geometry is frozen during the drag, even when a poll advances now.
-    S.trendPointer = { plot, id: e.pointerId, view: view.forecast ? view : null };
+    S.trendPointer = { plot, id: e.pointerId, x: e.clientX, y: e.clientY };
     S.scrub = plot.dataset.hist;
     scrubArm(plot);
     try { plot.setPointerCapture(e.pointerId); } catch { /* capture is an optimisation, not a requirement */ }
@@ -599,9 +605,11 @@ function wireTrendScrub(gv) {
       // detached node whose bounding box is all zeroes.
       const label = plot.dataset.hist;
       const i = e.type === "pointerup" && !plot.closest("[hidden], [inert]") ? scrubIndex(plot, e.clientX) : -1;
-      const view = S.trendPointer.view || undefined;
+      const pointer = S.trendPointer;
+      const low = label === "flow" && i >= 0 && Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) <= 8 &&
+        selectFlowMinimum(plot, e.clientX, e.clientY, e.pointerType === "touch" ? 18 : 4);
       scrubEnd(plot);
-      if (i >= 0) histPinToggle(label, i, plot.dataset.source || "", view);
+      if (i >= 0 && !low) histPinToggle(label, i, plot.dataset.source || "");
     });
   }
   // Keyboard: the plot is focusable, so arrow keys step through samples and the tooltip is the
@@ -660,10 +668,8 @@ function wireRestOfApp() {
     if (!act) return;
     if (act.dataset.act === "board") openBoard();
     else if (act.dataset.act === "ota") checkFirmwareUpdate();
-    else if (act.dataset.act === "ref-temp") openRefTemp();
     else if (act.dataset.act === "circulation") openCirculation();
     else if (act.dataset.act === "gas-comparison") openGasComparison();
-    else if (act.dataset.act === "weather") openWeather();
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
@@ -853,121 +859,6 @@ function wireRestOfApp() {
     $("mqBroker").classList.remove("invalid"); $("mqError").hidden = true;
   });
 
-  $("rtCancel").onclick = closeRefTemp;
-  $("refTempBackdrop").onclick = closeRefTemp;
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !$("refTempModal").hidden) closeRefTemp();
-  });
-  for (const id of ["rtName", "rtTemperatureSource", "rtTarget", "rtTimestampSource", "rtMaxAge"])
-    $(id).addEventListener("input", () => {
-      $(id).classList.remove("invalid"); $("rtError").hidden = true;
-    });
-  const refTempInput = () => {
-    const temperature = parseRefSource($("rtTemperatureSource").value);
-    const targetFixed = parseRefFixedTarget($("rtTarget").value);
-    const targetSource = targetFixed === null ? parseRefSource($("rtTarget").value) : null;
-    const timestamp = parseRefSource($("rtTimestampSource").value);
-    const input = refTempFormPayload();
-    const bad = (id, msg) => {
-      $(id).classList.add("invalid");
-      $("rtError").textContent = msg;
-      $("rtError").hidden = false;
-      toast(msg, "err");
-      return null;
-    };
-    if (!temperature) return bad("rtTemperatureSource", t("ref.err_temperature_source"));
-    if (targetFixed === null && !targetSource)
-      return bad("rtTarget", t("ref.err_target"));
-    if (targetFixed !== null && (targetFixed < 5 || targetFixed > 35))
-      return bad("rtTarget", t("ref.err_target"));
-    if ($("rtTimestampSource").value && !timestamp)
-      return bad("rtTimestampSource", t("ref.err_timestamp_source"));
-    if (input.topic && (!Number.isInteger(input.max_age_s) || input.max_age_s < 10 || input.max_age_s > 3600))
-      return bad("rtMaxAge", t("ref.err_max_age"));
-    return input;
-  };
-  const showRefTempRequestError = (msg) => {
-    const field = /maximum age/i.test(msg) ? "rtMaxAge" :
-      /setpoint|target/i.test(msg) ? "rtTarget" : /timestamp/i.test(msg) ? "rtTimestampSource" :
-      /JSON path|path is/i.test(msg) ? "rtTemperatureSource" :
-      /name/i.test(msg) ? "rtName" : /topic|mapping/i.test(msg) ? "rtTemperatureSource" : null;
-    if (field) $(field).classList.add("invalid");
-    $("rtError").textContent = msg;
-    $("rtError").hidden = false;
-    toast(msg, "err");
-  };
-  // Save records the mapping immediately. MQTT payload/path/freshness validation belongs to the
-  // durable subscriber, where low-frequency and on-change sensors can answer on their own cadence.
-  // Delete and Save remain mutually exclusive while the one request is in flight.
-  const setRefTempActionBusy = (button, on, label) => {
-    setBusy(button, on, label);
-    if (on) {
-      $("rtBtn").disabled = true;
-      $("rtDeleteBtn").disabled = true;
-    } else {
-      $("rtBtn").disabled = false;
-      $("rtDeleteBtn").disabled = !S.status?.reference_temperature?.configured;
-    }
-  };
-  $("refTempForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const input = refTempInput();
-    if (!input) return;
-    if (S.busy) { toast(t("toast.applying"), "info"); return; }
-    S.busy = true;
-    setRefTempActionBusy("rtBtn", true, "btn.saving");
-    const idle = () => { S.busy = false; setRefTempActionBusy("rtBtn", false); };
-    let r;
-    try {
-      r = await post("/set_ref_temp", input);
-    } catch {
-      idle(); showRefTempRequestError(t("toast.unreachable")); return;
-    }
-    if (!r.ok) {
-      const msg = await errorOf(r, t("toast.rejected"));
-      idle(); showRefTempRequestError(msg); return;
-    }
-    const res = await r.json().catch(() => ({}));
-    idle(); closeRefTemp();
-    const notice = res.room_evidence_reset === true ? "ref.evidence_reset"
-      : res.saved === false ? "toast.no_changes" : "ref.saved";
-    toast(t(notice), res.saved === false ? "info" : "ok");
-    await refreshStatus();
-  });
-
-  // Delete is the explicit Off path. It does not depend on what is currently typed into the form:
-  // posting the empty mapping removes the saved subscription and makes mqtt_reference_reconfigure
-  // clear the captured runtime value as the binding changes.
-  $("rtDeleteBtn").onclick = async () => {
-    if (S.busy) { toast(t("toast.applying"), "info"); return; }
-    if (!S.status?.reference_temperature?.configured) return;
-    const status = S.status;
-    S.busy = true;
-    setRefTempActionBusy("rtDeleteBtn", true, "ref.deleting");
-    const idle = () => { S.busy = false; setRefTempActionBusy("rtDeleteBtn", false); };
-    let r;
-    try {
-      r = await post("/set_ref_temp", {
-        name: "", topic: "", temperature_path: "", setpoint_topic: "", setpoint_path: "",
-        fixed_setpoint_c: 0, timestamp_topic: "", timestamp_path: "",
-        enabled_path: "", hvac_mode_path: "",
-        max_age_s: 600,
-      });
-    } catch {
-      idle(); showRefTempRequestError(t("toast.unreachable")); return;
-    }
-    if (!r.ok) {
-      const msg = await errorOf(r, t("toast.rejected"));
-      idle(); showRefTempRequestError(msg); return;
-    }
-    // Retire this mapping before reopening, unless a newer status already owns the source.
-    if (S.status === status && !S.imageReloading)
-      status.reference_temperature = { configured: false, max_age_s: 600 };
-    idle(); closeRefTemp();
-    toast(t("ref.deleted"), "ok");
-    await refreshStatus();
-  };
-
   $("circCancel").onclick = closeCirculation;
   $("circulationBackdrop").onclick = closeCirculation;
   document.addEventListener("keydown", (e) => {
@@ -986,9 +877,9 @@ function wireRestOfApp() {
       toast(msg, "err");
       return null;
     };
-    if (!input.topic || !validRefTopic(input.topic)) return bad("circTopic", t("circ.err_topic"));
-    if (!validRefPath(input.power_path)) return bad("circPowerPath", t("circ.err_power_path"));
-    if (!validRefPath(input.timestamp_path)) return bad("circTimePath", t("circ.err_time_path"));
+    if (!input.topic || !validCirculationTopic(input.topic)) return bad("circTopic", t("circ.err_topic"));
+    if (!validCirculationPath(input.power_path)) return bad("circPowerPath", t("circ.err_power_path"));
+    if (!validCirculationPath(input.timestamp_path)) return bad("circTimePath", t("circ.err_time_path"));
     if (!Number.isInteger(input.max_age_s) || input.max_age_s < 10 || input.max_age_s > 3600)
       return bad("circMaxAge", t("circ.err_max_age"));
     if (!Number.isInteger(input.confirm_s) || input.confirm_s < 1 || input.confirm_s > 600)
@@ -1227,64 +1118,6 @@ function wireRestOfApp() {
       close: closeNtp,
       then: renderApp,
       busyMsg: t("toast.saving_ntp"),
-    });
-  });
-
-  ["wxLatitude", "wxLongitude"].forEach((id) => {
-    $(id).addEventListener("input", clearWeatherError);
-    $(id).addEventListener("paste", pasteWeatherCoordinates);
-  });
-  $("wxCancel").onclick = closeWeather;
-  $("weatherBackdrop").onclick = closeWeather;
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("weatherModal").hidden) closeWeather(); });
-  $("weatherForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    let latitude = $("wxLatitude").value.trim();
-    let longitude = $("wxLongitude").value.trim();
-    const pastedPair = parseWeatherCoordinatePair(latitude) || parseWeatherCoordinatePair(longitude);
-    if (pastedPair) {
-      latitude = pastedPair.latitude;
-      longitude = pastedPair.longitude;
-      $("wxLatitude").value = latitude;
-      $("wxLongitude").value = longitude;
-    }
-    const disabled = !latitude && !longitude;
-    if (!disabled && (!latitude || !longitude)) {
-      if (!latitude) $("wxLatitude").classList.add("invalid");
-      if (!longitude) $("wxLongitude").classList.add("invalid");
-      $("wxError").textContent = t("wx.err_both");
-      $("wxError").hidden = false;
-      return;
-    }
-    const normalizedLatitude = disabled ? "" : normalizeWeatherCoordinate(latitude, -90, 90);
-    if (!disabled && normalizedLatitude == null) {
-      $("wxLatitude").classList.add("invalid");
-      $("wxError").textContent = t("wx.err_latitude");
-      $("wxError").hidden = false;
-      return;
-    }
-    const normalizedLongitude = disabled ? "" : normalizeWeatherCoordinate(longitude, -180, 180);
-    if (!disabled && normalizedLongitude == null) {
-      $("wxLongitude").classList.add("invalid");
-      $("wxError").textContent = t("wx.err_longitude");
-      $("wxError").hidden = false;
-      return;
-    }
-    latitude = normalizedLatitude;
-    longitude = normalizedLongitude;
-    $("wxLatitude").value = latitude;
-    $("wxLongitude").value = longitude;
-    saveReboot("/set_weather", { latitude, longitude }, {
-      btn: "wxBtn",
-      showError: (msg) => {
-        $("wxLatitude").classList.add("invalid");
-        $("wxLongitude").classList.add("invalid");
-        $("wxError").textContent = msg;
-        $("wxError").hidden = false;
-      },
-      close: closeWeather,
-      then: renderApp,
-      busyMsg: t("wx.saving"),
     });
   });
 

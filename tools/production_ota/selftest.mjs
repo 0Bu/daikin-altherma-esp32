@@ -37,9 +37,6 @@ const files = [
   "main/http_ota.cpp",
   "main/http_config.cpp",
   "main/http_status.cpp",
-  "main/weather_forecast.cpp",
-  "main/weather_forecast.hpp",
-  "main/logic/weather_forecast.hpp",
   "main/stack_watch.hpp",
   "main/logic/heartbeat.hpp",
   "main/mqtt_ha.cpp",
@@ -213,6 +210,7 @@ const supplementalContract = () => {
   assert.match(offer, /generation\s*!=\s*expected_generation/);
   const stress = section(gate, "def stress_board(", "\ndef verify_retained_x10a(");
   const pressureIdentity = section(stress, "    def validate_pressure_identity(", "\n    pinned_endpoint = ");
+  assert.match(pressureIdentity, /require_status_schema\(status, schema,/);
   assert.match(pressureIdentity, /if pin_weather_config:\s*\n\s+production_weather_configured\(status, require_weather\)/);
   const statusReads = Array.from(stress.matchAll(/^\s*(\w+) = request_status_deadline\(/gm), match => match[1]);
   for (const sample of new Set(statusReads)) {
@@ -313,12 +311,13 @@ const supplementalContract = () => {
   const productionStress = section(production, "production_evidence = stress_board(",
     '\n    journal_checkpoint("production_stress_passed"');
   assert.match(productionStress, /\brequire_x10a=True,/);
-  assert.match(productionStress, /\brequire_weather=weather_configured,/);
+  assert.match(productionStress, /\brequire_weather=target_weather_configured,/);
   assert.match(productionStress, /\bpin_weather_config=True,/);
+  assert.match(productionStress, /\bexpected_status_schema=target_schema,/);
   assert.match(productionStress, /\bexpected_app_sha256=args\.expected_app_sha256,/);
   assert.match(productionStress, /\*\*official_feed_override\(args\.manifest_url\)/);
   assert.match(production,
-    /production_weather_configured\(final_status, weather_configured\)[\s\S]{0,120}?verify_retained_x10a\(final_status\)/);
+    /production_weather_configured\(final_status, target_weather_configured\)[\s\S]{0,120}?verify_retained_x10a\(final_status\)/);
 };
 
 const runCentral = () => spawnSync(process.execPath, [centralContract], {
@@ -647,10 +646,13 @@ try {
         'if status.get("mqtt", {}).get("connected") is not True:',
         "if False:",
       )],
+    ["new firmware still requires the retired Weather task", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        "require_weather = require_weather and schema == 1", "require_weather = require_weather")],
     ["production promotion ignores active Weather TLS", () =>
       replaceOnce(
         "scripts/production-ota-gate.py",
-        'if weather["fetching"] is not False:',
+        'if legacy_weather and weather["fetching"] is not False:',
         "if False:",
       )],
     ["production promotion resets its absolute readiness deadline", () =>
@@ -701,10 +703,6 @@ try {
       replaceNth("scripts/production-ota-gate.py", "request_weather_refresh(", "ignore_weather_refresh(", 2)],
     ["the weather refresh becomes persistent", () =>
       replaceOnce("scripts/production-ota-gate.py", '"refresh": True', '"refresh": False')],
-    ["firmware Weather refresh ignores diagnostics consent", () =>
-      replaceOnce("main/http_config.cpp", "if (!c.diagnostics_enabled)", "if (false)")],
-    ["firmware Weather refresh acknowledges a missing task", () =>
-      replaceOnce("main/http_config.cpp", "if (!weather_forecast_request_refresh(refresh_token))", "if (false)")],
     ["Weather HIL accepts a foreign success edge", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'refresh_fields["refresh_completed_token"] == weather_refresh_token',
@@ -741,10 +739,6 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         ">= POST_STRESS_MIN_LARGEST_BLOCK",
         ">= 0")],
-    ["Weather firmware restores the permanently blocking 24 KiB contiguous floor", () =>
-      replaceOnce("main/logic/weather_forecast.hpp",
-        "WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 20 * 1024",
-        "WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES = 24 * 1024")],
     ["Weather HIL accepts a second post-stress headroom refusal", () =>
       replaceOnce("scripts/production-ota-gate.py",
         'refresh_fields["refresh_success_token"] == weather_refresh_token',
@@ -765,41 +759,8 @@ try {
       replaceOnce("scripts/production-ota-gate.py",
         "timeout=min(remaining, 1)",
         "timeout=1")],
-    ["Weather HIL success is not tied to the real update commit", () =>
-      replaceOnce("main/weather_forecast.cpp", "refresh_attempt.finish(updated);",
-        "refresh_attempt.finish(ok);")],
-    ["OTA preemption fail-completes the exact Weather refresh token", () =>
-      replaceOnce("main/weather_forecast.cpp", "refresh_attempt.defer();",
-        "refresh_attempt.finish(false);")],
-    ["Weather TLS completion is not stack-sampled", () =>
-      replaceNth("main/weather_forecast.cpp", "stack_watch_sample(StackWatch::Weather);",
-        "stack_watch_sample_bypassed(StackWatch::Weather);", 2)],
-    ["Weather loses its dedicated stack-watch slot", () =>
-      replaceOnce("main/stack_watch.hpp", /^([ \t]*)Weather([ \t]*,)/m, "$1Climate$2")],
-    ["Weather stack evidence is omitted from always-on status", () =>
-      replaceOnce("main/http_status.cpp", 'j += ",\\\"weather\\\":";', 'j += ",\\\"ignored_weather_stack\\\":";')],
     ["mandatory Weather stress no longer requires Weather stack evidence", () =>
       replaceOnce("scripts/production-ota-gate.py", 'required_tasks.add("weather")', 'required_tasks.add("poll")')],
-    ["Weather refresh leaves a duplicate-cycle wake queued", () =>
-      replaceOnce("main/weather_forecast.cpp",
-        "if (refresh_attempt.token != 0) ulTaskNotifyTake(pdTRUE, 0);",
-        "if (false) ulTaskNotifyTake(pdTRUE, 0);")],
-    ["Weather refresh publishes its wake after releasing the token mutex", () =>
-      replaceOnce("main/weather_forecast.cpp",
-        "        xTaskNotifyGive(task);\n    }\n    return true;",
-        "    }\n    xTaskNotifyGive(task);\n    return true;")],
-    ["Weather source replacement leaves an old refresh token outstanding", () =>
-      replaceOnce("main/weather_forecast.cpp",
-        "        weather_refresh_cancel_outstanding(s_refresh_requested_token, s_refresh_completed_token);",
-        "        // old refresh token left outstanding")],
-    ["Weather source cancellation is overwritten by a late success finish", () =>
-      replaceOnce("main/logic/weather_forecast.hpp", "completed_token == token", "false")],
-    ["Weather refresh POST omits its causal token", () =>
-      replaceOnce("main/http_config.cpp", "\\\"refresh_token\\\":%llu", "\\\"ignored_token\\\":%llu")],
-    ["a saved Weather location acknowledges before synchronous invalidation", () =>
-      replaceNth("main/http_config.cpp",
-        "weather_change.commit();",
-        "weather_change.commit_after_response();", 2)],
     ["pressure workers stop catching parser GateError", () =>
       replaceOnce("scripts/production-ota-gate.py", /(def probe\([\s\S]{0,1400}?)except BaseException as error:/, "$1except Exception as error:")],
     ["pressure workers discard unexpected parser failures", () =>
@@ -820,6 +781,26 @@ try {
       replaceOnce("scripts/production-ota-gate.py", 'old_version != lab["bootstrap_version"]', "False")],
     ["the bootstrap ELF identity is dropped", () =>
       replaceOnce("scripts/production-ota-gate.py", 'old_elf != lab["bootstrap_elf"]', "False")],
+    ["schema-2 release-HIL bootstrap preflight still requires retired Weather fields", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'before, bootstrap_paths, lab["persistence_canaries"]',
+        'before, lab["persistence_paths"], lab["persistence_canaries"]'), "hil-history"],
+    ["schema-2 release-HIL bootstrap rollback still requires retired Weather fields", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'rolled_back, bootstrap_paths, lab["persistence_canaries"]',
+        'rolled_back, lab["persistence_paths"], lab["persistence_canaries"]'), "hil-history"],
+    ["release-HIL accepts a changed bootstrap schema after pending-image rollback", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'require_status_schema(rolled_back, bootstrap_schema, "release-HIL bootstrap rollback")',
+        "pass"), "hil-history"],
+    ["release-HIL approves a second pending image with a changed schema", () =>
+      replaceOnce("scripts/production-ota-gate.py",
+        'require_status_schema(second_status, candidate_schema, "release-HIL pending candidate")',
+        "pass"), "hil-history"],
+    ["release-HIL checks the writer-bootstrap schema only after the regular watchdog cycle", () => {
+      const check = 'require_status_schema(bootstrap_status, bootstrap_schema, "release-HIL candidate-writer bootstrap")';
+      replaceOnce("scripts/production-ota-gate.py", check, "pass");
+      replaceOnce("scripts/production-ota-gate.py", "writer_rollback = wait_for_identity(host, mac, version, elf)",
+        "writer_rollback = wait_for_identity(host, mac, version, elf)\n        " + check);
+    }, "hil-history"],
     ["the pinned bootstrap artifact is not verified before hardware mutation", () =>
       replaceOnce(
         "scripts/production-ota-gate.py",
@@ -1088,11 +1069,14 @@ try {
     ["the production canary disables X10A", () =>
       replaceOnce("scripts/production-ota-gate.py", /(production_evidence = stress_board\([\s\S]{0,220}?)require_x10a=True,/, "$1require_x10a=False,")],
     ["the production canary skips configured Weather TLS", () =>
-      replaceOnce("scripts/production-ota-gate.py", "require_weather=weather_configured,",
+      replaceOnce("scripts/production-ota-gate.py", "require_weather=target_weather_configured,",
         "require_weather=False,"), "production-probation"],
     ["the production canary requires Weather TLS even when Weather is disabled", () =>
-      replaceOnce("scripts/production-ota-gate.py", "require_weather=weather_configured,",
+      replaceOnce("scripts/production-ota-gate.py", "require_weather=target_weather_configured,",
         "require_weather=True,"), "production-probation"],
+    ["the production canary no longer pins the accepted target status schema", () =>
+      replaceOnce("scripts/production-ota-gate.py", "expected_status_schema=target_schema,",
+        "expected_status_schema=None,"), "production-probation"],
     ["the production canary no longer pins the Weather configuration in stress samples", () =>
       replaceOnce("scripts/production-ota-gate.py", "pin_weather_config=True,",
         "pin_weather_config=False,"), "production-probation"],
@@ -1121,11 +1105,20 @@ try {
       replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(before_write, weather_configured)",
         "production_weather_configured(before_write)"), "production-probation"],
     ["production ignores a Weather configuration change across boot", () =>
-      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(returned, weather_configured)",
+      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(returned, target_weather_configured)",
         "production_weather_configured(returned)"), "production-probation"],
     ["production ignores a Weather configuration change at the final status", () =>
-      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(final_status, weather_configured)",
+      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(final_status, target_weather_configured)",
         "production_weather_configured(final_status)")],
+    ["production accepts a regressed status schema across boot", () =>
+      replaceOnce("scripts/production-ota-gate.py", "if target_schema < writer_schema:",
+        "if False:"), "production-probation"],
+    ["production accepts status schema drift immediately before its sole write", () =>
+      replaceOnce("scripts/production-ota-gate.py", 'require_status_schema(before_write, writer_schema, "production pre-write")',
+        "# removed writer schema validation"), "production-probation"],
+    ["production no longer uses the accepted target schema during probation", () =>
+      replaceOnce("scripts/production-ota-gate.py", "expected_status_schema=status_schema,",
+        "expected_status_schema=None,"), "production-probation"],
     ["raw OTA writes are no longer routed through the gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py", "direct OTA writes are forbidden; run scripts/production-ota-gate.py", "direct OTA writes are allowed")],
     ["a failed health cap no longer forces rollback", () =>

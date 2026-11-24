@@ -45,10 +45,11 @@ def main():
         root.mkdir()
         git(root, "init", "-q")
         put(root, "main/www/app.js", "tracked initial bytes\n", 0o755)
-        put(root, "main/logic/removed_dirty.hpp", "tracked deleted header\n")
         put(root, "scripts/run-browser-render-tests.sh", "#!/bin/sh\nexit 0\n", 0o755)
-        git(root, "add", "main/www/app.js", "main/logic/removed_dirty.hpp", "scripts/run-browser-render-tests.sh")
-        (root / "main/logic/removed_dirty.hpp").unlink()
+        git(root, "add", "main/www/app.js", "scripts/run-browser-render-tests.sh")
+        put(root, "test/retired_fixture.js")
+        git(root, "add", "test/retired_fixture.js")
+        (root / "test/retired_fixture.js").unlink()
         put(root, "main/www/app.js", "tracked current dirty bytes\n", 0o750)
         put(root, "tools/browser/new_runner.mjs", "new nonignored working bytes\n")
         put(root, "test/ignored.js", "synthetic ignored sentinel\n")
@@ -63,8 +64,7 @@ def main():
 
         def guard_open(name, *arguments, **keywords):
             assert os.fspath(name) not in ("secrets.env", ".env", "raw.bin", "ignored.js", "tracked_ignored.js",
-                                            "removed_dirty.hpp", "public_link.js", "linked-directory", "linked-parent",
-                                            "source-link", "target.js"), \
+                                            "public_link.js", "linked-directory", "linked-parent", "source-link", "target.js"), \
                 "an excluded sentinel or synthetic symlink target must never be opened"
             return actual_open(name, *arguments, **keywords)
 
@@ -77,7 +77,6 @@ def main():
         assert (snapshot / "tools/browser/new_runner.mjs").read_text() == "new nonignored working bytes\n"
         assert not (snapshot / ".git").exists() and not (snapshot / "unrelated").exists()
         paths = {row["path"] for row in json.loads((snapshot / "browser-source-manifest.json").read_text())["files"]}
-        assert "main/logic/removed_dirty.hpp" not in paths
         assert paths == {"main/www/app.js", "scripts/run-browser-render-tests.sh", "tools/browser/new_runner.mjs"}
         assert stat.S_IMODE(snapshot.stat().st_mode) == 0o700
         for forbidden in ("test/example.pem", "test/example.key", "test/example.elf", "test/dumps/data.js",

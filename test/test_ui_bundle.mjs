@@ -41,9 +41,8 @@ const httpConfig = fs.readFileSync(new URL("../main/http_config.cpp", import.met
 const httpStatus = fs.readFileSync(new URL("../main/http_status.cpp", import.meta.url), "utf8");
 const boardPresets = fs.readFileSync(new URL("../main/logic/board_presets.hpp", import.meta.url), "utf8");
 const mqttHa = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "utf8");
-const referenceLogic = fs.readFileSync(new URL("../main/logic/reference_temperature.hpp", import.meta.url), "utf8");
 const dialogs = [...html.matchAll(/<[^>]+class="[^"]*\bmodal-card\b[^"]*"[^>]+role="dialog"[^>]*>/g)].map((m) => m[0]);
-assert.equal(dialogs.length, 12, "every custom popup must remain identifiable as a dialog");
+assert.equal(dialogs.length, 10, "every custom popup must remain identifiable as a dialog");
 for (const dialog of dialogs)
   assert.match(dialog, /tabindex="-1"/, "popup focus must land on the dialog container, not an input");
 assert.match(app, /function openOverlay\(id\)[\s\S]*modal\.hidden = false;[\s\S]*querySelector\?\.\('\[role="dialog"\]'\)[\s\S]*focus\?\.\(\{ preventScroll: true \}\)/,
@@ -54,10 +53,10 @@ assert.match(app, /function closeOverlay\(id\)[\s\S]*hidden = true;[\s\S]*syncMo
   "all overlay close paths must also release the shared scroll lock");
 assert.doesNotMatch(app, /\b(?:confirm|alert)\s*\(/,
   "the shipped UI must use its accessible in-app decisions instead of native browser dialogs");
-for (const opener of ["openWifi", "openMqtt", "openRefTemp", "openCirculation", "openGasComparison", "openWeather", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
+for (const opener of ["openWifi", "openMqtt", "openCirculation", "openGasComparison", "openSyslog", "openNtp", "openHomehub", "openBoard", "openBug"])
   assert.match(app, new RegExp(`function ${opener}\\(\\)[\\s\\S]*?openPopup\\(\\"[^\\"]+\\"\\);`),
     `${opener} must use the no-field-autofocus popup path`);
-const gasComparisonHtml = html.slice(html.indexOf('id="gasComparisonModal"'), html.indexOf('id="weatherModal"'));
+const gasComparisonHtml = html.slice(html.indexOf('id="gasComparisonModal"'), html.indexOf('id="syslogModal"'));
 assert.match(gasComparisonHtml, /id="gcElecPrice"[\s\S]*id="gcGasPrice"[\s\S]*<select[^>]*id="gcCurrency"[\s\S]*id="gcDeleteBtn"/,
   "the gas-comparison modal must expose electricity/gas price, currency select and Clear controls");
 assert.doesNotMatch(gasComparisonHtml, /gcGasEff|fluid|glycol/i,
@@ -88,22 +87,9 @@ assert.match(app, /applyLive\(\{ mb_host: host, mb_port: port, mb_unit_id: unit 
 assert.doesNotMatch(app, /mb_mode|config_modbus_should_search/,
   "the browser bundle must carry no hidden Auto-mode contract");
 
-// One Firmware-card master opt-in owns all optional plant diagnostics. Room input and direct
-// Open-Meteo forecast are editable only in the dependent cards; board-bound ENV III remains an
-// independent sensor under Board Hardware.
-assert.match(app, /function dynamicControlCardHtml\(\)[\s\S]*t\("dyn\.state"\)[\s\S]*t\("dyn\.room_source"\)[\s\S]*t\("dyn\.weather"\)[\s\S]*t\("dyn\.strategy"\)/,
-  "the diagnosis Settings card must keep all planned configuration domains together");
-assert.doesNotMatch(app, /dynamicSourceRow\("env3"/,
-  "the board-bound outdoor sensor must not remain as a separate dynamic-control setting");
-// The card must NOT restate the Firmware toggle as a second mode row, and must not carry a
-// constant "read-only" row: with the write path deleted (legacy-294) neither can ever say anything else,
-// and a line that cannot vary is one more thing a reader has to rule out.
-assert.doesNotMatch(app, /t\("dyn\.mode"\)|t\("dyn\.safety"\)|t\("dyn\.read_only"\)|t\("dyn\.observe"\)/,
-  "the diagnosis card must carry neither a duplicate mode row nor a constant read-only row");
-// The state row must distinguish "the plant is not heating" from a fault: through the summer that
-// is the expected reading, and styling it as a warning would train the user to ignore the row.
-assert.match(app, /function dynamicStateRow\([\s\S]*"dyn\.state_waiting", cls: ""/,
-  "an idle plant must be a neutral state, not a warning");
+assert.doesNotMatch(app + html, /refTempModal|weatherModal|dynamicControlCardHtml|\/set_ref_temp|\/set_weather/,
+  "retired features must be absent from both startup and document markup");
+
 // Never resurrect the retired dynamic-LWT mode. The new control is a distinct master diagnostics
 // consent and therefore has its own id/handler/route and no actuator semantics.
 assert.doesNotMatch(app, /e32DynamicLwt|onDynamicLwtPick|set_dynamic_lwt/,
@@ -113,79 +99,10 @@ assert.match(app, /function diagnosticsRow\(diag\)[\s\S]*id="e32Diagnostics"[\s\
 assert.doesNotMatch(app,
   /Aus ist der Standard|unvollständig oder irreführend|Off is the default|incomplete or misleading/,
   "the diagnostics explainer must stay focused on what the feature enables");
-assert.match(httpConfig, /static esp_err_t set_diagnostics[\s\S]*diagnostics_next_generation[\s\S]*checkup_set_diagnostics[\s\S]*mqtt_reference_reconfigure[\s\S]*weather_forecast_reconfigure/,
+assert.match(httpConfig, /static esp_err_t set_diagnostics[\s\S]*diagnostics_next_generation[\s\S]*checkup_set_diagnostics[\s\S]*mqtt_circulation_reconfigure/,
   "the master route must start a fresh generation and reconfigure every dependent producer live");
-assert.doesNotMatch(app, /function dynamicControlCardHtml\(\)[\s\S]{0,600}?return "";/,
-  "the card itself must not invent another visibility rule");
-assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+[\s\S]{0,160}?diagnosticsEnabled \? circulationSettingsCardHtml\(\) \+ dynamicControlCardHtml\(\) : ""/,
-  "dependent plant and heating-curve cards must render only after the Firmware opt-in");
 assert.match(app, /const checkup = S\.status\?\.diagnostics\?\.enabled === true\s*\? checkupCardHtml\(checkupSourceReady\) : "";/,
   "the whole dashboard diagnosis card must share the Firmware master opt-in");
-// A current measurement and its diagnosis eligibility are separate facts. The source row stays
-// amber when the diagnosis is blocked, but the general status must still say the reading is valid.
-assert.match(app, /const diagnosis = !r\.control_eligible[\s\S]{0,180}?key: "unusable"[\s\S]{0,220}?key: "measurement_valid"[\s\S]{0,100}?cls: r\.control_eligible \? "ok" : "warn"/,
-  "a fresh ineligible source must separate valid measurement from its amber diagnosis block");
-assert.match(app, /ref\.detail\.diagnosis_label[\s\S]{0,120}?roomSourceStatusText\(status\.diagnosis\)/,
-  "the source tongue must render diagnosis usability under its own label");
-// The blocked line must name the room source's OWN reason, from one table both the state row and
-// the source explanation read, so the two cannot give different accounts of one block.
-assert.match(app, /const ROOM_BLOCK_LINES = \{[\s\S]*disabled:\s*"dyn\.room_off"/,
-  "the room block reasons must be a single shared table");
-const roomBlockTable = app.match(/const ROOM_BLOCK_LINES = \{[\s\S]*?\n\};/)?.[0] || "";
-const referenceReasons = [...referenceLogic.matchAll(/case ReferenceRoomReason::\w+:\s+return "([^"]+)"/g)]
-  .map((match) => match[1]).filter((reason) => !["eligible", "not_configured"].includes(reason));
-for (const reason of referenceReasons)
-  assert.match(roomBlockTable, new RegExp(`\\b${reason}:`),
-    `room-source UI must translate the firmware reason ${reason}`);
-assert.match(app, /d\.reason === "room_unavailable"[\s\S]{0,200}?ROOM_BLOCK_LINES\[room\.reason\]/,
-  "a blocked diagnosis must say WHY the room source is unusable");
-assert.match(app, /function roomSourceStatus\([\s\S]*const diagnosis = !r\.control_eligible[\s\S]*detail: t\(ROOM_BLOCK_LINES\[r\.reason\]/,
-  "the diagnosis verdict must read the same reason table as the state row");
-assert.match(app, /const sourceStatus = roomSourceStatus\(r, mqtt\);\s*const sourceCls = sourceStatus\.cls/,
-  "the source colour must come from the same overall verdict as its visible status");
-assert.match(app, /return vcard\(t\("dyn\.card"\), rows\);/,
-  "the bottom card must render without a maturity pill");
-assert.doesNotMatch(app, /"dyn\.experimental"|section-badge\.experimental/,
-  "the removed experimental pill must leave no translation or styling contract behind");
-assert.match(app,
-  /"dyn\.strategy_help": "[^"]*inner control loop[^"]*D2 clipping share[^"]*zone actually requests heat[^"]*"/,
-  "English heating-curve help must name the closed-loop masking caveat and corroborating evidence");
-assert.match(deSource,
-  /\/\* dyn\.strategy_help \*\/ "[^"]*inneren Regelkreis[^"]*D2-Clipping-Anteil[^"]*Zone tatsächlich Wärme anfordert[^"]*"/,
-  "German heating-curve help must name the closed-loop masking caveat and corroborating evidence");
-const weatherModalHtml = html.match(/<div class="modal" id="weatherModal"[\s\S]*?<\/form>\s*<\/div>/)?.[0] || "";
-assert.match(weatherModalHtml, /id="wxLatitude"[\s\S]*id="wxLongitude"[\s\S]*href="https:\/\/open-meteo\.com\/"[\s\S]*data-i18n="wx\.attribution"/,
-  "the direct Open-Meteo source must expose coordinate entry and attribution");
-assert.doesNotMatch(weatherModalHtml, /data-i18n="wx\.hint"/,
-  "the weather explanation belongs in the Settings tongue, not the editor");
-assert.doesNotMatch(html, /id="wxLocate"/,
-  "the HTTP device UI must not offer a browser-geolocation action that requires HTTPS or localhost");
-assert.match(app, /dynamicInfoRow\("weather"[\s\S]*"weather", t\("wx\.title"\)\)[\s\S]*function openWeather\(\)[\s\S]*saveReboot\("\/set_weather", \{ latitude, longitude \}/,
-  "the forecast value must open latitude and longitude editing through the firmware config route");
-assert.match(app, /function parseWeatherCoordinatePair\([\s\S]*function pasteWeatherCoordinates\([\s\S]*addEventListener\("paste", pasteWeatherCoordinates\)/,
-  "a Google Maps coordinate pair pasted into either field must be split before save");
-const weatherCopyLines = baseApp.split("\n").filter((line) =>
-  /^\s*"wx\.(?:detail\.source|hint\.(?:configured|setup))"\s*:/.test(line));
-const germanWeatherCopyLines = deSource.split("\n").filter((line) =>
-  /\/\* wx\.(?:detail\.source|hint\.(?:configured|setup)) \*\//.test(line));
-assert.equal(weatherCopyLines.length, 3,
-  "weather provenance plus configured/setup guidance must exist in English");
-assert.equal(germanWeatherCopyLines.length, 3,
-  "weather provenance plus configured/setup guidance must exist in both languages");
-for (const line of [...weatherCopyLines, ...germanWeatherCopyLines])
-  assert.doesNotMatch(line, /experimental|experimentell/i,
-    "weather copy must not refer to the controller's experimental Firmware switch");
-const configuredGermanWeatherCopy = germanWeatherCopyLines.find((line) => line.includes("Der ESP32 ruft")) || "";
-assert.equal((configuredGermanWeatherCopy.match(/alle 45 Minuten/g) || []).length, 1,
-  "configured German weather guidance must state its refresh interval exactly once");
-assert.doesNotMatch(configuredGermanWeatherCopy, /Google Maps/,
-  "configured weather guidance must not repeat coordinate-entry instructions");
-assert.doesNotMatch(app, /navigator\.geolocation/,
-  "the direct device UI must carry no unreachable browser-geolocation logic");
-assert.doesNotMatch(app, /weather[^\n]{0,120}broker_off|input\/weather/,
-  "the Open-Meteo forecast must not depend on the MQTT broker or an adapter topic");
-assert.match(httpConfig, /static esp_err_t set_weather[\s\S]*weather_location_parse[\s\S]*weather_forecast_reconfigure/,
-  "the coordinate save must validate both values and wake the firmware fetch task");
 assert.doesNotMatch(app, /function statusCardsHtml\(\)[\s\S]*vcard\(t\("env\.card"\)/,
   "ENV III must not retain a standalone outdoor-climate dashboard card");
 assert.match(html, /id="gEnv3"[^>]*data-insp="env3"[\s\S]*id="svEnv3Temp"[\s\S]*id="gSgRequest"/,
@@ -239,7 +156,7 @@ assert.match(app, /const ENV3_COMBINED_ID = "env3_combined"[\s\S]*const ENV3_COM
   "one combined timeline must render the three independently scaled ENV III series");
 assert.match(app, /function env3SeriesClass\(source\)[\s\S]*env-temperature[\s\S]*env-humidity[\s\S]*env-pressure/,
   "the three ENV III lines must keep distinct stable style classes");
-assert.match(app, /if \(e && e\.env3\)[\s\S]*request\(s\.id, "env3"\)[\s\S]*env3HistHtml\(historyView\(ENV3_COMBINED_ID,/,
+assert.match(app, /if \(e && e\.env3\)[\s\S]*request\(s\.id, "env3"\)[\s\S]*env3HistHtml\(historyView\(ENV3_COMBINED_ID\)/,
   "opening the ENV III pill must fetch all three rings and render their combined inspector trend");
 assert.match(app, /env3_sht30_not_found:\s*"env\.err_sht30"[\s\S]*mapError:\s*env3SaveError/,
   "ENV III probe failures must stay in the dialog as localized errors");
@@ -284,63 +201,7 @@ assert.match(mqttHa,
   /MqttCleanupTopic::Env3Discovery[\s\S]*env3_discovery_topic\(s_prefix, s_node, ENV3_HA_SENSORS\[action.index\]\)/,
   "the ENV III cleanup queue must retract all retained HA discovery configs as well as state");
 
-// The room-source row remains a user-configured exact MQTT mapping. Save performs the non-persistent
-// Save persists intent immediately; Delete posts the explicit empty mapping that clears the source
-// and captured value. Payload/path diagnostics belong to the durable subscriber.
-assert.match(html, /id="refTempModal"[\s\S]*id="rtTemperatureSource"[\s\S]*id="rtTarget"[\s\S]*id="rtTimestampSource"[\s\S]*id="rtMaxAge"/,
-  "the room-temperature source modal must expose current, target, source-time and freshness mappings");
-assert.doesNotMatch(html, /id="rtEnabledPath"|id="rtHvacModePath"|ref\.enabled_path|ref\.hvac_mode_path/,
-  "advanced eligibility mappings must not appear as optional fields in the room-source dialog");
-for (const [input, help, key] of [
-  ["rtTemperatureSource", "rtTemperatureSourceHelp", "ref.temperature_source_help"],
-  ["rtTarget", "rtTargetHelp", "ref.target_help"],
-  ["rtTimestampSource", "rtTimestampSourceHelp", "ref.timestamp_source_help"],
-  ["rtMaxAge", "rtMaxAgeHelp", "ref.max_age_help"],
-]) {
-  assert.match(html, new RegExp(`id="${input}"[^>]*aria-describedby="${help}"[\\s\\S]*id="${help}"[^>]*data-i18n="${key.replace(".", "\\.")}"`),
-    `${input} must expose its localized explanation to visual and assistive users`);
-}
-assert.doesNotMatch(html, /id="rtName"[^>]*aria-describedby|id="rtNameHelp"|data-i18n="ref\.name_help"/,
-  "the self-explanatory room-source name must not carry redundant help text");
-assert.match(html, /id="rtDeleteBtn"[^>]*data-i18n="ref\.delete"[\s\S]*id="rtBtn"[^>]*data-i18n="btn\.save"/,
-  "Delete must replace the separate Test action while Save remains immediately actionable");
-assert.doesNotMatch(html, /id="rtTestBtn"|id="rtTestResult"/,
-  "the room-source dialog must not retain a separate Test action or stale proof result");
-assert.match(html, /data-i18n="ref\.save_help"/,
-  "the immediate-save/runtime-validation contract belongs briefly beside Save");
-assert.doesNotMatch(app, /One MQTT source is supported|Es wird eine MQTT-Quelle unterstützt/,
-  "the room-source status must not carry the former generic subscription and delete manual");
-assert.doesNotMatch(app, /shelly[a-z0-9-]*-[0-9a-f]{6,}\/status\//i,
-  "an untouched profile must not carry an obsolete device-specific temperature preset");
-assert.doesNotMatch(app, /\$\("rtEnabledPath"\)|\$\("rtHvacModePath"\)/,
-  "the browser bundle must not retain DOM access to the removed optional fields");
-assert.match(app, /const sameMapping = !!saved\.configured[\s\S]*enabled_path: sameMapping \? \(saved\.enabled_path \|\| ""\) : ""[\s\S]*hvac_mode_path: sameMapping \? \(saved\.hvac_mode_path \|\| ""\) : ""/,
-  "editing an unchanged source must preserve existing advanced gates without exposing them in the UI");
-assert.match(app, /refTempForm[^]*post\("\/set_ref_temp", input\)/,
-  "Save must persist the mapping directly without waiting for a publisher");
-assert.doesNotMatch(app, /\/test_ref_temp|mqtt_reference_test/,
-  "the room-source UI must not retain the timed pre-save probe");
-assert.match(app, /\$\("rtDeleteBtn"\)\.onclick[^]*post\("\/set_ref_temp", \{[^]*name: "", topic: "", temperature_path: "", setpoint_topic: "", setpoint_path: ""[^]*timestamp_topic: "", timestamp_path: ""/,
-  "Delete must clear the saved mapping without testing the form's current field contents");
-assert.match(app, /lastIndexOf\("\$"\)/,
-  "topic$path parsing must preserve leading $ system topics by splitting at the last delimiter");
-assert.match(app, /validRefTopic\(topic\) && path\.length <= 128/,
-  "room-source paths must remain persistable until a real MQTT frame validates them");
-assert.match(baseApp, /"ref\.delete": "Delete"/);
-assert.match(deSource, /\/\* ref\.delete \*\/ "Löschen"/,
-  "Delete must remain explicit in the English/German baseline catalogs");
-assert.doesNotMatch(httpConfig, /test_ref_temp|mqtt_reference_test/,
-  "the room-source API must persist without a probe or proof gate");
-assert.match(mqttHa, /decode_reference_frame[\s\S]*reference temperature payload rejected/,
-  "the durable subscriber must expose and log payload/path failures at runtime");
-assert.doesNotMatch(mqttHa, /service_reference_probe|s_ref_probe|mqtt_reference_test/,
-  "the MQTT task must not retain a separate room-source probe state machine");
-assert.match(app, /r\.retained[\s\S]*ref\.retained/,
-  "the captured-value UI must identify retained MQTT messages");
-assert.match(app, /retained_without_timestamp: t\("ref\.time_untrusted"\)/,
-  "retained values without source time must be shown as untrusted, never fresh");
-
-// The circulation witness is a second read-only exact MQTT mapping. It consumes actual active power,
+// The circulation witness is a read-only exact MQTT mapping. It consumes actual active power,
 // not Shelly relay intent, and retains its separate live-test-before-persist safety boundary.
 assert.match(html, /id="circulationModal"[\s\S]*id="circTopic"[\s\S]*id="circPowerPath"[\s\S]*id="circTimePath"[\s\S]*id="circOn"[\s\S]*id="circOff"[\s\S]*id="circMaxAge"[\s\S]*id="circConfirm"/,
   "circulation settings must expose the exact topic, JSON paths, freshness, hysteresis and confirmation");
@@ -485,36 +346,6 @@ assert.doesNotMatch(httpConfig, /skipping broker connect probe[\s\S]*saving anyw
 // helper and pin both states: activation selects, a later click in the active field preserves its
 // native caret placement. Checkbox/radio/file interaction remains native too.
 const settingsSource = readAppFragments(["settings.js"]);
-
-// Google Maps copies "latitude, longitude" with more precision than the firmware's signed
-// microdegrees. Exercise the production parser, including either-field paste and range rejection.
-const weatherFields = {
-  wxLatitude: { id: "wxLatitude", value: "", classList: { remove() {} } },
-  wxLongitude: { id: "wxLongitude", value: "", classList: { remove() {} } },
-  wxError: { hidden: false },
-};
-const weatherContext = vm.createContext({ S: {}, $: (id) => weatherFields[id], t: (key) => key, esc: String });
-vm.runInContext(`${settingsSource}\nthis.__parseWeatherCoordinatePair = parseWeatherCoordinatePair; this.__pasteWeatherCoordinates = pasteWeatherCoordinates;`,
-  weatherContext, { filename: "main/www/js/settings.js" });
-const googlePair = "12.345678123456, 23.456789123456";
-const parsedGooglePair = weatherContext.__parseWeatherCoordinatePair(googlePair);
-assert.equal(parsedGooglePair.latitude, "12.345678");
-assert.equal(parsedGooglePair.longitude, "23.456789");
-assert.equal(weatherContext.__parseWeatherCoordinatePair("91.0, 7.0"), null,
-  "latitude outside the valid range must not be accepted as a pair");
-for (const target of [weatherFields.wxLatitude, weatherFields.wxLongitude]) {
-  weatherFields.wxLatitude.value = "";
-  weatherFields.wxLongitude.value = "";
-  let prevented = false;
-  weatherContext.__pasteWeatherCoordinates({
-    currentTarget: target,
-    clipboardData: { getData: () => googlePair },
-    preventDefault: () => { prevented = true; },
-  });
-  assert.equal(prevented, true, "recognized coordinate-pair paste must replace native field insertion");
-  assert.equal(weatherFields.wxLatitude.value, "12.345678");
-  assert.equal(weatherFields.wxLongitude.value, "23.456789");
-}
 
 const selectContext = vm.createContext({ S: {}, $: () => ({}), t: (key) => key, esc: String });
 vm.runInContext(`${settingsSource}\nthis.__wireModalFieldSelection = wireModalFieldSelection;`,

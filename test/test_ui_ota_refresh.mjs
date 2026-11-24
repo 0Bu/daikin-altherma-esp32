@@ -65,7 +65,6 @@ class Element {
     mqtt: { configured: false },
     syslog: { configured: false },
     ntp: { synced: true, server: "pool.ntp.org" },
-    heating_curve: { method_version: 2, armed: false, state: "off" },
   };
   const cacheKey = "daikinOtaRenderV1";
   const storage = new Map([[cacheKey, JSON.stringify({

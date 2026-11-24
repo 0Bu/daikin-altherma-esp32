@@ -41,7 +41,7 @@ struct HttpClientReadFailure {
 
 HttpClientProbe http_client_probe() noexcept;
 
-// `label` must be a static, non-identifying literal ("ota" or "weather").  The logger uses only
+// `label` must be a static, non-identifying literal (such as "ota").  The logger uses only
 // fixed stack buffers and integer samples, so it remains usable during the OOM it diagnoses.
 void http_client_log_init_failure(const char* label, const HttpClientProbe& before) noexcept;
 HttpClientOpenFailure http_client_log_open_failure(const char* label,

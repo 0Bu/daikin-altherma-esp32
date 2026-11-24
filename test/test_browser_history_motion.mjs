@@ -272,7 +272,7 @@ async function expireOpeningHistory(page, id, inspector = "") {
     const entry = inspector && INSPECT[inspector], keys = new Set();
     const add = (id, source) => {
       const offered = source === "x10a" ? hasHist(id) : source === "modbus" ? hasModbusHist(id)
-        : source === "env3" ? hasEnv3Hist(id) : hasRoomHist(id);
+        : source === "env3" && hasEnv3Hist(id);
       if (!offered) return;
       const key = histCacheKey(id, source);
       if (keys.has(key)) return;
@@ -285,7 +285,7 @@ async function expireOpeningHistory(page, id, inspector = "") {
     else {
       const source = (typeof entry?.trendSource === "function"
         ? entry.trendSource(S.live) : entry?.trendSource) || "";
-      for (const instrument of source ? [source] : ["x10a", "modbus", "env3", "room"])
+      for (const instrument of source ? [source] : ["x10a", "modbus", "env3"])
         add(id, instrument);
       // Tank overlays are fetched by ensureHistPair/renderInspectHist independently of the curve.
       if (id === "dhw_tank") for (const auxiliary of ["smart_grid_mode", "bsh_state"])
@@ -350,8 +350,7 @@ async function openInspector(page, key, id, context, { freshOpening = true } = {
     const plot = document.querySelector("#inspHist [data-hist]");
     const view = plot && historyView(plot.dataset.hist, plot.dataset.source || "");
     return { id: plot?.dataset.hist || "", samples: view?.v.length || 0,
-      sources: view?.series.map(series => series.source) || [],
-      forecast: !!document.querySelector("#inspHist .env-forecast-temperature") };
+      sources: view?.series.map(series => series.source) || [] };
   });
   assert.equal(chart.id, id, context + ": inspector must show its own history");
   assert.ok(chart.samples >= 288, context + ": full day must reach the real renderer");
@@ -754,42 +753,16 @@ async function closeInspector(page) {
   await settleHistoryAnimation(page, ["#inspect"]);
 }
 
-async function assertForecastRevision(page, server, fixture, context) {
+async function assertEnv3HistoryInteraction(page, server, context) {
   const selector = "#inspHist .vhist-plot";
   await prepareObservationViewport(page, selector, []);
-  const before = await evaluate(page, selector => {
-    const plot = document.querySelector(selector), rect = plot.getBoundingClientRect();
-    const view = scrubView(plot), x = rect.left + rect.width * 0.95;
-    const selected = scrubIndex(plot, x);
-    return { revision: plot.dataset.rev, gen: view.gen, selected,
-      time: forecastScrubView(view).points[selected - view.v.length].time,
-      x, y: rect.top + rect.height / 2 };
+  const { x, y } = await evaluate(page, selector => {
+    const r = document.querySelector(selector).getBoundingClientRect();
+    return { x: r.left + r.width * 0.8, y: r.top + r.height / 2 };
   }, selector);
-  const { x, y } = before;
-  const hourly = fixture.status.weather_forecast.hourly;
   const press = type => page.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
   await press("mousePressed");
   try {
-    await page.waitFor("S.trendPointer?.plot.dataset.hist === 'env3_combined'");
-    // Publish an updated forecast through the real status endpoint while the captured plot is held.
-    fixture.status.weather_forecast.hourly = hourly.slice(1);
-    await page.evaluate("pollNow(); true");
-    await page.waitFor("!_pollBusy && S.status.weather_forecast.hourly.length === " + (hourly.length - 1));
-    const during = await evaluate(page, ({ selector, x }) => {
-      const plot = document.querySelector(selector);
-      return { rev: plot.dataset.rev, gen: historyView(plot.dataset.hist).gen,
-        selected: scrubIndex(plot, x) };
-    }, { selector, x });
-    assert.deepEqual(during, { rev: before.revision, gen: before.gen, selected: before.selected },
-      context + ": a forecast refresh leaves the selection on the held chart");
-    await press("mouseReleased");
-    await settleHistoryRevision(page, [selector]);
-    assert.equal(await page.evaluate("S.histPin.get('env3_combined')?.t"), before.time,
-      context + ": releasing the original plot pins the same hour after the refresh");
-    assert.notEqual(await evaluate(page, selector => document.querySelector(selector).dataset.rev, selector),
-      before.revision, context + ": the refreshed forecast is mounted after release");
-    await page.evaluate("S.histPin.delete('env3_combined')");
-    await press("mousePressed");
     await page.waitFor("S.trendPointer?.plot.dataset.hist === 'env3_combined'");
     // A normal mouse-down focuses the plot. Keep the real captured drag active while a second
     // input activates the legend, without letting focusout end the gesture first.
@@ -804,9 +777,7 @@ async function assertForecastRevision(page, server, fixture, context) {
       context + ": release after a legend change cannot pin the old plot");
   } finally {
     await press("mouseReleased");
-    fixture.status.weather_forecast.hourly = hourly;
-    await page.evaluate("S.histHidden.delete('env3_combined'); S.inspHistSig = null; pollNow(); true");
-    await page.waitFor("!_pollBusy && S.status.weather_forecast.hourly.length === " + hourly.length);
+    await page.evaluate("S.histHidden.delete('env3_combined'); S.inspHistSig = null; renderApp(); true");
   }
   // The three ENV III rings and an eligible value plot share a single automatic admission.
   const requests = server.historyRequests.length;
@@ -1287,7 +1258,7 @@ export async function assertHistoryMotion(page, server, context) {
     { keys: NO_HISTORY_INSPECTORS }), [],
     context + ": no-history classification must reject newly declared trend metadata");
     if (only && ![...Object.keys(INSPECTOR_TRENDS), "board", "circulation", "x10a-row",
-      "modbus-numeric", "modbus-state", "env3-no-forecast", "room-mqtt-only", "room-stale"].includes(only))
+      "modbus-numeric", "modbus-state"].includes(only))
       throw new Error("unknown history motion case: " + only);
     await mountFixture(page, server, fixture);
     if (!only && !mutation) for (const key of NO_HISTORY_INSPECTORS) {
@@ -1313,10 +1284,8 @@ export async function assertHistoryMotion(page, server, context) {
       }
       if (key === "tank" && page.assertFlowPaint) await page.assertFlowPaint(label);
       const expected = key === "env3" ? ["env3_temperature", "env3_humidity", "env3_pressure"]
-        : [ "x10a", ...(key !== "bsh" && (MODBUS_HISTORY_ROWS.some(row => row.id === id) || id === "x10a_space_state" || id === "pel" || id === "dt" || id === "pth") ? ["modbus"] : []),
-          ...(key === "room" ? ["room"] : []) ];
+        : [ "x10a", ...(key !== "bsh" && (MODBUS_HISTORY_ROWS.some(row => row.id === id) || id === "x10a_space_state" || id === "pel" || id === "dt" || id === "pth") ? ["modbus"] : []) ];
       assert.deepEqual(chart.sources, expected, label + ": preserve independent history sources");
-      if (key === "env3") assert.equal(chart.forecast, true, label + ": forecast must accompany real ENV III history");
       if (key === "flow") await assertFlowTtlTransition(page, server, label);
       await observe(page, server, label, ["#inspHist .vhist-plot"], { inspector: true });
       let restoreValues;
@@ -1330,7 +1299,7 @@ export async function assertHistoryMotion(page, server, context) {
       await openInspector(page, key, id, label + "/cached", { freshOpening: false });
       assert.equal(server.historyRequests.length, requests, label + ": cached reopen must not refetch history");
       if (key === "env3" && !mutation && page.inputMode !== "touch")
-        await assertForecastRevision(page, server, fixture, label);
+        await assertEnv3HistoryInteraction(page, server, label);
       await closeInspector(page);
       if (restoreValues) fixture.values = restoreValues;
     }
@@ -1351,51 +1320,23 @@ export async function assertHistoryMotion(page, server, context) {
       await disclosure(page, server, fixture, context + "/modbus-state",
         ['#valueGroups [data-dashboard-card="modbus"] [data-trend="disinfection_state"]'], ["disinfection_state"]);
 
-    for (const variant of ["modbus-numeric", "env3-no-forecast", "room-mqtt-only", "room-stale"]) {
-      if (only && only !== variant) continue;
-      const frame = makeHistoryMotionFixture(originalStatus, lang), originalValues = frame.values;
-      if (variant === "modbus-numeric") {
-        frame.status.history.rows = frame.status.history.rows.filter(row => row.id !== "flow");
-        frame.values = tick => {
-          const values = originalValues(tick);
-          values.values = values.values.filter(row => row.concept !== "flow");
-          return values;
-        };
-      } else if (variant === "env3-no-forecast") {
-        frame.status.weather_forecast = { configured: false, available: false, fresh: false, hourly: [] };
-      } else {
-        frame.status.history.rows = frame.status.history.rows.filter(row => row.id !== "room_temp");
-        frame.status.history.modbus_rows = frame.status.history.modbus_rows.filter(row => row.id !== "room_temp");
-        frame.values = tick => {
-          const values = originalValues(tick);
-          values.values = values.values.filter(row => row.concept !== "room_temp");
-          values.modbus = values.modbus.filter(row => row.concept !== "room_temp");
-          return values;
-        };
-        if (variant === "room-stale") Object.assign(frame.status.reference_temperature,
-          { fresh: false, temperature_valid: false, reason: "stale", freshness_reason: "stale", age_s: 600 });
-      }
+    if (!only || only === "modbus-numeric") {
+      const frame = makeHistoryMotionFixture(originalStatus, lang);
+      const originalValues = frame.values;
+      frame.status.history.rows = frame.status.history.rows.filter(row => row.id !== "flow");
+      frame.values = tick => {
+        const values = originalValues(tick);
+        values.values = values.values.filter(row => row.concept !== "flow");
+        return values;
+      };
       await mountFixture(page, server, frame);
-      const label = context + "/" + variant;
-      if (variant === "modbus-numeric") {
-        await disclosure(page, server, frame, label,
-          ['#valueGroups [data-dashboard-card="modbus"] [data-trend="flow"]'], ["flow"], false,
-          { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"], cachedMarkup: true });
-      } else {
-        const key = variant === "env3-no-forecast" ? "env3" : "room";
-        const chart = await openInspector(page, key, INSPECTOR_TRENDS[key], label);
-        if (key === "env3") assert.equal(chart.forecast, false, label + ": no forecast may be invented");
-        else assert.deepEqual(chart.sources, ["room"], label + ": MQTT-only history stays independent");
-        if (variant === "room-stale")
-          assert.match(await page.evaluate("document.getElementById('inspNow').textContent"), /—/,
-            label + ": stale current value is absent while retained history remains");
-        await observe(page, server, label, ["#inspHist .vhist-plot"], { inspector: true });
-        await closeInspector(page);
-      }
+      await disclosure(page, server, frame, context + "/modbus-numeric",
+        ['#valueGroups [data-dashboard-card="modbus"] [data-trend="flow"]'], ["flow"], false,
+        { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"], cachedMarkup: true });
     }
     console.log("history motion matrix passed: " + context + "; " +
       (only ? "focused " + only : `${Object.keys(INSPECTOR_TRENDS).length} history inspectors; ` +
-        `${NO_HISTORY_INSPECTORS.length} no-history routes; 5 disclosure paths; 3 conditional source variants`) +
+        `${NO_HISTORY_INSPECTORS.length} no-history routes; 5 disclosure paths; Modbus-only flow`) +
       "; " + Math.round((performance.now() - started) / 1000) + " s");
   } finally {
     await evaluate(page, () => {

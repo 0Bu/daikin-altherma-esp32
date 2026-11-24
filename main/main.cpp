@@ -45,7 +45,6 @@
 #include "status_led.hpp"
 #include "stack_watch.hpp"
 #include "wifi.hpp"
-#include "weather_forecast.hpp"
 
 static const char* TAG = "main";
 
@@ -79,10 +78,10 @@ static void boot_sequence() {
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     // One shared timer, static watchdog task and static synchronization set are initialized before
-    // any network/TLS task exists. Boot also primes the watchdog's lwIP thread semaphore. OTA and
-    // Weather fail closed if that absolute socket-deadline guard is not fully ready.
+    // any network/TLS task exists. Boot also primes the watchdog's lwIP thread semaphore. OTA
+    // fails closed if that absolute socket-deadline guard is not fully ready.
     if (!daik::http_deadline_init())
-        daik::diag_printf("http deadline: unavailable; OTA and Weather downloads disabled\n");
+        daik::diag_printf("http deadline: unavailable; OTA downloads disabled\n");
     // Reserve the large delivery stack before WiFi/MQTT/HTTP fragment internal RAM. The worker
     // sleeps allocation-free until /ota/check wakes it; creating this task on demand used to split
     // the same largest block which the following TLS admission gate requires.
@@ -148,11 +147,11 @@ static void boot_sequence() {
     if (!daik::safe_mode_active()) daik::mb_autodiscover_initial();
 
     // --- Services ---
-    // The web UI + OTA are ALWAYS started (they are the recovery surface). In safe mode all optional
-    // background consumers — X10A, MQTT, Open-Meteo weather, and HomeHub — are skipped, so a bad-config
-    // boot loop stays fixable from the browser instead of over USB.
-    // History has two independent producer tasks. Create their shared lock before either starts —
-    // and before HTTP can ask for a snapshot — rather than racing two lazy creators on first boot.
+    // The web UI + OTA are ALWAYS started (they are the recovery surface). In safe mode all
+    // optional background consumers — X10A, MQTT and HomeHub — are skipped, so a bad-config boot
+    // loop stays fixable from the browser instead of over USB. History has two independent producer
+    // tasks. Create their shared lock before either starts — and before HTTP can ask for a snapshot
+    // — rather than racing two lazy creators on first boot.
     daik::history_start();
     daik::checkup_start(cfg.diagnostics_enabled, cfg.diagnostics_generation);
     // The circulation-power ring is diagnosis evidence, not general X10A history. Clear any
@@ -167,14 +166,12 @@ static void boot_sequence() {
     daik::http_start();  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {
         daik::env3_start();              // optional outdoor climate sensor (no-op unless configured)
-        // Start permanent source/forecast workers before MQTT. esp-mqtt's transport task (sdk_mqtt,
-        // 6 KiB) stops and restarts across Weather/OTA TLS windows; creating all boot-permanent
+        // Start permanent source workers before MQTT. esp-mqtt's transport task (sdk_mqtt,
+        // 6 KiB) stops and restarts across OTA TLS windows; creating all boot-permanent
         // tasks first packs them contiguously at the base of DRAM and leaves sdk_mqtt at the open
         // heap tail instead of opening a sandwiched 6 KiB hole that later spills into the 31 KiB
         // contiguous block. hp_poll still precedes mqtt_ha_start for X10A availability gating.
         daik::hp_poll_start();           // X10A poll engine
-        daik::weather_forecast_start();  // worker stays dormant without location + diagnostics
-                                         // consent
         // The HomeHub Modbus stack — a SECOND, INDEPENDENT source (docs/MODBUS_PROTOCOL.md), not an
         // alternative to the line above: both run, and neither notices the other failing. A saved
         // address is polled; after the one-shot startup decision above, an empty address
@@ -186,7 +183,7 @@ static void boot_sequence() {
         daik::mqtt_ha_start(); // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
     } else {
         // Recovery goes through the web UI, which safe mode keeps up.
-        ESP_LOGW(TAG, "SAFE MODE: ENV III, X10A, HomeHub, MQTT and weather skipped");
+        ESP_LOGW(TAG, "SAFE MODE: ENV III, X10A, HomeHub and MQTT skipped");
     }
     daik::ota_health_gate_arm();         // keep rollback armed until this image proves healthy
     daik::safe_mode_arm_healthy();       // clear the crash counter after BOOT_HEALTHY_S of continuous uptime

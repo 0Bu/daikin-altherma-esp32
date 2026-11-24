@@ -203,9 +203,6 @@ def report_surface_findings():
             findings.append(f"{name} does not refuse failed HTTP reads")
         if name == "copyDiagnostics" and "Could not be read from the device:" not in body:
             findings.append("copyDiagnostics silently loses a failed diagnostic read")
-    status = STATUS.read_text()
-    if not re.search(r"jstr_r\(rt\.hvac_mode,\s*redact\s*&&\s*!report_hvac_mode_public\(rt\.hvac_mode\)\)", status):
-        findings.append("reference-temperature HVAC text bypasses conditional source redaction")
     ota = (ROOT / "main/http_ota.cpp").read_text()
     for field in ("manifest", "firmware_base"):
         if not re.search(r"json_append_quoted\(j,\s*redact_identifier_view\(effective_feed\." +

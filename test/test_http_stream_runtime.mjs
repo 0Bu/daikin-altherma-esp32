@@ -129,19 +129,12 @@ const mutations=[
   {name:"defrost-start-zero-is-missing",file:"status",scenario:"defrost_start_wire",
     before:"start.outdoor_tenths != logic::CHECKUP_ABSENT",
     after:"start.outdoor_tenths != logic::CHECKUP_ABSENT && start.outdoor_tenths != 0"},
-  {name:"leaked-values-reader",file:"status",scenario:"weather_and_ota_admission",
-    before:"if (!weather_tls) weather_values_reader_leave();",after:"/* mutation: keep a refused reader counted */"},
   {name:"history-epoch-bypass",file:"status",scenario:"history_epoch_refusal",
     before:"if (history_snapshot_epoch != history_epoch())",after:"if (false)"},
   {name:"history-separately-rounded-clocks",file:"status",scenario:"restored_history_boot_raster",
     before:/logic::history_commit_unix_s\(unix_s, wall_ms, esp_timer_get_time\(\),\s*history_meta\.newest_commit_us, newest\)/,
     after:"((newest = unix_s - history_meta.newest_age_s), true)"},
-  {name:"room-source-attribution",file:"status",scenario:"room_history_completed",
-    before:': room_source ? "room"',after:': room_source ? "mqtt"'},
-  {name:"room-config-admission",file:"status",scenario:"room_history_refusals",
-    before:'(room_source && (!room_identity || std::strcmp(id, "room_temp") != 0))',
-    after:'(room_source && (std::strcmp(id, "room_temp") != 0))'},
-  {name:"room-label-escape",file:"status",scenario:"room_history_completed",
+  {name:"history-label-escape",file:"status",scenario:"completed_oracles",
     before:String.raw`json_append_quoted(j, lbl);
     j += ",\"dt\":";`,
     after:String.raw`j += "\""; j += lbl; j += "\"";
@@ -192,16 +185,13 @@ const mutations=[
     before:String.raw`bfield(",\"draw_marker\":", w.draw_marker);`,
     after:String.raw`bfield(",\"draw_marker\":", false);`},
   {name:"dhw-redaction-detail-leak",file:"status",scenario:"dhw_timeline_wire",
-    before:"trace_reader.admitted = !redact && c.diagnostics_enabled && weather_values_reader_enter();",
-    after:"trace_reader.admitted = c.diagnostics_enabled && weather_values_reader_enter();"},
-  {name:"dhw-refused-trace-admission",file:"status",scenario:"dhw_timeline_wire",
-    before:"trace_reader.admitted = !redact && c.diagnostics_enabled && weather_values_reader_enter();",
-    after:"trace_reader.admitted = !redact && c.diagnostics_enabled && (weather_values_reader_enter(), true);"},
-  {name:"dhw-dropped-shared-reader",file:"status",scenario:"dhw_timeline_wire",
-    before:"if (!dhw_trace) trace_reader.release();",after:"trace_reader.release();"},
-  {name:"overlapping-chart-and-cycling-context-leases",file:"status",scenario:"status_cycling_run_contexts",
-    before:/release_trace\(\);\s*(?=if \(!redact && have_trace && diag_effective == DiagnosticsSource::X10a\))/,
-    after:""},
+    before:"const bool trace_admitted = !redact && c.diagnostics_enabled;",
+    after:"const bool trace_admitted = c.diagnostics_enabled;"},
+  {name:"incorrect-status-schema-version",file:"status",scenario:"retired_sources_status_and_history",
+    before:'ufield("{\\"status_schema_version\\":", 2);',after:'ufield("{\\"status_schema_version\\":", 1);'},
+  {name:"truncated-history-source-falls-back",file:"status",scenario:"retired_sources_status_and_history",
+    before:"source_err != ESP_ERR_NOT_FOUND && !modbus && !env3_source",
+    after:"has_source && !modbus && !env3_source"},
   {name:"refrigerant-total-as-input-count",special:"refrigerant-total-count",scenario:"refrigerant_metadata"},
   {name:"refrigerant-coordinate-swap",file:"status",scenario:"refrigerant_metadata",
     before:"append_json_uint(j, source.reg);",after:"append_json_uint(j, source.off);"},
@@ -215,7 +205,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,38);
+  assert.equal(caseCount,34);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -226,13 +216,9 @@ try {
     ["config-absent-plain",{unreadable:false,redact:false,absent:true}],
     ["config-absent-redacted",{unreadable:false,redact:true,absent:true}],
   ]);
-  const roomWires=new Set([
-    "room-history","room-history-renamed","room-disabled-diagnostics","room-disabled-broker",
-    "room-disabled-mapping","room-unknown-row","room-unknown-source","room-unavailable",
-    "room-identity-refusal","room-epoch-refusal","room-status-plain","room-status-redacted",
-    "room-status-absent",
-  ]);
-  const roomName='Example sensor Café "quote"\\line\n';
+  const retirementWires=new Set(["retired-status-plain","retired-status-redacted",
+    "retired-room-history","invalid-mqtt-history","truncated-history-source",
+    "retained-env3-history","retained-homehub-room-history"]);
   const stopWires=new Set(["stop-unconfirmed","stop-unreadable","stop-covered-zero",
     "stop-populated","stop-populated-redacted"]);
   const secondaryWires=new Map([
@@ -247,7 +233,6 @@ try {
     ["cycling-partial",{bucket:0,elapsed_s:450,starts:1,run_s:180,observed_s:420,space_s:0,dhw_s:60}],
     ["cycling-edge",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
     ["cycling-trace-oom",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
-    ["cycling-trace-weather",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
     ["cycling-expired",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
   ]);
   const persistWires=new Set(["checkup-persist-plain","checkup-persist-redacted",
@@ -311,9 +296,6 @@ try {
     ["dhw-only-oom",{cycling:true}],
     ["dhw-mcp-only-oom",{cycling:true,mcp:true}],
     ["dhw-cycling-oom",{timeline:dhwX10a}],
-    ["dhw-weather",{}],
-    ["dhw-refused-admission",{}],
-    ["dhw-mcp-refused-admission",{mcp:true}],
     ["dhw-recovered",{timeline:dhwX10a,cycling:true}],
   ]);
   const dhwSeen=new Set();
@@ -396,7 +378,7 @@ try {
         ? {bucket:-1,expired:true,starts:0,run_s:0,observed_s:0}
         : {bucket:-1,end_unix_s:1999998000,restored:true,starts:2,run_s:1200,observed_s:2700,space_s:600,dhw_s:300};
       assert.deepEqual(cycling.hours,[closed,cyclingWires.get(name)],name);
-      if (["cycling-expired", "cycling-trace-oom", "cycling-trace-weather"].includes(name))
+      if (["cycling-expired", "cycling-trace-oom"].includes(name))
         assert.equal(cycling.timeline, undefined);
       else assert.deepEqual(cycling.timeline, {
         unix_s: 2000000000, window_end_s: 86400, observed_end_s: 86399,
@@ -605,29 +587,35 @@ try {
       assert.equal(doc.t0,2000000099-287*300);
       assert.match(doc.boot_id,/^[0-9a-f]{16}$/);
     }
-    if(name==="room-history"||name==="room-history-renamed") {
-      assert.equal(doc.id,"room_temp"); assert.equal(doc.source,"room"); assert.equal(doc.epoch,42);
-      assert.equal(doc.label,name==="room-history"?roomName:"Living room");
-      assert.equal(doc.unit,"°C"); assert.equal(doc.dt,300);
-      assert.equal(typeof doc.boot_id,"string"); assert.match(doc.boot_id,/^[0-9a-f]{16}$/);
-      assert.equal(doc.b0,700); assert.equal(doc.t0,2000000000-17-287*300);
-      assert.deepEqual(doc.v,Array.from({length:288},(_,i)=>i%4===1?null:201+i%50));
-      assert.equal(doc.v[0]/10,20.1); assert.equal(doc.v[1],null);
-      assert.deepEqual(doc.held,[],"MQTT gaps cannot borrow an outdoor-unit held-over reason");
+    if(name==="retired-status-plain"||name==="retired-status-redacted") {
+      assert.equal(doc.status_schema_version,2);
+      for(const field of ["heating_curve","weather_forecast","reference_temperature"])
+        assert.equal(Object.hasOwn(doc,field),false,field);
+      assert.equal(Object.hasOwn(doc.history,"room_rows"),false);
+      assert.equal(Object.hasOwn(doc.sys.stack_min_free_bytes,"weather"),false);
+      assert.equal(doc.modbus.enabled,true);
+      assert.equal(doc.modbus.connected,true);
+      assert.equal(doc.modbus.host,name==="retired-status-plain"?"fixture-homehub.invalid":"<redacted>");
+      assert.ok(doc.history.modbus_rows.some(row=>row.id==="room_temp"),"HomeHub retains its own room sensor");
+      assert.equal(doc.env3.fresh,true);
+      assert.deepEqual([doc.env3.temperature_c,doc.env3.humidity_pct,doc.env3.pressure_hpa],[8.5,71.25,1016.75]);
+      assert.deepEqual(doc.history.env3_rows.map(row=>row.id),["env3_temperature","env3_humidity","env3_pressure"]);
+      assert.ok(doc.health.checks.some(row=>row.id==="dhw_loss"),"ordinary plant diagnostics remain available");
     }
-    if(["room-disabled-diagnostics","room-disabled-broker","room-disabled-mapping","room-unknown-row"].includes(name))
-      assert.deepEqual(doc,{ok:false,error:"unknown trend"},name);
-    if(name==="room-unknown-source") assert.deepEqual(doc,{ok:false,error:"unknown source"});
-    if(name==="room-unavailable"||name==="room-identity-refusal")
-      assert.deepEqual(doc,{ok:false,error:"history unavailable"},name);
-    if(name==="room-epoch-refusal") assert.deepEqual(doc,{ok:false,error:"history changed; retry"});
-    if(name==="room-status-plain"||name==="room-status-redacted") {
-      const label=name==="room-status-plain"?roomName:"<redacted>";
-      assert.deepEqual(doc.history.room_rows,[{id:"room_temp",label}]);
-      assert.equal(doc.reference_temperature.name,label);
+    if(name==="retired-room-history"||name==="invalid-mqtt-history"||name==="truncated-history-source")
+      assert.deepEqual(doc,{ok:false,error:"unknown source"},name);
+    if(name==="retained-env3-history"||name==="retained-homehub-room-history") {
+      const env3=name==="retained-env3-history";
+      assert.equal(doc.id,env3?"env3_temperature":"room_temp");
+      assert.equal(doc.source,env3?"env3":"modbus");
+      assert.equal(doc.epoch,42);
+      assert.equal(doc.unit,"°C");
+      assert.equal(doc.v.length,288);
+      assert.equal(doc.v[0],-100);
+      assert.equal(doc.v[1],null);
+      assert.deepEqual(doc.held,[]);
     }
-    if(name==="room-status-absent") assert.deepEqual(doc.history.room_rows,[]);
-    roomWires.delete(name);
+    retirementWires.delete(name);
     if(name==="invalid-ssid") assert.equal(doc.wifi.ssid,"bad"+"�".repeat(5));
     if(name==="dwell-mismatch") assert.equal(Object.hasOwn(doc.values[0],"dwell_s"),false);
     if(name==="dwell-match") assert.equal(doc.values[0].dwell_s,5);
@@ -668,7 +656,7 @@ try {
     wires.push({name,type,hex});
   }
   assert.equal(configCases.size,0,"all plain/redacted stored and absent configuration cases must run");
-  assert.equal(roomWires.size,0,"all room-history and room-label wire oracles must run");
+  assert.equal(retirementWires.size,0,"all retirement and retained-source wire oracles must run");
   assert.equal(stopWires.size,0,"all unknown, covered-zero and populated stop-context wire oracles must run");
   assert.equal(cyclingWires.size,0,"both partially elapsed and start-edge cycling frames must run");
   assert.deepEqual([...dhwSeen].sort(),[...dhwCases.keys()].sort(),

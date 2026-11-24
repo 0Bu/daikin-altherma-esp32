@@ -672,14 +672,6 @@ function firmwareRow(version) {
     `<div class="vdesc-p">${esc(t("card.firmware_help"))}</div>`);
 }
 
-// The circulation witness's own condition, as ONE rule — the same shape roomSourceStatus() has, and
-// for the same reason: it is read three times (the tongue's assessment line, the row's status colour
-// and its accessible name), and three copies of a ladder is the drift this project keeps paying for.
-//
-// The BROKER branch is why this exists at all. The witness is an MQTT subscription, so clearing the
-// broker silences it completely — and this row used to answer that with "waiting for a message",
-// forever, while the room source one row up in the same card said so plainly (`ref.broker_off`). A
-// row that cannot say why it is empty is a row that reads as a broken sensor.
 function circulationSourceStatus(c, mqtt) {
   if (S.transportUnavailable === "status")
     return { key: "unavailable", text: t("circ.unavailable"), cls: "dim" };
@@ -719,10 +711,6 @@ function circulationSettingsCardHtml() {
   if (S.stage !== "dashboard" && S.descOpen.has("diagnostics:circulation"))
     body += typeof histHtml === "function" ? histHtml("circulation_state", "", t("circ.row")) : "";
   const sourceName = c.configured ? (c.name || "MQTT") : t("circ.not_configured");
-  // The face NAMES the source and states its condition in colour — the room-source row's shape. That
-  // makes the colour load-bearing, so DESIGN.md §9 requires the accessible name to spell the same
-  // condition out in words; before this the row carried neither, and a witness that had gone silent
-  // looked exactly like one that was running.
   // On an UNCONFIGURED row the name IS the status ("Not configured"), so appending it again reads as
   // "Not configured · Not configured" to a screen reader. Append the condition only where it says
   // something the name does not.
@@ -782,14 +770,11 @@ function gasComparisonSettingsRowHtml() {
 }
 
 // Settings cards rendered below Connections: THREE permanent ESP32-family cards, the plant-
-// diagnostics card and then the heating-curve diagnosis card. Those dependent cards render only
-// after the Firmware card's explicit master opt-in; their saved source mappings remain dormant while
-// it is off. The ESP32 cards
-// were split from what was
-// one, so each answers one question. ESP32 = the board itself (its onboard hardware and its own
+// diagnostics card. The circulation source remains dormant until enabled in the Firmware card.
+// ESP32 = the board itself (its onboard hardware and its own
 // health — uptime + the two memory curves). Protokoll = the X10A link (whether the bus answers, the
 // framing it speaks, and the RX/TX pins). Firmware = the running version, the update feed it follows,
-// and the UI language. All four render into one container (#settingsCards) as concatenated vcards,
+// and the UI language. These cards render into one container (#settingsCards) as concatenated vcards,
 // so the delegated click/change listeners bound there keep working across the split.
 //
 // The board-health rows are the ONLY telemetry here, and each earns its place by answering a question
@@ -840,477 +825,7 @@ function esp32CardHtml() {
     diagnosticsRow(s.diagnostics || diagnosticsEnabled);
   return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) +
          vcard(t("card.fw_title"), fwRows) +
-         (diagnosticsEnabled ? circulationSettingsCardHtml() + dynamicControlCardHtml() : "");
-}
-
-// The Settings home for the heating-curve diagnosis. Every main row uses the same split
-// interaction as Board Hardware: the label owns the otherwise empty left area and toggles its
-// explanation tongue; a compact value on the right opens an editor only where one exists. This
-// keeps status/explanation and configuration as two explicit actions on configured and empty rows.
-// `ariaState` is DESIGN.md §9's escape hatch, not decoration: a row whose face states a NAME conveys
-// its status by colour alone, which §5.6 permits for the Connections rows only because their
-// accessible names spell that status out in words. The room source is that shape now, so it passes
-// the state here; a row whose visible value already IS its state passes nothing and reads as before.
-function dynamicInfoRow(key, label, value, valueCls, bodyHtml, action = "", title = "",
-                        ariaState = "") {
-  const aria = ariaState ? `${title}: ${value} · ${ariaState}` : `${title}: ${value}`;
-  const right = action
-    ? `<button class="settings-split-action dynamic-config-open vrow-val settings-wrap ${valueCls}" ` +
-      `type="button" data-act="${action}" aria-label="${esc(aria)}">` +
-      `<span>${esc(value)}</span>${editIcon}</button>`
-    : `<span class="settings-info-value vrow-val settings-wrap ${valueCls}">${esc(value)}</span>`;
-  return settingsInfoRow(`dynamic:${key}`, `dynamic-${key}-detail`, label, right, bodyHtml,
-    "dynamic-info-item", "", !action);
-}
-
-// The weather tongue explains the two derived forecast numbers instead of compressing them into
-// one slash-separated status line. It deliberately uses the ordinary explainer paragraphs and
-// lead-ins, so this permanent Settings panel reads like every opened value/checkup explainer.
-// Old values remain visible when freshness fails because they are useful diagnostic evidence; the
-// status paragraph says explicitly that they are no longer current.
-function weatherSourceDetailHtml(w, outdoor, solar) {
-  if (S.transportUnavailable === "status") return descNoteHtml(t("sys.nodata"), t("ota.snapshot_value"));
-  let statusKey;
-  let detailText;
-  const reason = w.freshness_reason || w.reason;
-  if (w.fetching) {
-    statusKey = "fetching";
-  } else if (w.has_value && w.fresh) {
-    statusKey = "fresh";
-  } else if (reason === "clock_unsynced") {
-    statusKey = "unavailable";
-    detailText = t("ref.clock_unsynced");
-  } else if (reason === "network_unavailable") {
-    statusKey = "unavailable";
-    detailText = t("card.offline");
-  } else if (w.error) {
-    statusKey = "unavailable";
-  } else if (w.has_value) {
-    statusKey = "stale";
-  } else {
-    statusKey = "waiting";
-  }
-
-  const detail = detailText || t(`wx.detail.${statusKey}`);
-  let html = descNoteHtml(t("wx.detail.status"),
-    `${t(`wx.status.${statusKey}`)} — ${detail}`);
-  if (w.has_value) {
-    html += descNoteHtml(t("wx.detail.temperature_label"), t("wx.detail.temperature", outdoor));
-    html += descNoteHtml(t("wx.detail.solar_label"), t("wx.detail.solar", solar));
-  }
-  return html + descNoteHtml(t("wx.detail.source_label"), t("wx.detail.source"));
-}
-
-// Why a room reading that ARRIVED cannot produce a verdict — logic/reference_temperature.hpp's
-// ReferenceRoomReason, in the words a user can act on. ONE table, read by both the state line at
-// the top of the card and the source's own explanation further down, so the two can never give
-// different accounts of the same block. A reason with no entry here falls back to the generic line
-// rather than printing a raw enum name; the firmware may add reasons without this file changing.
-const ROOM_BLOCK_LINES = {
-  disabled:                   "dyn.room_off",
-  non_heating_mode:           "dyn.room_not_heating",
-  stale:                      "dyn.room_stale",
-  retained_without_timestamp: "dyn.room_retained_no_time",
-  clock_unsynced:             "dyn.state_clock",
-  no_value:                   "dyn.room_no_value",
-  invalid_payload:            "dyn.room_invalid_payload",
-  future_timestamp:           "dyn.room_future_time",
-  backward_timestamp:         "dyn.room_backward_time",
-  arrival_clock_invalid:      "dyn.room_invalid_time",
-  temperature_out_of_range:   "dyn.room_invalid_temperature",
-  setpoint_out_of_range:      "dyn.room_invalid_setpoint",
-  missing_setpoint:           "dyn.room_no_setpoint",
-  missing_setpoint_mapping:   "dyn.room_no_setpoint",
-  missing_source_time:        "dyn.room_no_time",
-  missing_enabled_state:      "dyn.room_no_enabled",
-  missing_hvac_mode:          "dyn.room_no_hvac_mode",
-};
-
-// What the row header calls the configured source. The name is cosmetic and may be empty, so one
-// stable fallback keeps the compact row identifiable.
-function roomSourceName(r) { return r.name || "MQTT"; }
-
-// The source's measurement condition and the diagnosis decision are related but not identical. A
-// switched-off thermostat can still supply a fresh, plausible room temperature; only its target is
-// unusable as an active heating reference. Keep that distinction in one result so the row can stay
-// amber for the blocked diagnosis without falsely calling the measurement itself unusable.
-function roomSourceStatus(r, mqtt) {
-  if (S.transportUnavailable === "status")
-    return { key: "unavailable", detail: t("sys.nodata"), cls: "dim" };
-  if (!r.configured)
-    return { key: "not_configured", detail: t("ref.detail.setup"), cls: "dim" };
-  if (!mqtt.configured)
-    return { key: "unavailable", detail: t("ref.broker_off"), cls: "err" };
-  if (r.error)
-    return { key: "error", detail: t("ref.detail.error", r.error), cls: "err" };
-  if (!r.has_value)
-    return { key: "waiting", detail: t("ref.detail.waiting"), cls: "warn" };
-  if (!r.fresh) {
-    const freshnessDetail = ({
-      missing_source_time: t("dyn.room_no_time"),
-      retained_without_timestamp: t("ref.time_untrusted"),
-      clock_unsynced: t("ref.clock_unsynced"),
-      future_timestamp: t("dyn.room_future_time"),
-      backward_timestamp: t("dyn.room_backward_time"),
-      arrival_clock_invalid: t("dyn.room_invalid_time"),
-    })[r.freshness_reason];
-    if (freshnessDetail)
-      return { key: "unusable", detail: freshnessDetail, cls: "warn" };
-    return { key: "stale",
-      detail: t("ref.detail.stale"), cls: "warn" };
-  }
-  if (r.temperature_valid === false)
-    return { key: "unusable", detail: t(ROOM_BLOCK_LINES[r.reason] || "dyn.room_invalid_payload"),
-      cls: "warn" };
-  const diagnosis = !r.control_eligible
-    ? { key: "unusable", detail: t(ROOM_BLOCK_LINES[r.reason] || "dyn.room_invalid_payload") }
-    : { key: "usable", detail: "" };
-  return { key: "measurement_valid", detail: "", diagnosis,
-    cls: r.control_eligible ? "ok" : "warn" };
-}
-
-function roomSourceStatusText(status) {
-  const state = t(`ref.status.${status.key}`);
-  return status.detail ? `${state} — ${status.detail}` : state;
-}
-
-function roomSourceAccessibleStatus(status) {
-  const measurement = roomSourceStatusText(status);
-  if (!status.diagnosis) return measurement;
-  return `${measurement} · ${t("ref.detail.diagnosis_label")} ${roomSourceStatusText(status.diagnosis)}`;
-}
-
-function roomSourceDetailHtml(r, status, temperature, setpoint, age) {
-  // This tongue is a live status, not a second copy of the editor. The source name is already the
-  // row value; topic/path mechanics belong in the modal. State measurement validity first, then
-  // separately say whether the heating-curve diagnosis may use it.
-  let html = descNoteHtml(t("ref.detail.status_label"), roomSourceStatusText(status));
-  if (status.diagnosis)
-    html += descNoteHtml(t("ref.detail.diagnosis_label"), roomSourceStatusText(status.diagnosis));
-  if (r.has_value && S.transportUnavailable !== "status") {
-    html += descNoteHtml(t("ref.detail.temperature_label"), t("ref.detail.temperature", temperature));
-    if (r.has_setpoint)
-      html += descNoteHtml(t("ref.detail.setpoint_label"), t("ref.detail.setpoint", setpoint));
-    const last = status.key === "stale" && Number.isFinite(r.max_age_s)
-      ? t("ref.detail.last_measurement_stale", age, r.max_age_s)
-      : t("ref.detail.last_measurement", age);
-    html += descNoteHtml(t("ref.detail.last_measurement_label"),
-      last + (r.retained ? ` · ${t("ref.retained")}` : ""));
-  }
-  return html + `<div class="vdesc-p">${esc(t("ref.detail.purpose"))}</div>`;
-}
-
-// state + reason -> one plain-language line, its severity class and its explanation. Keyed on the
-// STATE first because that is what decides whether anything is being recorded at all; the reason
-// only refines it. HOLD/plant_inactive is deliberately neutral, not a warning.
-//
-// Two of these lines name something OUTSIDE the sampler's own vocabulary, and that is the point:
-// a blocked diagnosis is only useful if it says which thing to go and fix.
-//  - NOT ARMED means the required room source is not configured. Forecast is deliberately optional:
-//    requiring a location would block raw room-error evidence and turn disclosure to a third-party
-//    weather service into a prerequisite for a local diagnosis.
-//  - ROOM_UNAVAILABLE used to read "room input unavailable" while the source sat green and current
-//    two rows below it, which is the opposite of a diagnosis. The room reason (`disabled` — the
-//    thermostat is switched off; `stale`; `non_heating_mode`; …) is already on /status and says
-//    exactly what is wrong, so it is what gets printed.
-//  - SAMPLER_INACTIVE means the device is ARMED — a room source is mapped and a broker is configured
-//    — and yet nothing is evaluating it, because the task the sampler lives on was never created.
-//    Safe mode, the boot window or a failed MQTT start. "Set up a room source" would send the reader
-//    to fix the one thing already done, so this names the real state (safe mode only when it is).
-//  - OFF plus a CONFIGURED room source is the other half of the same mistake, and it is not the same
-//    state: arming also requires a broker (heating_curve_diagnosis_armed), so clearing the broker
-//    disarms a fully-configured room source. The old copy told those users to set up the source they
-//    were looking at.
-function dynamicStateRow(d, room, weather, modbus, mqtt, sys) {
-  if (d.reason === "evaluation_stale")
-    return { key: "dyn.state_stale", cls: "", help: "dyn.state_help_stale" };
-  if (d.reason === "sampler_inactive") {
-    return { key: sys.safe_mode ? "dyn.state_safe_mode" : "dyn.state_inactive",
-             cls: "warn", help: "dyn.state_help_inactive" };
-  }
-  if (d.state === "off" && room.configured && !mqtt.configured)
-    return { key: "dyn.state_no_broker", cls: "warn", help: "dyn.state_help_no_broker" };
-  if (d.state === "recording")
-    return { key: "dyn.state_recording", cls: "ok", help: "dyn.state_help_recording" };
-  if (d.state === "degraded")
-    return { key: "dyn.state_recording_nowx", cls: "ok", help: "dyn.state_help_recording" };
-  if (d.state === "hold" && d.reason === "non_heating_mode")
-    return { key: "dyn.state_cooling", cls: "", help: "dyn.state_help_cooling" };
-  if (d.state === "hold")
-    return { key: "dyn.state_waiting", cls: "", help: "dyn.state_help_waiting" };
-  if (d.state === "off" && modbus.searched && !modbus.host)
-    return { key: "dyn.state_homehub_disabled", cls: "dim",
-             help: "dyn.state_help_homehub_disabled" };
-  if (d.state === "off")
-    return { key: "dyn.state_setup_room", cls: "dim", help: "dyn.state_help_setup" };
-  if (d.reason === "room_unavailable")
-    return { key: ROOM_BLOCK_LINES[room.reason] || "dyn.state_room", cls: "warn",
-             help: "dyn.state_help_room" };
-  if (d.reason === "homehub_unavailable" && !modbus.enabled)
-    return { key: "dyn.state_setup_homehub", cls: "dim", help: "dyn.state_help_setup_homehub" };
-  const blocked = {
-    x10a_unavailable:    "dyn.state_x10a",
-    homehub_unavailable: "dyn.state_homehub",
-    plant_gate_unknown:  "dyn.state_gate",
-    heating_mode_unknown:"dyn.state_mode",
-    clock_invalid:       "dyn.state_clock",
-  }[d.reason];
-  return { key: blocked || "dyn.state_blocked", cls: "warn", help: "dyn.state_help_blocked" };
-}
-
-// The OUTDOOR AXIS of the recorded evidence, from the optional ENV III sensor.
-//
-// The number is the one the DIAGNOSIS holds (/status.heating_curve), never /status.env3 read a
-// second time. Those two disagree exactly when it matters: the sensor can be live while the sampler
-// is not evaluating at all (safe mode, no broker), and a green reading here beside a blocked state
-// row is the same mistake the room-source row above documents — one row on the card looking fine
-// while the card's subject is doing nothing. The env3 block is consulted only to tell "no sensor"
-// apart from "sensor configured, value not reaching the sampler", which are different findings.
-//
-// An absent sensor is styled DIM, not warn: the axis is optional and its absence stops no sampling,
-// so it must not read as a fault — the same rule that keeps the summer cooling HOLD unstyled.
-//
-// The FACE names the SOURCE, like every other source row on this card ("Open-Meteo", the room
-// source's own name) — not the reading, and not a configuration action. Two reasons, and the second
-// is why the row header changed rather than merely losing its pencil:
-//  - There is exactly ONE editor for this sensor, the Board Hardware modal on the ESP32 card, where
-//    it is saved in one atomic POST /set_board beside the board identity that decides whether the
-//    Grove port exists at all. A second door into that modal from a DIAGNOSIS card invited editing
-//    hardware from a place that reports evidence, and offered it on a row whose own copy says the
-//    value changes nothing about what gets recorded.
-//  - A measurement in the face made this the one source row whose header was a reading, so the card
-//    showed two outdoor temperatures (this and the forecast) in two different shapes. The reading is
-//    not lost: it is stated inside, beside the recorded event's own value, which is where the
-//    durable half already lived.
-function outdoorAxisRow(d, env) {
-  // typeof, NOT Number(): the device sends JSON `null` for every absent figure here, and
-  // `Number(null)` is 0, which `Number.isFinite` then accepts. Read that way an unrecorded event
-  // prints "0,0 °C" — a real reading invented out of absence, the one thing this row's own copy
-  // promises it does not do. undefined happens to be safe (NaN); null is not.
-  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const live = S.transportUnavailable === "status" ? null : num(d.outdoor_temperature_c);
-  const hasLive = live !== null;
-  const sample = num(d.last_sample_outdoor_temperature_c);
-  const hasSample = sample !== null;
-  const hasEvent = num(d.last_sample_room_error_k) !== null;
-  const enabled = env.enabled === true;
-  // Whether the RECORDER is running at all, which decides who is to blame for a missing value.
-  // Clearing the broker disarms the diagnosis while leaving ENV III perfectly healthy, so without
-  // this the row would warn about the sensor and send the reader to check hardware that is fine —
-  // the same mistake as telling someone to set up the room source sitting one row below.
-  const evaluating = d.armed === true && !["sampler_inactive", "evaluation_stale"].includes(d.reason);
-  // NO-BREAK SPACE before the unit. Both readings this formats now sit in the tongue, where a lead-in
-  // ("Aktueller Messwert") and the number share one wrapping paragraph — so a plain space still puts
-  // "22,2" and "°C" on two lines at a phone width, which reads as a layout fault rather than as a
-  // measurement.
-  const fmt = (n) => `${n.toLocaleString(LANG,
-    { minimumFractionDigits: 1, maximumFractionDigits: 1 })} °C`;
-
-  // The sensor's product name, untranslated and inline like "Open-Meteo" one row above: it is what
-  // the hardware is called in every language, so a translation key would be many spellings of one
-  // proper noun waiting to disagree.
-  const SENSOR = "ENV III";
-  // Precedence states the ACTIONABLE thing: a set-up sensor names itself; an absent one says so;
-  // only a running recorder that is not being fed warrants a warning, because only then is the
-  // sensor the thing to go and look at. The COLOUR carries the condition the face no longer spells
-  // out, and the tongue's status line says it in words.
-  let cls = "dim";
-  let value = t("dyn.not_configured");
-  let statusKey = "dyn.outdoor_status_absent";
-  if (hasLive) {
-    cls = "ok"; value = SENSOR; statusKey = "dyn.outdoor_status_live";
-  } else if (!enabled) {
-    statusKey = "dyn.outdoor_status_absent";
-  } else if (!evaluating) {
-    value = SENSOR; statusKey = "dyn.outdoor_status_idle";
-  } else {
-    cls = "warn"; value = SENSOR; statusKey = "dyn.outdoor_status_unavailable";
-  }
-
-  let body = descNoteHtml(t("dyn.outdoor_detail_status"), t(statusKey, SENSOR));
-  // The LIVE reading, which the face used to carry. It says what the axis would record NOW — worth
-  // stating, and distinct from the event value below it, which is what a recorded sample actually
-  // holds. Only when there IS one: "—" here would be a third way of saying what the status line
-  // above has already said in a sentence.
-  if (hasLive) body += descNoteHtml(t("dyn.outdoor_detail_now"), fmt(live));
-  // What the LAST EVENT actually carries, which is the durable half — the live reading says only
-  // what the axis would record now. An event recorded without the axis says so rather than going
-  // unmentioned, since that is precisely the gap a later analysis would trip over.
-  if (hasSample) body += descNoteHtml(t("dyn.outdoor_detail_sample"), fmt(sample));
-  else if (hasEvent) body += descNoteHtml(t("dyn.outdoor_detail_sample"), t("dyn.outdoor_sample_none"));
-  body += `<div class="vdesc-p">${esc(t("dyn.outdoor_help_axis"))}</div>`;
-  // The placement caveat is not a footnote: the firmware cannot know where the sensor hangs, so
-  // whether this number is outdoor air at all is the reader's fact to supply, not the device's.
-  body += `<div class="vdesc-p">${esc(t(enabled ? "dyn.outdoor_help_placement"
-                                                : "dyn.outdoor_help_setup"))}</div>`;
-  // NO action argument: the row is passive, and the Board Hardware modal stays the sensor's one
-  // editor. Passing "board" here is what made this row a second door into it.
-  return dynamicInfoRow("outdoor", t("dyn.outdoor"), value, cls, body);
-}
-
-function outdoorSourceLabel(source) {
-  return ({ homehub: "HomeHub", x10a: "X10A", env3: "ENV III" })[source] || "—";
-}
-
-// The plant's own axis. It is separate from ENV III on purpose: HomeHub input 44 belongs to the
-// heat pump and answers in the same current-cycle sweep as the sampler's plant gates; ENV III is an
-// optional accessory whose mounting position the firmware cannot know. Neither value is a gate.
-function plantOutdoorAxisRow(d, modbus) {
-  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const live = S.transportUnavailable === "status" ? null : num(d.plant_outdoor_temperature_c);
-  const sample = num(d.last_sample_plant_outdoor_temperature_c);
-  const hasEvent = num(d.last_sample_room_error_k) !== null;
-  const liveSource = typeof d.plant_outdoor_source === "string"
-    ? d.plant_outdoor_source : null;
-  const sampleSource = typeof d.last_sample_plant_outdoor_source === "string"
-    ? d.last_sample_plant_outdoor_source : null;
-  const source = liveSource || sampleSource || (modbus.enabled ? "homehub" : null);
-  const fmt = (n) => `${n.toLocaleString(LANG,
-    { minimumFractionDigits: 1, maximumFractionDigits: 1 })} °C`;
-
-  const evaluating = d.armed === true && !["sampler_inactive", "evaluation_stale"].includes(d.reason);
-  let statusKey = "dyn.outdoor_status_absent";
-  if (live !== null) statusKey = "dyn.outdoor_status_live";
-  else if (source && evaluating) statusKey = "dyn.outdoor_status_unavailable";
-  else if (source) statusKey = "dyn.outdoor_status_idle";
-
-  let body = descNoteHtml(t("dyn.outdoor_detail_status"), t(statusKey, "HomeHub"));
-  if (live !== null)
-    body += descNoteHtml(t("dyn.outdoor_detail_now"),
-      `${fmt(live)} · ${outdoorSourceLabel(liveSource)}`);
-  if (sample !== null)
-    body += descNoteHtml(t("dyn.outdoor_detail_sample"),
-      `${fmt(sample)} · ${outdoorSourceLabel(sampleSource)}`);
-  else if (hasEvent)
-    body += descNoteHtml(t("dyn.outdoor_detail_sample"), t("dyn.outdoor_sample_none"));
-  body += `<div class="vdesc-p">${esc(t("dyn.plant_outdoor_help"))}</div>`;
-  return dynamicInfoRow("plant-outdoor", t("dyn.plant_outdoor"),
-    source ? outdoorSourceLabel(source) : t("dyn.not_configured"), live !== null ? "ok" : "dim", body);
-}
-
-function heatingCurveBinsRow(d) {
-  const bins = d.outdoor_bins;
-  if (bins === undefined) return ""; // Earlier firmware does not offer this detail.
-  const count = n => t("dyn.bins_count", n.toLocaleString(LANG));
-  const populated = Number.isSafeInteger(bins?.scope_samples) && bins.scope_samples > 0;
-  let body = Number.isFinite(bins?.target_c)
-    ? descNoteHtml(t("ref.target"), `${bins.target_c.toLocaleString(LANG, { maximumFractionDigits: 2 })} °C`)
-    : "";
-  if (!populated) {
-    body += descParaHtml(esc(t("dyn.bins_no_scope")));
-  } else {
-    const bands = ["<0", "0–<5", "5–<10", "≥10"];
-    const when = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric",
-      hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" });
-    const dated = s => Number.isSafeInteger(s) && s >= 0 && s <= 8.64e12;
-    const stats = (n, sum, min, max, unit) => {
-      if (![sum, min, max].every(Number.isFinite) || min > max) return t("sys.nodata");
-      const fmt = x => `${x.toLocaleString(LANG, { minimumFractionDigits: 1,
-        maximumFractionDigits: 1, signDisplay: unit === "K" ? "exceptZero" : "auto" })} ${unit}`;
-      return t("dyn.bins_stats", fmt(sum / (n * 10)), fmt(min / 10), fmt(max / 10));
-    };
-    for (const source of ["homehub", "env3"]) {
-      const axis = bins[source];
-      const name = outdoorSourceLabel(source);
-      let detail = "";
-      for (const [i, band] of bands.entries()) {
-        const bin = axis?.[i];
-        const n = bin?.samples;
-        if (!Number.isSafeInteger(n) || n <= 0) continue;
-        const first = bin.first_unix_s, last = bin.last_unix_s;
-        let period = t("dyn.bins_no_date");
-        if (dated(first) && dated(last) && first <= last)
-          period = first === last ? when.format(first * 1000)
-            : `${when.format(first * 1000)} – ${when.format(last * 1000)}`;
-        const room = stats(n, bin.room_sum_tenths, bin.room_min_tenths, bin.room_max_tenths, "K");
-        const air = stats(n, bin.outdoor_sum_tenths, bin.outdoor_min_tenths, bin.outdoor_max_tenths, "°C");
-        const lines = [[t("dyn.bins_room"), room], [t("dyn.bins_air"), air], [t("dyn.bins_period"), period]];
-        detail += descParaHtml(`<span class="vdesc-n">${esc(`${name} · ${band} °C`)}</span> · ${esc(count(n))}` +
-          lines.map(([label, value]) => `<br>${esc(label)} · ${esc(value)}`).join(""));
-      }
-      body += detail || descNoteHtml(name, t("dyn.bins_no_axis"));
-    }
-  }
-  body += descParaHtml(esc(t("dyn.bins_help")));
-  return dynamicInfoRow("outdoor-bins", t("dyn.bins"),
-    populated ? count(bins.scope_samples) : t("sys.nodata"), populated ? "" : "dim", body);
-}
-
-function dynamicControlCardHtml() {
-  const r = S.status?.reference_temperature || {};
-  const w = S.status?.weather_forecast || {};
-  const mqtt = S.status?.mqtt || {};
-  const d = S.status?.heating_curve || {};
-  const modbus = S.status?.modbus || {};
-  // The Firmware master opt-in owns visibility. Once enabled this card remains visible regardless of
-  // which individual source is configured, so its own editors are always reachable.
-  const sourceStatus = roomSourceStatus(r, mqtt);
-  const sourceCls = sourceStatus.cls;
-  let temperature = "", setpoint = "", age = "";
-  if (r.has_value) {
-    temperature = Number(r.temperature_c).toLocaleString(
-      LANG, { maximumFractionDigits: 2 });
-    if (r.has_setpoint) setpoint = Number(r.setpoint_c).toLocaleString(
-      LANG, { maximumFractionDigits: 2 });
-    // The firmware sends age_s exactly when it has a trusted age (source time, or a live non-retained
-    // arrival). Otherwise (missing, unusable or unsynced source time, or a retained replay) the
-    // reading has no known age, and the MQTT arrival clock must not stand in for it.
-    const seconds = Number.isFinite(r.age_s) ? r.age_s : null;
-    age = Number.isFinite(seconds) ? (seconds < 2 ? t("ref.now") : t("ref.ago", seconds))
-      : t("ref.age_unknown");
-  }
-  // The STATE, not an imaginary operating mode. What a reader needs is why no sample exists yet;
-  // through the summer the honest answer ("the plant is not heating") must NOT be styled as a fault,
-  // because it is the expected state for months.
-  const st = dynamicStateRow(d, r, w, modbus, mqtt, S.status?.sys || {});
-  // The state tongue carries WHAT THIS IS before what it is doing. That paragraph used to hang off
-  // the Firmware switch, which is where a reader met the feature first; with the switch gone the
-  // first row of its own card is that place, and a card whose title is the only thing explaining it
-  // would leave the short method label as the sole account of what is being recorded.
-  let rows = dynamicInfoRow("state", t("dyn.state"), t(st.key), st.cls,
-    `<div class="vdesc-p">${esc(t("dyn.card_help"))}</div>` +
-    `<div class="vdesc-p">${esc(t(st.help))}</div>`);
-  // The row header IDENTIFIES the source, exactly as the circulation row does. "Configured" merely
-  // repeated that a form had been saved; the unconfigured row already says so on its face and its
-  // tongue gives the only useful follow-up: where to add one.
-  const sourceValue = r.configured ? roomSourceName(r) : t("dyn.not_configured");
-  const sourceBody = roomSourceDetailHtml(r, sourceStatus, temperature, setpoint, age);
-  rows += dynamicInfoRow("room-sources", t("dyn.room_source"), sourceValue, sourceCls,
-    sourceBody, "ref-temp", t("ref.title"),
-    r.configured ? roomSourceAccessibleStatus(sourceStatus) : "");
-  let weatherCls = "dim";
-  let outdoor = "", solar = "";
-  if (w.configured && w.has_value) {
-    outdoor = Number(w.outdoor_mean_2h_c).toLocaleString(
-      LANG, { maximumFractionDigits: 1 });
-    solar = Number(w.solar_energy_2h_wh_m2).toLocaleString(
-      LANG, { maximumFractionDigits: 0 });
-  }
-  if (w.configured && w.fetching) weatherCls = "warn";
-  else if (w.configured && w.has_value && S.transportUnavailable !== "status") {
-    if (w.fresh) weatherCls = "ok";
-    else weatherCls = w.error ? "err" : "warn";
-  } else if (w.configured) weatherCls = w.error ? "err" : "warn";
-  const weatherValue = w.configured ? "Open-Meteo" : t("dyn.not_configured");
-  const weatherBody = (w.configured ? weatherSourceDetailHtml(w, outdoor, solar) : "") +
-    `<div class="vdesc-p">${esc(t(w.configured ? "wx.hint.configured" : "wx.hint.setup"))}</div>`;
-  rows += dynamicInfoRow("weather", t("dyn.weather"), weatherValue, weatherCls,
-    weatherBody, "weather", t("wx.title"));
-
-  // Plant and accessory axes stay separate and name their sources. Input 44 is the plant reading;
-  // ENV III remains a second, placement-dependent comparison and is never silently replaced.
-  rows += plantOutdoorAxisRow(d, modbus);
-  rows += outdoorAxisRow(d, S.status?.env3 || {});
-  rows += heatingCurveBinsRow(d);
-
-  rows += dynamicInfoRow("strategy", t("dyn.strategy"), t("dyn.shadow_strategy"), "",
-    `<div class="vdesc-p">${esc(t("dyn.strategy_help"))}</div>`);
-  // No "Safety & output → read-only" row. It was a hardcoded constant that could never say anything
-  // else, and since the write path was deleted (legacy-294) it can never BECOME anything else either —
-  // the same reason bus_tx_writes was dropped from the heartbeat. The card's own copy carries it.
-  if (r.error) rows += vrow(t("ref.error"), r.error, { cls: "err settings-wrap" });
-  if (w.error) rows += vrow(t("wx.error"), w.error, { cls: "err settings-wrap" });
-  return vcard(t("dyn.card"), rows);
+         (diagnosticsEnabled ? circulationSettingsCardHtml() : "");
 }
 
 // How long the board has been up (/status.uptime_s — seconds since boot, esp_timer). TWO units at
@@ -2627,95 +2142,29 @@ function checkupFlowReport() {
   const reported = health.checks.find(c => c?.id === "flow");
   const source = health.source || S.status.diagnostics.effective_source || "x10a";
   if (!reported || (source !== "x10a" && source !== "modbus")) return null;
-  const minimum = reported.verdict === "ok" && Number.isFinite(reported.min_l_min) &&
-    reported.min_l_min >= 0 && !(source === "modbus" && modbusFlowScaleUnverified())
-    ? reported.min_l_min : null;
-  // A newer provisional /values frame can invalidate an older accepted /status value.
-  // Keep the brief, reference and expanded evidence in agreement.
-  const check = reported.verdict === "ok" && minimum === null
-    ? { ...reported, verdict: "unavailable", min_l_min: null } : reported;
-  return { check, health, source, minimum };
+  const heating = reported.hydronic;
+  const value = heating?.flow_l_min?.min;
+  const minimum = source === "x10a" && checkupHydronicKnown(heating) &&
+    Number.isSafeInteger(heating.samples) && heating.samples > 0 &&
+    Number.isFinite(value) && value > 0 ? value : null;
+  const w = reported.minimum_windows;
+  const windows = minimum !== null && Number.isSafeInteger(w?.t0) && w.t0 >= 0 &&
+    w.t0 % 3600 === 0 && w.t0 <= 8640000000000 - 86400 && w.slot_s === 300 &&
+    Array.isArray(w.hour_masks) && w.hour_masks.length === 24 &&
+    w.hour_masks.every(mask => Number.isInteger(mask) && mask >= 0 && mask <= 0xfff)
+    ? w : null;
+  const locationsMissing = minimum !== null &&
+    (!windows || windows.locations_missing === true || !windows.hour_masks.some(Boolean));
+  return { source, minimum, windows, locationsMissing, unsupported: heating?.reason === "unsupported" };
 }
 
-function checkupFlowBriefHtml({ check, health, source, minimum }) {
-  const measured = minimum !== null;
-  const name = source === "modbus" ? "Modbus" : "X10A";
-  const period = Number.isFinite(health.span_s)
-    ? `${t("check.detail.period_label")} ${checkupDuration(health.span_s)}` : "";
-  const scope = [measured || check.verdict === "collecting" ? t("check.flow.runup") : "", period]
-    .filter(Boolean).join(" · ");
-  const value = measured ? `${checkupFmt1(minimum)} l/min` : checkupStatusText(check);
-  return `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · ${name}</span>` +
-    `<strong class="num">${esc(value)}</strong></div>` +
-    (scope ? `<p>${esc(scope)}</p>` : "") +
-    (measured ? `<p>${esc(t("check.flow.assessment"))}</p>` : "");
-}
-
-function checkupHydronicHtml(c, isModbus = false) {
-  const h = !isModbus && c.id === "flow" ? c.hydronic : null;
-  if (!h || typeof h !== "object") return ["", ""];
-  const labels = t("check.hydronic.labels").split("|");
-  const reasons = t("check.hydronic.reasons").split("|");
-  const limits = t("check.hydronic.limits").split("|");
-  const state = t("check.hydronic.states").split("|");
-  const nd = t("sys.nodata");
-  const row = (l, v) => `${l}: ${v}`;
-  const html = r => "<br>" + r.map(esc).join("<br>");
-  if (h.method !== 1) return ["", html([row(labels[5], reasons[13])])];
-  const known = checkupHydronicKnown(h);
-  const num = n => typeof n === "number" && Number.isFinite(n);
-  const cnt = n => num(n) && Number.isSafeInteger(n) && n >= 0;
-  const fmt = (n, p = 3) => n.toLocaleString(LANG, { maximumFractionDigits: p });
-  const pre = h.population_saturated === true ? "≥" : "";
-  const val = n => known && cnt(n) ? pre + fmt(n) : nd;
-  const dur = n => known && num(n) && n >= 0 ? pre + t("hist.duration_sec", fmt(n, 6)) : nd;
-  const rng = (r, n, u) => known && cnt(n) && n > 0 && r && [r.min, r.mean, r.max].every(num)
-    ? t("service.metric.range", fmt(r.min), fmt(r.mean), fmt(r.max), u) : nd;
-  const dt = n => known && num(n) && n >= 0 && Number.isFinite(n * 1000) && n <= 8640000000000
-    ? new Date(n * 1000).toLocaleString(LANG, { dateStyle: "short", timeStyle: "short", timeZone: "UTC" }) + " UTC" : nd;
-  const meas = [
-    row(labels[0], rng(h.spread_k, h.samples, "K")),
-    row(t("schem.flow_rate"), rng(h.flow_l_min, h.samples, "l/min")),
-    row(labels[1], rng(h.pump_command_pct, h.command_samples, "%")),
-    t("check.hydronic.counts", val(h.samples), val(h.command_samples)),
-    row(labels[2], [h.observed_s, h.candidate_s, h.qualified_s].map(dur).join(" / ")),
-    row(labels[3], `${dt(h.first_evidence_unix_s)} – ${dt(h.last_evidence_unix_s)}`),
-    row(labels[4], `${dt(h.first_accepted_unix_s)} – ${dt(h.last_accepted_unix_s)}`),
-    row(labels[7], val(h.observed_hours)),
-    row(labels[8], nd),
-  ];
-  const sr = k => t(`service.reason.${k}`);
-  const code = Number.isInteger(h.reason_code) && h.reason_code >= 0 && h.reason_code <= 19 ? h.reason_code : -1;
-  const reason = [reasons[0], sr("unsupported_profile"), reasons[1], reasons[2],
-    sr("missing_fresh_signal"), reasons[3], reasons[4],
-    sr("compressor_not_running"), sr("unsupported_or_unknown_mode"),
-    reasons[5], sr("defrost"), reasons[6],
-    sr("special_controller_phase"), reasons[7], sr("poll_gap"),
-    reasons[8], reasons[9], reasons[10], reasons[11], reasons[12]][code];
-  // A retained pump/valve/run-up reason is not a fresh current state after a source gap.
-  const fresh = h.current === true && h.confirmed === true;
-  const sec = c.secondary_supply;
-  if (fresh && sec?.zone_context === "unknown" && num(sec.delta_k) &&
-      num(sec.duration_s) && sec.duration_s >= 0 && cnt(sec.samples) && sec.samples > 0) {
-    meas.push(t("check.hydronic.secondary", (sec.delta_k > 0 ? "+" : "") + fmt(sec.delta_k) + " K",
-      t("hist.duration_sec", fmt(sec.duration_s, 6)), fmt(sec.samples)));
-  }
-  const cur = fresh || [1, 2, 3, 14, 15, 16, 17, 18, 19].includes(code) ? reason || reasons[13] : reasons[13];
-  const settle = fresh && code === 13 && num(h.settling_remaining_s) &&
-    h.settling_remaining_s > 0 && h.settling_remaining_s <= 600
-    ? ` ${t("hist.duration_sec", fmt(h.settling_remaining_s))}` : "";
-  const flags = m => cnt(m) && m <= 7
-    ? [limits[0], limits[1], state[5]].filter((_, i) => m & (1 << i)).join(" · ") : nd;
-  const pop = [known ? state[1] : h.dated === false ? state[2] : nd];
-  if (h.confirmed === false) pop.push(state[0]);
-  if (h.coverage_partial === true) pop.push(state[3]);
-  if (h.restore_pending === true) pop.push(limits[2]);
-  if (h.persistence_pending === true) pop.push(state[4]);
-  if (h.population_saturated === true && !(known && cnt(h.population_limitations_mask) && h.population_limitations_mask <= 7 && (h.population_limitations_mask & 4))) pop.push(state[5]);
-  if (known) pop.push(flags(h.population_limitations_mask));
-  if (cnt(h.dropped)) pop.push(t("check.hydronic.loss", `≥${fmt(h.dropped)}`));
-  return [html(meas), html([row(labels[5], [cur + settle, fresh ? flags(h.current_limitations_mask) : nd].filter(Boolean).join(" · ")),
-    row(labels[6], pop.filter(Boolean).join(" · "))])];
+function checkupFlowBriefHtml({ source, minimum, locationsMissing, unsupported }) {
+  if (source !== "x10a") return `<p>${esc(t("check.flow.x10a_only"))}</p>`;
+  if (minimum === null) return `<p>${esc(t(unsupported ? "check.status.unavailable" : "check.flow.waiting"))}</p>`;
+  return `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · X10A</span>` +
+    `<strong class="num">${esc(histFmt1(minimum))} l/min</strong></div>` +
+    `<p>${esc(t("check.flow.runup"))}</p>` +
+    (locationsMissing ? `<p>${esc(t("check.flow.locations_missing"))}</p>` : "");
 }
 
 function checkupStatusKey(c) {
@@ -3185,9 +2634,7 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
         : t("check.detail.collecting_unknown");
     }
   } else if (!detail) {
-    const hydronicEvidence = !isModbus && c.id === "flow" && checkupHydronicKnown(c.hydronic);
-    detail = t(statusKey === "unavailable" && hydronicEvidence
-      ? "check.detail.observation" : checkupDetailKey(c, statusKey));
+    detail = t(checkupDetailKey(c, statusKey));
   }
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
@@ -3250,11 +2697,9 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
     return (time.length ? descParaHtml(esc(time.join(" · "))) : "") +
       (metric ? descParaHtml(esc(metric)) : "") + descParaHtml(esc(detail)) +
       descNoteHtml(t("normal.label"), normal);
-  const [hydronicMeasurements, hydronicContext] = checkupHydronicHtml(c, isModbus);
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
-           (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}` +
-           hydronicMeasurements) +
-         descParaHtml(esc(detail) + hydronicContext) +
+           (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
+         descParaHtml(esc(detail)) +
          descNoteHtml(t("normal.label"), normal);
 }
 
@@ -3915,8 +3360,7 @@ function settingsConnectionsDown() {
 
 // ── Settings screen (behind the header gear) ─────────────────────────────────────────────────
 // The whole configuration on one screen, no menu level in between: Connections, ESP32 / Protocol /
-// Firmware, then the always-visible heating-curve diagnosis at the bottom, rendered together by
-// esp32CardHtml().
+// Firmware and optional plant diagnostics, rendered by esp32CardHtml().
 function renderSettings() {
   const snapshot = $("statusSnapshot");
   const otaOnly = S.otaInstalling && !S.status;

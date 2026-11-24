@@ -15,6 +15,11 @@ namespace daik::logic {
 constexpr uint32_t HYDRONIC_METHOD          = 1;
 constexpr size_t   HYDRONIC_PAYLOAD_BYTES   = 124;
 constexpr size_t   HYDRONIC_WORDS           = HYDRONIC_PAYLOAD_BYTES / 2;
+constexpr size_t   HYDRONIC_WINDOW_HOURS             = OBSERVATION_DAY_US / OBSERVATION_HOUR_US;
+constexpr int64_t  HYDRONIC_MINIMUM_SLOT_US          = 300000000;
+constexpr uint16_t HYDRONIC_MINIMUM_SLOTS            = (1u << 12) - 1;
+constexpr uint16_t HYDRONIC_MINIMUM_LOCATION_MISSING = 1u << 12;
+constexpr uint16_t HYDRONIC_LEGACY_MINIMUM_EVIDENCE  = UINT16_MAX;
 constexpr uint16_t HYDRONIC_HOUR_PARTIAL    = 1u;
 constexpr uint16_t HYDRONIC_HOUR_QUEUE_LOSS = 2u;
 constexpr uint16_t HYDRONIC_HOUR_CLOCK_LOSS = 4u;
@@ -35,6 +40,7 @@ struct HydronicHourlyPayload {
     uint32_t            observed_us = 0, candidate_us = 0, qualified_us = 0;
     uint32_t            samples = 0, command_samples = 0;
     uint16_t            flags = 0, dropped = 0;
+    uint16_t            flow_min_evidence = 0;
     uint8_t             limitations    = HydronicNoLimitation;
     HydronicHourlyKind  kind           = HydronicHourlyKind::Data;
     uint8_t             duration_edges = 0;
@@ -51,12 +57,23 @@ struct HydronicTotals {
     bool          saturated      = false;
     uint8_t       duration_edges = 0;
 };
+
+// Every set bin has at least one admitted endpoint with the exact rolling minimum. Anchoring
+// the fixed array to UTC buckets keeps it independent of the boot-relative trend raster.
+struct HydronicMinimumWindows {
+    int64_t  first_bucket = -1;
+    uint16_t masks[HYDRONIC_WINDOW_HOURS]{};
+    bool     locations_missing = false;
+};
 static_assert(HYDRONIC_PAYLOAD_BYTES <= HISTORY_JOURNAL_PAYLOAD_BYTES &&
                   HYDRONIC_PAYLOAD_BYTES % 2 == 0,
               "HYDR must fit the unchanged journal payload");
 static_assert(std::is_trivially_copyable<HydronicHourlyPayload>::value &&
-                  std::is_trivially_copyable<HydronicTotals>::value,
+                  std::is_trivially_copyable<HydronicTotals>::value &&
+                  std::is_trivially_copyable<HydronicMinimumWindows>::value,
               "HYDR producer and reader copies must not allocate");
+static_assert(OBSERVATION_HOUR_US == 12 * HYDRONIC_MINIMUM_SLOT_US,
+              "HYDR minimum evidence stores one bit per five minutes");
 static_assert(OBSERVATION_INDEX_CAP + OBSERVATION_QUEUE_CAP + 1 <=
                   static_cast<uint64_t>(INT64_MAX) /
                       (static_cast<uint64_t>(UINT32_MAX) * HYDRONIC_FLOW_MAX_MILLI),
@@ -70,6 +87,10 @@ inline bool hydronic_range_valid(const HydronicRange& r, uint32_t count, int32_t
     return r.min_milli >= low && r.max_milli <= high && r.min_milli <= r.max_milli &&
            r.sum_milli >= static_cast<int64_t>(r.min_milli) * (count - 1) + r.max_milli &&
            r.sum_milli <= static_cast<int64_t>(r.max_milli) * (count - 1) + r.min_milli;
+}
+inline uint16_t hydronic_minimum_slot(int64_t unix_us) {
+    if (unix_us < 0) return 0;
+    return uint16_t{1} << ((unix_us % OBSERVATION_HOUR_US) / HYDRONIC_MINIMUM_SLOT_US);
 }
 inline bool hydronic_hourly_valid(const HydronicHourlyPayload& p, int64_t bucket) {
     if (!observation_identity_valid(p.identity) || bucket < 0 ||
@@ -88,12 +109,22 @@ inline bool hydronic_hourly_valid(const HydronicHourlyPayload& p, int64_t bucket
         !hydronic_range_valid(p.command, p.command_samples, 0, HYDRONIC_COMMAND_MAX_MILLI))
         return false;
     if (!p.samples) {
-        if (p.first_accepted_unix_us != -1 || p.last_accepted_unix_us != -1) return false;
+        if (p.first_accepted_unix_us != -1 || p.last_accepted_unix_us != -1 || p.flow_min_evidence)
+            return false;
     } else if (p.first_accepted_unix_us < p.first_unix_us ||
                p.last_accepted_unix_us < p.first_accepted_unix_us ||
                p.last_accepted_unix_us > p.last_unix_us ||
                (p.samples == 1 && p.first_accepted_unix_us != p.last_accepted_unix_us))
         return false;
+    if (p.samples) {
+        const auto first = hydronic_minimum_slot(p.first_accepted_unix_us);
+        const auto last  = hydronic_minimum_slot(p.last_accepted_unix_us);
+        // Reject reserved bits and any claimed bin outside the accepted samples' own hour/span.
+        const uint16_t valid = (last << 1) - first;
+        if (!p.flow_min_evidence ||
+            (p.flow_min_evidence & ~(valid | HYDRONIC_MINIMUM_LOCATION_MISSING)))
+            return false;
+    }
     if (p.kind == HydronicHourlyKind::Fence)
         return p.first_unix_us == p.last_unix_us && !p.observed_us && !p.candidate_us &&
                !p.qualified_us && !p.samples && !p.command_samples && !p.dropped &&
@@ -177,6 +208,12 @@ inline bool hydronic_hourly_merge(HydronicHourlyPayload& into, const HydronicHou
     if (static_cast<uint64_t>(into.observed_us) + add.observed_us >
         static_cast<uint64_t>(last - first) + 1)
         return false;
+    if (add.samples) {
+        if (!into.samples || add.flow.min_milli < into.flow.min_milli)
+            into.flow_min_evidence = add.flow_min_evidence;
+        else if (add.flow.min_milli == into.flow.min_milli)
+            into.flow_min_evidence |= add.flow_min_evidence;
+    }
     hydronic_range_merge(into.spread, into.samples, add.spread, add.samples);
     hydronic_range_merge(into.flow, into.samples, add.flow, add.samples);
     hydronic_range_merge(into.command, into.command_samples, add.command, add.command_samples);
@@ -221,7 +258,9 @@ inline void hydronic_totals_add(HydronicTotals& into, const HydronicHourlyPayloa
 }
 
 // Explicit little-endian fields never expose ABI padding, native enum widths or endianness.
-// Byte 122 carries the duration edge membership. The remaining reserved byte stays zero.
+// Keep the complete older payload. Byte 122 carries duration edge membership and byte 123
+// remains reserved. Type-specific header pad[8..9] carries minimum evidence and remains inside
+// the existing CRC span. Older HYDR readers check the CRC and ignore the pad's interpretation.
 inline constexpr void hydronic_put(uint8_t*& at, uint64_t value, unsigned bytes) {
     for (unsigned i = 0; i < bytes; ++i) {
         *at++ = static_cast<uint8_t>(value);
@@ -241,7 +280,10 @@ inline int32_t hydronic_signed32(uint32_t value) {
     return value <= INT32_MAX ? static_cast<int32_t>(value)
                               : -1 - static_cast<int32_t>(UINT32_MAX - value);
 }
-inline void hydronic_encode(const HydronicHourlyPayload& p, void* destination) {
+inline void hydronic_encode(const HydronicHourlyPayload& p, void* destination,
+                            HistoryJournalHeader& h) {
+    h.pad[8] = static_cast<uint8_t>(p.flow_min_evidence);
+    h.pad[9] = static_cast<uint8_t>(p.flow_min_evidence >> 8);
     auto* at = static_cast<uint8_t*>(destination);
     hydronic_put(at, p.identity.source_fp, 4);
     hydronic_put(at, p.identity.model_fp, 4);
@@ -268,7 +310,7 @@ inline void hydronic_encode(const HydronicHourlyPayload& p, void* destination) {
     hydronic_put(at, p.duration_edges, 1);
     hydronic_put(at, 0, 1);
 }
-inline bool hydronic_decode(const void* source, size_t bytes, int64_t bucket,
+inline bool hydronic_decode(const void* source, size_t bytes, const HistoryJournalHeader& h,
                             HydronicHourlyPayload& p) {
     if (!source || bytes != HYDRONIC_PAYLOAD_BYTES) return false;
     const auto* at                = static_cast<const uint8_t*>(source);
@@ -295,7 +337,11 @@ inline bool hydronic_decode(const void* source, size_t bytes, int64_t bucket,
     p.limitations    = static_cast<uint8_t>(hydronic_get(at, 1));
     p.kind           = static_cast<HydronicHourlyKind>(hydronic_get(at, 1));
     p.duration_edges = static_cast<uint8_t>(hydronic_get(at, 1));
-    return hydronic_get(at, 1) == 0 && hydronic_hourly_valid(p, bucket);
+    if (hydronic_get(at, 1) != 0) return false;
+    p.flow_min_evidence = static_cast<uint16_t>(h.pad[8] | (h.pad[9] << 8));
+    if (p.flow_min_evidence == HYDRONIC_LEGACY_MINIMUM_EVIDENCE)
+        p.flow_min_evidence = p.samples ? HYDRONIC_MINIMUM_LOCATION_MISSING : 0;
+    return hydronic_hourly_valid(p, h.bucket);
 }
 inline constexpr uint32_t hydronic_fingerprint() {
     constexpr uint32_t fingerprint = [] {

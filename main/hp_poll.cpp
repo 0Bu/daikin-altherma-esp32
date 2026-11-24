@@ -34,7 +34,6 @@
 #include "logic/x10a_snapshot.hpp"
 #include "http_handlers.hpp"
 #include "ota_update.hpp"
-#include "weather_forecast.hpp"
 
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
@@ -887,16 +886,14 @@ static void poll_task(void*) {
         // on — the deepest one, so its stack peak does not move.
         history_liveness_touch();
 
-        // OTA/weather TLS and the Secure-Boot-v2 RSA verifier need the same scarce contiguous
+        // OTA TLS and the Secure-Boot-v2 RSA verifier need the same scarce contiguous
         // internal heap that poll_once() uses for its vector and owned strings. Stand aside before
-        // the first Config/cache allocation, not after a std::bad_alloc: the latter was the live 1.0.0 failure
-        // mode and left only 632 B free at validation. The lock-free network flag rises before TLS
-        // allocates; a sweep already in progress finishes, then this branch acknowledges every
-        // subsequent cycle by doing no bus/cache work. Like MQTT, the hold is bounded so a stuck
-        // flag cannot silence the heat-pump link forever.
-        const bool ota_active = ota_download_active();
-        const bool weather_active = weather_fetch_active();
-        const bool network_active = ota_active || weather_active;
+        // the first Config/cache allocation, not after a std::bad_alloc: the latter was the
+        // live 1.0.0 failure mode and left only 632 B free at validation. The lock-free network
+        // flag rises before TLS allocates; a sweep already in progress finishes, then this branch
+        // acknowledges every subsequent cycle by doing no bus/cache work. Like MQTT, the hold is
+        // bounded so a stuck flag cannot silence the heat-pump link forever.
+        const bool network_active = ota_download_active();
         if (ota_quiesce_step(network_quiesce, network_active)) {
             retire_saturation_witness();
             s_network_quiesced.store(true, std::memory_order_release);
@@ -906,8 +903,7 @@ static void poll_task(void*) {
             refrigerant_service_record_poll_gap(generation);
             esp_task_wdt_reset();  // explicit on the held path; keep this true if code moves above it
             if (!network_quiesce_logged) {
-                diag_printf("poll: holding off X10A sweeps during %s\n",
-                            ota_active ? "OTA" : "weather");
+                diag_printf("poll: holding off X10A sweeps during OTA\n");
                 network_quiesce_logged = true;
             }
             vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
