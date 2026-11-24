@@ -76,17 +76,6 @@ inline ConfigBlob config_blob_from(const Config& c) {
     b.mqtt_user                      = c.mqtt_user;
     b.mqtt_pass                      = c.mqtt_pass;
     b.mqtt_base                      = c.mqtt_base;
-    b.ref_temp_name                  = c.ref_temp_name;
-    b.ref_temp_topic                 = c.ref_temp_topic;
-    b.ref_temp_path                  = c.ref_temp_path;
-    b.ref_temp_time_path             = c.ref_temp_time_path;
-    b.ref_temp_setpoint_topic        = c.ref_temp_setpoint_topic;
-    b.ref_temp_time_topic            = c.ref_temp_time_topic;
-    b.ref_temp_fixed_setpoint_tenths = c.ref_temp_fixed_setpoint_tenths;
-    b.ref_temp_setpoint_path         = c.ref_temp_setpoint_path;
-    b.ref_temp_enabled_path          = c.ref_temp_enabled_path;
-    b.ref_temp_hvac_mode_path        = c.ref_temp_hvac_mode_path;
-    b.ref_temp_max_age_s             = c.ref_temp_max_age_s;
     b.circulation_name               = c.circulation_name;
     b.circulation_topic              = c.circulation_topic;
     b.circulation_power_path         = c.circulation_power_path;
@@ -95,14 +84,10 @@ inline ConfigBlob config_blob_from(const Config& c) {
     b.circulation_on_tenths_w        = c.circulation_on_tenths_w;
     b.circulation_off_tenths_w       = c.circulation_off_tenths_w;
     b.circulation_confirm_s          = c.circulation_confirm_s;
-    b.weather_enabled                = c.weather_enabled;
-    b.weather_latitude_e6            = c.weather_latitude_e6;
-    b.weather_longitude_e6           = c.weather_longitude_e6;
     b.diagnostics_enabled            = c.diagnostics_enabled;
     b.diagnostics_generation         = c.diagnostics_generation;
     b.diagnostics_source             = static_cast<uint8_t>(c.diagnostics_source);
     b.has_diagnostics_source         = true;
-    b.ref_temp_generation            = c.ref_temp_generation;
     b.env3_enabled                   = c.env3_enabled;
     b.env3_sda                       = c.env3_sda;
     b.env3_scl                       = c.env3_scl;
@@ -149,7 +134,7 @@ inline void config_blob_keep_yielded_pins(ConfigBlob& b, const LocalPinsRepair& 
 //    would reach RAM but never "cfg"), so it writes ONLY "link" and requires it. It neither builds
 //    nor writes "cfg": the RAM view it holds also carries the sanitising config_load applied
 //    without persisting (for example rejected board pins, a colliding ENV III mapping or an
-//    unusable weather location), and rewriting that view would persist the fallbacks over the
+//    unusable sensor mapping), and rewriting that view would persist the fallbacks over the
 //    user's stored settings. Its failure is also free of side effects: no durable entry changes
 //    and RAM stays as it was.
 //  * The only concurrent writer is auto-detection, so a snapshot older than a detection commit is

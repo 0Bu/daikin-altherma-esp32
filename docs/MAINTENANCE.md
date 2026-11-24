@@ -59,7 +59,7 @@ source-bound manifest, complete binary inventory, installer plan and changelog o
 All four source checkouts retain complete commit history and tags. Only `trusted_build` and
 `publish` filter historical blobs with `blob:none`; the current source tree remains complete.
 The local release suite hydrates the candidate and its first-parent tree, then uses
-`prepare-ci-history.py` to load the historical HTTP config and deadline regression sources before
+`prepare-ci-history.py` to load the historical HTTP deadline regression source before
 taking the offline snapshot. Missing source or a changed fixture read blocks the local checks.
 PR and mechanical checkouts remain unfiltered and remove persisted credentials.
 The publisher's `gh-pages` fetch filters blobs too. Version admission and changelog generation
@@ -274,20 +274,24 @@ pressure, the exact image must still show `pending_verify` with rollback armed. 
 status/values/diag plus real manifest-TLS pressure within 120 seconds of boot; require stable
 counters, recovered heap and MQTT. Afterwards allow at most 150 seconds to confirm the same identity,
 monotonic stressed uptime and `valid`/rollback-disarmed state. Confirmation permits at most three
-expected unwired X10A timeouts. Physical X10A and Weather are not bench prerequisites.
+expected unwired X10A timeouts. The bench does not require physical X10A or a configured forecast on
+legacy firmware.
 
 Raw board probes wait for peer close within the original request deadline before completing.
 The exact end sample is journaled before the final pressure, counter and heap checks, so a failed
 heap check retains its measured values. Peer close does not prove TCP memory reclamation.
-In every gate pressure window (bench delivery, promotion round trip, production and lab-HIL),
-busy-503s during the gate's own Weather-refresh/manifest-TLS window are expected and required
-(`tls_busy_503`). Outside it, a `/values` 503 counts as expected only when its body is exactly the
-firmware's TLS-busy text ([API](API.md)) and a `/status` sample from one second before the request to
-one second after its refusal shows the board's own Weather client fetching, at most
-`MAX_WEATHER_REFUSALS_PER_EPISODE` per continuous fetch and `MAX_WEATHER_REFUSALS_PER_WINDOW` per
-window; the receipt counts these as `firmware_weather_busy_503`. Every other refusal blocks. Each
-blocking error names any response text, its time in the window and the last sampled uptime; a
-rejected `/values` refusal also names why it was not accepted.
+Every pressure window (bench delivery, promotion round trip, production and lab-HIL) requires
+busy-503s during the gate's own manifest TLS (`tls_busy_503`). Legacy Weather evidence is required
+when the transaction pins its configuration, exercises a refresh or attributes a refusal to it.
+For legacy firmware only, a `/values` 503 outside the gate's TLS window counts as expected when its
+body is exactly `network operation in progress` and a `/status` sample from one second before the
+request to one second after its refusal shows the board's own Weather client fetching. The bounds
+are `MAX_WEATHER_REFUSALS_PER_EPISODE` per continuous fetch and `MAX_WEATHER_REFUSALS_PER_WINDOW`
+per window. The receipt counts these as `firmware_weather_busy_503`. Every other refusal blocks.
+`status_schema_version:2` requires the retired Weather object to be absent and the gate issues no
+Weather refresh. HTTP, MQTT, X10A, heap, stack and probation requirements continue to apply.
+Each blocking error names any response text, its time in the window and the last sampled uptime.
+A rejected `/values` refusal also names why it was refused.
 
 The sole old-writer exception is the gate's exact historical `1.0.2` version/ELF identity with an
 absent OTA-stack field. Numeric below-limit stack, missing validation/heap evidence or another
@@ -319,14 +323,14 @@ The transaction has two distinct stages:
    rollback, run three-minute pressure immediately and confirm the valid/disarmed image afterward.
    Wait past pending-image probation before each replacement. The legacy return offer must remain
    continuously idle for three seconds before its one restore write.
-2. **Production canary.** Before the sole production POST, observe two consecutive MQTT-connected,
-   Weather-idle samples within 15 seconds while old identity, uptime and live X10A remain stable.
+2. **Production canary.** Before the sole production POST, observe two consecutive MQTT-connected
+   samples within 15 seconds while old identity, uptime and live X10A remain stable. On legacy
+   firmware, the Weather client must also be idle.
    Heap-restart, MQTT-skip, poll-skip and CRC counters must not change; X10A timeout delta stays within
    three. Bind the completed target check generation/feed/version/SHA, require successor generation,
-   capture validation/heap/stack evidence, then observe target identity, rollback/crash/safe mode,
-   live values and retained X10A MQTT through a separate three-minute read-only canary (longer after
-   a clock wait, below). Before success, require an explicit valid/disarmed image with stable
-   identity, uptime and counters.
+   capture validation/heap/stack evidence, then run three minutes of pressure on the target (longer
+   after a clock wait, below). The subsequent read-only confirmation requires an explicit
+   valid/disarmed image with stable identity, uptime and counters and verifies retained X10A MQTT.
 
 **Do not publish either participating feed during this transaction.** The old release cannot retain
 transient feed headers; its return reads the mutable official dev path. Manifest drift, failed return,
@@ -335,22 +339,28 @@ MQTT reconnect window and requires at least 24 KiB free heap and a 16 KiB larges
 window. Pressure must still start within 120 seconds of boot with unchanged uptime/counter guards;
 a paused or unsafe-heap baseline is not accepted as a healthy start.
 
-The gate binds the production board's explicit Weather `configured` flag and checks it through
-pre-write readiness, reboot, pressure and probation. The production canary always exercises
-manifest TLS, HTTP, MQTT and X10A. Configured Weather additionally needs an exact non-zero
-requested/started/completed/success token and a success-counter advance. OTA serialization may
-defer the same outstanding attempt, but unrelated scheduled fetches cannot satisfy it. Only a
-completed `waiting/heap_headroom` refusal may wait until all pressure workers stop, then passively
-await two stable 48/20-KiB samples for at most 420 seconds and issue one different token under a
-120-second bound. That retry must
+The production pressure run exercises manifest TLS through `/ota/check` alongside HTTP, MQTT and
+X10A. A configured legacy target also receives a transient `POST /set_weather` to refresh Weather.
+These requests preserve the saved configuration. Before the sole firmware update POST, the gate
+checks the running status schema and pins the Weather `configured` boolean on legacy
+firmware. After the target reboots and transfer evidence has been checked, the gate reads the returned
+status schema. A return from schema 2 to the legacy schema fails acceptance at this point. The target
+schema stays fixed through pressure and probation. The Weather configuration must agree across
+legacy boots, and a schema 2 target follows the regular canary and probation checks without Weather.
+
+For a legacy target with Weather configured, the gate needs an exact non-zero requested, started,
+completed and successful refresh token and a success-counter advance. OTA serialization may defer
+the same outstanding attempt. Only a completed `waiting/heap_headroom` refusal may wait until all
+pressure workers stop, then passively await two stable 48/20-KiB samples for at most 420 seconds and
+issue one different token under a 120-second bound. That retry must
 succeed with MQTT/X10A recovered and invariant uptime/counters/heap. A second refusal or another
 failure blocks. Successful idle fetch afterward must not be described as Weather TLS success under
 load. Cross-subsystem streamed snapshots require later owner evidence, never assumed simultaneity.
 
-The firmware starts no Weather fetch before SNTP sets its clock. A pressure run that requires
-Weather therefore first waits, with its probes running but before the gate's own
-Weather-refresh/manifest-TLS window, while the board reports `ntp.synced: false` and until its
-Weather client is idle, at most `CLOCK_SYNC_WAIT_MAX_S`. The three-minute pressure window is
+Legacy firmware waits for SNTP before starting a Weather fetch. A pressure run that requires
+Weather therefore waits with probes running before the gate's own refresh and manifest TLS,
+while the board reports `ntp.synced: false` and until its Weather client is idle, at most
+`CLOCK_SYNC_WAIT_MAX_S`. The three-minute pressure window is
 extended by that wait, and the sample minima scale with it; absolute allowances such as the three
 X10A timeouts do not. The stress receipt records the wait as `clock_wait_s`. Refusals and MQTT gaps
 during the wait are judged as outside that window, and a reboot or allocation failure ends it at
@@ -371,8 +381,8 @@ follows failed acceptance. A staging command without `--execute` still writes th
 an admitted read-only preflight. Preserve failure evidence; a later healthy sample does not turn
 that transaction into a pass.
 
-Leave every board the gate contacts alone while it runs: no UI or API update check, settings save or
-Weather refresh. The gate cannot tell such an operation from a fault. A manifest check pauses X10A
+Leave every board the gate contacts alone while it runs. A competing UI or API update check,
+settings save or legacy Weather refresh can resemble a fault. A manifest check pauses X10A
 polling for its whole run, including heap waits of up to `kTransferHeadroomMaxAttempts` ×
 `kHeadroomRetryDelay` each (`main/ota_update.cpp`). Once `last_ok_s` reaches
 `MQTT_X10A_OFFLINE_GRACE_S` (`main/logic/mqtt_publish_gate.hpp`), `/status` reports X10A as lost
@@ -431,7 +441,11 @@ truth. Executed host fixtures prove controller behavior, not a physical cold cyc
 
 Then exercise the candidate's own writer through a verified bootstrap downgrade under another
 watchdog; capture pre-reboot evidence, prove pending bootstrap, force rollback to the valid candidate,
-and run combined HTTP/MQTT/X10A/Weather pressure with sampled stack limits and a fresh accepted offer.
+and run combined HTTP/MQTT/X10A pressure with sampled stack limits and a fresh accepted offer.
+The harness pins the bootstrap status schema at preflight and checks it on both returns to that image.
+The candidate may advance the schema and must report the same schema on subsequent candidate boots.
+Schema-3 inventory keeps its legacy Weather requirements for older artifacts. A schema-2 candidate
+omits only the retired Weather settings and task from its persistence and stack comparisons.
 Runner failure after explicit candidate approval still fails the test without promising automatic
 rollback of an already approved image. One lab profile proves neither a production plant nor all
 physical behavior.

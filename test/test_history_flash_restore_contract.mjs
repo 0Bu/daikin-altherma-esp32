@@ -1,0 +1,340 @@
+// Exercise production flash restore and the HomeHub target reset with modeled storage and locks.
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+const source = fs.readFileSync("main/history.cpp", "utf8");
+const take = (name) => {
+  const start = source.indexOf(name);
+  assert.ok(start >= 0 && source.indexOf(name, start + name.length) < 0, `unique production ${name}`);
+  const brace = source.indexOf("{", start);
+  let depth = 1, end = brace + 1;
+  while (end < source.length && depth) {
+    if (source[end] === "{") depth++;
+    if (source[end] === "}") depth--;
+    end++;
+  }
+  assert.ok(brace > start && depth === 0, `bounded production ${name}`);
+  return source.slice(start, end);
+};
+const restoreFunctions = ["inline void forget_adopt_floor(", "inline void bump_history_epoch(",
+  "void history_modbus_reset(", "void ring_replace_locked(", "bool splice_locked(",
+  "static bool history_splice_snapshot(", "HistorySource source_of_slot(",
+  "static void flash_restore_advance_to(", "static void history_restore_checkup_flash(",
+  "logic::HistoryJournalSource journal_source(", "void history_service_flash_restore("].map(take).join("\n");
+const journalStart = source.indexOf("struct FlashJournalRecord {");
+const journalEnd = source.indexOf("\n};", journalStart);
+const sourceEnum = source.match(/^enum class HistorySource[^\n]+/m)?.[0];
+assert.ok(journalStart >= 0 && journalEnd > journalStart && sourceEnum);
+const restoreFixture = String.raw`
+#include "logic/checkup_persist.hpp"
+#include "logic/config_model.hpp"
+#include "logic/history_persist.hpp"
+#include "stop_observation_store.hpp"
+#include "hydronic_observation_store.hpp"
+#include <atomic>
+#include <cstdio>
+#include <cstring>
+#include <stdexcept>
+namespace daik {
+using namespace logic;
+void* s_mtx = reinterpret_cast<void*>(1);
+void* s_flash_mtx = reinterpret_cast<void*>(2);
+int64_t now_us = 0;
+int64_t esp_timer_get_time() { return now_us; }
+void need(bool ok, const char* why) { if(!ok) throw std::runtime_error(why); }
+int flash_depth=0, history_depth=0, owned_reads=0;
+bool flash_contended=false;
+void (*after_flash_release)()=nullptr;
+template<typename T> struct FlashOwned {
+ T value{};
+ operator T&() { need(flash_depth==1,"unguarded restore metadata read"); ++owned_reads; return value; }
+ operator T() const { need(flash_depth==1,"unguarded restore metadata read"); ++owned_reads; return value; }
+ FlashOwned& operator=(T v) { need(flash_depth==1,"unguarded restore metadata write"); value=v; return *this; }
+ FlashOwned& operator=(const FlashOwned& v) { return *this=static_cast<T>(v); }
+ FlashOwned& operator++() { *this=static_cast<T>(*this)+1; return *this; }
+ T operator++(int) { T old=*this; ++*this; return old; }
+};
+struct Lock {
+ void* sem; bool held=false;
+ explicit Lock(void* m):Lock(m,0) {}
+ Lock(void* m,int):sem(m) {
+  if(!m || (m==s_flash_mtx&&flash_contended))return;
+  if(m==s_flash_mtx){need(history_depth==0,"history-to-flash lock inversion"); need(flash_depth==0,"recursive flash acquisition"); ++flash_depth;}
+  else {need(history_depth==0,"recursive history acquisition"); ++history_depth;}
+  held=true;
+ }
+ bool acquired() const{return held;}
+ ~Lock() noexcept(false) {
+  if(!held)return;
+  if(sem==s_flash_mtx){--flash_depth;if(after_flash_release){auto next=after_flash_release;after_flash_release=nullptr;next();}}
+  else --history_depth;
+ }
+};
+` + sourceEnum + "\n" + source.slice(journalStart, journalEnd + 3) + String.raw`
+constexpr size_t kJournalSources = static_cast<size_t>(HistoryJournalSource::Checkup) + 1;
+FlashOwned<int64_t> s_flash_last_bucket[kJournalSources], s_flash_newest_bucket[kJournalSources],
+    s_flash_oldest_bucket[kJournalSources];
+FlashOwned<uint16_t> s_flash_restore_slot_count[kJournalSources];
+std::atomic<bool> s_flash_forgotten{false};
+std::atomic<uint32_t> s_mb_target_fp{101}, s_mb_identity_generation{1}, s_history_epoch{1};
+int64_t s_adopt_real_end_us[HISTORY_LIVENESS_RASTERS], s_adopt_floor_bucket[HISTORY_LIVENESS_RASTERS];
+constexpr size_t kHomeHubSrc = static_cast<size_t>(HistoryJournalSource::Modbus);
+constexpr size_t kHomeHubColumn = HOMEHUB_HISTORY_COUNT - 1;
+constexpr size_t kHomeHubLastRing = TREND_COUNT + kHomeHubColumn;
+TrendRing homehub_ring;
+using CheckupFlashRecord=logic::CheckupJournalRecord;
+enum class CheckupFlashRestoreResult:uint8_t {Deferred,Ignored,Restored};
+using esp_err_t=int; constexpr int ESP_OK=0;
+constexpr size_t kTotalRings=HISTORY_FLASH_TOTAL_RINGS,kRestoreRingsPerTick=4;
+FlashOwned<bool> s_flash_scan_ok,s_flash_restore_done,s_flash_checkup_restore_done;
+FlashOwned<size_t> s_flash_restore_ring,s_flash_restored_rings;
+uint16_t s_flash_restore_slots[kJournalSources - 1][HISTORY_SAMPLES];
+uint16_t s_flash_checkup_restore_slots[logic::CHECKUP_JOURNAL_INDEX_CAP];
+constexpr size_t kCheckupModbusSource = kJournalSources + 2;
+struct CheckupModbusFlashState {
+ FlashOwned<bool> restore_done;
+ uint16_t restore_slots[logic::CHECKUP_COMPLETED_BUCKETS];
+ FlashOwned<uint16_t> restore_slot_count;
+ FlashOwned<int64_t> newest_bucket;
+} s_flash_mb_checkup;
+std::atomic<bool> s_reset_requested{false},s_mb_reset_requested{false},s_circulation_reset_requested{false};
+std::atomic<uint32_t> s_circulation_fp{0};
+bool s_persist_dirty=false;
+struct ExistingStore {uint32_t circulation_fp=0;} existing_store;
+ExistingStore& P(){return existing_store;}
+alignas(8) unsigned char s_flash_sector[HISTORY_FLASH_ERASE_BYTES];
+struct FlashTrendRestoreScratch {
+ HistorySample blocks[kRestoreRingsPerTick][HISTORY_SAMPLES];
+ HistorySample splice_live[HISTORY_SAMPLES];
+ HistorySample splice_out[HISTORY_SAMPLES];
+};
+FlashJournalRecord stored[4];
+int flash_reads=0,checkup_calls=0,stop_expirations=0,stop_services=0,hydronic_expirations=0,hydronic_services=0; bool queue_reset=false;
+void diag_printf(const char*,...){}
+const char* esp_err_to_name(int){return "fixture";}
+bool time_synced(){return true;}
+void time_now(int64_t& sec,int32_t& ms){sec=300000;ms=0;}
+void persist_seal_locked(){}
+logic::TrendRingView ring_at(HistorySource src, size_t index) {
+ need(flash_depth == 1 && history_depth == 1, "splice must acquire history under flash");
+ return src == HistorySource::Modbus && index == kHomeHubColumn
+     ? homehub_ring.view() : logic::TrendRingView{};
+}
+int64_t source_anchor_bucket_locked(HistorySource){return 1000;}
+bool seed_source_timeline_locked(HistorySource,int64_t,int64_t&){throw std::runtime_error("unexpected seed");}
+void history_modbus_reset(uint32_t) noexcept;
+void deferred_reset(){history_modbus_reset(202);}
+esp_err_t flash_read_record(size_t slot,FlashJournalRecord& out){
+ need(flash_depth==1,"record selection without flash owner");++flash_reads;
+ need(slot<4,"fixture slot bound");out=stored[slot];
+ if(queue_reset){queue_reset=false;after_flash_release=deferred_reset;}
+ return ESP_OK;
+}
+bool flash_record_valid(const FlashJournalRecord& r){
+ need(flash_depth==1,"record validation without flash owner");
+ return r.header.source==static_cast<uint8_t>(HistoryJournalSource::Checkup)||
+        history_journal_header_matches_scoped(r.header, 1234u, s_mb_target_fp.load());
+}
+bool flash_record_physically_valid(const FlashJournalRecord& r){return flash_record_valid(r);}
+bool flash_is_manifest(const HistoryJournalHeader&){return false;}
+bool flash_modbus_checkup_owned(const HistoryJournalHeader&){return false;}
+int flash_record_stored_index(const HistoryJournalHeader&,size_t index) {
+ return index == kHomeHubColumn ? static_cast<int>(index) : -1;
+}
+void flash_note_restore_ahead(size_t,int64_t,int64_t){need(flash_depth==1,"restore note without owner");}
+CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord*,size_t n,int64_t,DiagnosticsSource src=DiagnosticsSource::X10a){
+ need(flash_depth==1,"checkup restore lost caller flash owner");
+ if(src==DiagnosticsSource::X10a){need(n==1,"checkup record selection");++checkup_calls;}
+ else need(n==0,"unexpected modbus checkup records in trend fixture");
+ return CheckupFlashRestoreResult::Restored;
+}
+// Independent observation services must keep their ownership even during a trend restore.
+void checkup_stop_context_expire(int64_t sample_us){
+ need(flash_depth==0&&history_depth==0,"stop expiry acquired under a journal/history owner");
+ need(sample_us==now_us,"stop expiry must receive the current monotonic time");++stop_expirations;
+}
+bool flash_read_stop_observation(uint16_t,int64_t&,uint64_t&,logic::ObservationHourlyPayload&){
+ throw std::runtime_error("unexpected observation read in trend fixture");
+}
+void stop_observation_flash_service(StopObservationReader reader){
+ need(flash_depth==1&&history_depth==0,"stop restore service without sole flash owner");
+ need(reader==flash_read_stop_observation,"stop restore received a different reader");++stop_services;
+}
+void checkup_hydronic_expire(int64_t sample_us){
+ need(flash_depth==0&&history_depth==0,"hydronic expiry acquired under a journal/history owner");
+ need(sample_us==now_us,"hydronic expiry must receive the current monotonic time");++hydronic_expirations;
+}
+HydronicReadResult flash_read_hydronic_observation(uint16_t,int64_t&,uint64_t&,logic::HydronicHourlyPayload&){
+ throw std::runtime_error("unexpected hydronic observation read in trend fixture");
+}
+void hydronic_observation_flash_service(HydronicObservationReader reader){
+ need(flash_depth==1&&history_depth==0,"hydronic restore service without sole flash owner");
+ need(reader==flash_read_hydronic_observation,"hydronic restore received a different reader");++hydronic_services;
+}
+void history_restore_cycling_flash(uint32_t wait){
+ need(flash_depth==1&&history_depth==0&&wait==0,"cycling restore must use the nonblocking flash owner");
+}
+void history_restore_cycling_runs_flash(){
+ need(flash_depth==1&&history_depth==0,"cycling run restore must use the sole flash owner");
+}
+void history_restore_fault_flash(uint32_t wait){
+ need(flash_depth==1&&history_depth==0&&wait==0,"fault restore must use the nonblocking flash owner");
+}
+void history_restore_dhw_flash(uint32_t wait){
+ need(flash_depth==1&&history_depth==0&&wait==0,"tank-cooling restore must use the nonblocking flash owner");
+}
+` + restoreFunctions + String.raw`
+void prepare_restore(){
+ need(flash_depth==0&&history_depth==0,"fixture leaked owner");
+ flash_contended=false;after_flash_release=nullptr;queue_reset=false;
+ flash_reads=checkup_calls=stop_expirations=stop_services=hydronic_expirations=hydronic_services=0;
+ Lock flash(s_flash_mtx);
+ homehub_ring.reset();
+ s_mb_target_fp.store(101);
+ s_mb_reset_requested.store(false);
+ s_mb_identity_generation.store(1);
+ s_history_epoch.store(1);
+ s_flash_scan_ok=true;s_flash_restore_done=false;s_flash_checkup_restore_done=false;
+ s_flash_mb_checkup.restore_done=false;s_flash_mb_checkup.restore_slot_count=0;s_flash_mb_checkup.newest_bucket=INT64_MIN;
+ s_flash_restore_ring=kHomeHubLastRing;s_flash_restored_rings=0;
+ for(size_t s=0;s<kJournalSources;++s){
+  s_flash_last_bucket[s]=s_flash_newest_bucket[s]=s_flash_oldest_bucket[s]=INT64_MIN;
+  s_flash_restore_slot_count[s]=0;
+ }
+ // Leave the neighboring endpoint and an adoption floor to witness the reset's scope.
+ s_flash_newest_bucket[static_cast<size_t>(HistoryJournalSource::X10a)] = 1100;
+ s_adopt_real_end_us[kHomeHubSrc] = 0;
+ s_adopt_floor_bucket[kHomeHubSrc] = 999;
+ s_flash_last_bucket[kHomeHubSrc] = s_flash_newest_bucket[kHomeHubSrc] = 1000;
+ s_flash_oldest_bucket[kHomeHubSrc] = 999;
+ s_flash_restore_slot_count[kHomeHubSrc] = 2;
+ s_flash_restore_slots[kHomeHubSrc][0] = 1;
+ s_flash_restore_slots[kHomeHubSrc][1] = 2;
+ const size_t checkup = static_cast<size_t>(HistoryJournalSource::Checkup);
+ s_flash_newest_bucket[checkup]=83;s_flash_oldest_bucket[checkup]=83;s_flash_restore_slot_count[checkup]=1;
+ s_flash_checkup_restore_slots[0]=3;
+ for(size_t slot=1;slot<=2;++slot){
+  stored[slot] = {};
+  auto& h=stored[slot].header;h={};h.magic=HISTORY_JOURNAL_MAGIC;h.version=HISTORY_JOURNAL_VERSION;
+  h.source=static_cast<uint8_t>(HistoryJournalSource::Modbus);h.flags=HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
+  h.catalog_fp=1234u;h.commit=HISTORY_JOURNAL_COMMITTED;h.value_count=HOMEHUB_HISTORY_COUNT;
+  h.slot_bytes=HISTORY_JOURNAL_SLOT_BYTES;h.sequence=slot;h.bucket=1001-static_cast<int64_t>(slot);
+  h.dt_s = HISTORY_DT_S;
+  h.rings[0] = TREND_COUNT;
+  h.rings[1] = HOMEHUB_HISTORY_COUNT;
+  h.rings[2] = ENV3_HISTORY_COUNT;
+  history_journal_set_scope(h,101);
+  const HistorySample reading=slot==1?240:236;
+  std::memcpy(stored[slot].payload + kHomeHubColumn * sizeof(reading), &reading, sizeof(reading));
+ }
+ stored[3]={};stored[3].header.source=static_cast<uint8_t>(HistoryJournalSource::Checkup);stored[3].header.bucket=83;
+}
+void run_restore(){
+ prepare_restore();history_service_flash_restore();
+ need(flash_depth==0&&history_depth==0,"restore released all locks");
+ need(stop_expirations==1&&stop_services==1,"independent stop boundary serviced exactly once");
+ need(hydronic_expirations==1&&hydronic_services==1,"independent hydronic boundary serviced exactly once");
+ need(flash_reads==3&&checkup_calls==1,"checkup and HomeHub scanned once under a single flash owner");
+ HistorySample value=0;
+ need(homehub_ring.count==2,"actual HomeHub source block restored");
+ need(homehub_ring.sample_from_newest(0,value)&&value==240,"actual latest sample restored");
+ need(homehub_ring.sample_from_newest(1,value)&&value==236,"actual older sample restored");
+
+ prepare_restore();queue_reset=true;history_service_flash_restore();
+ need(flash_depth==0&&history_depth==0,"concurrent reset releases all locks");
+ need(stop_expirations==1&&stop_services==1,"source reset cannot skip independent stop boundary");
+ need(hydronic_expirations==1&&hydronic_services==1,"source reset cannot skip independent hydronic boundary");
+ need(s_mb_target_fp.load()==202 && s_mb_reset_requested.load() &&
+      s_mb_identity_generation.load()==2 && s_history_epoch.load()==2,
+      "queued actual HomeHub reset retires the restored generation");
+ {
+  Lock flash(s_flash_mtx);
+  need(s_flash_newest_bucket[kHomeHubSrc]==INT64_MIN &&
+       s_flash_oldest_bucket[kHomeHubSrc]==INT64_MIN &&
+       s_flash_last_bucket[kHomeHubSrc]==INT64_MIN && s_flash_restore_slot_count[kHomeHubSrc]==0,
+       "target reset clears HomeHub restore endpoints and index");
+  need(s_adopt_real_end_us[kHomeHubSrc]==INT64_MIN && s_adopt_floor_bucket[kHomeHubSrc]==INT64_MIN,
+       "target reset discards the old HomeHub adoption floor");
+  need(s_flash_newest_bucket[static_cast<size_t>(HistoryJournalSource::X10a)]==1100,
+       "target reset preserves the X10A restore endpoint");
+  const HistorySample predecessor=222;
+  need(!history_splice_snapshot(HistorySource::Modbus,kHomeHubColumn,&predecessor,1,1,998,0),
+       "final splice refuses an old block while a HomeHub target reset is pending");
+  s_flash_restore_ring=TREND_COUNT;
+ }
+ const int reads_after_reset=flash_reads;
+ history_service_flash_restore();
+ {
+  Lock flash(s_flash_mtx);
+  need(s_flash_restore_ring==TREND_COUNT + HOMEHUB_HISTORY_COUNT && flash_reads==reads_after_reset,
+       "a pending HomeHub reset skips that source and permits ENV III restore");
+ }
+
+ prepare_restore();flash_contended=true;int before=owned_reads;
+ history_service_flash_restore();
+ need(owned_reads==before&&flash_reads==0&&checkup_calls==0,"nonblocking restore touches no owned metadata on contention");
+ need(stop_expirations==1&&stop_services==0,"contention keeps expiry outside flash and refuses observation service");
+ need(hydronic_expirations==1&&hydronic_services==0,"contention keeps hydronic expiry outside flash and refuses observation service");
+ flash_contended=false;need(flash_depth==0&&history_depth==0,"contended restore owns nothing");
+}
+}
+int main(){try{daik::run_restore();std::puts("production flash restore ownership passed");return 0;}
+catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 1;}}
+`;
+
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),"daikin-history-restore-"));
+try {
+  const run = (text,name) => {
+    const cpp=path.join(dir,name+".cpp"),bin=path.join(dir,name);
+    fs.writeFileSync(cpp,text);
+    const build=spawnSync(process.env.CXX||"c++",["-std=c++17","-Wall","-Wextra","-Werror","-I","main",cpp,"-o",bin],{encoding:"utf8"});
+    assert.equal(build.status,0,build.stderr);
+    return spawnSync(bin,[],{encoding:"utf8"});
+  };
+  const restored=run(restoreFixture,"restore-base"); assert.equal(restored.status,0,restored.stderr);
+  for(const [name,before,after] of [
+    ["unguarded-restore-index",
+      "    Lock flash_lk(s_flash_mtx, 0);\n    if (!flash_lk.acquired() || s_flash_forgotten.load() || !s_flash_scan_ok) return;",
+      "    if (s_flash_forgotten.load() || !s_flash_scan_ok) return;"],
+    ["recursive-checkup-flash",
+      "static void history_restore_checkup_flash() {",
+      "static void history_restore_checkup_flash() { Lock nested(s_flash_mtx,0); if(!nested.acquired())return;"],
+    ["stop-expiry-under-flash-lock",
+      "    stop_observation_flash_service(flash_read_stop_observation);",
+      "    checkup_stop_context_expire(esp_timer_get_time());\n    stop_observation_flash_service(flash_read_stop_observation);"],
+    ["stop-service-before-flash-lock",
+      "void history_service_flash_restore() {",
+      "void history_service_flash_restore() { stop_observation_flash_service(flash_read_stop_observation);"],
+    ["hydronic-expiry-under-flash-lock",
+      "    hydronic_observation_flash_service(flash_read_hydronic_observation);",
+      "    checkup_hydronic_expire(esp_timer_get_time());\n    hydronic_observation_flash_service(flash_read_hydronic_observation);"],
+    ["hydronic-service-before-flash-lock",
+      "void history_service_flash_restore() {",
+      "void history_service_flash_restore() { hydronic_observation_flash_service(flash_read_hydronic_observation);"],
+    ["pending-homehub-splice",
+      "if (src == HistorySource::Modbus && s_mb_reset_requested.load()) return false;",
+      "if (false) return false;"],
+    ["pending-homehub-source-stalled",
+      "flash_restore_advance_to(logic::history_restore_next_source_ring(s_flash_restore_ring));",
+      "(void)s_flash_restore_ring;"],
+  ]) {
+    assert.equal(restoreFixture.split(before).length,2,`one restore mutation site ${name}`);
+    const bad=run(restoreFixture.replace(before,after),name);
+    assert.notEqual(bad.status,0,`${name}: broken production restore must fail`);
+    const diagnostic = {
+      "unguarded-restore-index": /unguarded restore metadata read/,
+      "recursive-checkup-flash": /recursive flash acquisition/,
+      "stop-expiry-under-flash-lock": /stop expiry acquired under a journal\/history owner/,
+      "stop-service-before-flash-lock": /stop restore service without sole flash owner/,
+      "hydronic-expiry-under-flash-lock": /hydronic expiry acquired under a journal\/history owner/,
+      "hydronic-service-before-flash-lock": /hydronic restore service without sole flash owner/,
+      "pending-homehub-splice": /final splice refuses an old block/,
+      "pending-homehub-source-stalled": /a pending HomeHub reset skips that source/,
+    }[name];
+    assert.match(bad.stderr,diagnostic);
+  }
+  console.log("history flash restore: HomeHub target reset, checkup and hourly observation ownership; eight compiling controls rejected");
+} finally { fs.rmSync(dir,{recursive:true,force:true}); }

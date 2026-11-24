@@ -8,7 +8,7 @@ validated independently using Node's fatal UTF-8 decoder and native `JSON.parse`
 The complete `http_common.cpp`, `http_server.cpp` and `mcp_server.cpp` production units execute with
 SDK-shaped transport adapters. Four route-registration functions from status/config/OTA are copied
 verbatim, retaining their conditions and method/order, while their unrelated service handlers are
-counted adapters. An independent fixed AP5/LAN40 oracle checks actual registration, the real common
+counted adapters. An independent fixed AP5/LAN38 oracle checks actual registration, the real common
 trampoline and catch-all order. MCP invokes controlled shared status/values stream adapters; their
 production serializers and physical readings remain outside this fixture.
 

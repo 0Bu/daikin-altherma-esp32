@@ -25,7 +25,6 @@
 #include "net.hpp"
 #include "ota_update.hpp"
 #include "stack_watch.hpp"
-#include "weather_forecast.hpp"
 #include "logic/detect_backoff.hpp"   // the SAME backoff the X10A sweep uses on a silent bus
 #include "logic/homehub_map.hpp"      // the concept a register pairs on
 #include "logic/modbus_plan.hpp"      // WHICH requests a cycle issues — batching + the gate cadence
@@ -1477,14 +1476,10 @@ static void mb_task(void*) {
             ota_quiesce_cap_logged = false;
         }
 
-        if (weather_fetch_active()) {
-            vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
-            continue;
-        }
         {
             MbNetworkActivity network_activity;
-            if (ota_download_active() || weather_fetch_active()) {
-                // Recheck closes the opposite race if OTA or weather began right as we
+            if (ota_download_active()) {
+                // Recheck closes the opposite race if OTA began right as we
                 // claimed network activity. Exit scope immediately so MbNetworkActivity
                 // destructor restores s_network_quiesced to true before the inter-cycle delay.
             } else {

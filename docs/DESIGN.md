@@ -308,11 +308,8 @@ column to the left of the plot (multi-scale outdoor climate follows the first vi
 own colour, and water pressure suppresses ticks colliding with its severity thresholds); gaps break
 both curve and fill, and a lone sample is a dot. Paired X10A and Modbus series share one chart, axis
 and cursor, with blue/petrol source legends; paired Modbus starts active when available and toggles
-in the legend.
-Room temperature can add the configured MQTT source as a third, separately coloured
-series with its name and MQTT attribution, including when no device room sensor is available.
-The device sensor and MQTT source keep distinct current values and explanations. Source replacement
-never splices two instruments into one series.
+in the legend. Room-temperature readings from X10A and HomeHub retain their own values and
+attribution across source replacement.
 
 Computed readings chart their own units and expressions, not an input relabelled as output.
 Heat output retains signed balance across heating, cooling and defrost; the live pill also applies
@@ -365,9 +362,7 @@ Replies carry sample epoch and boot identity. Visible charts refresh while live 
 Closing a chart ends its active gesture.
 A failed refresh keeps compatible readings within the most recent day. A distinct marker identifies
 each retained series' last received sample. Categorical timelines keep their separate live cap.
-Weather charts show a verified current forecast even when the measured history is empty.
-Incompatible measurement and forecast clocks get separate axes until a successful refresh
-establishes a shared time basis.
+ENV III charts show the accessory's measured temperature, humidity and pressure.
 
 Hover previews a sample. Tap pins it, and another tap on the same sample or Escape clears it.
 A boot-relative pin can appear in both views of a row when both show the selected instrument.
@@ -375,10 +370,8 @@ A peer's reading cannot keep a pinned measurement visible after its original sou
 A pin tracks the original boot-relative bucket when available, including before clock sync.
 Live-state pins require the same visible instruments and current states. Refreshing completed
 history alone leaves a live-state pin in place.
-The two views freeze while either is scrubbed. Routine status polls leave the selected forecast
-hour tied to the graph under the pointer until the gesture ends.
-A recorded pin without a boot-relative bucket expires when the plotted series or its alignment
-changes. A forecast pin stays while its timestamp remains selectable on the same chart.
+The two views freeze while either is scrubbed. A recorded pin without a boot-relative bucket
+expires when the plotted series or its alignment changes.
 Closing the inspector preserves a pin for an open
 value row. Collapsing the value panel clears it. Bubbles float directly above the plot without
 reserving vertical space when idle — overlaying header/legend content above — with one measurement
@@ -545,10 +538,10 @@ enable a stale version. Release versus Development comes from the page path. `?t
 esptool-js packet trace. The After flashing steps separate first/erased setup from ordinary updates
 and preserve breaker-off wiring instructions. See [SETUP.md](SETUP.md) for the owner task sequence.
 
-### 5.6 Settings — the screen behind the gear (Connections + ESP32 + heating-curve diagnosis)
+### 5.6 Settings — the screen behind the gear
 
 Settings is a flat single-column stack: Connections, ESP32, Protocol, Firmware and, while enabled,
-Plant diagnostics and Heating-curve diagnosis. Gear/back/Escape follow the hierarchy in §4.
+Plant diagnostics. Gear/back/Escape follow the hierarchy in §4.
 
 | Card | Rows and behavior |
 |---|---|
@@ -557,7 +550,6 @@ Plant diagnostics and Heating-curve diagnosis. Gear/back/Escape follow the hiera
 | Protocol | X10A link, detected protocol, RX/TX and connection-gated Protocol diagnostics |
 | Firmware | Version/update check, channel, Language and default-off Plant diagnostics selector |
 | Plant diagnostics | Independent circulation-witness source configuration under the master opt-in |
-| Heating-curve diagnosis | Status, room source, optional forecast/measured-outdoor context and method explanation |
 
 Connections use green for connected, amber for transient attention and red for failure. Disabled
 optional links are neutral. Each colour-only face has an accessible state in words. A configured
@@ -587,23 +579,11 @@ IDs and concise meaning. Query disables for the complete round trip; show status
 valid payload, selected bytes and grouped converter results. There is no duplicate JSON preview.
 
 Firmware opt-in applies live (`Off` / `X10A` / `Modbus`). First opt-in starts a fresh generation;
-switching to `Off` pauses new checkup, room, circulation and forecast collection while preserving
-collected 24-hour X10A, Modbus, room and circulation histories (retained forecast topics still clear),
-and switching between `X10A` and `Modbus` selects which 24-hour checkup store the dashboard card
+switching to `Off` pauses the checkup and circulation collection. Existing X10A, Modbus and
+circulation histories continue aging out. Switching between `X10A` and `Modbus` selects which
+24-hour checkup store the dashboard card
 displays while both keep recording. Normal X10A/HomeHub bridging and passive refrigerant observation
 keep their separate lifecycle.
-
-Heating-curve diagnosis observes confirmed heating windows; raw target-minus-room deviation is an
-uncalibrated indicator, not a water-temperature correction. Status distinguishes recording, missing
-forecast, waiting, excluded cooling, setup and the specific blocked input. Idle/setup is neutral.
-A source cannot be reported missing while another row reports it usable. Room status combines
-transport, freshness and diagnostic usability, then actual/target and last-reading age. The named
-source's pencil owns mappings/deletion. Saving a mapping is separate from a fresh readable MQTT
-frame. A mapped timestamp is the sole age authority; until received, name missing measurement time.
-Without a timestamp mapping only live non-retained arrival is usable. Retained replay without trusted
-source time is unusable. Delete clears mapping/captured value.
-Optional forecast deletion stops network traffic without disarming valid sampling. ENV III is a
-separate measured outdoor axis configured only in Hardware; it never replaces a Daikin plant sensor.
 
 Report a bug is a quiet footer action opening the device's two-step report modal. It is not a board
 fact or an automatic submission. Product/version text remains plain. The gear's red attention dot

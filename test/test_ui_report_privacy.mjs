@@ -35,7 +35,7 @@ function harness({ configured = true, failure = "", secure = true, log = "raw 0x
   const rawStatus = {
     wifi: { ssid: configured ? PRIVATE : "", ip: configured ? PRIVATE : "", mac: PRIVATE },
     mqtt: { broker: configured ? PRIVATE : "" },
-    reference_temperature: { name: configured ? PRIVATE : "", hvac_mode: configured ? "PRIVATE-HVAC" : "" },
+    circulation_source: { name: configured ? PRIVATE : "", topic: configured ? PRIVATE : "" },
     ntp: { server: configured ? PRIVATE : "" }, syslog: { host: configured ? PRIVATE : "" },
   };
   const redact = node => typeof node === "string" ? (node ? "<redacted>" : "")

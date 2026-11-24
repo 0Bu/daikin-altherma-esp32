@@ -383,7 +383,8 @@ static void stack_minimum_contract() {
         oracle(rendered == "null", "never_sampled_slot_renders_null");
     }
     constexpr auto extra_count = sizeof(STACK_WATCH_EXTRA_FIELDS) / sizeof(StackWatchField);
-    oracle(extra_count + 5 == static_cast<unsigned>(StackWatch::COUNT),
+    // HTTP, poll, MQTT and Modbus minima have dedicated status fields.
+    oracle(extra_count + 4 == static_cast<unsigned>(StackWatch::COUNT),
            "status_table_covers_all_additional_slots");
     for (unsigned i = 0; i < extra_count; ++i)
         for (unsigned k = i + 1; k < extra_count; ++k)

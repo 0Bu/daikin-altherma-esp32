@@ -23,7 +23,7 @@
 // Deliberately NOT redacted, because they identify the FIRMWARE rather than the reporter:
 // version, app_elf_sha256, uptime, heap, the X10A pins, the detected model. And not wifi.rssi /
 // wifi.connected / syslog.port either — the point of the report is that those still answer.
-// The reference-temperature and circulation sources' seven *_path selectors are user-typed too.
+// The circulation source's path selectors are user-typed.
 // A generic path can look structural (`thermostat.current_temperature_c`), but it can just as
 // legitimately spell `zones.<room>.temp`, naming a room, person or device. Structure is not worth
 // leaking identity into a public issue, so paths follow the source names/topics through the same
@@ -39,25 +39,17 @@ namespace daik {
 // BSSID) or a missing field.
 inline constexpr const char* REDACTED = "<redacted>";
 
-// The twenty-nine /status values http_status.cpp passes through redact_identifier (via its jstr_r
+// The sixteen /status values http_status.cpp passes through redact_identifier (via its jstr_r
 // wrapper). This array is the machine-readable source for tools/redact/check_diag_coverage.py
 // (`--list` prints it); the audit also compares docs/REPORTING.md's public table with it:
 //   wifi.ssid  wifi.ip  wifi.bssid  wifi.mac  mqtt.broker  mqtt.base
 //   net.ip  net.eth.ip  net.eth.mac
-//   reference_temperature.name  reference_temperature.topic  reference_temperature.temperature_path
-//   reference_temperature.setpoint_topic  reference_temperature.setpoint_path
-//   reference_temperature.timestamp_topic  reference_temperature.timestamp_path
-//   reference_temperature.enabled_path  reference_temperature.hvac_mode_path
-//   reference_temperature.hvac_mode (conditional: unknown source text only)
 //   circulation_source.name  circulation_source.topic  circulation_source.power_path
 //   circulation_source.timestamp_path
-//   weather_forecast.latitude  weather_forecast.longitude
 //   syslog.host  ntp.server  modbus.host
 // modbus.host joined the set with the HomeHub transport (legacy-32): it is a LAN address, whether
-// typed manually or filled by the explicit discovery button. The room source's name and topic
-// joined with legacy-62 — a topic is a path through the reporter's own broker and often carries a
-// room or a device name, and the name field is one the user typed. The circulation source follows
-// the same privacy boundary: its Shelly topic normally embeds a device id. mqtt.base joined when
+// typed manually or filled by discovery. MQTT source names, topics and paths can encode
+// installation identifiers. mqtt.base joined when
 // the base topic became runtime-settable: it is a word the user typed AND it becomes the
 // installation's Home Assistant device id, so it carries whatever they chose to call their house.
 // Its companion `base_custom` is a bool and stays in the clear — "is this the default?" is
@@ -83,28 +75,15 @@ inline constexpr std::string_view REDACTED_STATUS_FIELD_NAMES[] = {
     "net.ip",
     "net.eth.ip",
     "net.eth.mac",
-    "reference_temperature.name",
-    "history.room_rows.label",
-    "reference_temperature.topic",
-    "reference_temperature.temperature_path",
-    "reference_temperature.setpoint_topic",
-    "reference_temperature.setpoint_path",
-    "reference_temperature.timestamp_topic",
-    "reference_temperature.timestamp_path",
-    "reference_temperature.enabled_path",
-    "reference_temperature.hvac_mode_path",
-    "reference_temperature.hvac_mode",
     "circulation_source.name",
     "circulation_source.topic",
     "circulation_source.power_path",
     "circulation_source.timestamp_path",
-    "weather_forecast.latitude",
-    "weather_forecast.longitude",
     "syslog.host",
     "ntp.server",
     "modbus.host",
 };
-inline constexpr std::size_t REDACTED_STATUS_FIELDS = 29;
+inline constexpr std::size_t REDACTED_STATUS_FIELDS = 16;
 static_assert(REDACTED_STATUS_FIELDS ==
               sizeof(REDACTED_STATUS_FIELD_NAMES) / sizeof(REDACTED_STATUS_FIELD_NAMES[0]));
 
@@ -118,31 +97,22 @@ inline std::string redact_or(const std::string& value, bool on) {
 // builder wraps its identifier fields in.
 //
 // An UNSET field carries nothing to hide, and "<redacted>" over one manufactures an identifier that
-// does not exist: a report from a device with no room source, no circulation witness, no HomeHub and
-// no syslog collector reads exactly like a report from a device that has all four and scrubbed them.
-// That is the first question triage asks of a frozen report ($bug-triage) — which
-// optional sources is this installation even running — and answering it wrongly costs a round trip
-// to the reporter for a fact the payload already had. mqtt.broker is the sharpest case: empty IS the
-// disabled state, so the redacted form asserted a broker on every device that has none.
+// does not exist: a report from a device with no circulation witness or HomeHub would read exactly
+// like a report that has both and scrubbed them. That is the first question triage asks of a frozen
+// report ($bug-triage) — which optional sources is this installation even running — and answering
+// it wrongly costs a round trip to the reporter for a fact the payload already had. mqtt.broker is
+// the sharpest case: empty IS the disabled state, so the redacted form asserted a broker on every
+// device that has none.
 //
 // The empty string is kept rather than a JSON null so the field's TYPE does not change with the
 // flag, and the KEY is still always emitted — a dropped field would forge the "older build" signal
-// the header rule above exists to prevent. weather_forecast.latitude/longitude reach the same answer
-// from the other side (they emit null when unconfigured, redacted or not); this is that rule for the
-// identifiers that are strings.
+// the header rule above exists to prevent.
 //
 // Note this is deliberately NOT a change to redact_or() itself: the primitive still substitutes
 // whatever it is handed, because a caller that has already decided a value is present must not have
 // that decision quietly reversed by an empty-string edge case.
 inline std::string redact_identifier(const std::string& value, bool on) {
     return on && !value.empty() ? std::string(REDACTED) : value;
-}
-
-// The MQTT source accepts arbitrary short text. Only this fixed public vocabulary is safe to
-// retain in a public report; recognizing it here does not change source acceptance or evaluation.
-inline constexpr bool report_hvac_mode_public(std::string_view value) {
-    return value == "off" || value == "heat" || value == "cool" || value == "heat_cool" ||
-           value == "auto" || value == "dry" || value == "fan_only";
 }
 
 // Allocation-free form for fixed-buffer serializers such as /ota/status.
@@ -247,15 +217,16 @@ inline std::string redact_diag_line(std::string_view line) {
     while (limit > 0 && (out[limit - 1] == '\n' || out[limit - 1] == '\r')) limit--;
     for (std::size_t i = 0; i < DIAG_REDACTION_COUNT; i++) {
         const DiagRedaction& r = DIAG_REDACTIONS[i];
-        std::string_view marker(r.marker);
-        std::size_t start = out.find(marker);
-        if (start == std::string::npos || start + marker.size() > limit) continue;
+        const std::string_view body(out.data(), limit);
+        const std::string_view marker(r.marker);
+        std::size_t            start = body.find(marker);
+        if (start == std::string::npos) continue;
         start += marker.size();
         std::string_view end_tok(r.end);
         // The producer escapes delimiters; prefer the final trusted suffix as a second defense
         // against a delimiter-bearing identifier from an older producer.
-        std::size_t stop = end_tok.empty() ? std::string::npos : out.rfind(end_tok, limit);
-        if (stop == std::string::npos || stop < start || stop > limit) stop = limit;
+        std::size_t stop = end_tok.empty() ? std::string::npos : body.rfind(end_tok);
+        if (stop == std::string::npos || stop < start) stop = limit;
         std::size_t before = stop - start;
         out.replace(start, before, REDACTED);
         limit = limit - before + std::string_view(REDACTED).size();

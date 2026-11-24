@@ -1,6 +1,4 @@
-// Source-boundary contract for the bounded X10A publish path and the weather fetch headroom gate
-// (private issue 10: recurring `publish skipped at x10a (std::bad_alloc)` + the 800 B heap
-// low-water at a weather TLS fetch).
+// Source-boundary contract for the bounded X10A publish path and MQTT's OTA heap coordination.
 //
 // The host C++ suite proves the pure parts — the direct cache encoder writes exact grouped bytes,
 // its allocation-free probe returns the exact size + FNV-1a digest, and the headroom predicate has
@@ -8,9 +6,8 @@
 // sites: the per-second X10A cycle must probe the one poll cache, allocate only one exact changed
 // payload outside the cache mutex, then revision-check before copying. No duplicate cache/group
 // vectors or boot-long maximum payload block may return. The publish-skip catch
-// must carry the allocation-free heap snapshot, and the weather fetch must stand down for one
-// short retry when the last-moment headroom gate refuses. Those are whole-component claims, so this test
-// reads the production call sites.
+// must carry the allocation-free heap snapshot. This test also reads the production call sites
+// that coordinate MQTT allocations with OTA.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -29,7 +26,6 @@ const occurrences = (text, token) => text.split(token).length - 1;
 const mqtt = code("main/mqtt_ha.cpp");
 const hpPoll = code("main/hp_poll.cpp");
 const snapshot = code("main/logic/x10a_snapshot.hpp");
-const weather = code("main/weather_forecast.cpp");
 const group = code("main/logic/mqtt_group.hpp");
 
 // ── The per-second X10A cycle probes first, allocates once only when changed ────────────────────
@@ -58,7 +54,7 @@ assert.match(publish,
 const x10aStage = mqtt.indexOf('publish_stage = "x10a"');
 const x10aStageEnd = mqtt.indexOf('publish_stage = "modbus"', x10aStage);
 assert.ok(x10aStage >= 0 && x10aStageEnd > x10aStage &&
-          /const std::string&\s+prof\s*=\s*ref_config\.profile/.test(mqtt.slice(x10aStage, x10aStageEnd)),
+          /const std::string&\s+prof\s*=\s*cycle_config\.profile/.test(mqtt.slice(x10aStage, x10aStageEnd)),
   "the per-second x10a stage must borrow the already-copied profile string, not allocate another one");
 
 // ── The dedup guard is a digest, not a retained copy of the payload ────────────────────────────
@@ -119,45 +115,11 @@ assert.ok(catchRegion.indexOf("s_mqtt_skipped.fetch_add(1") >= 0 &&
 assert.equal(occurrences(mqtt, "publish skipped at"), 2,
   "the heap snapshot must be logged from both the std::exception and the unknown-exception handler");
 
-// ── Weather quiesces both publishers and gates after URL construction, directly before TLS ───
-const downloadStart = weather.indexOf("bool download_json(");
-const downloadEnd = weather.indexOf("bool json_number_array(", downloadStart);
-assert.ok(downloadStart >= 0 && downloadEnd > downloadStart,
-  "the weather download boundary must remain identifiable");
-const download = weather.slice(downloadStart, downloadEnd);
-const reserveAt = download.indexOf("out.reserve(kPayloadMax)");
-const urlAt = download.indexOf("open_meteo_url(weather)");
-const weatherProbeAt = download.indexOf("http_client_probe()");
-const gateAt = download.indexOf("weather_fetch_headroom_ok(", weatherProbeAt);
-const clientAt = download.indexOf("esp_http_client_init(", gateAt);
-assert.ok(reserveAt >= 0 && urlAt > reserveAt && weatherProbeAt > urlAt &&
-          gateAt > weatherProbeAt && clientAt > gateAt,
-  "response and URL allocations must finish before the final gate and client/TLS setup");
-assert.ok(/HttpClientCleanup\s+cleanup\(client,\s*socket_deadline\)/.test(download.slice(clientAt)) &&
-          download.indexOf("out.reserve(", reserveAt + 1) < 0,
-  "the live HTTP client must be unwind-safe and the capped response must not grow under TLS");
-const parseStart = weather.indexOf("bool parse_forecast(");
-const parseEnd = weather.indexOf("bool fetch_forecast(", parseStart);
-assert.ok(parseStart >= 0 && parseEnd > parseStart &&
-          weather.slice(parseStart, parseEnd).includes("JsonCleanup cleanup(root)"),
-  "the cJSON tree must be released when parse-time vector or error allocations throw");
-
-const refDecodeStarts = [...mqtt.matchAll(/static\s+__attribute__\(\(noinline\)\)\s+DecodedReferenceFrame\s+decode_reference_frame\(/g)];
+// ── The circulation decoder owns its bounded cJSON tree ───────────────────────────────────────
 const circDecodeStarts = [...mqtt.matchAll(/static\s+__attribute__\(\(noinline\)\)\s+DecodedCirculationFrame\s+decode_circulation_frame\(/g)];
-assert.equal(refDecodeStarts.length, 1, "one noinline reference decoder must remain");
 assert.equal(circDecodeStarts.length, 1, "one noinline circulation decoder must remain");
-const refDecodeStart = refDecodeStarts[0].index;
-const refDecodeEnd = circDecodeStarts[0].index;
-assert.ok(refDecodeStart >= 0 && refDecodeEnd > refDecodeStart,
-  "decode_reference_frame must exist in mqtt_ha.cpp");
-const refDecode = mqtt.slice(refDecodeStart, refDecodeEnd);
-assert.match(refDecode, /JsonGuard\s+root\s*\(\s*cJSON_ParseWithLength/,
-  "decode_reference_frame must wrap cJSON_ParseWithLength in JsonGuard RAII");
-assert.ok(!refDecode.includes("cJSON_Delete(root)"),
-  "decode_reference_frame must rely on JsonGuard RAII, not manual cJSON_Delete");
-
-const circDecodeStart = refDecodeEnd;
-const circDecodeEnd = mqtt.indexOf("static ReferenceFreshness circulation_frame_freshness(", circDecodeStart);
+const circDecodeStart = circDecodeStarts[0].index;
+const circDecodeEnd = mqtt.indexOf("static MqttSourceFreshness circulation_frame_freshness(", circDecodeStart);
 assert.ok(circDecodeStart >= 0 && circDecodeEnd > circDecodeStart,
   "decode_circulation_frame must exist in mqtt_ha.cpp");
 const circDecode = mqtt.slice(circDecodeStart, circDecodeEnd);
@@ -165,23 +127,17 @@ assert.match(circDecode, /JsonGuard\s+root\s*\(\s*cJSON_ParseWithLength/,
   "decode_circulation_frame must wrap cJSON_ParseWithLength in JsonGuard RAII");
 assert.ok(!circDecode.includes("cJSON_Delete(root)"),
   "decode_circulation_frame must rely on JsonGuard RAII, not manual cJSON_Delete");
-const fetchAt = weather.indexOf("fetch_forecast(cfg, sample, error");
-const quiesceAt = weather.indexOf("vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs))");
-const pollBarrierAt = weather.indexOf("hp_poll_network_quiesced()", quiesceAt);
-const mqttBarrierAt = weather.indexOf("mqtt_publish_network_quiesced()", pollBarrierAt);
-assert.ok(quiesceAt >= 0 && pollBarrierAt > quiesceAt &&
-          mqttBarrierAt > pollBarrierAt && fetchAt > mqttBarrierAt,
-  "weather must wait for both X10A and MQTT allocation paths before entering the gated fetch");
-const mqttHoldStart = mqtt.indexOf(
-  "static __attribute__((noinline)) bool mqtt_network_hold_step(");
+// ── MQTT coordinates its publisher and transport with OTA ─────────────────────────────────────
+const mqttHoldStart = mqtt.search(
+  /static __attribute__\(\(noinline\)\) bool\s+mqtt_network_hold_step\(/);
 const mqttHoldEnd = mqtt.indexOf(
   "static __attribute__((noinline)) bool mqtt_transport_resume_step(", mqttHoldStart);
 assert.ok(mqttHoldStart >= 0 && mqttHoldEnd > mqttHoldStart,
   "the MQTT network-hold helper must remain an explicit stack boundary");
 const mqttHold = mqtt.slice(mqttHoldStart, mqttHoldEnd);
 assert.match(mqttHold,
-  /ota_quiesce_step\(quiesce, network_busy\)[\s\S]{0,700}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,120}?vTaskDelay\([\s\S]{0,100}?return true;/,
-  "the held MQTT cycle must acknowledge weather before sleeping");
+  /ota_quiesce_step\(quiesce, ota_busy\)[\s\S]{0,700}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,120}?vTaskDelay\([\s\S]{0,100}?return true;/,
+  "the held MQTT cycle must acknowledge OTA before sleeping");
 const mqttTaskStart = mqtt.indexOf("static void mqtt_task(");
 const mqttTaskEnd = mqtt.indexOf("static bool build_client(", mqttTaskStart);
 const mqttTask = mqtt.slice(mqttTaskStart, mqttTaskEnd);
@@ -208,7 +164,7 @@ assert.doesNotMatch(transportGate, /vTaskDelay|for\s*\(|while\s*\(/,
   "BEFORE_CONNECT holds MQTT_API_LOCK and must never wait against the owner task's client_stop");
 assert.match(mqtt,
   /return s_publish_network_quiesced\.load\(std::memory_order_acquire\)\s*&&\s*!s_transport_connecting\.load\(std::memory_order_acquire\);/,
-  "weather/OTA acknowledgement must include the asynchronous esp-mqtt handshake/reconnect");
+  "OTA acknowledgement must include the asynchronous esp-mqtt handshake/reconnect");
 const mqttStart = mqtt.indexOf("void mqtt_ha_start()");
 const startupNotQuiesced = mqtt.indexOf(
   "MqttStartupActivity startup_activity", mqttStart);
@@ -228,13 +184,6 @@ assert.ok(startupGuard >= 0 && guardNotQuiesced > startupGuard &&
   "startup must claim/recheck/yield behind an existing TLS owner before allocation, then hand off");
 assert.doesNotMatch(mqtt, /promote_client_to_publisher/,
   "source proof must not replace the single transport or introduce another TLS handshake");
-assert.match(weather, /s_status\.reason\s*=\s*"heap_headroom";/,
-  "a refused fetch must state the heap-headroom reason");
-const skipBranch = weather.indexOf('"heap_headroom"');
-const skipWait = weather.indexOf("WEATHER_RETRY_INTERVAL_S * 1000u", skipBranch);
-assert.ok(skipWait > skipBranch,
-  "a refused fetch must use the bounded retry interval instead of aging a forecast for 45 minutes");
-
 // ── The bounded builder keeps ONE encoder and the owning form wraps it ─────────────────────────
 const owning = group.indexOf("inline std::string build_grouped_json(");
 assert.ok(owning >= 0 && group.indexOf("grouped_json_size(vals)", owning) >= 0 &&

@@ -543,8 +543,8 @@ void identity_and_invalid_wire() {
     wire.header.catalog_fp ^= 1;
     require(!observation_header_matches(wire.header), "method/catalog mismatch refused");
     wire               = make_slot(current - 5, payload(current - 5), 1000);
-    wire.header.source = static_cast<uint8_t>(HistoryJournalSource::Room);
-    require(!observation_header_matches(wire.header), "different physical source refused");
+    wire.header.source = 4; // Legacy room-temperature source ID in existing journals.
+    require(!observation_header_matches(wire.header), "retired room source refused");
     wire = make_slot(current - 5, payload(current - 5), 1000);
     wire.header.value_count -= 1;
     require(!observation_header_matches(wire.header), "wrong payload width refused");

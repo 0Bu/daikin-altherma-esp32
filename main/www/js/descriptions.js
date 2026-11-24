@@ -315,10 +315,10 @@ const DESCRIPTIONS = [
     de: { what: "Die Smart-Grid-/Demand-Response-Anforderung: Freier Betrieb, Zwangsabschaltung, Empfehlung ein oder Erzwungen ein. HomeHub und Altherma 4 melden sie direkt (als Smart-Grid- bzw. Demand-Response-Modus); die X10A-Zeile leitet dieselben vier Zustände aus Kontakt 1 und 2 ab. Das ist ein Energiemanagement-Befehl und nicht der Heiz- oder Kühlmodus der Außeneinheit.",
           normal: "Freier Betrieb im normalen autonomen Betrieb. Die anderen Modi sollten nur erscheinen, wenn ein externes Energiemanagement den Betrieb bewusst sperrt, empfiehlt oder erzwingt." } },
   { exact: true, re: /^current operation mode$/i,
-    what: "The currently reported space-conditioning mode: Heating or Cooling. Unlike the configured Operation mode, this live input has no Auto value and is the witness used to exclude cooling windows from heating-curve samples; it still does not prove that the compressor is running.",
-    normal: "Heating during a heating sample, Cooling during a cooling window. Read it with Space heating/cooling normal operation to distinguish an active window from an idle selection.",
-    de: { what: "Der aktuell gemeldete Raumbetriebsmodus: Heizen oder Kühlen. Anders als der eingestellte Heiz- oder Kühlmodus kennt dieser Live-Eingang keinen Auto-Wert und dient dazu, Kühlfenster aus den Heizkurven-Messwerten auszuschließen; einen laufenden Verdichter beweist er dennoch nicht.",
-          normal: "Heizen während eines Heizkurven-Messfensters, Kühlen während eines Kühlfensters. Zusammen mit Raumheiz- oder Kühlbetrieb lesen, um ein aktives Fenster von einer bloßen Auswahl im Stillstand zu unterscheiden." } },
+    what: "The currently reported space-conditioning mode: Heating or Cooling. Unlike the configured Operation mode, this live input has no Auto value. It does not establish whether the compressor is running.",
+    normal: "Read it with Space heating/cooling normal operation to distinguish an active window from an idle selection.",
+    de: { what: "Der aktuell gemeldete Raumbetriebsmodus: Heizen oder Kühlen. Anders als der eingestellte Heiz- oder Kühlmodus kennt dieser Live-Eingang keinen Auto-Wert. Ob der Verdichter läuft, zeigt der Wert nicht.",
+          normal: "Zusammen mit Raumheiz- oder Kühlbetrieb lesen, um ein aktives Fenster von einer bloßen Auswahl im Stillstand zu unterscheiden." } },
   // HomeHub holding register 3 and X10A's identically named row describe different things. Keep the
   // public labels stable, but let descFor() use the row's source so neither inherits the other's copy.
   { exact: true, source: "modbus", re: /^operation mode$/i,

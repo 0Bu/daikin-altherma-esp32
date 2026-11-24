@@ -16,12 +16,12 @@
 
 namespace daik {
 
-// Allocate the single small esp_timer before any OTA/Weather TLS pressure. Failure is latched and
+// Allocate the single small esp_timer before any OTA TLS pressure. Failure is latched and
 // every later arm fails closed; no transfer path retries timer allocation beside a TLS client.
 bool http_deadline_init() noexcept;
 
-// Allocation-free boot latch used before OTA task creation and before Weather payload/client
-// allocation. Once false after initialization it remains false for the complete boot.
+// Allocation-free boot latch used before OTA task creation. Once false after initialization it
+// remains false for the complete boot.
 bool http_deadline_ready() noexcept;
 
 class HttpSocketDeadline {
@@ -32,7 +32,7 @@ public:
     ~HttpSocketDeadline();
 
     // Arm the public socket exposed by an already-open esp_http_client for the remainder of the
-    // original operation deadline. Only one OTA/Weather TLS owner may be armed at a time.
+    // original operation deadline. Only one OTA TLS owner may be armed at a time.
     esp_err_t arm(esp_http_client_handle_t client, TickType_t started,
                   TickType_t duration) noexcept;
 

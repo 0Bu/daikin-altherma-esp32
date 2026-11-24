@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: d9020417be48ee9b356f6385eb7fbbf264d3513a35201ed031bab27bcdf05b70 -->
+<!-- diagnostic-evidence-contract: 4444fd34e1953fbac5f1f2fb583c0b867685238fe107dfea348861f533cbd7c9 -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -13,7 +13,7 @@ answers four questions.
 The whole feature is an explicit opt-in under Settings › Firmware and is off by default. The first
 opt-in starts a fresh evidence generation; turning it off pauses recording and hides the card while
 keeping already collected 24-hour diagnostic histories (which continue aging out after 24 hours),
-stops live room/forecast/circulation sampling and closes any open run as censored without bridging
+stops live circulation sampling and closes any open run as censored without bridging
 paused time on resume. Only factory reset or a source/mapping change clears stored history. None of
 the results below is a recommendation. Polls begun before a consent transition cannot supply
 diagnosis evidence for the replacement state.
@@ -688,28 +688,6 @@ cannot be reconstructed from the retained flag.
   (2009), 2701–2707, DOI 10.1016/j.applthermaleng.2009.01.003:
   [publisher page and abstract][R2-doi]. The study supports dependence on outdoor conditions, not
   this project's 15% heuristic.
-
-## Heating-curve evaluation freshness
-
-**External evidence:** None is required for this internal producer-age observation; it is not a
-manufacturer timing limit or a diagnosis of the plant.
-
-**Firmware rule:** HTTP and MQTT read the same age-projected MQTT-owner evaluation. Expiration
-withholds current diagnosis context while preserving dated events, counters and sample cadence.
-[PLANT.md](PLANT.md#heating-curve-diagnosis) owns the complete age and recovery rule.
-
-**Project boundary:** The expiry bound is a project choice tied to the nominal evaluation cadence.
-Readers never evaluate inputs or renew their own evidence. A delayed legitimate task stage can
-therefore temporarily report **Not evaluated recently**.
-
-**Not established:** This status identifies no transport, sensor, broker or plant failure, and does
-not change the freshness of the independently observed room source or prove heating-season behavior.
-
-Method 4 summarizes admitted events in a boot-local date window. It reports
-each outdoor axis independently against the same count of admitted room observations. The
-boundaries at 0, 5 and 10 °C are display groups. The counts show sample coverage, and the extrema
-show observed spread. These summaries cannot establish continuous heating, thermostat action or a
-causal curve defect. [PLANT.md](PLANT.md#heating-curve-diagnosis) specifies sources and resets.
 
 ## Maintenance rule
 

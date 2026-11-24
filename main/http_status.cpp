@@ -29,7 +29,6 @@
 #include "logic/history_persist.hpp"
 #include "logic/hp_probe.hpp" // active-profile rows accepted by POST /hp/query
 #include "logic/http_cache.hpp"
-#include "logic/http_values_wait.hpp"
 #include "logic/convert.hpp"   // conv_is_binary — /values marks a bit-flag row from its converter id
 #include "logic/discovery.hpp" // ambiguous X10A labels need their existing MQTT page scope in the UI
 #include "logic/mqtt_base.hpp"  // mqtt_base_effective — report the base actually published under
@@ -39,9 +38,6 @@
 #include "logic/detect_identity.hpp"
 #include "logic/json.hpp"
 #include "logic/query_flag.hpp"
-#include "logic/reference_temperature.hpp"
-#include "logic/weather_forecast.hpp"
-#include "weather_forecast.hpp"
 #include "logic/redact.hpp"
 #include "logic/heartbeat.hpp" // append_stack_bytes — ONE never-sampled rendering rule
 #include "logic/hydronic_payload.hpp"
@@ -116,52 +112,6 @@ inline constexpr char LOCALE_ASSET_TAG[] = "00000000";
 
 namespace daik {
 
-// GET /values needs one contiguous 40-byte CachedValue slot per live X10A row (5,160 B on the
-// 129-row production profile). Weather/OTA TLS can temporarily leave less than that even though the
-// heap recovers immediately. Weather's TLS phase is short, so /values waits boundedly behind it;
-// its lead and quiesce interval holds no TLS memory and admits /values, which Weather then drains.
-// OTA can own TLS for almost a minute; both /values and the allocation-rich /status snapshot fail
-// fast there, leaving the single HTTP worker available for the compact /ota/status progress route.
-// Diagnostics use a static ring buffer and remain reachable. This is request-time coordination,
-// not another boot-long buffer (the dev.13 regression).
-constexpr TickType_t kValuesTlsWait = pdMS_TO_TICKS(4000);
-constexpr TickType_t kValuesTlsRetry = pdMS_TO_TICKS(250);
-
-// One admitted /values reader in Weather's exclusion. It stays counted until the snapshot and its
-// stream are released, including when an allocation failure unwinds to the 503 boundary.
-struct ValuesTlsReader {
-    ValuesTlsReader()                                  = default;
-    ValuesTlsReader(const ValuesTlsReader&)            = delete;
-    ValuesTlsReader& operator=(const ValuesTlsReader&) = delete;
-    ~ValuesTlsReader() { release(); }
-    void release() {
-        if (std::exchange(admitted, false)) weather_values_reader_leave();
-    }
-    bool admitted = false;
-};
-
-static bool wait_for_values_tls_owner(ValuesTlsReader& reader) {
-    const TickType_t started = xTaskGetTickCount();
-    for (;;) {
-        const TickType_t elapsed = xTaskGetTickCount() - started;
-        // Enter Weather's reader count first, then read OTA. The TLS phase ends before Weather's
-        // network admission does; a reader admitted in between, like one admitted while both are
-        // idle, is covered by the OTA recheck after this wait and by OTA's lead and headroom.
-        const bool weather_tls = !weather_values_reader_enter();
-        const bool ota_active  = ota_download_active();
-        const auto decision    = logic::http_values_wait_decision(
-            ota_active, weather_tls, static_cast<uint32_t>(elapsed * portTICK_PERIOD_MS),
-            static_cast<uint32_t>(kValuesTlsWait * portTICK_PERIOD_MS));
-        if (decision == logic::HttpValuesWaitDecision::Ready) {
-            reader.admitted = true;
-            return true;
-        }
-        if (!weather_tls) weather_values_reader_leave();
-        if (decision == logic::HttpValuesWaitDecision::Refuse) return false;
-        vTaskDelay(kValuesTlsRetry);
-    }
-}
-
 static esp_err_t network_tls_busy(httpd_req_t* req) {
     httpd_resp_set_status(req, "503 Service Unavailable");
     httpd_resp_set_type(req, "text/plain");
@@ -180,7 +130,7 @@ static esp_err_t network_tls_busy(httpd_req_t* req) {
 // build that never had it, and "which build produced this?" is the first question a frozen bug
 // report has to answer.
 // redact_identifier, not redact_or: an UNSET identifier is left empty rather than substituted, so
-// "this installation has no HomeHub / no room source / no broker" survives into the report instead
+// "this installation has no HomeHub / no broker" survives into the report instead
 // of being spelled the same way as "it has one and hid it" (logic/redact.hpp carries the
 // reasoning).
 struct RedactedJson {
@@ -424,149 +374,6 @@ template <typename JsonOut>
         j += "null";
 }
 
-template <typename JsonOut>
-static inline void append_status_fixed_double(JsonOut& j, const char* prefix, bool present,
-                                              double value) {
-    append_status_fmt_double(j, prefix, "%f", present, value);
-}
-
-template <typename JsonOut>
-[[gnu::noinline]] static void append_heating_curve_bins(JsonOut&                      j,
-                                                        const HeatingCurveBinsReport& report) {
-    j += ",\"outdoor_bins\":";
-    if (!report.valid) {
-        j += "null";
-        return;
-    }
-    append_status_fixed_double(j, "{\"target_c\":", true, report.target_c);
-    j += ",\"scope_samples\":";
-    append_json_uint(j, report.homehub[0].scope_samples);
-    const auto field = [&j](const char* name, int64_t value) {
-        j += name;
-        append_json_int(j, value);
-    };
-    const auto append_axis = [&j, &field](const auto& axis) {
-        bool first = true;
-        for (const auto& bin : axis) {
-            if (!first) j += ",";
-            first = false;
-            if (!bin.samples) {
-                j += "null";
-                continue;
-            }
-            field("{\"samples\":", bin.samples);
-            field(",\"first_unix_s\":", bin.first_unix_s);
-            field(",\"last_unix_s\":", bin.last_unix_s);
-            field(",\"room_sum_tenths\":", bin.room_sum_tenths);
-            field(",\"room_min_tenths\":", bin.room_min_tenths);
-            field(",\"room_max_tenths\":", bin.room_max_tenths);
-            field(",\"outdoor_sum_tenths\":", bin.outdoor_sum_tenths);
-            field(",\"outdoor_min_tenths\":", bin.outdoor_min_tenths);
-            field(",\"outdoor_max_tenths\":", bin.outdoor_max_tenths);
-            j += "}";
-        }
-    };
-    j += ",\"homehub\":[";
-    append_axis(report.homehub);
-    j += "],\"env3\":[";
-    append_axis(report.env3);
-    j += "]}";
-}
-
-template <typename JsonOut>
-[[gnu::noinline]] static void append_heating_curve_json(JsonOut& j, const Config& c, bool redact) {
-    HeatingCurveBinsReport bins;
-    const bool             heating_curve_armed = heating_curve_diagnosis_armed(c);
-    const auto             heating_curve =
-        heating_curve_status(heating_curve_armed && !redact ? &bins : nullptr);
-    const logic::HeatingCurveReason heating_curve_reason = logic::heating_curve_reported_reason(
-        heating_curve_armed, heating_curve.state, heating_curve.reason);
-    auto bfield = [&j](const char* prefix, bool v) __attribute__((noinline)) {
-        j += prefix;
-        j += v ? "true" : "false";
-    };
-    auto ufield = [&j](const char* prefix, uint64_t v) __attribute__((noinline)) {
-        j += prefix;
-        append_json_uint(j, v);
-    };
-    auto qsv = [&j](const char* prefix, std::string_view v) __attribute__((noinline)) {
-        j += prefix;
-        json_append_quoted(j, v);
-    };
-    auto qcstr = [&qsv](const char* prefix, const char* v) __attribute__((noinline)) {
-        qsv(prefix, std::string_view(v));
-    };
-    auto qstr = [&qsv](const char* prefix, const std::string& v) __attribute__((noinline)) {
-        qsv(prefix, std::string_view(v));
-    };
-    struct QField {
-        decltype(qsv)&   sv;
-        decltype(qcstr)& cstr;
-        decltype(qstr)&  str;
-        void             operator()(const char* p, const char* v) const { cstr(p, v); }
-        void             operator()(const char* p, const std::string& v) const { str(p, v); }
-        void             operator()(const char* p, std::string_view v) const { sv(p, v); }
-    } qfield{qsv, qcstr, qstr};
-    auto sfield = [&j](const char* prefix, bool has, logic::OutdoorSource src)
-        __attribute__((noinline)) {
-        j += prefix;
-        if (has)
-            json_append_quoted(j, logic::outdoor_source_name(src));
-        else
-            j += "null";
-    };
-    ufield("},\"heating_curve\":{\"method_version\":",
-           logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION);
-    bfield(",\"armed\":", heating_curve_armed);
-    qfield(",\"state\":", logic::heating_curve_state_name(heating_curve.state));
-    ufield(",\"state_code\":", static_cast<unsigned>(heating_curve.state));
-    qfield(",\"reason\":", logic::heating_curve_reason_name(heating_curve_reason));
-    ufield(",\"reason_code\":", static_cast<unsigned>(heating_curve_reason));
-    bfield(",\"sample_eligible\":", heating_curve.sample_eligible);
-    append_status_fixed_double(j,
-                               ",\"current_room_error_k\":", heating_curve.has_current_room_error,
-                               heating_curve.current_room_error_k);
-    append_status_fixed_double(j, ",\"last_sample_room_error_k\":", heating_curve.has_last_sample,
-                               heating_curve.last_sample_room_error_k);
-    append_status_opt_int(j, ",\"last_sample_unix_s\":", heating_curve.has_last_sample,
-                          heating_curve.last_sample_unix_s);
-    append_status_fixed_double(j,
-                               ",\"outdoor_temperature_c\":", heating_curve.has_outdoor_temperature,
-                               heating_curve.outdoor_temperature_c);
-    sfield(",\"outdoor_source\":", heating_curve.has_outdoor_temperature,
-           heating_curve.outdoor_source);
-    append_status_fixed_double(
-        j, ",\"last_sample_outdoor_temperature_c\":", heating_curve.has_last_sample_outdoor,
-        heating_curve.last_sample_outdoor_temperature_c);
-    sfield(",\"last_sample_outdoor_source\":", heating_curve.has_last_sample_outdoor,
-           heating_curve.last_sample_outdoor_source);
-    append_status_fixed_double(
-        j, ",\"plant_outdoor_temperature_c\":", heating_curve.has_plant_outdoor_temperature,
-        heating_curve.plant_outdoor_temperature_c);
-    sfield(",\"plant_outdoor_source\":", heating_curve.has_plant_outdoor_temperature,
-           heating_curve.plant_outdoor_source);
-    append_status_fixed_double(j, ",\"last_sample_plant_outdoor_temperature_c\":",
-                               heating_curve.has_last_sample_plant_outdoor,
-                               heating_curve.last_sample_plant_outdoor_temperature_c);
-    sfield(",\"last_sample_plant_outdoor_source\":", heating_curve.has_last_sample_plant_outdoor,
-           heating_curve.last_sample_plant_outdoor_source);
-    bfield(",\"forecast_available\":", heating_curve.forecast_available);
-    bfield(",\"plant_gate_known\":", heating_curve.plant_gate_known);
-    bfield(",\"plant_gate_active\":", heating_curve.plant_gate_active);
-    bfield(",\"heating_mode_known\":", heating_curve.heating_mode_known);
-    bfield(",\"heating_mode_active\":", heating_curve.heating_mode_active);
-    append_status_opt_int(j, ",\"room_source_unix_s\":", heating_curve.room_has_source_time,
-                          heating_curve.room_source_unix_s);
-    append_status_opt_uint(j, ",\"room_age_s\":", heating_curve.room_age_known,
-                           heating_curve.room_age_s);
-    ufield(",\"sequence\":", heating_curve.sequence);
-    ufield(",\"evaluations\":", heating_curve.evaluations);
-    ufield(",\"samples\":", heating_curve.samples);
-    ufield(",\"holds\":", heating_curve.holds);
-    ufield(",\"blocks\":", heating_curve.blocks);
-    if (!redact) append_heating_curve_bins(j, bins);
-}
-
 // `redact` withholds the reporter-identifying values (logic/redact.hpp) so a snapshot can be
 // pasted into a bug report. Defaulted OFF: the dashboard polls this same route and legitimately
 // shows the SSID and the broker — only GET /status?redact=1 asks for the scrubbed form.
@@ -575,7 +382,7 @@ template <typename JsonOut>
 //
 // broadcaster), and that second runner is what overflowed hp_poll's stack (legacy-241). GET /status
 // now instantiates this serializer with a 1 KiB bounded sink: the live payload is already ~8.7 KiB
-// and a growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA/weather
+// and a growing whole-body std::string needed a ~15 KiB contiguous reallocation under OTA
 // TLS, making the shared OOM guard return 503. MCP get_status now streams its small JSON-RPC prefix
 // and suffix around the same bounded serializer too. This serializer still takes ordinary small
 // snapshots and formats temporary strings. If one of those allocations fails before the first
@@ -805,10 +612,6 @@ append_status_fault_check_json(JsonOut& j, DiagnosticsSource source, bool source
         j += "}";
     };
 
-    ValuesTlsReader fault_reader;
-    fault_reader.admitted = weather_values_reader_enter();
-    if (!fault_reader.admitted) return;
-
     if (!redact) {
         struct FaultTraceBuf {
             logic::CheckupFaultTrace* p = nullptr;
@@ -855,9 +658,6 @@ template <typename JsonOut>
     constexpr auto source = DiagnosticsSource::X10a;
     static_assert(std::is_trivially_destructible_v<logic::CheckupRunContextSnapshot>);
     if (!checkup_has_cycling_run_contexts(source, boot_s, timeline_unix_s)) return;
-    ValuesTlsReader reader;
-    reader.admitted = weather_values_reader_enter();
-    if (!reader.admitted) return;
 
     struct RunCtxBuf {
         logic::CheckupRunContextSnapshot* p = nullptr;
@@ -964,7 +764,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         void             operator()(const char* p, std::string_view v) const { sv(p, v); }
     } qfield{qsv, qcstr, qstr};
 
-    qfield("{\"version\":", esp_app_get_description()->version);
+    ufield("{\"status_schema_version\":", 2);
+    qfield(",\"version\":", esp_app_get_description()->version);
     qfield(",\"platform\":", CONFIG_IDF_TARGET);
     ifield(",\"uptime_s\":", esp_timer_get_time() / 1000000);
     char boot_id[17];
@@ -1200,8 +1001,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         // "the compile-time default" (logic/mqtt_base.hpp), and reporting "" would make a default
         // device look unconfigured to the modal that has to prefill this field. `base_custom` is
         // the separate fact: whether the user has stated a base, which is what the UI needs to know
-        // before offering Reset. Redacted like reference_temperature.name and for the same reason —
-        // it is a word the user typed, and it becomes this installation's Home Assistant device id.
+        // before offering Reset. The configured base forms this installation's Home Assistant
+        // device id and must be redacted.
         append_status_redacted(
             j, ",\"base\":",
             jstr_r(mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC), redact));
@@ -1209,119 +1010,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         ufield(",\"retirement_evidence\":", mqtt_retirement_evidence());
         j += "},";
     }
-    // One exact MQTT-backed living-room source. Freshness and canonical eligibility remain
-    // separate: a disabled thermostat may still expose a trustworthy temperature but cannot emit
-    // room_error_k.
-    {
-        const ReferenceTemperatureStatus rt = reference_temperature_status(c);
-        const uint64_t now_ms               = static_cast<uint64_t>(esp_timer_get_time() / 1000);
-        const uint64_t ref_age_s =
-            rt.has_value && now_ms >= rt.received_ms ? (now_ms - rt.received_ms) / 1000 : 0;
-        int64_t now_unix_s = -1;
-        int32_t now_sub_ms = 0;
-        time_now(now_unix_s, now_sub_ms);
-        ReferenceFreshness freshness = reference_room_freshness(
-            reference_source_time_mapped(c.ref_temp_time_topic, c.ref_temp_time_path), rt.has_value,
-            rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms, now_unix_s, now_ms,
-            c.ref_temp_max_age_s);
-        ReferenceRoomRaw room_raw;
-        room_raw.configured      = !c.ref_temp_topic.empty();
-        room_raw.has_temperature = rt.has_value;
-        room_raw.payload_valid   = rt.error.empty();
-        room_raw.temperature_c   = rt.temperature_c;
-        room_raw.has_source_time = rt.has_source_time;
-        room_raw.setpoint_mapped = c.ref_temp_fixed_setpoint_tenths != 0 ||
-                                   !c.ref_temp_setpoint_topic.empty() ||
-                                   !c.ref_temp_setpoint_path.empty();
-        room_raw.has_setpoint          = rt.has_setpoint;
-        room_raw.setpoint_c            = rt.setpoint_c;
-        room_raw.enabled_mapped        = !c.ref_temp_enabled_path.empty();
-        room_raw.has_enabled           = rt.has_enabled;
-        room_raw.enabled               = rt.enabled;
-        room_raw.hvac_mode_mapped      = !c.ref_temp_hvac_mode_path.empty();
-        room_raw.has_hvac_mode         = rt.has_hvac_mode;
-        room_raw.hvac_mode             = rt.hvac_mode;
-        room_raw.payload_reason        = rt.rejection_reason;
-        const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
-        if (!rt.error.empty()) {
-            freshness.fresh  = false;
-            freshness.reason = "invalid";
-        }
-        j += "\"reference_temperature\":{\"configured\":";
-        j += c.ref_temp_topic.empty() ? "false" : "true";
-        append_status_redacted(j, ",\"name\":", jstr_r(c.ref_temp_name, redact));
-        append_status_redacted(j, ",\"topic\":", jstr_r(c.ref_temp_topic, redact));
-        append_status_redacted(j, ",\"temperature_path\":", jstr_r(c.ref_temp_path, redact));
-        append_status_redacted(j,
-                               ",\"setpoint_topic\":", jstr_r(c.ref_temp_setpoint_topic, redact));
-        append_status_redacted(j, ",\"setpoint_path\":", jstr_r(c.ref_temp_setpoint_path, redact));
-        append_status_fmt_double(j, ",\"fixed_setpoint_c\":", "%.1f",
-                                 c.ref_temp_fixed_setpoint_tenths != 0,
-                                 static_cast<double>(c.ref_temp_fixed_setpoint_tenths) / 10.0);
-        append_status_redacted(j, ",\"timestamp_topic\":", jstr_r(c.ref_temp_time_topic, redact));
-        append_status_redacted(j, ",\"timestamp_path\":", jstr_r(c.ref_temp_time_path, redact));
-        append_status_redacted(j, ",\"enabled_path\":", jstr_r(c.ref_temp_enabled_path, redact));
-        append_status_redacted(j,
-                               ",\"hvac_mode_path\":", jstr_r(c.ref_temp_hvac_mode_path, redact));
-        qfield(",\"source_id\":", REF_ROOM_SOURCE_ID);
-        ifield(",\"calibration_k\":0,\"temperature_min_c\":",
-               static_cast<int64_t>(REF_ROOM_TEMPERATURE_MIN_C));
-        ifield(",\"temperature_max_c\":", static_cast<int64_t>(REF_ROOM_TEMPERATURE_MAX_C));
-        ufield(",\"max_age_s\":", c.ref_temp_max_age_s);
-        bfield(",\"subscribed\":", rt.subscribed);
-        bfield(",\"has_value\":", rt.has_value);
-        append_status_fmt_double(j, ",\"temperature_c\":", "%.6g", rt.has_value, rt.temperature_c);
-        bfield(",\"has_setpoint\":", rt.has_setpoint);
-        append_status_fmt_double(j, ",\"setpoint_c\":", "%.6g", rt.has_setpoint, rt.setpoint_c);
-        j += ",\"enabled\":";
-        j += rt.has_enabled ? (rt.enabled ? "true" : "false") : "null";
-        j += ",\"hvac_mode\":";
-        j += rt.has_hvac_mode
-                 ? jstr_r(rt.hvac_mode, redact && !report_hvac_mode_public(rt.hvac_mode))
-                 : "null";
-        append_status_rfc3339(j, ",\"received_at\":", rt.has_value && rt.received_unix_s >= 0,
-                              rt.received_unix_s);
-        append_status_opt_uint(j, ",\"received_ago_s\":", rt.has_value, ref_age_s);
-        append_status_rfc3339(j, ",\"source_at\":", rt.has_value && rt.has_source_time,
-                              rt.source_unix_s);
-        append_status_opt_int(j, ",\"source_unix_s\":", rt.has_value && rt.has_source_time,
-                              rt.source_unix_s);
-        append_status_opt_quoted(j, ",\"timestamp_source\":", rt.has_value, rt.timestamp_source);
-        append_status_opt_uint(j, ",\"age_s\":", freshness.age_known, freshness.age_s);
-        bfield(",\"fresh\":", freshness.fresh);
-        qfield(",\"freshness_reason\":", freshness.reason);
-        bfield(",\"temperature_valid\":", room.temperature_valid);
-        bfield(",\"setpoint_valid\":", room.setpoint_valid);
-        bfield(",\"control_eligible\":", room.control_eligible);
-        append_status_fmt_double(j, ",\"room_error_k\":", "%.6g", room.has_room_error,
-                                 room.room_error_k);
-        qfield(",\"reason\":", reference_room_reason_name(room.reason));
-        ufield(",\"reason_code\":", static_cast<unsigned>(room.reason));
-        bfield(",\"retained\":", rt.has_value && rt.retained);
-        ufield(",\"messages\":", rt.messages);
-        ufield(",\"errors\":", rt.errors);
-        ufield(",\"rejections\":", rt.rejections);
-        if (!rt.eligibility_error.empty()) qfield(",\"eligibility_error\":", rt.eligibility_error);
-        if (!rt.error.empty()) qfield(",\"error\":", rt.error);
-    }
-    // Heating-curve diagnosis v2: raw room error sampled only in confirmed HEATING operation. The
-    // absolute timestamp + monotonic sequence is the durable event contract; no actuator-derived
-    // P/quantized/bounded/requested-offset vocabulary remains.
-    // `armed` is the CONFIGURATION's answer (are room mapping + HomeHub saved), while state/reason
-    // come from a snapshot the MQTT publish task owns. Those two can disagree, and only in one
-    // direction: with no broker configured, or in safe mode, that task is never created, so the
-    // snapshot stays default-constructed at Off/Disabled while armed reads true. Published raw,
-    // that was a payload contradicting itself — and "disabled" is the evaluator's word for "no room
-    // source is mapped", which is exactly what the reader has already done.
-    // logic/heating_curve_diagnosis.hpp names the situation instead (host-tested), so the state
-    // stays honestly `off` while the reason says the sampler is not running.
-    append_heating_curve_json(j, c, redact);
     // Independent electrical witness for the potable-water circulation pump. Topic/name are
-    // identifying installation data and therefore follow the same redaction boundary as the room
-    // source. Power and source-time remain non-secret diagnostic evidence.
+    // identifying installation data. Power and source-time remain diagnostic evidence.
     {
         const CirculationSourceStatus circulation = circulation_source_status(c);
-        j += "},\"circulation_source\":{\"configured\":";
+        j += "\"circulation_source\":{\"configured\":";
         j += c.circulation_topic.empty() ? "false" : "true";
         append_status_redacted(j, ",\"name\":", jstr_r(c.circulation_name, redact));
         append_status_redacted(j, ",\"topic\":", jstr_r(c.circulation_topic, redact));
@@ -1352,101 +1045,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         ufield(",\"errors\":", circulation.errors);
         ufield(",\"rejections\":", circulation.rejections);
         if (!circulation.error.empty()) qfield(",\"error\":", circulation.error);
-    }
-    // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not
-    // expose model-run issue time, so issued_at remains null instead of being fabricated. Failed
-    // refreshes retain the last numbers for diagnosis but set available/fresh false.
-    {
-        const WeatherForecastStatus wf         = weather_forecast_status();
-        int64_t                     now_unix_s = -1;
-        int32_t                     now_sub_ms = 0;
-        time_now(now_unix_s, now_sub_ms);
-        const bool weather_configured = c.weather_enabled;
-        const bool weather_safe_mode  = safe_mode_active();
-        const bool weather_source_active =
-            weather_configured && c.diagnostics_enabled && !weather_safe_mode;
-        const bool       weather_has_value = weather_source_active && wf.has_value;
-        WeatherFreshness weather =
-            weather_freshness(weather_has_value, wf.fetched_unix_s, now_unix_s, WEATHER_MAX_AGE_S);
-        if (!weather_configured) {
-            weather.fresh  = false;
-            weather.reason = "not_configured";
-        } else if (weather_safe_mode) {
-            weather.fresh  = false;
-            weather.reason = "safe_mode";
-        } else if (!c.diagnostics_enabled) {
-            weather.fresh  = false;
-            weather.reason = "diagnostics_disabled";
-        } else if (!wf.available) {
-            weather.fresh  = false;
-            weather.reason = wf.reason.empty() ? "unavailable" : wf.reason.c_str();
-        }
-        const bool weather_available = weather_source_active && wf.available && weather.fresh;
-        const bool weather_fetching  = weather_source_active && wf.fetching;
-        const std::string weather_latitude =
-            weather_configured ? weather_coordinate_format_e6(c.weather_latitude_e6)
-                               : std::string();
-        const std::string weather_longitude =
-            weather_configured ? weather_coordinate_format_e6(c.weather_longitude_e6)
-                               : std::string();
-        bfield("},\"weather_forecast\":{\"configured\":", weather_configured);
-        qfield(",\"provider\":\"open-meteo\",\"model\":", wf.model);
-        ufield(",\"fetch_interval_s\":", WEATHER_FETCH_INTERVAL_S);
-        ufield(",\"max_age_s\":", WEATHER_MAX_AGE_S);
-        bfield(",\"fetching\":", weather_fetching);
-        bfield(",\"available\":", weather_available);
-        bfield(",\"has_value\":", weather_has_value);
-        append_status_redacted(j, ",\"latitude\":", jstr_r(weather_latitude, redact),
-                               !weather_latitude.empty());
-        append_status_redacted(j, ",\"longitude\":", jstr_r(weather_longitude, redact),
-                               !weather_longitude.empty());
-        qfield(",\"state\":", !weather_configured      ? "disabled"
-                              : weather_safe_mode      ? "waiting"
-                              : !c.diagnostics_enabled ? "disabled"
-                                                       : wf.state.c_str());
-        append_status_fmt_double(j, ",\"outdoor_mean_2h_c\":", "%.6g", weather_has_value,
-                                 wf.outdoor_mean_2h_c);
-        append_status_fmt_double(j, ",\"solar_energy_2h_wh_m2\":", "%.6g", weather_has_value,
-                                 wf.solar_energy_2h_wh_m2);
-        j += ",\"hourly\":[";
-        if (weather_has_value) {
-            const size_t count = std::min(wf.hourly_count, WEATHER_HOURLY_CAP);
-            for (size_t i = 0; i < count; ++i) {
-                if (i) j += ',';
-                ifield("{\"time_unix_s\":", wf.hourly_unix_s[i]);
-                append_status_fmt_double(j, ",\"temperature_c\":", "%.6g", true,
-                                         wf.hourly_temperature_c[i]);
-                append_status_fmt_double(j, ",\"humidity_pct\":", "%.6g", true,
-                                         wf.hourly_humidity_pct[i]);
-                append_status_fmt_double(j, ",\"pressure_hpa\":", "%.6g", true,
-                                         wf.hourly_pressure_hpa[i]);
-                j += '}';
-            }
-        }
-        append_status_rfc3339(j, "],\"issued_at\":", weather_has_value && wf.issued_unix_s >= 0,
-                              wf.issued_unix_s);
-        append_status_rfc3339(j, ",\"fetched_at\":", weather_has_value, wf.fetched_unix_s);
-        append_status_rfc3339(j, ",\"valid_for_decision_at\":", weather_has_value,
-                              wf.decision_unix_s);
-        append_status_rfc3339(j, ",\"last_attempt_at\":", wf.last_attempt_unix_s >= 0,
-                              wf.last_attempt_unix_s);
-        append_status_opt_uint(j, ",\"age_s\":", weather.age_known, weather.age_s);
-        bfield(",\"fresh\":", weather.fresh);
-        qfield(",\"freshness_reason\":", weather.reason);
-        ufield(",\"successes\":", wf.successes);
-        ufield(",\"errors\":", wf.errors);
-        ufield(",\"refresh_requested_token\":", wf.refresh_requested_token);
-        ufield(",\"refresh_started_token\":", wf.refresh_started_token);
-        ufield(",\"refresh_completed_token\":", wf.refresh_completed_token);
-        ufield(",\"refresh_success_token\":", wf.refresh_success_token);
-        j += ",\"task_stack_min_free_bytes\":";
-        append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
-        const std::string_view wf_reason = !weather_configured      ? "not_configured"
-                                           : weather_safe_mode      ? "safe_mode"
-                                           : !c.diagnostics_enabled ? "diagnostics_disabled"
-                                                                    : std::string_view(wf.reason);
-        if (!wf_reason.empty()) qfield(",\"reason\":", wf_reason);
-        if (weather_source_active && !wf.error.empty()) qfield(",\"error\":", wf.error);
         j += "},";
     }
     {
@@ -1583,14 +1181,6 @@ static void append_status_json(JsonOut& j, bool redact) {
                                    ENV3_HISTORIES[et].label);
         }
     }
-    j += "],\"room_rows\":[";
-    if (c.diagnostics_enabled && !c.mqtt_uri.empty() && !c.ref_temp_topic.empty() &&
-        !safe_mode_active()) {
-        append_status_redacted(j,
-                               "{\"id\":\"room_temp\",\"label\":", jstr_r(c.ref_temp_name, redact));
-        j += "}";
-    }
-
     // ── The rolling on-board plant diagnosis (logic/checkup.hpp) ────────────────────────────────
     // `health` summarizes events and extrema that can be lost in the five-minute trend buckets.
     //
@@ -1607,30 +1197,25 @@ static void append_status_json(JsonOut& j, bool redact) {
     {
         logic::CheckupCyclingHours hrs{};
         // The optional chart must not need exception storage under heap pressure.
-        ValuesTlsReader trace_reader;
-        trace_reader.admitted = !redact && c.diagnostics_enabled && weather_values_reader_enter();
+        const bool trace_admitted = !redact && c.diagnostics_enabled;
         using Trace           = logic::CheckupCyclingTrace;
         void* trace_storage =
-            trace_reader.admitted ? heap_caps_malloc(sizeof(Trace), MALLOC_CAP_8BIT) : nullptr;
+            trace_admitted ? heap_caps_malloc(sizeof(Trace), MALLOC_CAP_8BIT) : nullptr;
         std::unique_ptr<Trace, decltype(&std::free)> trace(
             trace_storage ? new (trace_storage) Trace : nullptr, std::free);
         // A separate <=416-byte optional allocation avoids putting exact DHW windows into the
-        // shared report/task stack. Both chart buffers use the same admission lease and snapshot.
+        // shared report/task stack. Both chart buffers use the same checkup snapshot.
         using DhwTrace = logic::DhwLossTimeline;
         void* dhw_storage =
-            trace_reader.admitted ? heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT) : nullptr;
+            trace_admitted ? heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT) : nullptr;
         std::unique_ptr<DhwTrace, decltype(&std::free)> dhw_trace(
             dhw_storage ? new (dhw_storage) DhwTrace : nullptr, std::free);
         logic::CheckupRestore      persist;
         logic::DefrostStartReport  defrost_start;
         const logic::CheckupReport hr = checkup_report(&hrs, trace.get(), &persist, diag_effective,
                                                        &defrost_start, dhw_trace.get());
-        const auto                 release_trace = [&] {
-            trace.reset();
-            if (!dhw_trace) trace_reader.release();
-        };
         if (!dhw_trace || !dhw_trace->epoch) dhw_trace.reset();
-        if (!trace || !trace->unix_s) release_trace();
+        if (!trace || !trace->unix_s) trace.reset();
         qfield("]},\"health\":{\"source\":", diagnostics_source_name(diag_effective));
         ufield(",\"covered_s\":", hr.covered_s);
         ufield(",\"span_s\":", hr.span_s);
@@ -1748,7 +1333,6 @@ static void append_status_json(JsonOut& j, bool redact) {
                     j += "]}";
                 }
                 dhw_trace.reset();
-                if (!trace) trace_reader.release();
                 break;
             case logic::CheckupCheck::Cycling: {
                 // Keep legacy names; the pooled mean is null. Only complete heating runs judge.
@@ -1813,7 +1397,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                     }
                     j += "]}";
                 }
-                release_trace();
+                trace.reset();
                 if (!redact && have_trace && diag_effective == DiagnosticsSource::X10a) {
                     append_cycling_run_contexts_json(j, trace_boot_s, trace_unix_s);
                 }
@@ -1972,7 +1556,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // Beside them, what that headroom already COST while the board DID survive (legacy-380): cycles
     // the two 1 s task loops produced nothing on. mqtt_skipped/poll_skipped are OOM-guard catches —
     // a reading dropped, or (poll) never read at all; mqtt_quiesced is the publisher standing aside
-    // on purpose while an OTA/weather TLS operation owns the heap (logic/ota_quiesce.hpp), the same
+    // on purpose while an OTA TLS operation owns the heap (logic/ota_quiesce.hpp), the same
     // gap with a stated cause. The three of them complete the sequence the two figures above start:
     // min_free_heap says how close the board came, these say what it lost getting there, and
     // heap_restarts says when it did not get there at all. Three atomic loads and three plain
@@ -2005,8 +1589,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Mqtt));
         j += ",\"modbus\":";
         append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Modbus));
-        j += ",\"weather\":";
-        append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
         for (const StackWatchField& field : STACK_WATCH_EXTRA_FIELDS) {
             j += ",\"";
             j += field.name;
@@ -2500,11 +2082,8 @@ static void append_values_json(JsonOut& j, const ValuesSnapshot& snapshot) {
 // snapshots before the first byte and stream the same representation through this strict 1 KiB sink.
 esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix,
                                 std::string_view suffix) {
-    // Do not park the sole HTTP worker for the lifetime of a firmware download. Weather remains a
-    // bounded wait because it is short; OTA progress must stay responsive through /ota/status.
+    // Leave the sole HTTP worker available for OTA progress.
     if (ota_download_active()) return network_tls_busy(req);
-    ValuesTlsReader reader;
-    if (!wait_for_values_tls_owner(reader) || ota_download_active()) return network_tls_busy(req);
     ValuesSnapshot snapshot = take_values_snapshot();
     HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
@@ -2595,7 +2174,7 @@ union HttpdRouteScratch {
 };
 static HttpdRouteScratch s_httpd_route_scratch;
 
-// GET /history?row=<trend id>[&source=x10a|modbus|env3|room] — one 24-hour series, oldest first.
+// GET /history?row=<trend id>[&source=x10a|modbus|env3] — one 24-hour series, oldest first.
 // X10A is the backwards-compatible default; the external circulation witness identifies itself as
 // MQTT, Modbus carries paired HomeHub measurements/state timelines, and ENV III owns three
 // independent outdoor-climate rings.
@@ -2636,7 +2215,7 @@ static HttpdRouteScratch s_httpd_route_scratch;
 }
 
 static esp_err_t h_history(httpd_req_t* req) {
-    // Snapshot/header preparation allocates before transfer. Keep it outside firmware TLS;
+    // Snapshot/header preparation allocates before transfer. Keep it outside OTA TLS;
     // the finished header and numeric samples then use the shared bounded stream boundary.
     if (ota_download_active()) return network_tls_busy(req);
     char q[96]  = {0};
@@ -2646,12 +2225,13 @@ static esp_err_t h_history(httpd_req_t* req) {
         return send_status_json_err(req, "400 Bad Request",
                                     "{\"ok\":false,\"error\":\"row required\"}");
     }
-    char       source[12]  = {0};
-    const bool has_source  = httpd_query_key_value(q, "source", source, sizeof(source)) == ESP_OK;
-    const bool modbus      = has_source && std::strcmp(source, "modbus") == 0;
-    const bool env3_source = has_source && std::strcmp(source, "env3") == 0;
-    const bool room_source = has_source && std::strcmp(source, "room") == 0;
-    if (has_source && !modbus && !env3_source && !room_source && std::strcmp(source, "x10a") != 0) {
+    char            source[12]  = {0};
+    const esp_err_t source_err  = httpd_query_key_value(q, "source", source, sizeof(source));
+    const bool      has_source  = source_err == ESP_OK;
+    const bool      modbus      = has_source && std::strcmp(source, "modbus") == 0;
+    const bool      env3_source = has_source && std::strcmp(source, "env3") == 0;
+    if (source_err != ESP_ERR_NOT_FOUND && !modbus && !env3_source &&
+        (!has_source || std::strcmp(source, "x10a") != 0)) {
         return send_status_json_err(req, "400 Bad Request",
                                     "{\"ok\":false,\"error\":\"unknown source\"}");
     }
@@ -2671,23 +2251,16 @@ static esp_err_t h_history(httpd_req_t* req) {
             : nullptr;
     const int  env_t           = env3_source ? env3_history_index(id) : -1;
     bool       env3_configured = false;
-    uint32_t   room_identity   = 0;
     char       lbl[80] = {0}, unit[8] = {0};
     {
         const Config active_config = config();
         env3_configured = active_config.env3_enabled && env3_board_supported(active_config);
-        if (room_source && active_config.diagnostics_enabled && !safe_mode_active()) {
-            room_identity = logic::history_room_identity(active_config);
-            copy_bounded_str(lbl, sizeof(lbl), active_config.ref_temp_name.c_str());
-        }
     } // Release the configuration snapshot before constructing the streamed history response.
-    const bool x10a_unknown =
-        !modbus && !env3_source && !room_source && (!def_ || t >= logic::TREND_COUNT);
+    const bool x10a_unknown = !modbus && !env3_source && (!def_ || t >= logic::TREND_COUNT);
     const bool missing_modbus_profile =
         modbus && mb_t >= 0 && (!mb_reg || !def::homehub_has_quiet_activity(*mb_reg));
     if (x10a_unknown || (modbus && (mb_t < 0 || missing_modbus_profile)) ||
-        (env3_source && (!env3_configured || env_t < 0)) ||
-        (room_source && (!room_identity || std::strcmp(id, "room_temp") != 0))) {
+        (env3_source && (!env3_configured || env_t < 0))) {
         return send_status_json_err(req, "404 Not Found",
                                     "{\"ok\":false,\"error\":\"unknown trend\"}");
     }
@@ -2710,13 +2283,10 @@ static esp_err_t h_history(httpd_req_t* req) {
     else if (env3_source)
         n = history_env3_snapshot(static_cast<size_t>(env_t), samples, logic::HISTORY_SAMPLES,
                                   &history_snapshot_epoch, &history_meta);
-    else if (room_source)
-        n = history_room_snapshot(samples, logic::HISTORY_SAMPLES, room_identity,
-                                  &history_snapshot_epoch, &history_meta);
     else
         n = history_snapshot(t, samples, logic::HISTORY_SAMPLES, &history_snapshot_epoch,
                              &history_meta);
-    const size_t nruns = (modbus || env3_source || room_source)
+    const size_t nruns = (modbus || env3_source)
                              ? 0
                              : logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
 
@@ -2725,8 +2295,6 @@ static esp_err_t h_history(httpd_req_t* req) {
         copy_bounded_str(lbl, sizeof(lbl),
                          modbus ? (mb_reg ? mb_reg->label : "") : ENV3_HISTORIES[env_t].label);
         unit_str = modbus ? (mb_reg ? mb_reg->unit : "") : ENV3_HISTORIES[env_t].unit;
-    } else if (room_source) {
-        unit_str = "°C";
     } else {
         history_label(t, lbl, sizeof(lbl));
         history_unit(t, unit, sizeof(unit));
@@ -2735,14 +2303,12 @@ static esp_err_t h_history(httpd_req_t* req) {
     std::string j = "{\"id\":\"";
     j += modbus        ? logic::HOMEHUB_HISTORIES[mb_t].trend_id
          : env3_source ? ENV3_HISTORIES[env_t].id
-         : room_source ? "room_temp"
                        : def_->id;
     const bool mqtt_source =
-        !modbus && !env3_source && !room_source && def_->kind == logic::TrendKind::CirculationState;
+        !modbus && !env3_source && def_->kind == logic::TrendKind::CirculationState;
     j += "\",\"source\":\"";
     j += modbus        ? "modbus"
          : env3_source ? "env3"
-         : room_source ? "room"
          : mqtt_source ? "mqtt"
                        : "x10a";
     // Bind the body to the lifetime captured with its samples, not a successor observed while

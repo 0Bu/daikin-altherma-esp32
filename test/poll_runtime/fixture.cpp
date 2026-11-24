@@ -203,7 +203,6 @@ void dwell_record(const CachedValue* values, size_t count, uint32_t, uint32_t,
     if (!values && !count) ++sdk::dwell_unread;
 }
 bool ota_download_active() { return sdk::ota_active; }
-bool weather_fetch_active() { return false; }
 } // namespace daik
 static void oracle(bool pass, const char* name) {
     if (!pass) {

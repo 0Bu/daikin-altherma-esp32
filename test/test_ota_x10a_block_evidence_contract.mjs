@@ -107,10 +107,17 @@ baseline = ns["board_counters"](board(7))
 def forbidden(*args, **kwargs):
     raise AssertionError("PROBE_UNEXPECTED_IO")
 
-def run_stress(status, *, weather, sync_workers):
+def run_stress(status, *, weather, sync_workers, retired=False):
     virtual, start_at, refreshes = [0.0], [], []
+    def observed_status(endpoint, **kwargs):
+        result = status(virtual[0] - (start_at[0] if start_at else 0.0), bool(start_at))
+        if retired:
+            del result["weather_forecast"]
+            result["status_schema_version"] = 2
+        return result
     def request_json(endpoint, route, **kwargs):
         if route == "/set_weather":
+            check(not retired, "PROBE_RETIRED_WEATHER_MUST_NOT_BE_REQUESTED")
             check(kwargs.get("method") == "POST" and kwargs["payload"].get("refresh") is True,
                   "PROBE_ONLY_NONPERSISTENT_REFRESH")
             refreshes.append(len(refreshes) + 1)
@@ -150,8 +157,7 @@ def run_stress(status, *, weather, sync_workers):
         journal = ns["GateJournal"]()
     try:
         with patch.dict(ns, {"ACTIVE_JOURNAL": journal, "resolve_http_endpoint": lambda value: value,
-                             "request_status_deadline": lambda endpoint, **kwargs:
-                                 status(virtual[0] - (start_at[0] if start_at else 0.0), bool(start_at)),
+                             "request_status_deadline": observed_status,
                              "request_values_deadline": lambda endpoint, **kwargs: {"values": []},
                              "request_diag_deadline": lambda endpoint, **kwargs: b"diag",
                              "request_json_deadline": request_json, "journal_checkpoint": checkpoint,
@@ -196,6 +202,8 @@ def stress_sample(at):
 results = {
     "healthy deferred run": run_stress(headroom_board(None, LIVE), weather=True, sync_workers=False),
     "healthy live stress": run_stress(stress_sample(10 ** 9), weather=False, sync_workers=True),
+    "healthy live stress without retired Weather": run_stress(
+        stress_sample(10 ** 9), weather=True, sync_workers=True, retired=True),
     "readiness pause": run_stress(lambda relative, started: board(7, PAUSED), weather=True,
                                   sync_workers=False),
     "stress sample pause": run_stress(stress_sample(60.0), weather=False, sync_workers=True),
@@ -228,7 +236,7 @@ def probation(hp):
 for name, hp in (("probation pause", PAUSED), ("probation silent bus", SILENT)):
     results[name] = probation(hp)
 
-for name in ("healthy deferred run", "healthy live stress"):
+for name in ("healthy deferred run", "healthy live stress", "healthy live stress without retired Weather"):
     check(results[name] is None, "X10A_FIXTURE_HEALTHY_RUN_PASSES[" + name + "]: " + str(results[name]))
 expected = {
     "readiness pause": ("X10A did not connect or deliver values before the pressure window", PAUSED),
@@ -261,7 +269,7 @@ const run = (mode, file = gatePath) => spawnSync("python3", ["-I", "-B", "-c", p
 const actual = run("actual");
 assert.equal(actual.status, 0, `X10A block evidence probe failed: ${actual.stderr}`);
 const { checks, scenarios } = JSON.parse(actual.stdout);
-assert.equal(scenarios, 13);
+assert.equal(scenarios, 14);
 
 // Negative control 1: blocks that keep their wording but lose the evidence must fail the probe.
 const blank = run("no-evidence");

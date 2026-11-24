@@ -10,7 +10,6 @@ enum class StackWatch : uint8_t {
     Poll,      // hp_poll — legacy-241 died here, 8192
     Mqtt,      // the publish task, whose cycle builds every payload
     Modbus,    // the HomeHub link; retires and is recreated after configuration changes
-    Weather,   // Open-Meteo TLS + HTTP + JSON task; release HIL requires its post-fetch evidence
     Ota,       // boot-resident check/install worker; minimum spans operations for this boot
     Syslog,
     Env3,

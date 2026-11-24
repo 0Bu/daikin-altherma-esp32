@@ -94,7 +94,7 @@ int http_body_read(
 }
 
 // The leftover a session may still discard after its response: the largest route buffer
-// (/set_ref_temp), within a budget checked before each receive. A receive in progress still returns
+// within a budget checked before each receive. A receive in progress still returns
 // under its socket timeout, so the worst case is the budget plus one socket timeout.
 inline constexpr size_t  BODY_DISCARD_MAX_BYTES = 8192;
 inline constexpr int64_t BODY_DISCARD_BUDGET_US = 2000000;
