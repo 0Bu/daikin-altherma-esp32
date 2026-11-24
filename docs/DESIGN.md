@@ -281,16 +281,19 @@ explanation, optional history, then member values. Assemblies with no single mea
 headline or numeric chart. A leaf omits its own duplicated value row but keeps a current HomeHub
 twin with its comparison; grouped components keep their full member list.
 
-**Flow rate** shows the live value and source above the trend. When Plant diagnostics is enabled,
-the lowest-flow observation follows the trend and identifies its own source. A labelled red
-horizontal reference marks the observed minimum on the shared Y-axis when the matching source
-has visible samples. Gaps and cursor readouts still refer to the five-minute samples.
-**Measurement details** holds the explanation, related readings and diagnostic details.
+**Flow rate** follows that order. Its trend comes after the explanation and Normal note. The
+comparison, water pressure and pump command follow the trend, and the heating observation comes
+last. Violet fill marks recorded five-minute windows wherever they overlap the visible, dated X10A
+curve. Gaps stay clear. Select an area or use the legend to read its time and heating conditions
+directly below the plot. Adjacent five-minute windows share a single readout. When a recorded
+window overlaps the dated chart and an X10A sample is visible, the legend also reaches windows
+inside curve gaps. The usual cursor reads the trend samples.
 
 Explain what the quantity is, its bounded normal context, then current state or absence. Held data
 cannot reappear in a headline, members or state sentence. A fallback pressure row must own headline,
 source line and history together. Only rerender changed content so polling does not destroy a text
-selection. The same quantity uses the same underlying description as the value table. Native Altherma 4
+selection. Inspectors generally share descriptions with the value table. Flow rate has its own short
+help. Native Altherma 4
 flow/pressure and any Modbus Input 49 row marked `flow_scale_unverified` (`Probing`, `Fallback`, or
 `Altherma4` sweeps) have unverified conversion limits: unverified flow displays provisionally on
 the pill and unified 24-hour chart with its caveat without driving `waterMoving`, ΔT, thermal power,

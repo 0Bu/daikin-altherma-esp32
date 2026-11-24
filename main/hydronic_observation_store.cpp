@@ -51,6 +51,7 @@ constexpr HydronicObservationReport kInactiveReport = [] {
     HydronicObservationReport r;
     r.totals.first_evidence_unix_us = r.totals.last_evidence_unix_us = 0;
     r.totals.first_accepted_unix_us = r.totals.last_accepted_unix_us = 0;
+    r.minimum_windows.first_bucket                                   = 0;
     r.partial = r.restore_pending = false;
     return r;
 }();
@@ -62,7 +63,7 @@ bool     s_claim_barrier                     = false;
 HydronicObservationReport s_completed        = kInactiveReport;
 int64_t                   s_completed_expiry = INT64_MIN, s_archive_first_bucket = INT64_MIN;
 int64_t                   s_archive_wake_us = 0;
-constexpr size_t          kArchiveHours     = OBSERVATION_DAY_US / OBSERVATION_HOUR_US;
+constexpr size_t          kArchiveHours     = HYDRONIC_WINDOW_HOURS;
 constexpr uint8_t         kFirstSample = 4, kLastSample = 8;
 static_assert(OBSERVATION_HOUR_US < UINT32_MAX, "archive offsets must fit within uint32");
 struct ArchiveEdges {
@@ -254,7 +255,36 @@ bool delta_valid(const HydronicDelta& d) {
             (!d.command_accepted ||
              (d.command_milli >= 0 && d.command_milli <= HYDRONIC_COMMAND_MAX_MILLI)));
 }
+void reanchor_minimum_windows(HydronicMinimumWindows& windows, int64_t first_bucket) {
+    if (first_bucket == windows.first_bucket) return;
+    const int64_t     shift = first_bucket - windows.first_bucket;
+    constexpr int64_t hours = kArchiveHours;
+    auto&             masks = windows.masks;
+    if (windows.first_bucket < 0 || shift >= hours || shift <= -hours) {
+        std::memset(masks, 0, sizeof(masks));
+    } else if (shift > 0) {
+        std::memmove(masks, masks + shift, (hours - shift) * sizeof(*masks));
+        std::memset(masks + hours - shift, 0, shift * sizeof(*masks));
+    } else {
+        std::memmove(masks - shift, masks, (hours + shift) * sizeof(*masks));
+        std::memset(masks, 0, -shift * sizeof(*masks));
+    }
+    windows.first_bucket = first_bucket;
+}
 void add_report(HydronicObservationReport& into, const HydronicHourlyPayload& p) {
+    if (p.samples && (!into.totals.samples || p.flow.min_milli <= into.totals.flow.min_milli)) {
+        auto& windows = into.minimum_windows;
+        if (!into.totals.samples || p.flow.min_milli < into.totals.flow.min_milli) {
+            std::memset(windows.masks, 0, sizeof(windows.masks));
+            windows.locations_missing = false;
+        }
+        const int64_t hour = observation_bucket(p.first_unix_us) - windows.first_bucket;
+        if (windows.first_bucket >= 0 && hour >= 0 && hour < static_cast<int64_t>(kArchiveHours))
+            windows.masks[hour] |= p.flow_min_evidence & HYDRONIC_MINIMUM_SLOTS;
+        else
+            windows.locations_missing = true;
+        windows.locations_missing |= (p.flow_min_evidence & HYDRONIC_MINIMUM_LOCATION_MISSING) != 0;
+    }
     hydronic_totals_add(into.totals, p);
     into.partial |= p.flags != 0;
     if (p.dropped > into.dropped) into.dropped = p.dropped;
@@ -456,6 +486,10 @@ void hydronic_observation_record(const logic::HydronicDelta& d) {
         } else {
             open_at(at, at, 0);
             s_open.spread.fold(d.spread_milli, s_open.samples);
+            if (!s_open.samples || d.flow_milli < s_open.flow.min_milli)
+                s_open.flow_min_evidence = hydronic_minimum_slot(at);
+            else if (d.flow_milli == s_open.flow.min_milli)
+                s_open.flow_min_evidence |= hydronic_minimum_slot(at);
             s_open.flow.fold(d.flow_milli, s_open.samples);
             if (!s_open.samples) s_open.first_accepted_unix_us = at;
             s_open.last_accepted_unix_us = at;
@@ -505,6 +539,8 @@ HydronicObservationReport hydronic_observation_report() {
     }
     expire_live(wall);
     r           = s_completed;
+    const int64_t first_bucket = observation_bucket(wall) - static_cast<int64_t>(kArchiveHours - 1);
+    reanchor_minimum_windows(r.minimum_windows, first_bucket >= 0 ? first_bucket : 0);
     r.confirmed = r.dated = true;
     r.restore_pending     = s_restore_pending;
     r.persistence_pending = s_barrier_pending;
@@ -597,6 +633,7 @@ void hydronic_observation_flash_service(HydronicObservationReader reader) {
     rebuilt.restore_pending    = false;
     const int64_t wall_bucket  = observation_bucket(wall);
     const int64_t first_bucket = wall_bucket - static_cast<int64_t>(kArchiveHours - 1);
+    rebuilt.minimum_windows.first_bucket = first_bucket >= 0 ? first_bucket : 0;
     for (auto& first : s_staged_archive.first_plus_one) first = 0;
     int64_t    expiry = INT64_MIN, wake = 0;
     const auto defer_until = [&wake](int64_t at) {

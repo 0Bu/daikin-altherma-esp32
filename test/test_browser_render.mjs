@@ -568,7 +568,7 @@ const nativeAltherma4Rows = Object.freeze([
 ]);
 
 // Use native pointer events so delegated navigation, focus and hit testing all participate.
-async function clickElement(page, selector) {
+async function clickElement(page, selector, { touch = false, yFraction = .5 } = {}) {
   // Native input must reach this owned fixture tab. Chrome may open an internal help/update tab
   // in a fresh profile; a background fixture also throttles the disclosure's bounded hold timer.
   await page.send("Page.bringToFront");
@@ -585,12 +585,22 @@ async function clickElement(page, selector) {
     const button = document.querySelector(${JSON.stringify(selector)});
     const rect = button.getBoundingClientRect();
     if (!rect.width || !rect.height) throw new Error("hidden pointer target: " + ${JSON.stringify(selector)});
-    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height * ${yFraction} };
     if (document.elementFromPoint(point.x, point.y)?.closest("button, [role=button]") !==
         button.closest("button, [role=button]"))
       throw new Error("pointer target is obstructed: " + ${JSON.stringify(selector)});
     return point;
   })()`);
+  if (touch) {
+    await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+    try {
+      await page.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+      await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    } finally {
+      await page.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    }
+    return;
+  }
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
   await page.send("Input.dispatchMouseEvent",
     { type: "mousePressed", button: "left", clickCount: 1, ...point });
@@ -1204,16 +1214,22 @@ async function captureNativeEvidence(page, context, target = "valueGroups", ance
     return rect.width > 0 && rect.height > 0 && element.getAnimations({subtree:true})
       .every(animation => !(animation instanceof CSSTransition) || animation.playState !== "running");
   })()`);
-  const clip = await page.evaluate(`(() => {
-    const element = ${elementQuery};
-    const rect = element.getBoundingClientRect();
-    return { x: rect.left + scrollX, y: rect.top + scrollY,
-      width: rect.width, height: rect.height, scale: 1 };
-  })()`);
-  const capture = await page.send("Page.captureScreenshot",
-    { format: "png", captureBeyondViewport: true, clip });
-  fs.writeFileSync(path.join(directory, `${context.replaceAll("/", "-")}.png`),
-    Buffer.from(capture.data, "base64"));
+  const scroll = ancestor === "#inspCard" ? await page.evaluate("[scrollX, scrollY]") : null;
+  if (scroll) await page.evaluate("scrollTo({ top: 0, behavior: 'instant' }); true");
+  try {
+    const clip = await page.evaluate(`(() => {
+      const element = ${elementQuery};
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + scrollX, y: rect.top + scrollY,
+        width: rect.width, height: rect.height, scale: 1 };
+    })()`);
+    const capture = await page.send("Page.captureScreenshot",
+      { format: "png", captureBeyondViewport: true, clip });
+    fs.writeFileSync(path.join(directory, `${context.replaceAll("/", "-")}.png`),
+      Buffer.from(capture.data, "base64"));
+  } finally {
+    if (scroll) await page.evaluate(`scrollTo({ left: ${scroll[0]}, top: ${scroll[1]}, behavior: 'instant' }); true`);
+  }
 }
 
 async function assertDiagnosisSummaryRows(page, context) {
@@ -1261,13 +1277,22 @@ async function assertDiagnosisSummaryRows(page, context) {
 }
 
 async function assertFlowInspector(page, context, missingDay) {
+  const hour = Math.floor(1791868800 / 3600) * 3600;
+  const chartStart = hour + 150;
+  const chartSpan = 7 * 300;
+  const intervals = [[hour, hour + 300], [hour + 600, hour + 1200], [hour + 2100, hour + 2400]];
+  const windows = { t0: hour, slot_s: 300,
+    hour_masks: [(1 << 0) | (1 << 2) | (1 << 3) | (1 << 7) | (1 << 10), ...Array(23).fill(0)],
+    locations_missing: false };
   await page.evaluate(`(() => {
     S.status.health.source = "x10a";
     S.status.hp.connected = true;
     S.status.modbus = { ...S.status.modbus, enabled: true, connected: true,
       host: "flow.fixture.invalid", profile: "homehub", profile_basis: "affirmative" };
-    S._values = [...S._values.filter(row => !/flow sensor/i.test(row.label)),
-      { label: "Flow sensor", value: "14.2", unit: "L/min", reg: 0x62, concept: "flow" }];
+    S._values = [...S._values.filter(row => !/flow sensor|^water pressure$|water pump signal/i.test(row.label)),
+      { label: "Flow sensor", value: "14.2", unit: "L/min", reg: 0x62, concept: "flow" },
+      { label: "Water pressure", value: "1.4", unit: "bar", reg: 0x60 },
+      { label: "Water pump signal (0:max-100:stop)", value: "4", unit: "", reg: 0x60 }];
     S._modbus = [{ off: 49, label: "Flow rate", value: 14.6, unit: "L/min", concept: "flow" }];
     S.status.history.rows = [...S.status.history.rows.filter(row => row.id !== "flow"),
       { id: "flow", label: "Flow sensor" }];
@@ -1275,8 +1300,9 @@ async function assertFlowInspector(page, context, missingDay) {
     syncHistSources();
     S.histHidden.delete("flow");
     S.histPin.delete("flow");
-    const ring = { at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: "L/min", b0: 280,
-      t0: 1791868800, held: [] };
+    S.status.ntp = { ...S.status.ntp, synced: true, time: new Date(${hour + 3600} * 1000).toISOString() };
+    const ring = { at: Date.now(), receivedAt: Date.now(), receivedDeviceTime: ${hour + 3600},
+      gen: 1, dt: 300, unit: "L/min", t0: ${chartStart}, held: [] };
     S.hist.set("flow", { ...ring, v: [142, null, 150, 145, 120, 151, 153, 146] });
     S.hist.set(histCacheKey("flow", "modbus"), { ...ring, v: [146, 148, 154, null, 123, 153, 154, 149] });
     renderApp();
@@ -1291,71 +1317,125 @@ async function assertFlowInspector(page, context, missingDay) {
     document.getElementById("inspect").getAnimations({subtree: true})
       .every(animation => animation.playState !== "running")`);
   const diagnosisText = () => page.evaluate('document.getElementById("inspFlowDiagnosis").innerText');
-  const flowLine = () => page.evaluate('!!document.querySelector("#inspHist .vhist-flow-min")');
+  const bandCount = () => page.evaluate('document.querySelectorAll("#inspHist .vhist-flow-band").length');
+  const statusCopy = (key) => page.evaluate(`t(${JSON.stringify(key)})`);
   assert.deepEqual(await page.evaluate(`(() => {
     const chart = document.getElementById("inspHist"), brief = document.getElementById("inspFlowDiagnosis");
-    const details = document.getElementById("inspFlowDetails");
-    return { chartFirst: chart.getBoundingClientRect().bottom <= brief.getBoundingClientRect().top + 1,
-      closed: details.tagName === "DETAILS" && !details.open && !details.hidden,
-      containsDetails: ["inspBody", "inspRows", "inspFlowEvidence"].every(id => details.contains(document.getElementById(id))),
-      label: details.querySelector("summary").innerText,
+    const rows = document.getElementById("inspRows"), body = document.getElementById("inspBody");
+    const before = (a, b) => a.nextElementSibling === b &&
+      a.getBoundingClientRect().bottom <= b.getBoundingClientRect().top + 1;
+    return { cardOrder: before(body, chart) && before(chart, rows) && before(rows, brief),
+      simpleCopy: body.innerText.includes(t("check.flow.explain")) && body.innerText.includes(t("check.flow.assessment")),
+      visibleRows: /Modbus/i.test(rows.textContent) && rows.innerText.includes(t("check.pressure")) &&
+        rows.innerText.includes(t("check.flow.pump")) && rows.innerText.includes(fmt1(96)),
+      disclosure: Boolean(document.querySelector("#inspCard details")),
       duplicate: Boolean(document.querySelector("[data-desc='model:health_flow']")) };
-  })()`), { chartFirst: true, closed: true, containsDetails: true, duplicate: false,
-    label: await page.evaluate("t('check.flow.measurements')") },
-  `${context}: real schematic click opens chart, diagnosis and collapsed supporting details in order`);
+  })()`), { cardOrder: true, simpleCopy: true, visibleRows: true, disclosure: false, duplicate: false },
+  `${context}: flow uses the shared card order and shows the diagnosis below the related values`);
   const waiting = await diagnosisText();
-  assert.ok(waiting.includes(await page.evaluate("t('check.status.collecting')")) &&
-            waiting.includes(await page.evaluate("t('check.detail.period_label') + ' 15 min'")) &&
-            !waiting.includes(missingDay), `${context}: flow collection has a period and no full-day wait`);
-  assert.equal(await flowLine(), false, `${context}: waiting cannot mark a fabricated lowest reading`);
+  assert.ok(waiting.includes(await statusCopy("check.flow.waiting")) && !waiting.includes(missingDay),
+    `${context}: flow collection asks for a qualifying heating period`);
+  assert.equal(await bandCount(), 0, `${context}: waiting cannot mark a fabricated lowest reading`);
   await assertLayout(await page.evaluate(layoutAudit), `${context}/waiting`);
   await assertAccessibility(page, `${context}/waiting`, { nativeTree: true });
   await captureNativeEvidence(page, `${context}/waiting`, "#inspFlowDiagnosis", "#inspCard");
 
   await page.evaluate(`(() => {
-    const h = S.status.health;
-    Object.assign(h.checks.find(c => c.id === "flow"), {
-      verdict: "ok", min_l_min: 5.9, observed_s: 60,
-      hydronic: { confirmed: true, current: true, dated: true, method: 1, samples: 4, reason_code: 0,
-        first_evidence_unix_s: 1791868800, last_evidence_unix_s: 1791868860,
+    const report = S.status.health.checks.find(c => c.id === "flow");
+    Object.assign(report, {
+      verdict: "collecting", min_l_min: 5.9, observed_s: 60,
+      hydronic: { confirmed: true, current: true, dated: true, method: 1, samples: 12, reason_code: 0,
+        first_evidence_unix_s: ${hour}, last_evidence_unix_s: ${hour + 3600},
         flow_l_min: { min: 11, mean: 12, max: 13 } },
     });
+    delete report.minimum_windows;
     renderInspect();
     return true;
   })()`);
-  assert.ok((await diagnosisText()).includes(await page.evaluate("checkupFmt1(5.9) + ' l/min'")),
-    `${context}: lowest reading comes from the pump-run diagnosis rather than the heater statistics or trend`);
-  assert.deepEqual(await page.evaluate(`(() => {
+  const undatedMinimum = await diagnosisText();
+  assert.ok(undatedMinimum.includes(await page.evaluate("histFmt1(11) + ' l/min'")) &&
+    undatedMinimum.includes(await statusCopy("check.flow.runup")) &&
+    undatedMinimum.includes(await statusCopy("check.flow.locations_missing")) &&
+    !undatedMinimum.includes(await page.evaluate("histFmt1(5.9) + ' l/min'")),
+  `${context}: older reports retain the heating minimum and explain the missing recorded times`);
+  assert.equal(await bandCount(), 0, `${context}: the plot cannot infer locations from an older report or curve samples`);
+
+  await page.evaluate(`S.status.health.checks.find(c => c.id === "flow").minimum_windows =
+    ${JSON.stringify(windows)}; renderInspect(); true`);
+  assert.equal(await bandCount(), intervals.length, `${context}: three recorded heating intervals intersect the chart`);
+  assert.ok(!(await diagnosisText()).includes(await statusCopy("check.flow.locations_missing")),
+    `${context}: the preserved locations clear the older-report caveat`);
+  const rendered = await page.evaluate(`(() => {
     const plot = document.querySelector("#inspHist [data-hist=flow]");
-    const line = plot.querySelector("svg .vhist-flow-min");
-    const legend = document.querySelector("#inspHist .vhist-legend-flow-min").textContent;
-    const y = Number(line.getAttribute("y1"));
-    const style = getComputedStyle(line);
+    const bands = [...plot.querySelectorAll("svg .vhist-flow-band")];
+    const legend = document.querySelector("#inspHist button[data-flow-min-show]");
+    const style = getComputedStyle(bands[0]);
+    const clip = plot.querySelector("clipPath");
+    const clippedPaths = [...clip.querySelectorAll("path")];
+    const drawnPaths = [...plot.querySelectorAll("svg > .vhist-area:not(.mb)")];
+    const filled = (x, y) => clippedPaths.some(p => p.isPointInFill(new DOMPoint(x, y)));
     const colour = document.createElement("canvas").getContext("2d");
-    colour.fillStyle = style.stroke;
+    colour.fillStyle = style.fill;
     colour.fillRect(0, 0, 1, 1);
     const [red, green, blue] = colour.getImageData(0, 0, 1, 1).data;
-    const ordinates = Array.from(plot.querySelectorAll(".vhist-line")).flatMap(path =>
-      Array.from(path.getAttribute("d").matchAll(/[ML][0-9.]+ ([0-9.]+)/g), match => Number(match[1])));
-    const ticks = [...plot.parentElement.querySelectorAll(".vhist-y-label")];
-    const guides = [...plot.querySelectorAll(".vhist-grid")];
-    return { minimum: Number(plot.dataset.flowMin), horizontal: y === Number(line.getAttribute("y2")),
-      inScale: y >= 0 && y <= HIST_H,
-      reddishDashed: red > green && red > blue && style.strokeDasharray !== "none",
-      belowSamples: ordinates.length > 0 && ordinates.every(ordinate => ordinate < y),
-      alignedGrid: guides.length > 0 && guides.length === ticks.length &&
-        guides.every((guide, i) => Number(guide.getAttribute("y1")) === parseFloat(ticks[i].style.top)),
-      identifiesMinimum: legend.includes(t("check.flow.lowest")) && legend.includes("X10A") &&
-        legend.includes(checkupFmt1(5.9)) };
-  })()`), { minimum: 5.9, horizontal: true, inScale: true, reddishDashed: true,
-    belowSamples: true, alignedGrid: true, identifiesMinimum: true },
-  `${context}: the labeled historical reference uses the numeric scale, even below the sampled curve`);
+    return { minimum: Number(plot.dataset.flowMinimum), width: HIST_W,
+      violet: blue > red && red > green && Number(style.fillOpacity) > 0 && Number(style.fillOpacity) < 1 &&
+        getComputedStyle(legend).color === style.fill,
+      clipped: bands.every(b => b.parentElement.getAttribute("clip-path") === "url(#" + clip.id + ")") &&
+        clippedPaths.length > 0 && clippedPaths.map(p => p.getAttribute("d")).join() ===
+          drawnPaths.map(p => p.getAttribute("d")).join() &&
+        !filled(HIST_W / 7, HIST_H - 1) && !filled(HIST_W / 2, 1) && filled(HIST_W / 2, HIST_H - 1),
+      legend: legend.textContent === t("check.flow.show"),
+      legacyLine: !!plot.querySelector(".vhist-flow-min"),
+      bands: bands.map(band => ({ from: Number(band.dataset.flowBand), x: Number(band.getAttribute("x")),
+        width: Number(band.getAttribute("width")) })) };
+  })()`);
+  const scale = (time) => (time - chartStart) / chartSpan * rendered.width;
+  assert.deepEqual(rendered.bands, intervals.map(([from, to]) => ({
+    from, x: Number(Math.max(0, scale(from)).toFixed(3)),
+    width: Number((Math.min(rendered.width, scale(to)) - Math.max(0, scale(from))).toFixed(3)),
+  })), `${context}: UTC windows are clipped to the plotted range and adjacent ties share one band`);
+  assert.deepEqual([rendered.minimum, rendered.violet, rendered.clipped, rendered.legend, rendered.legacyLine],
+    [11, true, true, true, false], `${context}: only the area under the X10A curve is tinted violet, with no fill over gaps`);
+
+  const selectedInterval = async ([from, to]) => page.evaluate(`(() => {
+    const selected = document.querySelector("#inspHist .vhist-flow-band.selected");
+    const readout = document.querySelector("#inspHist .vhist-flow-readout");
+    const plot = document.querySelector("#inspHist [data-hist=flow]");
+    const rows = document.getElementById("inspRows");
+    const format = new Intl.DateTimeFormat(LANG, { dateStyle: "short", timeStyle: "short" });
+    const from = new Date(${from} * 1000), to = new Date(${to} * 1000);
+    const expectedTime = format.formatRange ? format.formatRange(from, to) : format.format(from) + " – " + format.format(to);
+    return Number(selected?.dataset.flowBand) === ${from} && !readout.hidden &&
+      plot.getBoundingClientRect().bottom <= readout.getBoundingClientRect().top &&
+      readout.getBoundingClientRect().bottom <= rows.getBoundingClientRect().top &&
+      readout.querySelector("strong").textContent === expectedTime &&
+      readout.querySelector("span").textContent === t("check.flow.readout", histFmt1(11) + " L/min");
+  })()`);
+  const minimumArea = `#inspHist [data-flow-band="${intervals[1][0]}"]`;
+  await clickElement(page, minimumArea, { yFraction: .05 });
+  assert.equal(await selectedInterval(intervals[1]), false,
+    `${context}: clicking above the filled area leaves the minimum unselected`);
+  await page.evaluate('S.histPin.delete("flow"); renderInspect(); true');
+  await clickElement(page, minimumArea, { touch: context.startsWith("phone/"), yFraction: .85 });
+  assert.equal(await selectedInterval(intervals[1]), true,
+    `${context}: native input explains the full recorded interval and ten-minute heating condition`);
+  await captureNativeEvidence(page, `${context}/tapped`, "#inspFlowDiagnosis", "#inspCard");
+  assert.equal(await page.evaluate('S.histPin.has("flow")'), false,
+    `${context}: selecting diagnosis evidence leaves the numeric curve unpinned`);
+  const legend = '#inspHist [data-flow-min-show]';
+  await page.evaluate(`document.querySelector(${JSON.stringify(legend)}).focus(); true`);
+  await page.key("Enter", { code: "Enter", keyCode: 13 });
+  assert.equal(await selectedInterval(intervals[2]), true,
+    `${context}: the focused legend button moves to the next recorded interval`);
   await page.waitFor("!S.clickHold && !S.scrub && !S.histBusy.size");
   assert.equal(await page.evaluate(`(() => {
-    const line = document.querySelector("#inspHist .vhist-flow-min");
+    const selected = document.querySelector("#inspHist .vhist-flow-band.selected");
+    const legend = document.activeElement;
     recoverOpenHistory();
-    return !!line && line === document.querySelector("#inspHist .vhist-flow-min");
-  })()`), true, `${context}: the polling history refresh preserves the unchanged reference node`);
+    return !!selected && selected === document.querySelector("#inspHist .vhist-flow-band.selected") &&
+      legend === document.querySelector("#inspHist [data-flow-min-show]") && legend === document.activeElement;
+  })()`), true, `${context}: unchanged polling preserves the selected band and legend focus`);
   await page.evaluate('document.querySelector("#inspHist [data-hist=flow]").focus(); true');
   await page.key("End", { code: "End", keyCode: 35 });
   assert.equal(await page.evaluate(`(() => {
@@ -1364,63 +1444,63 @@ async function assertFlowInspector(page, context, missingDay) {
     const marker = plot.querySelector(".vhist-mark.vhist-live[data-source=x10a]");
     const y = Number(path.getAttribute("d").split(" ").at(-1));
     return !marker.hidden && Math.abs(parseFloat(marker.style.top) * HIST_H / 100 - y) < .2;
-  })()`), true, `${context}: keyboard readout marker uses the expanded scale of its own curve`);
+  })()`), true, `${context}: keyboard scrubbing still reads the plotted numeric curve`);
   await page.evaluate('document.querySelector("#inspHist [data-hist=flow]").blur(); true');
   await assertLayout(await page.evaluate(layoutAudit), `${context}/measured`);
   await captureNativeEvidence(page, `${context}/measured`, "#inspFlowDiagnosis", "#inspCard");
 
   const x10aLegend = '#inspHist [data-hist-series="x10a"]';
   await clickElement(page, x10aLegend);
-  assert.equal(await flowLine(), false, `${context}: hiding the diagnosis source removes its line from the other curve`);
+  assert.equal(await bandCount(), 0, `${context}: hiding the diagnosis source removes its bands from the other curve`);
   assert.ok((await diagnosisText()).includes("X10A"), `${context}: source toggles keep the independent textual observation`);
   await clickElement(page, x10aLegend);
-  assert.equal(await flowLine(), true, `${context}: showing the diagnosis source restores its line`);
+  assert.equal(await bandCount(), intervals.length, `${context}: showing the diagnosis source restores its bands`);
 
-  await clickElement(page, "#inspFlowDetails summary");
   assert.equal(await page.evaluate(`(() => {
-    const details = document.getElementById("inspFlowDetails");
-    const evidence = document.getElementById("inspFlowEvidence").innerText;
-    return details.open && details.contains(document.getElementById("inspRows")) &&
-      evidence.includes(t("service.metric.range", "11", "12", "13", "l/min"));
-  })()`), true, `${context}: measurement details explicitly retain the independent heating statistics`);
-  await assertLayout(await page.evaluate(layoutAudit), `${context}/details`);
+    return document.getElementById("inspCard").innerText.includes(t("service.metric.range", "11", "12", "13", "l/min"));
+  })()`), false, `${context}: raw aggregate statistics do not appear in the inspector`);
 
   await page.evaluate(`(() => {
-    S.status.health.checks.find(c => c.id === "flow").min_l_min = 0;
+    for (const key of ["flow", histCacheKey("flow", "modbus")]) {
+      S.hist.set(key, { ...S.hist.get(key), t0: null });
+    }
     renderInspect();
     return true;
   })()`);
-  assert.equal(await page.evaluate('document.querySelector("#inspHist [data-hist=flow]").dataset.flowMin'), "0",
-    `${context}: measured zero remains a valid plotted minimum on a later status update`);
-  assert.equal(await page.evaluate('document.getElementById("inspFlowDetails").open'), true,
-    `${context}: changing the minimum preserves the opened details`);
+  assert.equal(await bandCount(), 0, `${context}: an undated trend cannot locate a dated diagnostic window`);
+  assert.ok((await diagnosisText()).includes(await page.evaluate("histFmt1(11) + ' l/min'")),
+    `${context}: the confirmed heating minimum remains visible without a UTC chart axis`);
+  await page.evaluate(`(() => {
+    for (const key of ["flow", histCacheKey("flow", "modbus")]) {
+      S.hist.set(key, { ...S.hist.get(key), t0: ${chartStart} });
+    }
+    renderInspect();
+    return true;
+  })()`);
   await page.evaluate("S.status.diagnostics.enabled = false; renderInspect(); true");
   assert.deepEqual(await page.evaluate(`({
     hidden: document.getElementById("inspFlowDiagnosis").hidden,
     graph: Boolean(document.querySelector("#inspHist .vhist-line")),
-    line: Boolean(document.querySelector("#inspHist .vhist-flow-min")),
-    details: !document.getElementById("inspFlowDetails").hidden,
-  })`), { hidden: true, graph: true, line: false, details: true },
+    bands: document.querySelectorAll("#inspHist .vhist-flow-band").length,
+    readings: document.getElementById("inspRows").getBoundingClientRect().height > 0,
+  })`), { hidden: true, graph: true, bands: 0, readings: true },
   `${context}: opting out hides diagnostic evidence and keeps the ordinary flow readings`);
   await page.evaluate("S.status.diagnostics.enabled = true; renderInspect(); true");
-  assert.equal(await flowLine(), true, `${context}: opted-in historical zero is restored`);
+  assert.equal(await bandCount(), intervals.length, `${context}: opting in restores the dated heating bands`);
   await page.evaluate(`(() => {
     S.status.health.source = "modbus";
     S.status.health.checks.find(c => c.id === "flow").min_l_min = 7.3;
     renderInspect();
   })()`);
-  assert.equal(await page.evaluate(`document.getElementById("inspSrc").innerText.includes("X10A") &&
-    document.querySelector("#inspHist .vhist-legend-flow-min").textContent.includes("Modbus")`), true,
-  `${context}: reference and live headline retain separate instruments`);
+  assert.equal(await bandCount(), 0, `${context}: a Modbus report cannot use X10A diagnosis bands`);
   await page.evaluate("S._modbus[0].flow_scale_unverified = true; renderApp(); true");
-  assert.equal(await flowLine(), false, `${context}: new provisional Modbus readings retire the historical line`);
-  assert.equal(await page.evaluate(`["inspFlowDiagnosis", "inspFlowEvidence"].some(id =>
-    document.getElementById(id).innerText.includes(checkupFmt1(7.3)))`), false,
-  `${context}: provisional Modbus cannot leave a measured minimum in the brief or expanded details`);
+  assert.equal(await bandCount(), 0, `${context}: provisional Modbus cannot supply heating minimum bands`);
+  assert.equal((await diagnosisText()).trim(), await statusCopy("check.flow.x10a_only"),
+    `${context}: provisional Modbus shows the source caveat without reusing the old minimum`);
   await page.evaluate("S.status.health.persist = 'unknown'; renderInspect(); true");
   assert.equal(await page.evaluate('document.getElementById("inspFlowDiagnosis").hidden'), true,
     `${context}: an unreadable snapshot cannot display a diagnosis`);
-  assert.equal(await flowLine(), false, `${context}: an unreadable snapshot cannot leave an old minimum line`);
+  assert.equal(await bandCount(), 0, `${context}: an unreadable snapshot cannot leave old minimum bands`);
 }
 
 async function assertPlantDiagnosis(page, context) {
@@ -1432,7 +1512,7 @@ async function assertPlantDiagnosis(page, context) {
       values: S._values, modbus: S._modbus, insp: S.insp,
       hist: new Map(S.hist), histPin: new Map(S.histPin),
       histHidden: new Map(S.histHidden), histEpoch: S.histEpoch,
-      histIdentity: S.histIdentity, histUptime: S.histUptime,
+      histIdentity: S.histIdentity, histUptime: S.histUptime, flowMinSelection: S.flowMinSelection,
     };
     S.status = structuredClone(S.status);
     S.status.history = {
@@ -2012,6 +2092,7 @@ async function assertPlantDiagnosis(page, context) {
       S.histEpoch = window.__browserDiagnosisOriginal.histEpoch;
       S.histIdentity = window.__browserDiagnosisOriginal.histIdentity;
       S.histUptime = window.__browserDiagnosisOriginal.histUptime;
+      S.flowMinSelection = window.__browserDiagnosisOriginal.flowMinSelection;
       delete window.__browserDiagnosisOriginal;
       renderApp();
       return true;
@@ -2203,8 +2284,7 @@ async function assertNativeAltherma4(page, context, locale = "en") {
           })`));
           throw error;
         }
-        if (target === "flow" && connected) await clickElement(page, "#inspFlowDetails summary");
-        const helpId = connected ? "inspRows" : target === "flow" ? "inspFlowNotice" : "inspBody";
+        const helpId = connected ? "inspRows" : "inspBody";
         assert.deepEqual(await page.evaluate(`(() => {
           const help = document.getElementById(${JSON.stringify(helpId)});
           return { help: help.getBoundingClientRect().height > 0 && help.innerText.includes(t(${JSON.stringify(key)})),
@@ -2239,8 +2319,7 @@ async function assertNativeAltherma4(page, context, locale = "en") {
       dtPill: document.getElementById("svDt").textContent,
       pumpOn: document.getElementById("schem").classList.contains("pump-on"),
       waterFlowOn: document.getElementById("fPhe").classList.contains("on"),
-      help: !document.getElementById("inspFlowNotice").hidden &&
-        document.getElementById("inspFlowNotice").innerText.includes(t("mb.flow_scale_help")),
+      help: document.getElementById("inspBody").innerText.includes(t("mb.flow_scale_help")),
       deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length,
     }))()`), {
       flowPill: expectedFlow, dtPill: "—", pumpOn: true, waterFlowOn: false, help: true, deltas: 0,

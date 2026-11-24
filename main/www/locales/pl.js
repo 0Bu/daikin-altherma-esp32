@@ -1,4 +1,4 @@
-// translation-source: 6afa8f5a73c7e7f65faf36130caecb99c1c59d20fd7f551a16b13090244d67fa
+// translation-source: c7de29a481f17e11a35ea248d888ac416d34b79cb23bafa5bcba8f20a50dc331
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -175,11 +175,17 @@ I18N.pl = localeValues([
   /* check.defrost */ "Odszraniania",
   /* check.pressure */ "Ciśnienie wody",
   /* check.flow */ "Min. przepływ",
-  /* check.flow.lowest */ "Najniższy zmierzony przepływ",
-  /* check.flow.runup */ "Po co najmniej 1 min ciągłej pracy pompy",
-  /* check.flow.assessment */ "Wymagany przepływ zależy od modelu i trybu pracy.",
-  /* check.flow.measurements */ "Szczegóły pomiaru",
+  /* check.flow.lowest */ "Najniższy przepływ podczas ogrzewania",
+  /* check.flow.runup */ "Pomiary są uwzględniane po co najmniej dziesięciu minutach ciągłego ogrzewania pomieszczeń.",
+  /* check.flow.assessment */ "Instrukcja montażu podaje minimalny przepływ dla każdego modelu i trybu pracy. Zbyt mały przepływ może wywołać błąd 7H.",
+  /* check.flow.explain */ "Przepływ pokazuje, ile litrów wody przepływa przez pompę ciepła w ciągu minuty.",
+  /* check.flow.pump */ "Sygnał sterujący pompą",
   /* check.flow.live */ "Teraz",
+  /* check.flow.show */ "Pokaż minimum na wykresie",
+  /* check.flow.readout */ (value) => `W tym przedziale co najmniej raz zmierzono ${value}. Ogrzewanie pomieszczeń trwało już od co najmniej dziesięciu minut.`,
+  /* check.flow.locations_missing */ "Nie zapisano czasu starszych pomiarów o tej wartości.",
+  /* check.flow.x10a_only */ "Najniższy przepływ podczas ogrzewania jest obliczany na podstawie pomiarów X10A.",
+  /* check.flow.waiting */ "Oczekiwanie na okres ogrzewania spełniający warunki pomiaru.",
   /* check.heater */ "Grzałki",
   /* check.retries */ "Liczniki ochrony",
   /* check.status.ok */ "OK",
@@ -357,13 +363,6 @@ I18N.pl = localeValues([
   /* service.metric.eev */ "Polecenie zaworu rozprężnego",
   /* service.metric.hp */ "Wysokie ciśnienie",
   /* service.metric.lp */ "Niskie ciśnienie",
-  /* check.hydronic.labels */ "Różnica temperatur wody|Wysterowanie pompy|Obserwowane / dopuszczone / zakwalifikowane|Daty dowodów|Daty zakwalifikowane|Teraz|Populacja|Przedziały godzinowe|Docelowa różnica temperatur wody",
-  /* check.hydronic.reasons */ "Zakwalifikowane filtrem projektu|Diagnostyka wyłączona|Brak bieżącego źródła|Nieprawidłowy odczyt|Pompa wyłączona|Tor ciepłej wody|Grzałka wspomagająca zgłasza włączenie|Pozostały rozruch|Brak zegara obserwacji|Zmieniono źródło|Zmieniono zgodę diagnostyczną|Osiągnięto limit licznika|Wyłączone do końca tego uruchomienia|Kwalifikacja nieznana",
-  /* check.hydronic.limits */ "Fazy sterownika nieobserwowalne|Wysterowanie pompy niedostępne|Oczekiwanie na odtworzenie",
-  /* check.hydronic.counts */ (w, c) => `Odczyty wody ${w} · odczyty wysterowania ${c}`,
-  /* check.hydronic.states */ "Źródło niepotwierdzone|Z datą|Bez daty|Niepełne 24 h|Oczekuje na zapis|Nasycenie liczników: dolne granice",
-  /* check.hydronic.loss */ (n) => `Zgłoszenia utraty podczas zapisu ${n}`,
-  /* check.hydronic.secondary */ (d, s, n) => `Różnica temp. zasilania (pompa ciepła minus obieg mieszany): ${d} · ${s} · odczyty: ${n}. Cel mieszania nieznany; straty ciepła wymagają więcej danych.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · średnia ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `Liczba przyjętych odczytów: ${n}`,
   /* service.metric.input_none */ "Brak wybranego wejścia",

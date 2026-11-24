@@ -2462,6 +2462,25 @@
       },
       "test_source_sha256": "b14eb976fc3da447e88b70195890f33382cc37624dcbbb9d9e72a548be02ed36",
       "validation_boundary": "Exact compiler outcome counts measured on synthetic host fixtures. Hardware and hosted CI verification remain separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3.0, ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2.0, release-coverage Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 release-coverage Docker result is the hosted candidate. Authoritative GitHub CI confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage compiler flags and gcov invocation, with isolated outputs",
+      "scope": "Verify five-minute minimum bins, equal and lower claims across nonoverlapping revisions, and CRC-guarded minimum metadata in the unchanged legacy hourly envelope.",
+      "sources": {
+        "main/logic/hydronic_hourly.hpp": "b109f07b18def6d9ffe8d9456da0a32c0716f275750bc2429ecaa91987889a26"
+      },
+      "test_source_sha256": "0546a5f227ab6cc9d47594515b6e738f0dd1d11b672332712161fecad1166bb2",
+      "measurement_limits": [
+        "Before the source retirement, the GCC 15 aarch64 profile reported a prior MQTT mismatch of 39/40 against 35/36 for mqtt_publish_gate.hpp."
+      ],
+      "validation_boundary": "Hydronic coverage was measured with synthetic inputs on all four local compiler profiles before the source retirement was integrated."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2688,8 +2707,8 @@
         "taken": 8
       },
       "main/logic/hydronic_hourly.hpp": {
-        "outcomes": 204,
-        "taken": 152
+        "outcomes": 224,
+        "taken": 169
       },
       "main/logic/hydronic_input.hpp": {
         "outcomes": 142,
@@ -3158,8 +3177,8 @@
         "taken": 12
       },
       "main/logic/hydronic_hourly.hpp": {
-        "outcomes": 234,
-        "taken": 170
+        "outcomes": 254,
+        "taken": 187
       },
       "main/logic/hydronic_input.hpp": {
         "outcomes": 196,
@@ -3628,8 +3647,8 @@
         "taken": 12
       },
       "main/logic/hydronic_hourly.hpp": {
-        "outcomes": 234,
-        "taken": 170
+        "outcomes": 254,
+        "taken": 187
       },
       "main/logic/hydronic_input.hpp": {
         "outcomes": 196,
@@ -4098,8 +4117,8 @@
         "taken": 12
       },
       "main/logic/hydronic_hourly.hpp": {
-        "outcomes": 234,
-        "taken": 170
+        "outcomes": 254,
+        "taken": 187
       },
       "main/logic/hydronic_input.hpp": {
         "outcomes": 196,

@@ -35,6 +35,7 @@ const S = {
   // as the ring rolls, rather than selecting whatever now occupies that slot
   // (logic/history.hpp's history_pin_index).
   histPin: new Map(),
+  flowMinSelection: null,
   cyclingScope: null,
   cyclingPin: null,
   cyclingHover: null,
@@ -137,6 +138,7 @@ function invalidateHistSources() {
   S.histRequests?.clear();
   (S.histAwait ||= new Map()).clear();
   S.histPin.clear();
+  S.flowMinSelection = null;
   S.faultCodes?.clear();
   S.faultSnapKeys = null;
   S.faultHoverIdx = null;

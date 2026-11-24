@@ -70,7 +70,7 @@ function element() {
 }
 
 const ids = ["gEnv3", "svEnv3Temp", "inspect", "inspCard", "inspTitle", "inspSrc", "inspNow",
-             "inspBody", "inspHist", "inspRows"];
+             "inspBody", "inspHist", "inspRows", "inspFlowDiagnosis"];
 const elements = Object.fromEntries(ids.map((id) => [id, element()]));
 const nativeTitle = element();
 elements.gEnv3.querySelector = (selector) => selector === ":scope > title" ? nativeTitle : null;

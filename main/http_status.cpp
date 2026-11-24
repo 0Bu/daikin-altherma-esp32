@@ -464,8 +464,8 @@ append_status_outdoor_context(JsonOut& j, const logic::CheckupOutdoorReport& con
 }
 
 template <typename JsonOut>
-static __attribute__((noinline)) void append_hydronic_status(JsonOut&          j,
-                                                             DiagnosticsSource diag_effective) {
+static __attribute__((noinline)) void
+append_hydronic_status(JsonOut& j, DiagnosticsSource diag_effective, bool redact) {
     CheckupHydronicReport report{};
     if (diag_effective == DiagnosticsSource::Modbus) {
         report.observation.partial         = false;
@@ -477,6 +477,23 @@ static __attribute__((noinline)) void append_hydronic_status(JsonOut&          j
     }
     j += ",\"hydronic\":";
     append_hydronic_json(j, report);
+    const auto& observation = report.observation;
+    const auto& windows     = observation.minimum_windows;
+    j += ",\"minimum_windows\":";
+    if (redact || !observation.confirmed || !observation.dated || !observation.totals.samples ||
+        windows.first_bucket < 0) {
+        j += "null";
+    } else {
+        j += "{\"t0\":";
+        append_json_uint(j, static_cast<uint64_t>(windows.first_bucket) * 3600);
+        j += ",\"slot_s\":300,\"hour_masks\":[";
+        for (size_t i = 0; i < logic::HYDRONIC_WINDOW_HOURS; ++i) {
+            if (i) j += ',';
+            append_json_uint(j, windows.masks[i]);
+        }
+        j += windows.locations_missing ? "],\"locations_missing\":true}"
+                                       : "],\"locations_missing\":false}";
+    }
     const auto& secondary = report.secondary;
     j += ",\"secondary_supply\":";
     if (!report.current || !secondary.samples || !secondary.source.conv) {
@@ -1443,7 +1460,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 break;
             case logic::CheckupCheck::Flow:
                 tenths("min_l_min", ck.a);
-                append_hydronic_status(j, diag_effective);
+                append_hydronic_status(j, diag_effective, redact);
                 break;
             case logic::CheckupCheck::Heater:
                 num("buh_min", whole_minutes(ck.a));

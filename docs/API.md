@@ -186,7 +186,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, optional `timeline`, optional `run_contexts`, optional `flow_typical_l_min`, `stop_context` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
-| `flow` | `min_l_min`, independent `hydronic` observations and nullable `secondary_supply` |
+| `flow` | `min_l_min`, independent `hydronic` observations, nullable `minimum_windows` and nullable `secondary_supply` |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
 | `retries` | `seen` |
 
@@ -480,9 +480,17 @@ circuit. The ranges use `weighting: "sample"`.
 
 Durations and counts are null until evidence is dated and its source is confirmed. Once dated,
 a population can have zero qualified samples and null ranges. Modbus diagnostics leaves `flow.hydronic`
-unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`, null metrics) and
-`flow.secondary_supply` null. See the
+unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`, null metrics). See the
 [flow evidence ledger](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow) for the admission rules.
+
+In unredacted HTTP status, `flow.minimum_windows` locates the minimum in `flow.hydronic.flow_l_min`.
+It is null without a confirmed and dated X10A minimum, including in Modbus diagnoses and redacted
+status. `t0` is the start of the oldest of 24 UTC hour buckets, in Unix seconds. The last bucket
+is the current UTC hour. `slot_s` is 300, and `hour_masks` contains one unsigned 12-bit mask per
+hour in chronological order. Bit zero marks minutes 0–4 and bit 11 marks minutes 55–59. A set bit
+means at least one accepted reading in that window equals the stored heating minimum.
+`locations_missing` flags matching older records without retained locations. If all matching
+records lack locations, every mask is zero and `locations_missing` is true.
 
 ### Secondary supply-temperature comparison
 
