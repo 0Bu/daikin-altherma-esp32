@@ -1583,6 +1583,16 @@ def required_uptime(status: dict[str, Any], label: str) -> int:
     return value
 
 
+def production_weather_configured(status: dict[str, Any], expected: bool | None = None) -> bool:
+    weather = status.get("weather_forecast")
+    configured = weather.get("configured") if isinstance(weather, dict) else None
+    if not isinstance(configured, bool):
+        fail("production Weather status has no boolean configured state")
+    if expected is not None and configured is not expected:
+        fail("production Weather configuration changed during promotion")
+    return configured
+
+
 def production_promotion_snapshot_ready(
     status: dict[str, Any], *, baseline_counters: dict[str, int], last_uptime: int,
 ) -> tuple[int, bool, str]:
@@ -1619,6 +1629,7 @@ def wait_for_production_promotion_readiness(
     version: str, elf: str,
 ) -> dict[str, Any]:
     """Wait boundedly for a stable MQTT-connected, Weather-idle pre-write baseline."""
+    expected_weather_configured = production_weather_configured(initial)
     baseline_counters = board_counters(initial)
     last_uptime = required_uptime(initial, "initial production promotion status")
     deadline = time.monotonic() + MQTT_RECOVERY_TIMEOUT_S
@@ -1628,6 +1639,7 @@ def wait_for_production_promotion_readiness(
     while True:
         if status is not None:
             validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+            production_weather_configured(status, expected_weather_configured)
             last_uptime, ready, last_reason = production_promotion_snapshot_ready(
                 status, baseline_counters=baseline_counters, last_uptime=last_uptime,
             )
@@ -1744,7 +1756,7 @@ def x10a_evidence(status: dict[str, Any], baseline: dict[str, int]) -> str:
 
 def wait_for_post_stress_mqtt_recovery(
     endpoint: ResolvedHttpEndpoint, initial: dict[str, Any], *, host: str, mac: str,
-    version: str, elf: str, uptimes: list[int],
+    version: str, elf: str, uptimes: list[int], expected_weather_configured: bool | None = None,
 ) -> dict[str, Any]:
     """Allow bounded recovery if MQTT was paused for TLS at the pressure window boundary."""
     if initial.get("mqtt", {}).get("connected") is True:
@@ -1770,6 +1782,8 @@ def wait_for_post_stress_mqtt_recovery(
             time.sleep(0.1)
             continue
         validate_identity(recovered, host=host, mac=mac, version=version, elf=elf)
+        if expected_weather_configured is not None:
+            production_weather_configured(recovered, expected_weather_configured)
         uptimes.append(required_uptime(recovered, f"{host} post-stress MQTT status"))
         if recovered.get("mqtt", {}).get("connected") is True:
             return recovered
@@ -1786,15 +1800,22 @@ def stress_board(
     hil_manifest_url: str | None = None, hil_firmware_base_url: str | None = None,
     require_pending_image: bool = False,
     preserve_saved_channel: bool = False,
+    pin_weather_config: bool = False,
 ) -> dict[str, Any]:
     if (hil_manifest_url is None) != (hil_firmware_base_url is None):
         fail("stress HIL feed expectation must be a complete pair")
     hil_headers = None if hil_manifest_url is None else release_hil_request_headers(
         hil_manifest_url, hil_firmware_base_url,
     )
+
+    def validate_pressure_identity(status: dict[str, Any]) -> None:
+        validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+        if pin_weather_config:
+            production_weather_configured(status, require_weather)
+
     pinned_endpoint = resolve_http_endpoint(host)
     started = request_status_deadline(pinned_endpoint, timeout=HTTP_TIMEOUT_S)
-    validate_identity(started, host=host, mac=mac, version=version, elf=elf)
+    validate_pressure_identity(started)
     if preserve_saved_channel:
         require_saved_channel(started, expected_channel)
     initial_uptime = required_uptime(started, f"{host} initial readiness status")
@@ -1850,7 +1871,7 @@ def stress_board(
             continue
         except (CompactTransportError, OSError, TimeoutError):
             continue
-        validate_identity(started, host=host, mac=mac, version=version, elf=elf)
+        validate_pressure_identity(started)
         if preserve_saved_channel:
             require_saved_channel(started, expected_channel)
         ready_uptime = required_uptime(started, f"{host} readiness status")
@@ -1938,7 +1959,7 @@ def stress_board(
                 status = request_status_deadline(
                     pinned_endpoint, timeout=HTTP_TIMEOUT_S,
                 )
-                validate_identity(status, host=host, mac=mac, version=version, elf=elf)
+                validate_pressure_identity(status)
                 if preserve_saved_channel:
                     require_saved_channel(status, expected_channel)
                 hp = status.get("hp", {})
@@ -2066,7 +2087,7 @@ def stress_board(
             except (CompactTransportError, OSError, TimeoutError):
                 continue
             clock_answered_at = time.monotonic()
-            validate_identity(started, host=host, mac=mac, version=version, elf=elf)
+            validate_pressure_identity(started)
             if preserve_saved_channel:
                 require_saved_channel(started, expected_channel)
             # A reboot or an allocation failure ends the wait at once instead of after it.
@@ -2131,7 +2152,7 @@ def stress_board(
             except (CompactTransportError, OSError, TimeoutError):
                 time.sleep(0.1)
                 continue
-            validate_identity(candidate, host=host, mac=mac, version=version, elf=elf)
+            validate_pressure_identity(candidate)
             weather_candidate = candidate.get("weather_forecast", {})
             if isinstance(weather_candidate, dict):
                 refresh_fields = {
@@ -2186,7 +2207,7 @@ def stress_board(
             mqtt_recovery_error = str(error)
             time.sleep(0.1)
             continue
-        validate_identity(mqtt_recovery_status, host=host, mac=mac, version=version, elf=elf)
+        validate_pressure_identity(mqtt_recovery_status)
         if mqtt_recovery_status.get("mqtt", {}).get("connected"):
             mqtt_recovery_expected.clear()
             break
@@ -2218,7 +2239,7 @@ def stress_board(
     disconnected += mqtt_recovery.finish()
 
     finished = request_status_deadline(pinned_endpoint, timeout=HTTP_TIMEOUT_S)
-    validate_identity(finished, host=host, mac=mac, version=version, elf=elf)
+    validate_pressure_identity(finished)
     uptimes.append(required_uptime(finished, f"{host} final stress status"))
     require_stress_ota_offer(
         ota_check, version=version, app_sha256=expected_app_sha256,
@@ -2227,7 +2248,7 @@ def stress_board(
     )
     finished = wait_for_post_stress_mqtt_recovery(
         pinned_endpoint, finished, host=host, mac=mac, version=version, elf=elf,
-        uptimes=uptimes,
+        uptimes=uptimes, expected_weather_configured=require_weather if pin_weather_config else None,
     )
     final = board_counters(finished)
     system = finished.get("sys", {})
@@ -2313,7 +2334,7 @@ def stress_board(
                     max(0.0, post_stress_headroom_deadline - time.monotonic()),
                 ))
                 continue
-            validate_identity(candidate, host=host, mac=mac, version=version, elf=elf)
+            validate_pressure_identity(candidate)
             uptimes.append(required_uptime(candidate, f"{host} post-stress headroom status"))
             deferred_weather = candidate.get("weather_forecast")
             if not isinstance(deferred_weather, dict) or \
@@ -2379,7 +2400,7 @@ def stress_board(
             except (CompactTransportError, OSError, TimeoutError):
                 time.sleep(0.1)
                 continue
-            validate_identity(candidate, host=host, mac=mac, version=version, elf=elf)
+            validate_pressure_identity(candidate)
             uptimes.append(required_uptime(candidate, f"{host} post-stress weather status"))
             weather_candidate = candidate.get("weather_forecast")
             if not isinstance(weather_candidate, dict):
@@ -2434,7 +2455,7 @@ def stress_board(
                 post_weather_mqtt_error = str(error)
                 time.sleep(0.1)
                 continue
-            validate_identity(recovered, host=host, mac=mac, version=version, elf=elf)
+            validate_pressure_identity(recovered)
             uptimes.append(required_uptime(recovered, f"{host} post-stress MQTT status"))
             if recovered.get("mqtt", {}).get("connected"):
                 finished = recovered
@@ -2860,6 +2881,7 @@ def wait_for_legacy_offer(endpoint: ResolvedHttpEndpoint, expected_version: str)
 def confirm_ota_probation(
     *, host: str, mac: str, version: str, elf: str, stress: dict[str, Any],
     saved_channel: str | None = None, require_x10a: bool = False,
+    expected_weather_configured: bool | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Confirm the same stressed boot without losing its counters or accepting a hidden reboot."""
     endpoint = resolve_http_endpoint(host)
@@ -2873,6 +2895,8 @@ def confirm_ota_probation(
         validate_identity(status, host=host, mac=mac, version=version, elf=elf)
         if saved_channel is not None:
             require_saved_channel(status, saved_channel)
+        if expected_weather_configured is not None:
+            production_weather_configured(status, expected_weather_configured)
         uptime = required_uptime(status, "OTA probation confirmation")
         if uptime < last_uptime:
             fail(f"{host} rebooted after its pressure window")
@@ -2938,11 +2962,13 @@ def confirm_bench_probation(
 
 def confirm_production_probation(
     *, host: str, mac: str, version: str, elf: str, stress: dict[str, Any], saved_channel: str,
+    weather_configured: bool,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Require a disarmed production boot and return the exact final liveness/identity witness."""
     return confirm_ota_probation(
         host=host, mac=mac, version=version, elf=elf, stress=stress,
         saved_channel=saved_channel, require_x10a=True,
+        expected_weather_configured=weather_configured,
     )
 
 
@@ -4594,11 +4620,28 @@ def self_test() -> None:
         **healthy,
         "uptime_s": 10,
         "mqtt": {"connected": False},
-        "weather_forecast": {"fetching": False},
+        "weather_forecast": {"configured": False, "fetching": False},
         "sys": {"safe_mode": False, "heap_restarts": 0, "mqtt_skipped": 0,
                 "poll_skipped": 0},
         "hp": {"connected": True, "values": 129, "crc_err": 0, "timeout_err": 4},
     }
+    for configured in (False, True):
+        status = {**promotion_status, "weather_forecast": {"configured": configured}}
+        assert production_weather_configured(status) is configured
+        assert production_weather_configured(status, configured) is configured
+        try:
+            production_weather_configured(status, not configured)
+        except GateError as error:
+            assert "configuration changed" in str(error)
+        else:
+            raise AssertionError("production promotion accepted a changed Weather configuration")
+    for weather in (None, {}, {"configured": 0}, {"configured": "false"}):
+        try:
+            production_weather_configured({**promotion_status, "weather_forecast": weather})
+        except GateError as error:
+            assert "no boolean configured state" in str(error)
+        else:
+            raise AssertionError("production promotion accepted an unknown Weather configuration")
     promotion_counters = board_counters(promotion_status)
     observed_uptime, promotion_ready, promotion_reason = production_promotion_snapshot_ready(
         promotion_status, baseline_counters=promotion_counters, last_uptime=10,
@@ -6161,6 +6204,7 @@ def main() -> int:
         version=args.expected_current_version, elf=str(production_before.get("app_elf_sha256", "")),
     )
     saved_channel = require_saved_channel(production_before)
+    weather_configured = production_weather_configured(production_before)
     production_before = wait_for_production_promotion_readiness(
         production_status_endpoint, production_before,
         host=production["host"], mac=production["mac"],
@@ -6168,6 +6212,7 @@ def main() -> int:
         elf=str(production_before.get("app_elf_sha256", "")),
     )
     require_saved_channel(production_before, saved_channel)
+    production_weather_configured(production_before, weather_configured)
     require_official_manifest_snapshot(args.manifest_url, manifest_sha256,
                                       args.expected_source_sha, args.expected_version,
                                       args.expected_app_sha256)
@@ -6184,6 +6229,7 @@ def main() -> int:
                       version=args.expected_current_version,
                       elf=str(production_before.get("app_elf_sha256", "")))
     require_saved_channel(before_write, saved_channel)
+    production_weather_configured(before_write, weather_configured)
     production_transfer: dict[str, Any] = {}
     journal_checkpoint("production_write_attempted", production={
         "executed": None, "write_attempted": True, "role": PRODUCTION_ROLE,
@@ -6191,6 +6237,7 @@ def main() -> int:
         "previous_version": args.expected_current_version, "check_generation": check_generation,
         "ota_download_heap": production_transfer,
         "artifact_feed": artifact_feed, "saved_channel": saved_channel,
+        "weather_configured": weather_configured,
     })
     update_generation = post_update_once(
         production_status_endpoint, check_generation,
@@ -6213,9 +6260,10 @@ def main() -> int:
         writer_elf=str(production_before.get("app_elf_sha256", "")),
     )
     journal_checkpoint("production_transfer_verified", production={"transfer_verified": True})
+    production_weather_configured(returned, weather_configured)
     production_evidence = stress_board(
         host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf,
-        require_x10a=True, require_weather=True,
+        require_x10a=True, require_weather=weather_configured, pin_weather_config=True,
         expected_app_sha256=args.expected_app_sha256, expected_channel=saved_channel,
         preserve_saved_channel=True, **official_feed_override(args.manifest_url),
     )
@@ -6225,6 +6273,7 @@ def main() -> int:
     production_probation, final_status = confirm_production_probation(
         host=production["host"], mac=production["mac"], version=args.expected_version,
         elf=elf, stress=production_evidence, saved_channel=saved_channel,
+        weather_configured=weather_configured,
     )
     journal_checkpoint("production_probation_confirmed", production={
         "probation_confirmed": True, "probation_after": production_probation,
@@ -6234,6 +6283,7 @@ def main() -> int:
         version=args.expected_version, elf=elf,
     )
     require_saved_channel(final_status, saved_channel)
+    production_weather_configured(final_status, weather_configured)
     retained = verify_retained_x10a(final_status)
     journal_checkpoint("production_retained_passed", production={
         "retained_passed": True, "retained_x10a": retained,
