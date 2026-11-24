@@ -96,7 +96,7 @@ if (pollContract.split("\n").filter(Boolean).length < 5) {
 fingerprintText("main/hp_poll.cpp:checkup-contract", pollContract);
 
 const httpStatus = read(path.join(root, "main/http_status.cpp"), "main/http_status.cpp");
-const hydronicJsonStart = httpStatus.indexOf("void append_hydronic_status(");
+const hydronicJsonStart = httpStatus.search(/\bvoid\s+append_hydronic_status\(/);
 const hydronicJsonEnd = httpStatus.indexOf("append_status_service_metric(", hydronicJsonStart);
 if (hydronicJsonStart < 0 || hydronicJsonEnd < 0) {
   die(2, "cannot isolate the /status.health hydronic JSON contract — refusing to pass vacuously");

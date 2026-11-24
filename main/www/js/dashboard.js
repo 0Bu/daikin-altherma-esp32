@@ -2097,95 +2097,29 @@ function checkupFlowReport() {
   const reported = health.checks.find(c => c?.id === "flow");
   const source = health.source || S.status.diagnostics.effective_source || "x10a";
   if (!reported || (source !== "x10a" && source !== "modbus")) return null;
-  const minimum = reported.verdict === "ok" && Number.isFinite(reported.min_l_min) &&
-    reported.min_l_min >= 0 && !(source === "modbus" && modbusFlowScaleUnverified())
-    ? reported.min_l_min : null;
-  // A newer provisional /values frame can invalidate an older accepted /status value.
-  // Keep the brief, reference and expanded evidence in agreement.
-  const check = reported.verdict === "ok" && minimum === null
-    ? { ...reported, verdict: "unavailable", min_l_min: null } : reported;
-  return { check, health, source, minimum };
+  const heating = reported.hydronic;
+  const value = heating?.flow_l_min?.min;
+  const minimum = source === "x10a" && checkupHydronicKnown(heating) &&
+    Number.isSafeInteger(heating.samples) && heating.samples > 0 &&
+    Number.isFinite(value) && value > 0 ? value : null;
+  const w = reported.minimum_windows;
+  const windows = minimum !== null && Number.isSafeInteger(w?.t0) && w.t0 >= 0 &&
+    w.t0 % 3600 === 0 && w.t0 <= 8640000000000 - 86400 && w.slot_s === 300 &&
+    Array.isArray(w.hour_masks) && w.hour_masks.length === 24 &&
+    w.hour_masks.every(mask => Number.isInteger(mask) && mask >= 0 && mask <= 0xfff)
+    ? w : null;
+  const locationsMissing = minimum !== null &&
+    (!windows || windows.locations_missing === true || !windows.hour_masks.some(Boolean));
+  return { source, minimum, windows, locationsMissing, unsupported: heating?.reason === "unsupported" };
 }
 
-function checkupFlowBriefHtml({ check, health, source, minimum }) {
-  const measured = minimum !== null;
-  const name = source === "modbus" ? "Modbus" : "X10A";
-  const period = Number.isFinite(health.span_s)
-    ? `${t("check.detail.period_label")} ${checkupDuration(health.span_s)}` : "";
-  const scope = [measured || check.verdict === "collecting" ? t("check.flow.runup") : "", period]
-    .filter(Boolean).join(" · ");
-  const value = measured ? `${checkupFmt1(minimum)} l/min` : checkupStatusText(check);
-  return `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · ${name}</span>` +
-    `<strong class="num">${esc(value)}</strong></div>` +
-    (scope ? `<p>${esc(scope)}</p>` : "") +
-    (measured ? `<p>${esc(t("check.flow.assessment"))}</p>` : "");
-}
-
-function checkupHydronicHtml(c, isModbus = false) {
-  const h = !isModbus && c.id === "flow" ? c.hydronic : null;
-  if (!h || typeof h !== "object") return ["", ""];
-  const labels = t("check.hydronic.labels").split("|");
-  const reasons = t("check.hydronic.reasons").split("|");
-  const limits = t("check.hydronic.limits").split("|");
-  const state = t("check.hydronic.states").split("|");
-  const nd = t("sys.nodata");
-  const row = (l, v) => `${l}: ${v}`;
-  const html = r => "<br>" + r.map(esc).join("<br>");
-  if (h.method !== 1) return ["", html([row(labels[5], reasons[13])])];
-  const known = checkupHydronicKnown(h);
-  const num = n => typeof n === "number" && Number.isFinite(n);
-  const cnt = n => num(n) && Number.isSafeInteger(n) && n >= 0;
-  const fmt = (n, p = 3) => n.toLocaleString(LANG, { maximumFractionDigits: p });
-  const pre = h.population_saturated === true ? "≥" : "";
-  const val = n => known && cnt(n) ? pre + fmt(n) : nd;
-  const dur = n => known && num(n) && n >= 0 ? pre + t("hist.duration_sec", fmt(n, 6)) : nd;
-  const rng = (r, n, u) => known && cnt(n) && n > 0 && r && [r.min, r.mean, r.max].every(num)
-    ? t("service.metric.range", fmt(r.min), fmt(r.mean), fmt(r.max), u) : nd;
-  const dt = n => known && num(n) && n >= 0 && Number.isFinite(n * 1000) && n <= 8640000000000
-    ? new Date(n * 1000).toLocaleString(LANG, { dateStyle: "short", timeStyle: "short", timeZone: "UTC" }) + " UTC" : nd;
-  const meas = [
-    row(labels[0], rng(h.spread_k, h.samples, "K")),
-    row(t("schem.flow_rate"), rng(h.flow_l_min, h.samples, "l/min")),
-    row(labels[1], rng(h.pump_command_pct, h.command_samples, "%")),
-    t("check.hydronic.counts", val(h.samples), val(h.command_samples)),
-    row(labels[2], [h.observed_s, h.candidate_s, h.qualified_s].map(dur).join(" / ")),
-    row(labels[3], `${dt(h.first_evidence_unix_s)} – ${dt(h.last_evidence_unix_s)}`),
-    row(labels[4], `${dt(h.first_accepted_unix_s)} – ${dt(h.last_accepted_unix_s)}`),
-    row(labels[7], val(h.observed_hours)),
-    row(labels[8], nd),
-  ];
-  const sr = k => t(`service.reason.${k}`);
-  const code = Number.isInteger(h.reason_code) && h.reason_code >= 0 && h.reason_code <= 19 ? h.reason_code : -1;
-  const reason = [reasons[0], sr("unsupported_profile"), reasons[1], reasons[2],
-    sr("missing_fresh_signal"), reasons[3], reasons[4],
-    sr("compressor_not_running"), sr("unsupported_or_unknown_mode"),
-    reasons[5], sr("defrost"), reasons[6],
-    sr("special_controller_phase"), reasons[7], sr("poll_gap"),
-    reasons[8], reasons[9], reasons[10], reasons[11], reasons[12]][code];
-  // A retained pump/valve/run-up reason is not a fresh current state after a source gap.
-  const fresh = h.current === true && h.confirmed === true;
-  const sec = c.secondary_supply;
-  if (fresh && sec?.zone_context === "unknown" && num(sec.delta_k) &&
-      num(sec.duration_s) && sec.duration_s >= 0 && cnt(sec.samples) && sec.samples > 0) {
-    meas.push(t("check.hydronic.secondary", (sec.delta_k > 0 ? "+" : "") + fmt(sec.delta_k) + " K",
-      t("hist.duration_sec", fmt(sec.duration_s, 6)), fmt(sec.samples)));
-  }
-  const cur = fresh || [1, 2, 3, 14, 15, 16, 17, 18, 19].includes(code) ? reason || reasons[13] : reasons[13];
-  const settle = fresh && code === 13 && num(h.settling_remaining_s) &&
-    h.settling_remaining_s > 0 && h.settling_remaining_s <= 600
-    ? ` ${t("hist.duration_sec", fmt(h.settling_remaining_s))}` : "";
-  const flags = m => cnt(m) && m <= 7
-    ? [limits[0], limits[1], state[5]].filter((_, i) => m & (1 << i)).join(" · ") : nd;
-  const pop = [known ? state[1] : h.dated === false ? state[2] : nd];
-  if (h.confirmed === false) pop.push(state[0]);
-  if (h.coverage_partial === true) pop.push(state[3]);
-  if (h.restore_pending === true) pop.push(limits[2]);
-  if (h.persistence_pending === true) pop.push(state[4]);
-  if (h.population_saturated === true && !(known && cnt(h.population_limitations_mask) && h.population_limitations_mask <= 7 && (h.population_limitations_mask & 4))) pop.push(state[5]);
-  if (known) pop.push(flags(h.population_limitations_mask));
-  if (cnt(h.dropped)) pop.push(t("check.hydronic.loss", `≥${fmt(h.dropped)}`));
-  return [html(meas), html([row(labels[5], [cur + settle, fresh ? flags(h.current_limitations_mask) : nd].filter(Boolean).join(" · ")),
-    row(labels[6], pop.filter(Boolean).join(" · "))])];
+function checkupFlowBriefHtml({ source, minimum, locationsMissing, unsupported }) {
+  if (source !== "x10a") return `<p>${esc(t("check.flow.x10a_only"))}</p>`;
+  if (minimum === null) return `<p>${esc(t(unsupported ? "check.status.unavailable" : "check.flow.waiting"))}</p>`;
+  return `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · X10A</span>` +
+    `<strong class="num">${esc(histFmt1(minimum))} l/min</strong></div>` +
+    `<p>${esc(t("check.flow.runup"))}</p>` +
+    (locationsMissing ? `<p>${esc(t("check.flow.locations_missing"))}</p>` : "");
 }
 
 function checkupStatusKey(c) {
@@ -2655,9 +2589,7 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
         : t("check.detail.collecting_unknown");
     }
   } else if (!detail) {
-    const hydronicEvidence = !isModbus && c.id === "flow" && checkupHydronicKnown(c.hydronic);
-    detail = t(statusKey === "unavailable" && hydronicEvidence
-      ? "check.detail.observation" : checkupDetailKey(c, statusKey));
+    detail = t(checkupDetailKey(c, statusKey));
   }
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
@@ -2720,11 +2652,9 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
     return (time.length ? descParaHtml(esc(time.join(" · "))) : "") +
       (metric ? descParaHtml(esc(metric)) : "") + descParaHtml(esc(detail)) +
       descNoteHtml(t("normal.label"), normal);
-  const [hydronicMeasurements, hydronicContext] = checkupHydronicHtml(c, isModbus);
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
-           (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}` +
-           hydronicMeasurements) +
-         descParaHtml(esc(detail) + hydronicContext) +
+           (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
+         descParaHtml(esc(detail)) +
          descNoteHtml(t("normal.label"), normal);
 }
 

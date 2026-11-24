@@ -479,8 +479,7 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
       first_evidence_unix_s: 1791880000, last_evidence_unix_s: 1791880020,
       samples: 4, spread_k: { min: 1.0, mean: 2.0, max: 3.0 } } };
   modbusOnly.health.checks = [modbusOkFlow];
-  const spreadLabel = ui.t("check.hydronic.labels").split("|")[0];
-  assert.ok(!ui.checkupDetailHtml(modbusOkFlow, false, modbusOnly.health).includes(spreadLabel),
+  assert.ok(!ui.checkupDetailHtml(modbusOkFlow, false, modbusOnly.health).includes("Water spread"),
     "Modbus flow detail must omit X10A hydronic population rows");
   checks++;
 }

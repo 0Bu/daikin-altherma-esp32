@@ -6,7 +6,8 @@ namespace daik {
 // Retained dated evidence only. Current eligibility, settling and reasons belong to the
 // caller's live tracker. Empty populations have no defined mean or accepted timestamps.
 struct HydronicObservationReport {
-    logic::HydronicTotals totals;
+    logic::HydronicTotals         totals;
+    logic::HydronicMinimumWindows minimum_windows;
     uint16_t              observed_hours      = 0;
     uint16_t              dropped             = 0; // cumulative per-identity loss watermark
     bool                  confirmed           = false;

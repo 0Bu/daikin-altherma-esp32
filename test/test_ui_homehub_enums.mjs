@@ -24,7 +24,7 @@ function renderer(lang, removeNativePrecedence = false) {
   }
   const nodes = new Map();
   const element = (id) => {
-    if (!nodes.has(id)) nodes.set(id, { innerHTML: "", textContent: "", hidden: id === "inspFlowDetails",
+    if (!nodes.has(id)) nodes.set(id, { innerHTML: "", textContent: "", hidden: false,
       classList: { toggle() {} }, removeAttribute() {}, setAttribute() {}, append() {}, before() {}, after() {} });
     return nodes.get(id);
   };
@@ -140,15 +140,10 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
     ui.renderInspect();
     assert.ok(ui.element("inspBody").innerHTML.includes(escaped),
       `${lang}/${off}: actual replacement inspector retains its native interpretation limit`);
-    if (off === 49)
-      assert.ok(ui.element("inspFlowNotice").innerHTML.includes(escaped) && !ui.element("inspFlowNotice").hidden,
-        `${lang}/flow: provisional headline retains its visible source caveat`);
     ui.state._modbus[0].profile = "homehub";
     ui.renderInspect();
     assert.ok(!ui.element("inspBody").innerHTML.includes(escaped),
       `${lang}/${off}: the base inspector must not inherit native limits`);
-    if (off === 49)
-      assert.ok(ui.element("inspFlowNotice").hidden, `${lang}/flow: verified scaling clears the caveat`);
   }
 }
 const precedenceMutation = renderer("es", true);

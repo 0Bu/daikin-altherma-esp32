@@ -53,13 +53,14 @@ HydronicReadResult reader(uint16_t slot, int64_t& bucket, uint64_t& sequence,
     const auto& h      = stored.header;
     if (!hydronic_header_matches(h) ||
         h.crc != history_journal_crc_bytes(h, stored.bytes.data(), HYDRONIC_PAYLOAD_BYTES) ||
-        !hydronic_decode(stored.bytes.data(), HYDRONIC_PAYLOAD_BYTES, h.bucket, p))
+        !hydronic_decode(stored.bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, p))
         return HydronicReadResult::Invalid;
     bucket   = h.bucket;
     sequence = h.sequence;
     return HydronicReadResult::Valid;
 }
-Slot make_slot(int64_t bucket, const HydronicHourlyPayload& p, uint64_t sequence) {
+Slot make_slot(int64_t bucket, const HydronicHourlyPayload& p, uint64_t sequence,
+               bool legacy = false) {
     Slot  slot;
     auto& h       = slot.header;
     h.magic       = HISTORY_JOURNAL_MAGIC;
@@ -75,7 +76,9 @@ Slot make_slot(int64_t bucket, const HydronicHourlyPayload& p, uint64_t sequence
     h.rings[0]    = TREND_COUNT;
     h.rings[1]    = HOMEHUB_HISTORY_COUNT;
     h.rings[2]    = ENV3_HISTORY_COUNT;
-    hydronic_encode(p, slot.bytes.data());
+    std::memset(h.pad, 0xff, sizeof(h.pad));
+    hydronic_encode(p, slot.bytes.data(), h);
+    if (legacy) h.pad[8] = h.pad[9] = 0xff;
     h.crc = history_journal_crc_bytes(h, slot.bytes.data(), HYDRONIC_PAYLOAD_BYTES);
     return slot;
 }
@@ -88,7 +91,7 @@ void scan_slot(uint16_t slot) {
     HydronicHourlyPayload p;
     if (!hydronic_header_matches(h) ||
         h.crc != history_journal_crc_bytes(h, stored.bytes.data(), HYDRONIC_PAYLOAD_BYTES) ||
-        !hydronic_decode(stored.bytes.data(), HYDRONIC_PAYLOAD_BYTES, h.bucket, p)) {
+        !hydronic_decode(stored.bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, p)) {
         hydronic_observation_flash_index_incomplete();
         return;
     }
@@ -138,6 +141,7 @@ HydronicHourlyPayload payload(int64_t bucket, uint32_t samples = 1,
         p.spread                 = {static_cast<int64_t>(6000) * samples, 6000, 6000};
         p.flow                   = {static_cast<int64_t>(10000) * samples, 10000, 10000};
         p.command                = {static_cast<int64_t>(40000) * samples, 40000, 40000};
+        p.flow_min_evidence      = hydronic_minimum_slot(p.first_accepted_unix_us);
     }
     if (observed >= 2) {
         p.duration_edges = HYDRONIC_DUR_BOTH;
@@ -150,13 +154,13 @@ HydronicHourlyPayload payload(int64_t bucket, uint32_t samples = 1,
     }
     return p;
 }
-void put(int64_t bucket, const HydronicHourlyPayload& p) {
-    flash[next_slot] = make_slot(bucket, p, next_sequence++);
+void put(int64_t bucket, const HydronicHourlyPayload& p, bool legacy = false) {
+    flash[next_slot] = make_slot(bucket, p, next_sequence++, legacy);
     scan_slot(next_slot);
     next_slot = (next_slot + 1) % flash.size();
 }
 void tick_us(int64_t from_us, int64_t to_us, bool accepted, bool command, bool observed,
-             bool qualified) {
+             bool qualified, int32_t flow_milli = 10000) {
     sdk::now_us = to_us;
     HydronicDelta d;
     d.to_us   = sdk::now_us;
@@ -168,7 +172,7 @@ void tick_us(int64_t from_us, int64_t to_us, bool accepted, bool command, bool o
     d.accepted         = accepted;
     d.command_accepted = accepted && command;
     d.spread_milli     = 6000;
-    d.flow_milli       = 10000;
+    d.flow_milli       = flow_milli;
     d.command_milli    = 40000;
     if (!command) d.limitations |= HydronicCommandUnavailable;
     hydronic_observation_record(d);
@@ -220,36 +224,38 @@ void codec() {
     require(hydronic_hourly_valid(p, 100), "valid dated stats payload");
     std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES + 2> bytes;
     bytes.fill(0xa5);
-    hydronic_encode(p, bytes.data());
+    HistoryJournalHeader wire_header{};
+    wire_header.bucket = 100;
+    hydronic_encode(p, bytes.data(), wire_header);
     require(bytes[HYDRONIC_PAYLOAD_BYTES] == 0xa5 && bytes.back() == 0xa5,
             "codec writes exact width without tail padding");
     require(bytes[0] == 101 && bytes[1] == 0 && bytes[4] == 202 && bytes[8] == 47 &&
                 bytes[9] == 1 && bytes[122] == HYDRONIC_DUR_BOTH && bytes[123] == 0,
             "explicit little endian identity, timed edges and reserved byte");
     HydronicHourlyPayload decoded;
-    require(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, 100, decoded),
+    require(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
             "codec round trip");
     require(decoded.samples == 2 && decoded.flow.sum_milli == 20000 &&
                 decoded.first_accepted_unix_us == p.first_accepted_unix_us &&
                 decoded.duration_edges == HYDRONIC_DUR_BOTH,
             "codec retains independent sample and UTC fields");
     p.spread = {-2000, -1000, -1000};
-    hydronic_encode(p, bytes.data());
-    require(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, 100, decoded) &&
+    hydronic_encode(p, bytes.data(), wire_header);
+    require(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded) &&
                 decoded.spread.sum_milli == -2000 && decoded.spread.min_milli == -1000,
             "portable signed negative spread decode");
     require(hydronic_signed64(UINT64_MAX) == -1 && hydronic_signed64(1ULL << 63) == INT64_MIN &&
                 hydronic_signed32(UINT32_MAX) == -1 && hydronic_signed32(1u << 31) == INT32_MIN,
             "signed decoding covers extrema without out-of-range conversion");
     bytes[123] = 1;
-    require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, 100, decoded),
+    require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
             "reserved bits refused");
     bytes[123] = 0;
     bytes[122] = 0x80;
-    require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, 100, decoded),
+    require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
             "unknown duration edge bit refused");
-    require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, 100, decoded) &&
-                !hydronic_decode(nullptr, HYDRONIC_PAYLOAD_BYTES, 100, decoded),
+    require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, wire_header, decoded) &&
+                !hydronic_decode(nullptr, HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
             "wrong or absent bytes refused");
     const auto valid = payload(100);
     for (unsigned i = 0; i < 21; ++i) {
@@ -495,6 +501,7 @@ void disjoint_earlier_archive_fragment() {
     archived.first_unix_us += 1200 * second;
     archived.last_unix_us           = archived.first_unix_us + 600 * second - 1;
     archived.first_accepted_unix_us = archived.last_accepted_unix_us = archived.first_unix_us;
+    archived.flow_min_evidence = hydronic_minimum_slot(archived.first_accepted_unix_us);
     put(hour, archived);
     sdk::now_us = 300 * second;
     boot(false, 11, false);
@@ -883,6 +890,47 @@ void expiry() {
     sdk::now_us += 25 * OBSERVATION_HOUR_US;
     require(hydronic_observation_report().totals.samples == 0,
             "whole-hour evidence expires without producer");
+}
+void minimum_windows() {
+    constexpr int64_t second = 1000000;
+    boot();
+    const int64_t hour = current_bucket();
+    put(hour - 23, payload(hour - 23), true);
+    put(hour - 1, payload(hour - 1));
+    hydronic_observation_flash_service(reader);
+    auto r = hydronic_observation_report();
+    require(r.totals.flow.min_milli == 10000 && r.minimum_windows.first_bucket == hour - 23 &&
+                r.minimum_windows.locations_missing && !r.minimum_windows.masks[0] &&
+                r.minimum_windows.masks[22] == 1,
+            "mixed replay marks known ties and leaves the legacy location unknown");
+
+    sdk::now_us = 3601 * second;
+    hydronic_observation_flash_service(reader);
+    r = hydronic_observation_report();
+    require(r.totals.samples == 1 && r.minimum_windows.first_bucket == hour - 22 &&
+                !r.minimum_windows.locations_missing && r.minimum_windows.masks[21] == 1 &&
+                !r.minimum_windows.masks[22],
+            "expiry retires the legacy claimant and reanchors the surviving occurrence");
+
+    tick_us(-1, 3900 * second, true, true, false, false, 9000);
+    tick_us(-1, 4501 * second, true, true, false, false, 9000);
+    tick_us(-1, 4801 * second, false, true, false, false, 7000);
+    r = hydronic_observation_report();
+    require(r.totals.flow.min_milli == 9000 && !r.minimum_windows.locations_missing &&
+                !r.minimum_windows.masks[21] && r.minimum_windows.masks[23] == (2 | 8),
+            "lower qualified samples replace archived hits and exclude unrelated readings");
+
+    tick_us(-1, 7201 * second, true, true, false, false, 9000);
+    const auto crosses_hour = [hour](const HydronicObservationReport& report) {
+        return report.totals.flow.min_milli == 9000 && !report.minimum_windows.locations_missing &&
+               report.minimum_windows.first_bucket == hour - 21 &&
+               report.minimum_windows.masks[22] == (2 | 8) && report.minimum_windows.masks[23] == 1;
+    };
+    require(crosses_hour(hydronic_observation_report()), "open and queued tied bins stay visible");
+    hydronic_observation_seal();
+    drain();
+    boot(false);
+    require(crosses_hour(hydronic_observation_report()), "precise tied bins survive replay");
 }
 void archive_clock_rollback(bool with_live) {
     boot();
@@ -1660,15 +1708,18 @@ HydronicReadResult borrowed_then_lifecycle(uint16_t slot, int64_t& bucket, uint6
     const auto result = reader(slot, bucket, sequence, p);
     if (result != HydronicReadResult::Valid) return result;
     std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES> before, after;
-    hydronic_encode(p, before.data());
+    HistoryJournalHeader                        header{};
+    hydronic_encode(p, before.data(), header);
+    const auto minimum = p.flow_min_evidence;
     if (forget)
         hydronic_observation_forget();
     else {
         hydronic_observation_reset();
         hydronic_observation_bind(101, 202, 303, 8, false);
     }
-    hydronic_encode(p, after.data());
-    require(before == after, "reset and forget leave the Flash-owner borrowed scratch unchanged");
+    hydronic_encode(p, after.data(), header);
+    require(before == after && minimum == p.flow_min_evidence,
+            "reset and forget leave the Flash-owner borrowed scratch unchanged");
     return HydronicReadResult::Valid;
 }
 HydronicReadResult borrowed_then_reset(uint16_t slot, int64_t& bucket, uint64_t& sequence,
@@ -1695,6 +1746,8 @@ int main(int argc, char** argv) {
     try {
         if (name == "codec")
             codec();
+        else if (name == "minimum_windows")
+            minimum_windows();
         else if (name == "settling_durations")
             settling_durations();
         else if (name == "seam_and_revisions")

@@ -32406,6 +32406,7 @@ static void test_hourly_wire_and_population() {
     p.spread                      = {10000, 10000, 10000};
     p.flow                        = {10000, 10000, 10000};
     p.command                     = {40450, 40450, 40450};
+    p.flow_min_evidence           = hydronic_minimum_slot(p.last_accepted_unix_us);
     CHECK(hydronic_hourly_valid(p, bucket));
     CHECK(HYDRONIC_PAYLOAD_BYTES == 124 && HYDRONIC_WORDS == 62);
     CHECK(HYDRONIC_PAYLOAD_BYTES <= HISTORY_JOURNAL_PAYLOAD_BYTES);
@@ -32415,22 +32416,36 @@ static void test_hourly_wire_and_population() {
 
     std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES + 1> bytes;
     bytes.fill(0xa5);
-    hydronic_encode(p, bytes.data());
+    HistoryJournalHeader h{};
+    h.bucket = bucket;
+    std::memset(h.pad, 0xff, sizeof(h.pad));
+    hydronic_encode(p, bytes.data(), h);
     CHECK(bytes[0] == 1 && bytes[1] == 2 && bytes[2] == 3 && bytes[3] == 4);
     CHECK(bytes[122] == HYDRONIC_DUR_FIRST && bytes[123] == 0);
+    CHECK(h.pad[7] == 0xff && h.pad[8] == 1 && h.pad[9] == 0 && h.pad[10] == 0xff);
     CHECK(bytes[HYDRONIC_PAYLOAD_BYTES] == 0xa5);
     HydronicHourlyPayload decoded;
-    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
     CHECK(decoded.samples == 1 && decoded.command_samples == 1);
     CHECK(decoded.duration_edges == HYDRONIC_DUR_FIRST);
     CHECK(decoded.command.sum_milli == 40450 && decoded.first_accepted_unix_us == p.last_unix_us);
-    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, bucket, decoded));
-    CHECK(!hydronic_decode(nullptr, HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
-    bytes[HYDRONIC_PAYLOAD_BYTES - 1] = 1;
-    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
-    bytes[HYDRONIC_PAYLOAD_BYTES - 1] = 0;
-    bytes[122]                        = 0x80;
-    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(decoded.flow_min_evidence == 1);
+    h.pad[8] = h.pad[9] = 0xff;
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    CHECK(decoded.flow.min_milli == 10000 &&
+          decoded.flow_min_evidence == HYDRONIC_MINIMUM_LOCATION_MISSING);
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, h, decoded));
+    CHECK(!hydronic_decode(nullptr, HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    h.pad[8] = 1;
+    h.pad[9] = 1; // a claimed bin after the last admitted sample
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    h.pad[9] = 0x80; // a reserved bit in a nonlegacy marker
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    h.pad[8] = h.pad[9] = 0;
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    h.pad[8]   = 1;
+    bytes[122] = 0x80;
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
 
     auto q          = p;
     q.first_unix_us = p.last_unix_us;
@@ -32443,8 +32458,8 @@ static void test_hourly_wire_and_population() {
     q.command                                          = {};
     q.limitations                                      = HydronicCommandUnavailable;
     CHECK(hydronic_hourly_valid(q, bucket));
-    hydronic_encode(q, bytes.data());
-    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    hydronic_encode(q, bytes.data(), h);
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
     CHECK(decoded.spread.sum_milli == -500 && decoded.spread.min_milli == -500);
     auto merged = p;
     CHECK(hydronic_hourly_merge(merged, q));
@@ -32465,20 +32480,20 @@ static void test_hourly_wire_and_population() {
     duplicate.duration_edges = HYDRONIC_DUR_BOTH;
     CHECK(hydronic_hourly_valid(overlap, bucket) && hydronic_hourly_valid(duplicate, bucket));
     std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES> original{}, preserved{};
-    hydronic_encode(p, original.data());
+    hydronic_encode(p, original.data(), h);
     for (const auto& conflicting : {overlap, duplicate}) {
         auto untouched = p;
         CHECK(!hydronic_hourly_merge(untouched, conflicting));
-        hydronic_encode(untouched, preserved.data());
-        CHECK(original == preserved);
+        hydronic_encode(untouched, preserved.data(), h);
+        CHECK(original == preserved && untouched.flow_min_evidence == p.flow_min_evidence);
     }
     auto timed_edge = p;
     // A hole leaves one spare tick in the span even though both fragments own the shared tick.
     timed_edge.duration_edges = HYDRONIC_DUR_BOTH;
     CHECK(hydronic_hourly_valid(timed_edge, bucket));
-    hydronic_encode(timed_edge, original.data());
+    hydronic_encode(timed_edge, original.data(), h);
     CHECK(!hydronic_hourly_merge(timed_edge, q));
-    hydronic_encode(timed_edge, preserved.data());
+    hydronic_encode(timed_edge, preserved.data(), h);
     CHECK(original == preserved);
     auto point          = p;
     point.first_unix_us = point.last_unix_us;
@@ -32489,6 +32504,26 @@ static void test_hourly_wire_and_population() {
     CHECK(hydronic_hourly_merge(point_merge, point));
     CHECK(point_merge.samples == 2 && point_merge.observed_us == SECOND &&
           point_merge.duration_edges == HYDRONIC_DUR_FIRST);
+    auto later = point;
+    later.first_unix_us += 600 * SECOND;
+    later.last_unix_us = later.first_accepted_unix_us = later.last_accepted_unix_us =
+        later.first_unix_us;
+    later.flow_min_evidence = hydronic_minimum_slot(later.first_unix_us);
+    CHECK(later.flow_min_evidence == 4 && hydronic_hourly_valid(later, bucket));
+    auto tie = point;
+    CHECK(hydronic_hourly_merge(tie, later) && tie.flow_min_evidence == (1 | 4));
+    tie                   = point;
+    tie.flow_min_evidence = HYDRONIC_MINIMUM_LOCATION_MISSING;
+    CHECK(hydronic_hourly_merge(tie, later));
+    CHECK(tie.flow_min_evidence == (HYDRONIC_MINIMUM_LOCATION_MISSING | 4));
+    later.flow              = {9000, 9000, 9000};
+    auto lower              = point;
+    lower.flow_min_evidence = HYDRONIC_MINIMUM_LOCATION_MISSING;
+    CHECK(hydronic_hourly_merge(lower, later) && lower.flow_min_evidence == 4 &&
+          lower.flow.min_milli == 9000);
+    CHECK(hydronic_minimum_slot(-1) == 0 && hydronic_minimum_slot(300 * SECOND - 1) == 1 &&
+          hydronic_minimum_slot(300 * SECOND) == 2 &&
+          hydronic_minimum_slot(OBSERVATION_HOUR_US - 1) == (1 << 11));
     auto one_tick           = point;
     one_tick.observed_us    = 1;
     one_tick.duration_edges = HYDRONIC_DUR_BOTH;
@@ -32497,9 +32532,9 @@ static void test_hourly_wire_and_population() {
     CHECK(!hydronic_hourly_valid(one_tick, bucket));
     auto reverse = q;
     CHECK(hydronic_hourly_merge(reverse, p));
-    hydronic_encode(reverse, original.data());
-    hydronic_encode(merged, preserved.data());
-    CHECK(original == preserved);
+    hydronic_encode(reverse, original.data(), h);
+    hydronic_encode(merged, preserved.data(), h);
+    CHECK(original == preserved && reverse.flow_min_evidence == merged.flow_min_evidence);
     auto wrong = q;
     wrong.identity.schema_fp++;
     const auto sum_before = merged.flow.sum_milli;
@@ -32532,13 +32567,16 @@ static void test_hourly_wire_and_population() {
     fence.kind          = HydronicHourlyKind::Fence;
     fence.first_unix_us = fence.last_unix_us = p.last_unix_us;
     CHECK(hydronic_hourly_valid(fence, bucket));
-    hydronic_encode(fence, bytes.data());
-    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    hydronic_encode(fence, bytes.data(), h);
+    CHECK(h.pad[8] == 0 && h.pad[9] == 0);
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
     CHECK(decoded.first_accepted_unix_us == -1 && decoded.last_accepted_unix_us == -1);
+    h.pad[8] = h.pad[9] = 0xff;
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, h, decoded));
+    CHECK(decoded.kind == HydronicHourlyKind::Fence && !decoded.flow_min_evidence);
     CHECK(hydronic_signed64(UINT64_MAX) == -1 && hydronic_signed64(1ULL << 63) == INT64_MIN);
     CHECK(hydronic_signed32(UINT32_MAX) == -1 && hydronic_signed32(1u << 31) == INT32_MIN);
 
-    HistoryJournalHeader h{};
     h.magic       = HISTORY_JOURNAL_MAGIC;
     h.version     = HISTORY_JOURNAL_VERSION;
     h.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
@@ -32553,6 +32591,9 @@ static void test_hourly_wire_and_population() {
     h.rings[1]    = HOMEHUB_HISTORY_COUNT;
     h.rings[2]    = ENV3_HISTORY_COUNT;
     CHECK(hydronic_header_recognizable(h) && hydronic_header_matches(h));
+    h.value_count -= 1;
+    CHECK(hydronic_header_recognizable(h) && !hydronic_header_matches(h));
+    h.value_count = HYDRONIC_WORDS;
     CHECK(hydronic_append_owned(h));
     CHECK(!observation_append_owned(h));
     h.catalog_fp = 3490136859u; // preceding H1 fingerprint without explicit duration edges

@@ -674,16 +674,14 @@ const HIST_W = 320, HIST_H = 88;
 // in one would leave the crosshair marker sitting off the line it is pointing at, and the drawing
 // would still look perfectly plausible. Returns the mapping, not the numbers, so no caller can
 // re-derive it slightly differently.
-function histScale(pts, sampleCount, id = "", reference = NaN) {
+function histScale(pts, sampleCount, id = "") {
   const real = pts.filter((x) => x != null);
   const lo = Math.min(...real), hi = Math.max(...real);
   const isPressure = id === "water_pressure";
-  const domainLo = Number.isFinite(reference) ? Math.min(lo, reference) : lo;
-  const domainHi = Number.isFinite(reference) ? Math.max(hi, reference) : hi;
-  const span = domainHi - domainLo;
+  const span = hi - lo;
   const pad = span < 1 ? 1 : span * 0.12;           // a flat series gets a band, not a divide-by-zero
-  const y0 = isPressure ? Math.min(0, lo - pad) : domainLo - pad;
-  const y1 = isPressure ? Math.max(2.2, hi + Math.max(0.25, hi * 0.12)) : domainHi + pad;
+  const y0 = isPressure ? Math.min(0, lo - pad) : lo - pad;
+  const y1 = isPressure ? Math.max(2.2, hi + Math.max(0.25, hi * 0.12)) : hi + pad;
   const n = sampleCount || pts.length;
   return {
     lo, hi, y0, y1,
@@ -1468,6 +1466,65 @@ function histRuns(pts, n, X, Y, cls, r, splitZones = false) {
   return [line, area, dots];
 }
 
+function flowMinimumBands(view, flow) {
+  const w = flow?.windows;
+  const span = (view.v.length - 1) * view.dt;
+  if (!w || !Number.isFinite(view.t0) || span <= 0 ||
+      !histVisibleSeries(view).some(s => s.source === flow.source && s.v.some(v => v != null))) return [];
+  const bands = [];
+  for (let h = 0; h < w.hour_masks.length; h++) {
+    for (let slot = 0; slot < 12; slot++) {
+      if (!(w.hour_masks[h] & (1 << slot))) continue;
+      const from = w.t0 + h * 3600 + slot * w.slot_s, to = from + w.slot_s;
+      if (to <= view.t0 || from >= view.t0 + span) continue;
+      const previous = bands.at(-1);
+      if (previous?.to === from) previous.to = to;
+      else bands.push({ from, to });
+    }
+  }
+  const x = (time) => Math.min(1, Math.max(0, (time - view.t0) / span)) * HIST_W;
+  return bands.map(b => ({ ...b, x: x(b.from), width: x(b.to) - x(b.from) }));
+}
+
+function flowMinimumTime(time, from, to) {
+  const a = new Date(from * 1000), b = new Date(to * 1000);
+  return time.formatRange ? time.formatRange(a, b) : `${time.format(a)} – ${time.format(b)}`;
+}
+
+function selectFlowMinimum(plot, clientX, clientY, tolerance = 0) {
+  const bands = [...plot.querySelectorAll("[data-flow-band]")];
+  if (!bands.length) return false;
+  let picked;
+  if (clientX == null) {
+    picked = bands[(bands.findIndex(b => b.classList.contains("selected")) + 1) % bands.length];
+  } else {
+    const svg = plot.querySelector("svg");
+    const bounds = svg.getBoundingClientRect();
+    const curve = [...svg.querySelectorAll("#flowObservationClip path")];
+    if (!bounds.width || !bounds.height) return false;
+    let best = tolerance;
+    for (const b of bands) {
+      const r = b.getBoundingClientRect();
+      const distance = Math.max(0, r.left - clientX, clientX - r.right);
+      if (!r.width || distance > best || (picked && distance === best)) continue;
+      const x = Math.min(r.right, Math.max(r.left, clientX));
+      const point = new DOMPoint((x - bounds.left) / bounds.width * HIST_W,
+        (clientY - bounds.top) / bounds.height * HIST_H);
+      if (!curve.some(area => area.isPointInFill(point))) continue;
+      picked = b;
+      best = distance;
+    }
+  }
+  if (!picked) return false;
+  S.flowMinSelection = { from: Number(picked.dataset.flowBand), minimum: Number(plot.dataset.flowMinimum) };
+  for (const b of bands) b.classList.toggle("selected", b === picked);
+  const readout = plot.closest(".vhist").querySelector(".vhist-flow-readout");
+  readout.hidden = false;
+  readout.querySelector("strong").textContent = picked.dataset.flowTime;
+  readout.querySelector("span").textContent = picked.dataset.flowReadout;
+  return true;
+}
+
 function histHtml(id, unit, name, source = "", identifySource = false, flow = null) {
   const offeredX = (!source || source === "x10a") && hasHist(id);
   const offeredM = (!source || source === "modbus") && hasModbusHist(id);
@@ -1493,11 +1550,8 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   // changed later contributes explicit null gaps, never a shorter axis or fabricated flat data.
   const full  = n * view.dt >= 23.5 * 3600;
   const visible = histVisibleSeries(view);
-  // The reference follows the diagnostic instrument's own visible series.
-  const flowSeries = id === "flow" && Number.isFinite(flow?.minimum)
-    ? visible.find(s => s.source === flow.source && s.v.some(v => v != null)) : null;
-  const flowMinimum = flowSeries ? flow.minimum : NaN;
-  const scale = histScale(allPts, n, id, flowMinimum);
+  const flowBands = id === "flow" ? flowMinimumBands(view, flow) : [];
+  const scale = histScale(allPts, n, id);
   const { lo, hi, X, Y } = scale;
   const isPressure = id === "water_pressure";
 
@@ -1505,11 +1559,12 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   // numeric trend uses the same visual grammar while a gap remains a real gap. Multiple sources use
   // the same geometry and are made more transparent by the wrapper class below. A run of ONE sample
   // still gets a dot because there is no interval whose area or upper edge could honestly be drawn.
-  let line = "", area = "", dots = "";
+  let line = "", area = "", dots = "", flowCurveArea = "";
   for (const s of visible) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
     const [l, a, d] = histRuns(pts, n, X, Y, histSourceClass(s.source), 1.6, isPressure && s.source === "x10a");
     line += l; area += a; dots += d;
+    if (flowBands.length && s.source === flow.source) flowCurveArea = a;
   }
   // The "now" marker is an HTML element, not an SVG circle: the SVG is stretched non-uniformly, so
   // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
@@ -1576,13 +1631,25 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
     view.series[0].source === "modbus")
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
-  let flowSvg = "", flowAttr = "";
-  if (flowSeries) {
-    const y = Y(flowMinimum).toFixed(1);
-    flowSvg = `<line class="vhist-flow-min" x1="0" x2="${HIST_W}" y1="${y}" y2="${y}" vector-effect="non-scaling-stroke"/>`;
-    flowAttr = ` data-flow-min="${flowMinimum}"`;
-    legendItems.push(`<span class="vhist-source vhist-legend-flow-min"><i aria-hidden="true"></i>` +
-      `<span>${esc(t("check.flow.lowest"))} · ${esc(flowSeries.name)} · ${esc(histFmt1(flowMinimum) + u)}</span></span>`);
+  let flowSvg = "", flowAttr = "", flowReadout = "";
+  if (flowBands.length) {
+    const minimum = flow.minimum;
+    const time = new Intl.DateTimeFormat(LANG, { dateStyle: "short", timeStyle: "short" });
+    const explanation = t("check.flow.readout", histFmt1(minimum) + (u || " l/min"));
+    const selected = S.flowMinSelection?.minimum === minimum
+      ? flowBands.find(b => b.from === S.flowMinSelection.from) : null;
+    const windows = flowBands.map(b => `<rect class="vhist-flow-band${b === selected ? " selected" : ""}"` +
+      ` x="${b.x.toFixed(3)}" y="0" width="${b.width.toFixed(3)}" height="${HIST_H}" data-flow-band="${b.from}"` +
+      ` data-flow-time="${esc(flowMinimumTime(time, b.from, b.to))}" data-flow-readout="${esc(explanation)}"/>`).join("");
+    // Use the same closed paths as the X10A trend so the tint ends at the curve and leaves its gaps clear.
+    flowSvg = `<defs><clipPath id="flowObservationClip">${flowCurveArea}</clipPath></defs>` +
+      `<g clip-path="url(#flowObservationClip)">${windows}</g>`;
+    flowAttr = ` data-flow-minimum="${minimum}"`;
+    legendItems.push(`<button type="button" data-flow-min-show class="vhist-source vhist-legend-flow-min">` +
+      `<i aria-hidden="true"></i>${esc(t("check.flow.show"))}</button>`);
+    flowReadout = `<div class="vhist-flow-readout" role="status"${selected ? "" : " hidden"}>` +
+      `<strong>${selected ? esc(flowMinimumTime(time, selected.from, selected.to)) : ""}</strong>` +
+      `<span>${selected ? esc(explanation) : ""}</span></div>`;
   }
   if (isPressure) {
     legendItems.push(
@@ -1631,12 +1698,12 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
       histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)}${flowAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", chartName || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}">` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${phaseBands}${area}${line}${flowSvg}${dots}</svg>` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${phaseBands}${area}${flowSvg}${line}${dots}</svg>` +
         threshHtml + nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
       `</div>` + axis + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
-    `</div>` +
+    `</div>` + flowReadout +
     histUnavailableHtml(view) +
     (modbusFlowUnverified(view) ? `<div class="vhist-note">${esc(t("hist.modbus_flow_unverified"))}</div>` : ""),
     view.series.length > 1 ? "vhist-multi" : ""
@@ -2062,7 +2129,7 @@ function scrubMove(plot, i) {
   // marker, never the other one.
   const separateScales = env3ChartId(h.id);
   const allPts = h.series.flatMap((s) => s.v.map((z) => z == null ? null : z / 10));
-  const sharedY = separateScales ? null : histScale(allPts, n, h.id, Number(plot.dataset.flowMin)).Y;
+  const sharedY = separateScales ? null : histScale(allPts, n, h.id).Y;
   for (const mark of marks) {
     const s = h.series.find((q) => q.source === mark.dataset.source);
     const v = s ? s.v[i] : null;
@@ -2291,6 +2358,8 @@ function replaceHistoryHtml(host, html) {
     if (chart) paintCyclingChart(chart);
   }
   if (focused && active.isConnected) active.focus({ preventScroll: true });
+  else if (focused && active?.hasAttribute?.("data-flow-min-show"))
+    host.querySelector("[data-flow-min-show]")?.focus({ preventScroll: true });
   else if (focused && (hist || histSeries))
     [...host.querySelectorAll(hist ? "[data-hist]" : "[data-hist-series]")].find(node =>
       owner(node) === focusedOwner && (hist
