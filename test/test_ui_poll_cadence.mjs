@@ -119,4 +119,159 @@ assert.equal(timers.length, 1, "a failed render still schedules the next poll");
 assert.equal(errors.length, 1, "a failed render is reported");
 assert.equal(explicitDrains, 2, "a failed render still releases the history queue");
 
+// Boot overlaps locale loading with the initial /status + /values fetches, skips resumeOta()
+// when no OTA render snapshot is cached, and delays the first renderApp() until static i18n
+// and event wiring complete.
+{
+  const runBootCase = async ({ cached }) => {
+    const bootTimers = [];
+    let bootTimerId = 1;
+    let resolveLocale;
+    const localePending = new Promise((resolve) => { resolveLocale = resolve; });
+    const order = [];
+    let resumeCalls = 0;
+    const bootContext = {
+      S: { hpProbeBusy: false },
+      LANG: "de",
+      OTA_RENDER_CACHE_KEY: "daikinOtaRenderV1",
+      otaCacheStorage: () => (cached ? { getItem: (key) => (key === "daikinOtaRenderV1" ? "{}" : null) } : null),
+      document: { hidden: false, addEventListener() {} },
+      performance: { now: () => 0 },
+      setTimeout(fn, ms) { bootTimers.push({ id: bootTimerId, fn, ms }); return bootTimerId++; },
+      clearTimeout(id) {
+        const at = bootTimers.findIndex((timer) => timer.id === id);
+        if (at >= 0) bootTimers.splice(at, 1);
+      },
+      async refreshStatus(paint) {
+        order.push(`refreshStatus(${paint})`);
+        return true;
+      },
+      async refreshValues(paint) {
+        order.push(`refreshValues(${paint})`);
+        return true;
+      },
+      renderApp() { order.push("renderApp"); },
+      loadLocale(lang) { order.push(`loadLocale(${lang})`); return localePending; },
+      applyStaticI18n() { order.push("applyStaticI18n"); },
+      labelSchematicHits() { order.push("labelSchematicHits"); },
+      wire() {},
+      initNavigation() { order.push("initNavigation"); },
+      resumeOta() { resumeCalls++; order.push("resumeOta"); },
+    };
+    bootContext.window = bootContext;
+    bootContext.globalThis = bootContext;
+
+    const bootSandbox = vm.createContext(bootContext);
+    vm.runInContext(source, bootSandbox, { filename: "main/www/js/bootstrap.js" });
+    bootSandbox.wire = () => { order.push("wire"); };
+
+    assert.equal(bootTimers.length, 1,
+      "boot() must schedule pollStart() before awaiting loadLocale()");
+    assert.deepEqual(order, ["loadLocale(de)"]);
+
+    const initialTick = bootTimers.shift().fn();
+    await flush();
+    assert.deepEqual(order, ["loadLocale(de)", "refreshStatus(false)", "refreshValues(false)"],
+      "initial /status and /values must start while loadLocale() is pending without painting yet");
+
+    resolveLocale(true);
+    await initialTick;
+    const expectedTail = cached
+      ? ["applyStaticI18n", "labelSchematicHits", "wire", "initNavigation", "resumeOta", "renderApp"]
+      : ["applyStaticI18n", "labelSchematicHits", "wire", "initNavigation", "renderApp"];
+    assert.deepEqual(order, [
+      "loadLocale(de)",
+      "refreshStatus(false)",
+      "refreshValues(false)",
+      ...expectedTail,
+    ], "renderApp() must wait until loadLocale(), applyStaticI18n(), and wire() finish");
+    assert.equal(resumeCalls, cached ? 1 : 0,
+      cached ? "cached OTA snapshot at boot must call resumeOta()" : "idle boot must skip resumeOta()");
+  };
+
+  await runBootCase({ cached: false });
+  await runBootCase({ cached: true });
+}
+
+// Locale script URL appends &v=<tag> only when LOCALE_ASSET_TAG is non-empty,
+// and failed loads clear LOCALE_LOADS so subsequent retries can succeed.
+{
+  const i18nSource = readAppFragments(["i18n.js"]);
+  for (const [tag, expected] of [
+    ["", "/locale.js?lang=de"],
+    ["a1b2c3d4", "/locale.js?lang=de&v=a1b2c3d4"],
+  ]) {
+    const scripts = [];
+    let attempt = 0;
+    const mutated = tag
+      ? i18nSource.replace('const LOCALE_ASSET_TAG = "";', `const LOCALE_ASSET_TAG = "${tag}";`)
+      : i18nSource;
+    assert.ok(mutated.includes(`const LOCALE_ASSET_TAG = "${tag}";`),
+      "i18n.js must expose the literal LOCALE_ASSET_TAG placeholder");
+    const i18nCtx = vm.createContext({
+      navigator: { language: "en" },
+      localStorage: { getItem: () => null, setItem() {} },
+      setTimeout, clearTimeout,
+      document: {
+        getElementById: () => null,
+        createElement: () => ({ remove() {} }),
+        head: {
+          appendChild(script) {
+            attempt++;
+            scripts.push(script.src);
+            if (attempt === 1) {
+              script.onerror();
+            } else {
+              i18nCtx.localeReady = (lang) => lang === "de";
+              script.onload();
+            }
+          },
+        },
+      },
+    });
+    vm.runInContext(`${mutated}\nthis.__loadLocale = loadLocale;`,
+      i18nCtx, { filename: "main/www/js/i18n.js" });
+    assert.equal(await i18nCtx.__loadLocale("de"), false);
+    assert.equal(await i18nCtx.__loadLocale("de"), true,
+      "a transient /locale.js failure must clear LOCALE_LOADS so later attempts retry");
+    assert.deepEqual(scripts, [expected, expected]);
+  }
+}
+
+// A failing initial /status during boot must wait for _bootReady before invalidateLiveReadings()
+// or markUnreachable() repaints in English.
+{
+  const stateSource = readAppFragments(["app_state.js"]);
+  const bootOrder = [];
+  let resolveBoot;
+  const bootGate = new Promise((resolve) => { resolveBoot = resolve; });
+  const errCtx = vm.createContext({
+    _bootReady: bootGate,
+    S: { status: null, histEpoch: 0 },
+    pollSignal: () => undefined,
+    historyClock: () => 0,
+    j: async () => { throw new Error("503"); },
+    probeRunningOta: async () => { bootOrder.push("probeRunningOta"); return false; },
+    renderApp: () => { bootOrder.push("renderApp"); },
+    sysSet: (mode) => { bootOrder.push(`sysSet:${mode}`); },
+    t: (k) => k,
+    markCheckupDhwStale: () => {},
+    expireLiveHistoryPins: () => {},
+  });
+  vm.runInContext(`${stateSource}\nthis.__readStatusFrame = readStatusFrame;\nthis.__S = S;`, errCtx,
+    { filename: "main/www/js/app_state.js" });
+  errCtx.renderApp = () => { bootOrder.push("renderApp"); };
+  errCtx.sysSet = (mode) => { bootOrder.push(`sysSet:${mode}`); };
+  const pendingRead = errCtx.__readStatusFrame(false);
+  await flush();
+  assert.equal(errCtx.__S.transportUnavailable, "status");
+  assert.deepEqual(bootOrder, ["probeRunningOta"],
+    "initial /status failure must wait on _bootReady before calling renderApp() or sysSet()");
+  errCtx._bootReady = null;
+  resolveBoot();
+  assert.equal(await pendingRead, false);
+  await flush();
+  assert.deepEqual(bootOrder, ["probeRunningOta", "renderApp", "sysSet:sys.nodata"]);
+}
+
 console.log("UI poll cadence: forced status refresh and queued history after a failed live poll pass");

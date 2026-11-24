@@ -213,8 +213,21 @@ try {
   assert.ok(minified.length < assembled.length * 0.7,
     "CSS/JS syntax minification must remove meaningful source-only weight");
 
+  const externalLocaleCodes = [...app.match(/const UI_LANGS = Object\.freeze\(\[([\s\S]*?)\]\)/)[1]
+    .matchAll(/"([a-z]{2})"/g)].map((match) => match[1]).filter((code) => code !== "en");
+  const tagProc = childProcess.spawnSync("python3", [
+    path.join(root, "tools/web_asset/build_locale_bundle.py"),
+    "--locale-dir", path.join(root, "main/www/locales"),
+    "--locales", ...externalLocaleCodes, "--print-locale-tag",
+  ], { cwd: root, encoding: "utf8" });
+  assert.equal(tagProc.status, 0, tagProc.stderr || tagProc.stdout);
+  const localeTag = tagProc.stdout.trim();
+  assert.match(localeTag, /^[0-9a-f]{8}$/);
+
   const startup = minified.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   assert.ok(startup, "packed page must retain its one inline startup script");
+  assert.doesNotMatch(startup, /\bwindow\.(?:LZMA|LZMA_WORKER|onmessage)\b/,
+    "startup wrapper must not touch global LZMA/worker namespaces");
   const unpack = wrapper => {
     let script;
     const slot = { isConnected: true, after: node => { script = node.textContent; } };
@@ -222,7 +235,13 @@ try {
       assert.equal(tag, "script");
       return { remove() {} };
     } };
-    vm.runInNewContext(wrapper, { document, atob, TextDecoder, Uint8Array, setTimeout });
+    const sentinel = () => {};
+    const sandbox = { document, atob, TextDecoder, Uint8Array, setTimeout,
+      LZMA: sentinel, LZMA_WORKER: sentinel, onmessage: sentinel };
+    vm.runInNewContext(wrapper, sandbox);
+    assert.equal(sandbox.LZMA, sentinel);
+    assert.equal(sandbox.LZMA_WORKER, sentinel);
+    assert.equal(sandbox.onmessage, sentinel);
     return script;
   };
   const script = unpack(startup);
@@ -233,8 +252,32 @@ try {
     "--output", path.join(work, "index-unpacked.gz"), "--html-output", plain,
     "--max-gzip-bytes", String(assembled.length)], { cwd: root, encoding: "utf8" });
   assert.equal(plainRun.status, 0, plainRun.stderr || plainRun.stdout);
-  assert.equal(script, fs.readFileSync(plain, "utf8").match(/<script>([\s\S]*?)<\/script>/)?.[1],
-    "the shipped startup wrapper must restore the exact minified script");
+  const plainScript = fs.readFileSync(plain, "utf8").match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  const expectedScript = plainScript.includes('const LOCALE_ASSET_TAG=""')
+    ? plainScript.replace('const LOCALE_ASSET_TAG=""', `const LOCALE_ASSET_TAG="${localeTag}"`)
+    : plainScript;
+  assert.equal(script, expectedScript,
+    "the shipped startup wrapper must restore the exact minified script with stamped locale tag");
+  const tagStamp = childProcess.spawnSync("python3", ["-c", [
+    "import sys",
+    "sys.path.insert(0, sys.argv[1])",
+    "from minify_and_gzip import minify_page",
+    "from pack_startup_script import pack_startup_script",
+    "page = '<html><body><style>.x{color:red}</style><script>const LOCALE_ASSET_TAG = \"\"; console.log(LOCALE_ASSET_TAG);</script></body></html>'",
+    "packed = pack_startup_script(minify_page(page), locale_tag=sys.argv[2])",
+    "print(packed)",
+  ].join("\n"), path.dirname(tool), localeTag], { cwd: root, encoding: "utf8" });
+  assert.equal(tagStamp.status, 0, tagStamp.stderr || tagStamp.stdout);
+  const stampedWrapper = tagStamp.stdout.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.equal(unpack(stampedWrapper), `const LOCALE_ASSET_TAG="${localeTag}";console.log(LOCALE_ASSET_TAG);`,
+    "startup packer must substitute the build-time locale asset tag into the minified declaration");
+  const dupTag = childProcess.spawnSync("python3", ["-c", [
+    "import sys",
+    "sys.path.insert(0, sys.argv[1])",
+    "from pack_startup_script import pack_startup_script",
+    "pack_startup_script('<html><body><script>const LOCALE_ASSET_TAG=\"\";const LOCALE_ASSET_TAG=\"\";</script></body></html>', locale_tag='12345678')",
+  ].join("\n"), path.dirname(tool)], { cwd: root, encoding: "utf8" });
+  assert.notEqual(dupTag.status, 0, "duplicate LOCALE_ASSET_TAG placeholder must fail closed");
   const corrupt = startup.replace(/(checksum\^4294967295\)>>>0\)!==)(\d+)/,
     (_, prefix, crc) => prefix + (Number(crc) + 1));
   assert.notEqual(corrupt, startup, "the integrity control must change the shipped wrapper");

@@ -1,5 +1,6 @@
 #pragma once
 #include "esp_http_server.h"
+#include "http_handlers.hpp"
 #include "logic/chunk_sink.hpp"
 #include <string_view>
 
@@ -11,7 +12,11 @@ struct HttpChunkEmitter {
     httpd_req_t* req = nullptr;
 
     bool operator()(std::string_view bytes, bool final) const {
-        if (final) return httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
+        if (final) {
+            http_set_nodelay(req, true);
+            return httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
+        }
+        http_set_nodelay(req, false);
         return httpd_resp_send_chunk(req, bytes.data(), bytes.size()) == ESP_OK;
     }
 };

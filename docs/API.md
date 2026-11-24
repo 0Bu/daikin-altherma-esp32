@@ -52,13 +52,15 @@ lead), `/values` waits in 250-ms steps for at most four seconds, then returns bu
 | `/`, `/index.html` | Embedded gzip device UI; setup page on the provisioning surface |
 | `/favicon.ico` | Embedded setup/dashboard icon |
 | `/heat-pump-icon.png` | Dashboard app icon; LAN only |
-| `/locale.js?lang=<code>` | Shared device-local locale bundle with app-image ETag; LAN only |
+| `/locale.js?lang=<code>[&v=<tag>]` | Device-local locale pack (`de` or one of four cognate packs) with app-image ETag and optional immutable cache tag; LAN only |
 | `/mcp` | Embedded MCP setup page; no API or external requests. SSE-only GET receives 405; see [MCP.md](MCP.md) |
 
 The UI locale codes are `en`, `de`, `es`, `fr`, `it`, `pl`, `cs`, `uk`, `zh`, `ja`, `nb`, `sv`, `fi`.
-English is embedded in the startup page; each of the other supported codes serves the same bundle,
-which registers all twelve external languages. A missing language argument returns 400; an
-unsupported code (including `en` on this asset route) returns 404.
+English is embedded in the startup page; `de` serves its own plain gzipped catalog, and the
+remaining codes serve one of four self-contained cognate packs (`es/fr/it`, `pl/cs/uk`, `nb/sv/fi`,
+`zh/ja`). A missing language argument returns 400; an unsupported code (including `en` on this asset
+route) returns 404. Matching the running image's `v=<tag>` enables `private, max-age=31536000, immutable`
+caching alongside the per-code `ETag`; missing or mismatched tags fall back to `no-cache`.
 Catalog value labels and API error prose remain English. The browser UI polls; there is no `/events`
 or live WebSocket route.
 
@@ -82,7 +84,7 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 | `mqtt` | `configured`, `connected`, `tls`, `has_creds`, `broker`, `base`, `base_custom`, `error`, `retirement_evidence` | Effective base vs explicit custom choice. `has_creds` reports stored presence, never credentials, even if the broker is disabled. Retirement bit mask is defined below. |
 | `syslog` | `configured`, `resolved`, `reachable`, `queue_dropped`, `host`, `port`, `error` | Saved target and DNS/advisory reachability. Queue refusal cannot prove UDP delivery or collector retention. |
 | `ntp` | `server`, `synced`, `time` | Configured server; false/null until sync, then RFC 3339 UTC (empty if calendar conversion is invalid). |
-| `ota` | `channel` | Saved `release`/`dev` feed choice, independent of the currently running version. |
+| `ota` | `channel`, `busy`, `state` | Saved `release`/`dev` feed choice (independent of the running version), whether an OTA check/update/upload owns the worker, and compact worker state (`idle`, `checking`, `updating`, `done`, `error`). |
 | `ui` | `lang` | `auto` or a supported locale; manual override applies to all clients. |
 | `diagnostics` | `enabled`, `source`, `effective_source`, `available_sources` | Default-off persisted plant-diagnostics consent, configured display source (`"x10a"` or `"modbus"`, default `"x10a"`), active fallback-resolved source (`"x10a"` or `"modbus"`), and detected available sources (`[]`, `["x10a"]`, `["modbus"]`, or both). Missing in an older response means off. |
 | `hp` | `proto`, `rx`, `tx`, `connected`, `last_ok_s`, `registers`, `values`, `crc_err`, `timeout_err` | X10A transport and poll counters. `last_ok_s` is the age of the last sweep with an answer (`-1` before the first); once it reaches `MQTT_X10A_OFFLINE_GRACE_S`, `connected` is `false` and `values` is `0`. |

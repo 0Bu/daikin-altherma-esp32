@@ -212,6 +212,7 @@ static esp_err_t handle_all(httpd_req_t* req) {
 static esp_err_t handle_then_settle_body(httpd_req_t* req) {
     const esp_err_t result = handle_all(req);
     if (result == HTTP_ASYNC_ACCEPTED) return ESP_OK;
+    http_set_nodelay(req, true);
     if (result != ESP_OK) return result;
     if (!discard_unread_body(req)) return ESP_FAIL;
     finish_receive_budget(req);
@@ -251,8 +252,20 @@ esp_err_t http_open_session(httpd_handle_t server, int socket) {
         return ESP_FAIL;
     }
     const esp_err_t result = httpd_sess_set_recv_override(server, socket, receive_with_budget);
+    if (result == ESP_OK) {
+        const int one = 1;
+        (void)setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    }
     if (result == ESP_OK) budget->admitted = true;
     return result;
+}
+
+void http_set_nodelay(httpd_req_t* req, bool enable) noexcept {
+    if (!req) return;
+    const int sock = httpd_req_to_sockfd(req);
+    if (sock < 0) return;
+    const int flag = enable ? 1 : 0;
+    (void)setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 }
 
 void http_close_session(httpd_handle_t server, int socket) {

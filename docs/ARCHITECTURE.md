@@ -411,15 +411,17 @@ backs off to 30 seconds while unreachable, and suspends ordinary polling while h
 
 English and the application code remain in the startup page, capped at 181,248 gzip bytes.
 The build packs the minified script into an LZMA frame with a 512 KiB dictionary and a 1 MiB
-decoded-size limit. The inline loader verifies the header, decoded length, prefix, CRC and UTF-8
-before inserting the classic script synchronously at the end of the body. A validation failure
-prevents dashboard initialization.
-A first non-English locale request loads one local gzip resource containing twelve catalogs.
-It uses the same 512 KiB LZMA dictionary with a 1.5 MiB decoded-size limit across the twelve catalogs
-and validates the payload before synchronous registration.
-Later language changes reuse the registered tables. A locale load failure retains English.
-Both resources embed the pinned decoder and its license. Packing reduces flash use and costs
-transient browser memory and CPU. Per-catalog 32 KiB and aggregate locale size checks still
+decoded-size limit using a self-contained pure-TypedArray LZMA1 decoder (`tools/web_asset/lzma1_decoder.js`).
+The inline loader verifies the header, decoded length, prefix, CRC and UTF-8 before inserting the
+classic script synchronously at the end of the body. A validation failure prevents dashboard initialization.
+Non-English locales are embedded as five pre-compressed packs capped at 296,960 gzip bytes total:
+plain gzipped JavaScript for `de`, and four self-contained cognate TypedArray-LZMA1 packs (`es/fr/it`,
+`pl/cs/uk`, `nb/sv/fi`, `zh/ja`), each with the 512 KiB LZMA dictionary, a 1.5 MiB decoded-size
+limit and header/length/prefix/CRC/UTF-8 validation before synchronous registration.
+Requests carrying the build-time `v=<tag>` query digest receive immutable private caching, while
+untagged or mismatched queries revalidate with `no-cache` and the running image `ETag`.
+Later language changes within a loaded pack or already-loaded language reuse the registered tables.
+A locale load failure retains English. Per-catalog 32 KiB and aggregate locale size checks still
 apply. See `tools/web_asset/` and the delivery and locale contracts in [test/README.md](../test/README.md#ui-interaction-rendering-and-recording).
 
 Registration goes through the common exception boundary. The open setup AP exposes provisioning;
