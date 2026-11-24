@@ -130,8 +130,10 @@ cases.append(("reject absent stack", {key: value for key, value in valid.items()
                                     if key != "ota_stack_min_free_bytes"}))
 for label, transfer_sample in cases:
     events = []
-    old_status = {"version": writer_version, "app_elf_sha256": writer_elf, "uptime_s": 1, "ota": {"channel": "dev"}}
-    target_status = {"version": target_version, "app_elf_sha256": target_elf, "uptime_s": 1, "ota": {"channel": "dev"}}
+    old_status = {"version": writer_version, "app_elf_sha256": writer_elf, "uptime_s": 1,
+                  "ota": {"channel": "dev"}, "weather_forecast": {"configured": True}}
+    target_status = {"version": target_version, "app_elf_sha256": target_elf, "uptime_s": 1,
+                     "ota": {"channel": "dev"}, "weather_forecast": {"configured": True}}
     def post_once(endpoint, generation, version, sha, **kwargs):
         assert (endpoint, generation, version, sha) == ("production.invalid", 7, target_version, app_sha)
         events.append("post")
@@ -232,6 +234,7 @@ def board(version=target, image=elf, uptime=13):
             "sys": {"free_heap": 65536, "max_alloc": 32768, "reset_reason": "sw",
                     **{key: counters[key] for key in ("heap_restarts", "mqtt_skipped", "poll_skipped")}},
             "hp": {"crc_err": 0, "timeout_err": 0}, "ota": {"channel": "dev"},
+            "weather_forecast": {"configured": True, "fetching": False},
             "mqtt": {"connected": True}}
 stress_receipt = {"uptime": [13, 193], "counters_before": counters, "counters_after": counters,
                   "samples": {"status": 400, "values": 180, "diag": 20},
@@ -1417,10 +1420,14 @@ def manifest(version, sha):
                 {"path": "daikin-altherma-esp32.bin", "offset": 0x20000}]}]}
 for feed in (dev, root):
  for saved in ("dev", "release"):
-  for defect in (None, "pending then valid", "pending forever", "unknown", "missing image", "missing pending",
+  for weather_enabled, defect in [(True, defect) for defect in (
+      None, "pending then valid", "pending forever", "unknown", "missing image", "missing pending",
       "valid armed", "pending disarmed", "reboot", "heap_restarts", "mqtt_skipped", "poll_skipped",
       "crc_err", "timeout regression", "timeout excess", "timeout boundary", "mac", "version", "elf", "channel",
-      "mqtt", "x10a", "values", "free_heap", "largest_block", "ack lost", "tag timeout"):
+      "mqtt", "x10a", "values", "free_heap", "largest_block", "ack lost", "tag timeout")] + [
+      (False, None), (False, "missing weather"), (False, "non-boolean weather"),
+      (False, "weather changed during readiness"), (False, "weather changed before write"),
+      (False, "weather changed after boot"), (False, "weather changed at final status")]:
     target = "2.0.0-dev.5" if feed == dev else "2.0.0"
     documents = {feed: json.dumps(manifest(target, app), separators=(",", ":")).encode()}
     other_feed = root if feed == dev else dev
@@ -1431,6 +1438,7 @@ for feed in (dev, root):
     def board(version=target, image=elf, uptime=13, mac=prod_mac):
         return {"version": version, "app_elf_sha256": image, "uptime_s": uptime,
             "wifi": {"mac": mac, "connected": True, "rolled_back": False}, "ota": {"channel": saved},
+            "weather_forecast": {"configured": weather_enabled, "fetching": False},
             "sys": {"free_heap": 65536, "max_alloc": 32768, "reset_reason": "sw", **counters},
             "mqtt": {"connected": True}, "hp": {"connected": True, "values": 129,
                                                  "crc_err": 0, "timeout_err": 5}}
@@ -1454,12 +1462,19 @@ for feed in (dev, root):
         return host
     def full_status(endpoint, *, timeout):
         check(endpoint == "production.invalid" and 0 < timeout <= g["HTTP_TIMEOUT_S"], "unbounded/wrong status request")
-        if "returned" not in events: return board(writer, old_elf)
+        if "returned" not in events:
+            status = board(writer, old_elf)
+            if defect == "missing weather": status.pop("weather_forecast")
+            if defect == "non-boolean weather": status["weather_forecast"]["configured"] = 0
+            if defect == "weather changed before write" and "offer read" in events:
+                status["weather_forecast"]["configured"] = True
+            return status
         if "stress passed" not in events: return board()
         after_image = bool(sequence) and sequence[-1] == "image"
         sequence.append("status")
         status = board(uptime=206 if after_image else 194)
         if after_image:
+            if defect == "weather changed at final status": status["weather_forecast"]["configured"] = True
             if defect == "reboot": status["uptime_s"] = 3
             if defect in ("heap_restarts", "mqtt_skipped", "poll_skipped"): status["sys"][defect] = 1
             if defect == "crc_err": status["hp"]["crc_err"] = 1
@@ -1480,7 +1495,12 @@ for feed in (dev, root):
         check((endpoint, version, sha) == ("production.invalid", target, app) and
               kwargs["expected_channel"] == saved and kwargs["preserve_saved_channel"] is True and
               kwargs["hil_manifest_url"] == feed, "production offer lost feed/preference binding")
+        events.append("offer read")
         return 7
+    def promotion_readiness(endpoint, before, **kwargs):
+        if defect == "weather changed during readiness":
+            return {**before, "weather_forecast": {**before["weather_forecast"], "configured": True}}
+        return before
     def json_request(endpoint, route, *, method="GET", **kwargs):
         check(endpoint == "production.invalid", "probation contacted another endpoint")
         if route.startswith("/ota/update?"):
@@ -1507,9 +1527,12 @@ for feed in (dev, root):
         g["record_ota_transfer_evidence"]({"state": "done", "heap_min_free_bytes": 32768,
             "heap_min_largest_block_bytes": 16384, "ota_stack_min_free_bytes": 1536}, evidence)
         events.append("returned")
-        return board()
+        status = board()
+        if defect == "weather changed after boot": status["weather_forecast"]["configured"] = True
+        return status
     def canary(**kwargs):
-        check(kwargs["require_x10a"] is True and kwargs["require_weather"] is True and
+        check(kwargs["require_x10a"] is True and kwargs["require_weather"] is weather_enabled and
+              kwargs.get("pin_weather_config") is True and kwargs["expected_app_sha256"] == app and
               kwargs["expected_channel"] == saved and kwargs["hil_manifest_url"] == feed,
               "production canary weakened liveness/feed requirements")
         events.append("stress passed")
@@ -1519,6 +1542,7 @@ for feed in (dev, root):
         check(ns["ACTIVE_JOURNAL"].phases[-1] == "production_probation_confirmed" and
               ns["ACTIVE_JOURNAL"].receipt["production"]["probation_after"]["image_state"] == "valid",
               "valid/disarmed probation was not durable before retained acceptance")
+        events.append("retained")
         return {"retained": True, "rows": 1}
     def read_bench(host, route):
         check(host == "bench.invalid" and route == "/status", "wrong bench bootstrap identity request")
@@ -1535,7 +1559,7 @@ for feed in (dev, root):
         "exercise_bench_full_download": bench_cycle, "resolve_http_endpoint": resolve,
         "request_status_deadline": full_status, "wait_for_ota_offer": offer,
         "request_json_deadline": json_request, "wait_for_new_firmware": returned,
-        "wait_for_production_promotion_readiness": lambda endpoint, before, **k: before,
+        "wait_for_production_promotion_readiness": promotion_readiness,
         "stress_board": canary, "verify_retained_x10a": retained}
     output, errors = io.StringIO(), io.StringIO()
     with patch.dict(ns, replacements), patch.object(ns["time"], "monotonic", lambda: virtual[0]), \
@@ -1547,7 +1571,9 @@ for feed in (dev, root):
             document = json.loads(output.getvalue())
             accepted = defect in (None, "pending then valid", "timeout boundary")
             check(result == (0 if accepted else 2), "unsafe/rejected production probation: " + str(defect))
-            check(len(writes) == (0 if defect == "tag timeout" else 1), "failed production probation retried a POST")
+            blocked_before_write = defect in ("tag timeout", "missing weather", "non-boolean weather",
+                "weather changed during readiness", "weather changed before write")
+            check(len(writes) == (0 if blocked_before_write else 1), "production POST count disagreed with the result")
             if accepted:
                 probation = document["production"]["probation_after"]
                 check(document["production"]["probation_confirmed"] is True and probation == {
@@ -1556,6 +1582,9 @@ for feed in (dev, root):
             else:
                 check(document["outcome"] == "blocked" and "completed" not in ns["ACTIVE_JOURNAL"].phases,
                       "failed probation published completion")
+                check("retained" not in events, "failed probation continued to retained acceptance")
+                if defect == "weather changed after boot":
+                    check("stress passed" not in events, "post-boot Weather mismatch reached the canary")
                 if defect in ("tag timeout", "ack lost"):
                     check(not sequence, "source/ambiguous write failure continued probation queries")
                 if defect == "tag timeout": check(not reads, "source timeout contacted production")

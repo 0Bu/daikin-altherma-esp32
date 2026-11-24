@@ -212,6 +212,8 @@ const supplementalContract = () => {
   assert.match(offer, /status\.get\("available_channel"\)\s*!=\s*expected_channel/);
   assert.match(offer, /generation\s*!=\s*expected_generation/);
   const stress = section(gate, "def stress_board(", "\ndef verify_retained_x10a(");
+  assert.match(stress, /if pin_weather_config:\s*\n\s+production_weather_configured\(started, require_weather\)/);
+  assert.match(stress, /if pin_weather_config:\s*\n\s+production_weather_configured\(status, require_weather\)/);
   assert.match(stress, /request_json_deadline\([\s\S]{0,260}?"\/ota\/check\?ms=[\s\S]{0,220}?extra_headers=hil_headers/);
   assert.match(stress, /require_stress_ota_offer\([\s\S]{0,260}?manifest_url=hil_manifest_url[\s\S]{0,120}?firmware_base_url=hil_firmware_base_url/);
   const feedLease = section(gate, "def validate_feed_lease(", "\n@contextmanager\ndef leased_release_hil_feed(");
@@ -297,7 +299,13 @@ const supplementalContract = () => {
   assert.match(install, /return post_witness_status, transfer/);
 
   const production = gate.slice(gate.indexOf("if args.confirm_production != PRODUCTION_ROLE"));
-  assert.match(production, /production_evidence\s*=\s*stress_board\([\s\S]{0,300}?require_x10a=True,[\s\S]{0,100}?require_weather=True,/);
+  const productionStress = section(production, "production_evidence = stress_board(",
+    '\n    journal_checkpoint("production_stress_passed"');
+  assert.match(productionStress, /\brequire_x10a=True,/);
+  assert.match(productionStress, /\brequire_weather=weather_configured,/);
+  assert.match(productionStress, /\bpin_weather_config=True,/);
+  assert.match(productionStress, /\bexpected_app_sha256=args\.expected_app_sha256,/);
+  assert.match(productionStress, /\*\*official_feed_override\(args\.manifest_url\)/);
 };
 
 const runCentral = () => spawnSync(process.execPath, [centralContract], {
@@ -1066,8 +1074,33 @@ try {
       replaceOnce("scripts/production-ota-gate.py", 'OFFICIAL_RELEASE_MANIFEST_URL = "https://0bu.github.io/daikin-altherma-esp32/manifest.json"', 'OFFICIAL_RELEASE_MANIFEST_URL = "https://example.invalid/manifest.json"')],
     ["the production canary disables X10A", () =>
       replaceOnce("scripts/production-ota-gate.py", /(production_evidence = stress_board\([\s\S]{0,220}?)require_x10a=True,/, "$1require_x10a=False,")],
-    ["the production canary disables weather TLS", () =>
-      replaceOnce("scripts/production-ota-gate.py", /(production_evidence = stress_board\([\s\S]{0,220}?)require_weather=True,/, "$1require_weather=False,")],
+    ["the production canary skips configured Weather TLS", () =>
+      replaceOnce("scripts/production-ota-gate.py", "require_weather=weather_configured,",
+        "require_weather=False,"), "production-probation"],
+    ["the production canary requires Weather TLS even when Weather is disabled", () =>
+      replaceOnce("scripts/production-ota-gate.py", "require_weather=weather_configured,",
+        "require_weather=True,"), "production-probation"],
+    ["the production canary no longer pins the Weather configuration in stress samples", () =>
+      replaceOnce("scripts/production-ota-gate.py", "pin_weather_config=True,",
+        "pin_weather_config=False,"), "production-probation"],
+    ["production stress readiness no longer checks the pinned Weather configuration", () =>
+      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(started, require_weather)",
+        "production_weather_configured(started)")],
+    ["production stress samples no longer check the pinned Weather configuration", () =>
+      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(status, require_weather)",
+        "production_weather_configured(status)")],
+    ["production ignores a Weather configuration change during readiness", () =>
+      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(production_before, weather_configured)",
+        "production_weather_configured(production_before)"), "production-probation"],
+    ["production ignores a Weather configuration change at the last pre-write status", () =>
+      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(before_write, weather_configured)",
+        "production_weather_configured(before_write)"), "production-probation"],
+    ["production ignores a Weather configuration change across boot", () =>
+      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(returned, weather_configured)",
+        "production_weather_configured(returned)"), "production-probation"],
+    ["production ignores a Weather configuration change at the final status", () =>
+      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(final_status, weather_configured)",
+        "production_weather_configured(final_status)"), "production-probation"],
     ["raw OTA writes are no longer routed through the gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py", "direct OTA writes are forbidden; run scripts/production-ota-gate.py", "direct OTA writes are allowed")],
     ["a failed health cap no longer forces rollback", () =>

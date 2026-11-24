@@ -1583,6 +1583,16 @@ def required_uptime(status: dict[str, Any], label: str) -> int:
     return value
 
 
+def production_weather_configured(status: dict[str, Any], expected: bool | None = None) -> bool:
+    weather = status.get("weather_forecast")
+    configured = weather.get("configured") if isinstance(weather, dict) else None
+    if not isinstance(configured, bool):
+        fail("production Weather status has no boolean configured state")
+    if expected is not None and configured is not expected:
+        fail("production Weather configuration changed during promotion")
+    return configured
+
+
 def production_promotion_snapshot_ready(
     status: dict[str, Any], *, baseline_counters: dict[str, int], last_uptime: int,
 ) -> tuple[int, bool, str]:
@@ -1786,6 +1796,7 @@ def stress_board(
     hil_manifest_url: str | None = None, hil_firmware_base_url: str | None = None,
     require_pending_image: bool = False,
     preserve_saved_channel: bool = False,
+    pin_weather_config: bool = False,
 ) -> dict[str, Any]:
     if (hil_manifest_url is None) != (hil_firmware_base_url is None):
         fail("stress HIL feed expectation must be a complete pair")
@@ -1811,6 +1822,8 @@ def stress_board(
     ready_deadline = time.monotonic() + OTA_CHECK_TIMEOUT_S
     last_ready_uptime = initial_uptime
     while True:
+        if pin_weather_config:
+            production_weather_configured(started, require_weather)
         mqtt_connected = started.get("mqtt", {}).get("connected")
         hp = started.get("hp", {})
         fetching: bool | None = False
@@ -1941,6 +1954,8 @@ def stress_board(
                 validate_identity(status, host=host, mac=mac, version=version, elf=elf)
                 if preserve_saved_channel:
                     require_saved_channel(status, expected_channel)
+                if pin_weather_config:
+                    production_weather_configured(status, require_weather)
                 hp = status.get("hp", {})
                 mqtt = status.get("mqtt", {})
                 weather = status.get("weather_forecast", {})
@@ -4599,6 +4614,23 @@ def self_test() -> None:
                 "poll_skipped": 0},
         "hp": {"connected": True, "values": 129, "crc_err": 0, "timeout_err": 4},
     }
+    for configured in (False, True):
+        status = {**promotion_status, "weather_forecast": {"configured": configured}}
+        assert production_weather_configured(status) is configured
+        assert production_weather_configured(status, configured) is configured
+        try:
+            production_weather_configured(status, not configured)
+        except GateError as error:
+            assert "configuration changed" in str(error)
+        else:
+            raise AssertionError("production promotion accepted a changed Weather configuration")
+    for weather in (None, {}, {"configured": 0}, {"configured": "false"}):
+        try:
+            production_weather_configured({**promotion_status, "weather_forecast": weather})
+        except GateError as error:
+            assert "no boolean configured state" in str(error)
+        else:
+            raise AssertionError("production promotion accepted an unknown Weather configuration")
     promotion_counters = board_counters(promotion_status)
     observed_uptime, promotion_ready, promotion_reason = production_promotion_snapshot_ready(
         promotion_status, baseline_counters=promotion_counters, last_uptime=10,
@@ -6161,6 +6193,7 @@ def main() -> int:
         version=args.expected_current_version, elf=str(production_before.get("app_elf_sha256", "")),
     )
     saved_channel = require_saved_channel(production_before)
+    weather_configured = production_weather_configured(production_before)
     production_before = wait_for_production_promotion_readiness(
         production_status_endpoint, production_before,
         host=production["host"], mac=production["mac"],
@@ -6168,6 +6201,7 @@ def main() -> int:
         elf=str(production_before.get("app_elf_sha256", "")),
     )
     require_saved_channel(production_before, saved_channel)
+    production_weather_configured(production_before, weather_configured)
     require_official_manifest_snapshot(args.manifest_url, manifest_sha256,
                                       args.expected_source_sha, args.expected_version,
                                       args.expected_app_sha256)
@@ -6184,6 +6218,7 @@ def main() -> int:
                       version=args.expected_current_version,
                       elf=str(production_before.get("app_elf_sha256", "")))
     require_saved_channel(before_write, saved_channel)
+    production_weather_configured(before_write, weather_configured)
     production_transfer: dict[str, Any] = {}
     journal_checkpoint("production_write_attempted", production={
         "executed": None, "write_attempted": True, "role": PRODUCTION_ROLE,
@@ -6191,6 +6226,7 @@ def main() -> int:
         "previous_version": args.expected_current_version, "check_generation": check_generation,
         "ota_download_heap": production_transfer,
         "artifact_feed": artifact_feed, "saved_channel": saved_channel,
+        "weather_configured": weather_configured,
     })
     update_generation = post_update_once(
         production_status_endpoint, check_generation,
@@ -6213,9 +6249,10 @@ def main() -> int:
         writer_elf=str(production_before.get("app_elf_sha256", "")),
     )
     journal_checkpoint("production_transfer_verified", production={"transfer_verified": True})
+    production_weather_configured(returned, weather_configured)
     production_evidence = stress_board(
         host=production["host"], mac=production["mac"], version=args.expected_version, elf=elf,
-        require_x10a=True, require_weather=True,
+        require_x10a=True, require_weather=weather_configured, pin_weather_config=True,
         expected_app_sha256=args.expected_app_sha256, expected_channel=saved_channel,
         preserve_saved_channel=True, **official_feed_override(args.manifest_url),
     )
@@ -6234,6 +6271,7 @@ def main() -> int:
         version=args.expected_version, elf=elf,
     )
     require_saved_channel(final_status, saved_channel)
+    production_weather_configured(final_status, weather_configured)
     retained = verify_retained_x10a(final_status)
     journal_checkpoint("production_retained_passed", production={
         "retained_passed": True, "retained_x10a": retained,
