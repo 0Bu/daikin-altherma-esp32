@@ -2451,7 +2451,7 @@ function replaceHistoryHtml(host, html) {
   else {
     const roots = root => [...root.querySelectorAll(".vhist")]
       .filter(node => !node.parentElement?.closest(".vhist"));
-    const prior = roots(host), template = document.createElement("template");
+    const template = document.createElement("template");
     template.innerHTML = html;
     // Retaining a chart's identity is insufficient in WebKit: moving it through a detached
     // template still invalidates its painting ancestors. Scalar polls can update text in place.
@@ -2501,6 +2501,7 @@ function replaceHistoryHtml(host, html) {
       for (const [a, b] of scopedUpdates) replaceHistoryHtml(a, b.innerHTML);
       return;
     }
+    const prior = roots(host);
     const rebuilding = S.trendRebuilding;
     S.trendRebuilding = true;
     try {
@@ -2803,6 +2804,26 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", p
     `</button>` +
     `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">${innerBody}</div></div></div>` +
     `</div>`;
+}
+
+const numericHistoryMarkup = new WeakMap();
+function cachedHistoryHtml(ring, id, unit, label, source = "", identifySource = false) {
+  if (ring?.err || !ring?.v?.length) return histHtml(id, unit, label, source, identifySource);
+  const signature = JSON.stringify([id, unit, label, source, identifySource, S.histEpoch, LANG,
+    historyRingRevision(ring), id === "flow" && modbusFlowScaleUnverified()]);
+  const pin = S.histPin.get(id);
+  const cached = numericHistoryMarkup.get(ring);
+  if (cached?.signature === signature && cached.pin === pin) return cached.html;
+  const html = histHtml(id, unit, label, source, identifySource);
+  numericHistoryMarkup.set(ring, { signature, pin, html });
+  return html;
+}
+
+function modbusHistoryHtml(id, unit, label) {
+  // Other series need live inputs, paired rings or the tank's auxiliary histories.
+  if (STATE_HIST[id] || id === "dhw_tank" || hasHist(id) || hasEnv3Hist(id) || hasRoomHist(id))
+    return histHtml(id, unit, label);
+  return cachedHistoryHtml(S.hist.get(histCacheKey(id, "modbus")), id, unit, label);
 }
 
 // One value row. If a description matches the label, render the accordion; otherwise a plain,
@@ -3141,7 +3162,7 @@ function modbusOnlyGroupHtml(all) {
     }
     return descAccordion(label, shown, val, "src-val-mb",
                          d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "", hid, unit,
-                         S.dashboardCard !== "modbus");
+                         S.dashboardCard !== "modbus", modbusHistoryHtml);
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.

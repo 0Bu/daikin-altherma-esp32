@@ -107,6 +107,14 @@ CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTra
                                                   TickType_t, DiagnosticsSource) {
     return CheckupFlashRestoreResult::Ignored;
 }
+bool checkup_cycling_runs_checkpoint(logic::CyclingRunJournalPage&, uint32_t, uint32_t&, TickType_t,
+                                     uint32_t, uint32_t) {
+    return false;
+}
+CheckupFlashRestoreResult checkup_cycling_runs_restore(const logic::CyclingRunJournalPage&,
+                                                       uint32_t, TickType_t) {
+    return CheckupFlashRestoreResult::Ignored;
+}
 void checkup_cycling_forget() {}
 bool checkup_fault_checkpoint(logic::CheckupFaultTrace&, logic::CyclingTraceIdentity&, uint32_t&,
                               TickType_t, bool, bool, DiagnosticsSource) {

@@ -12,7 +12,7 @@ import push_checks
 
 
 class PushChecksTests(unittest.TestCase):
-    def run_candidate(self, fail_phase=None):
+    def run_candidate(self, fail_phase=None, browser_context=None):
         build_started = threading.Event()
         host_started = threading.Event()
         runtime_started = threading.Event()
@@ -58,6 +58,8 @@ class PushChecksTests(unittest.TestCase):
                     elif phase == "browser":
                         self.assertTrue(build_finished.is_set() and host_finished.is_set())
                         self.assertCountEqual(phases, ["firmware", "artifacts", "runtime", "docker", "audits"])
+                expected_context = browser_context if phase == "browser" and browser_context else "shared"
+                self.assertEqual(env["DOCKER_CONTEXT"], expected_context)
                 phases.append(phase)
                 if phase == fail_phase:
                     raise subprocess.CalledProcessError(1, command)
@@ -73,7 +75,10 @@ class PushChecksTests(unittest.TestCase):
                                      command, cwd=cwd, env=env, check=True, **kwargs)), \
                     patch.object(push_checks, "Event", return_value=host_failed), \
                     patch.object(push_checks.local, "verify", side_effect=verify_receipt) as verify:
-                args = (host, {}, firmware, {}, runtime, {}, "a" * 40, "b" * 40, "c" * 40)
+                env = {"DOCKER_CONTEXT": "shared"}
+                if browser_context:
+                    env["DAIKIN_RELEASE_BROWSER_DOCKER_CONTEXT"] = browser_context
+                args = (host, env, firmware, env, runtime, env, "a" * 40, "b" * 40, "c" * 40)
                 if fail_phase:
                     error = push_checks.local.CheckError if fail_phase == "receipt" else subprocess.CalledProcessError
                     with self.assertRaises(error):
@@ -87,6 +92,9 @@ class PushChecksTests(unittest.TestCase):
 
     def test_host_and_firmware_overlap_and_browser_runs_last(self):
         self.assertEqual(self.run_candidate()[-1], "browser")
+
+    def test_browser_context_is_used_only_for_browser_checks(self):
+        self.assertEqual(self.run_candidate(browser_context="browser-vm")[-1], "browser")
 
     def test_failure_in_either_worker_prevents_browser(self):
         for phase in ("firmware", "receipt", "audits", "runtime", "docker", "artifacts"):

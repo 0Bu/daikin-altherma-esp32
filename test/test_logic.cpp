@@ -99,6 +99,7 @@
 #include "logic/history.hpp"
 #include "logic/checkup_persist.hpp"
 #include "logic/cycling_persist.hpp"
+#include "logic/cycling_run_persist.hpp"
 #include "logic/fault_trace.hpp"
 #include "logic/fault_persist.hpp"
 #include "logic/dhw_loss_persist.hpp"
@@ -17047,6 +17048,16 @@ static void test_checkup_population() {
         CHECK(!snapshot.count && !snapshot.live); // Both clocks are ahead of the snapshot.
         checkup_cycling_snapshot(snapshot, saved, current, wall + 180000, 180000, 0);
         CHECK(!snapshot.count && !snapshot.live); // A stale live ring contributes no coverage.
+        current.push(6, Trace::Stop);
+        Trace empty;
+        checkup_cycling_snapshot(snapshot, empty, current, wall, 5, 0, true);
+        CHECK(snapshot.live && snapshot.end_s == CHECKUP_WINDOW_S && snapshot.count == 2);
+        CHECK(Trace::kind(snapshot.at(1)) == Trace::Start);
+        current.reset();
+        current.push(6, Trace::Start);
+        current.end_s = 6;
+        checkup_cycling_snapshot(snapshot, empty, current, wall, 5, 0, true);
+        CHECK(!snapshot.live && !snapshot.count); // No sample fits the corrected clock.
         current.reset();
         current.push(0, Trace::Heat);
         current.end_s = 86411;
@@ -17060,7 +17071,6 @@ static void test_checkup_population() {
         current.reset();
         current.push(0, Trace::Off);
         current.end_s = 60;
-        Trace empty;
         checkup_cycling_snapshot(snapshot, empty, current, wall, CHECKUP_WINDOW_S, 0);
         CHECK(snapshot.count == 1 && snapshot.at(0) == Trace::Off);
         saved.reset();
@@ -26245,7 +26255,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 13824);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 14904);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -34854,6 +34864,177 @@ void test_cycling_run_context() {
     CHECK(tr.at(5).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
 }
 
+void test_cycling_run_journal() {
+    using namespace daik::logic;
+
+    auto closed_run = [](uint32_t start, uint32_t stop, int16_t flow) {
+        auto run        = cycling_run_context_empty();
+        run.start_s     = start;
+        run.stop_s      = stop;
+        run.flow_tenths = flow;
+        run.mode        = static_cast<uint8_t>(CyclingRunMode::Space);
+        run.stop_kind   = static_cast<uint8_t>(CyclingStopKind::LowRpsAboveTarget);
+        run.flags       = RUN_CTX_F_STOPPED;
+        return run;
+    };
+    constexpr uint32_t     boot_unix = 1700000000;
+    CheckupRunContextTrace trace;
+    trace.push(closed_run(10, 610, 100));
+    trace.push(closed_run(620, 650, 70));
+    trace.push(cycling_run_context_empty());
+    trace.latest_mut()->start_s = 655;
+
+    auto old = closed_run(boot_unix - 900, boot_unix - 300, 300);
+    old.flags |= RUN_CTX_F_FINALIZED | RUN_CTX_F_RESTORED;
+    old.flow_typical_tenths = 280;
+    CHECK(trace.prepend(old));
+
+    cycling_run_context_finalize(trace, -1);
+    cycling_run_context_finalize(trace, (static_cast<int64_t>(UINT32_MAX) + 1) * 1000000);
+    cycling_run_context_finalize(trace, 680999999, boot_unix + 680);
+    CHECK(!(trace.at(2).flags & RUN_CTX_F_FINALIZED)); // preserve the last fraction of refinement
+    CHECK(trace.at(2).flow_typical_tenths == CHECKUP_ABSENT);
+    cycling_run_context_finalize(trace, 681000000, boot_unix + 681);
+    CHECK((trace.at(2).flags & RUN_CTX_F_FINALIZED) && trace.at(2).flow_typical_tenths == 200);
+    CHECK((trace.at(3).flags & RUN_CTX_F_FINALIZED) == 0 && trace.at(0).flow_typical_tenths == 280);
+
+    CheckupRunContextSnapshot snapshot;
+    cycling_run_context_snapshot(snapshot, trace, 700, boot_unix + 700);
+    CHECK(snapshot.count == 4 && snapshot.flow_typical_tenths == 200);
+    CHECK(snapshot.entries[0].start_s == CHECKUP_WINDOW_S - 1600);
+    CHECK(snapshot.entries[0].stop_s == CHECKUP_WINDOW_S - 1000);
+    CHECK(snapshot.entries[0].flags & RUN_CTX_F_RESTORED);
+    CHECK(snapshot.entries[2].start_s == CHECKUP_WINDOW_S - 80);
+    CHECK(snapshot.entries[2].flow_typical_tenths == 200);
+    cycling_run_context_snapshot(snapshot, trace, 700, boot_unix + 700, old.start_s + 1);
+    CHECK(snapshot.count == 3 && snapshot.flow_typical_tenths == 100);
+    cycling_run_context_snapshot(snapshot, trace, 700, 0);
+    CHECK(snapshot.count == 3); // unresolved wall clock
+    cycling_run_context_snapshot(snapshot, trace, 700, old.stop_s + 700);
+    CHECK(snapshot.count == 3); // saved stop now overlaps the corrected boot time
+    cycling_run_context_snapshot(snapshot, trace, 700, old.start_s + CHECKUP_WINDOW_S + 1);
+    CHECK(snapshot.count == 3); // out of the restored window
+    cycling_run_context_finalize(trace, 701000000);
+    CHECK(trace.at(2).flow_typical_tenths == 200); // loss of baseline cannot change a finalized row
+
+    // A full ring retains the newest rows and still accepts its next live witness.
+    while (trace.count < CYCLING_RUN_CONTEXT_CAP) CHECK(trace.prepend(old));
+    CHECK(!trace.prepend(old));
+    const auto next = closed_run(800, 801, CHECKUP_ABSENT);
+    trace.push(next);
+    CHECK(trace.count == CYCLING_RUN_CONTEXT_CAP && trace.latest_mut()->start_s == 800);
+    cycling_run_context_finalize(trace, 832000000, boot_unix + 832, old.start_s + 1);
+    CHECK(trace.latest_mut()->flags & RUN_CTX_F_FINALIZED);
+    CHECK(trace.latest_mut()->flow_typical_tenths == 100); // expired restored runs cannot return
+
+    CyclingRunJournalPage page;
+    page.identity   = {7, 8, 9};
+    page.entries[0] = old;
+    page.entries[0].flags &= static_cast<uint8_t>(~RUN_CTX_F_RESTORED);
+    page.entries[1] = closed_run(boot_unix + 620, boot_unix + 650, 70);
+    page.entries[1].flags |= RUN_CTX_F_FINALIZED | RUN_CTX_F_LOW_RPS_ABOVE_TGT;
+    page.entries[1].flow_typical_tenths = 200;
+
+    HistoryJournalHeader h{};
+    h.magic       = HISTORY_JOURNAL_MAGIC;
+    h.version     = HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    h.catalog_fp  = CYCLING_RUN_JOURNAL_SCHEMA;
+    h.commit      = HISTORY_JOURNAL_COMMITTED;
+    h.value_count = CYCLING_RUN_JOURNAL_WORDS;
+    h.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = 42;
+    h.bucket      = checkup_journal_bucket(page.entries[1].stop_s);
+    h.dt_s        = CHECKUP_DT_S;
+    h.rings[0] = h.rings[1] = h.rings[2] = 1;
+    CHECK(cycling_run_journal_header_matches(h));
+    CHECK(cycling_run_journal_page_valid(h, page));
+    CHECK(cycling_run_journal_count(page) == 2);
+
+    uint8_t payload[HISTORY_JOURNAL_PAYLOAD_BYTES]{};
+    std::memcpy(payload, &page, sizeof(page));
+    CyclingRunJournalPage decoded;
+    std::memcpy(&decoded, payload, sizeof(decoded));
+    CHECK(cycling_run_journal_page_valid(h, decoded));
+    CHECK(decoded.entries[1].flow_typical_tenths == 200);
+    auto bad_header   = h;
+    bad_header.commit = HISTORY_JOURNAL_ERASED;
+    CHECK(!cycling_run_journal_header_matches(bad_header));
+    CHECK(cycling_run_journal_page_valid(bad_header, page)); // validate the body before commit
+    bad_header        = h;
+    bad_header.source = static_cast<uint8_t>(HistoryJournalSource::Modbus);
+    CHECK(!cycling_run_journal_header_matches(bad_header));
+    bad_header = h;
+    ++bad_header.bucket;
+    CHECK(!cycling_run_journal_page_valid(bad_header, page));
+
+    for (const auto invalid_identity :
+         {CyclingTraceIdentity{0, 8, 9}, CyclingTraceIdentity{7, 0, 9},
+          CyclingTraceIdentity{7, 8, 0}}) {
+        decoded          = page;
+        decoded.identity = invalid_identity;
+        CHECK(!cycling_run_journal_page_valid(h, decoded));
+    }
+    decoded                    = page;
+    decoded.entries[1].start_s = old.stop_s - 1;
+    CHECK(!cycling_run_journal_page_valid(h, decoded));
+    decoded                     = page;
+    decoded.entries[1].reserved = 1;
+    CHECK(!cycling_run_journal_page_valid(h, decoded));
+    decoded                 = page;
+    decoded.entries[3].mode = static_cast<uint8_t>(CyclingRunMode::Dhw);
+    CHECK(!cycling_run_journal_page_valid(h, decoded)); // nonzero tail
+    decoded.entries[0] = {};
+    CHECK(!cycling_run_journal_page_valid(h, decoded)); // empty page
+    decoded = page;
+    for (size_t i = 2; i < CYCLING_RUN_JOURNAL_CAPACITY; ++i) {
+        decoded.entries[i] = page.entries[1];
+        decoded.entries[i].start_s += 30 * (i - 1);
+        decoded.entries[i].stop_s += 30 * (i - 1);
+    }
+    CHECK(cycling_run_journal_count(decoded) == CYCLING_RUN_JOURNAL_CAPACITY);
+    h.bucket = checkup_journal_bucket(decoded.entries[4].stop_s);
+    CHECK(cycling_run_journal_page_valid(h, decoded)); // exactly adjacent periods
+
+    const auto valid   = page.entries[1];
+    auto       invalid = valid;
+    invalid.start_s    = 0;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid        = valid;
+    invalid.stop_s = invalid.start_s;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid.stop_s += CHECKUP_WINDOW_S;
+    CHECK(cycling_run_journal_entry_valid(invalid));
+    ++invalid.stop_s;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid          = valid;
+    invalid.reserved = 1;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid       = valid;
+    invalid.flags = RUN_CTX_F_STOPPED;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid.flags |= RUN_CTX_F_FINALIZED | RUN_CTX_F_RESTORED;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid      = valid;
+    invalid.mode = UINT8_MAX;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid            = valid;
+    invalid.start_kind = UINT8_MAX;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid           = valid;
+    invalid.stop_kind = UINT8_MAX;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid             = valid;
+    invalid.flow_tenths = -1;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid.flow_tenths         = 0;
+    invalid.flow_typical_tenths = 0;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid.flow_tenths         = CHECKUP_ABSENT;
+    invalid.flow_typical_tenths = CHECKUP_ABSENT;
+    CHECK(cycling_run_journal_entry_valid(invalid));
+}
+
 int main() {
     hydronic_host_tests::test_hourly_wire_and_population();
     hydronic_host_tests::test_population_and_boundaries();
@@ -34864,6 +35045,7 @@ int main() {
     hydronic_host_tests::test_secondary_supply_inputs();
     hydronic_host_tests::test_secondary_supply_continuity();
     test_cycling_run_context();
+    test_cycling_run_journal();
     test_stop_context();
     test_stop_context_inputs();
     test_stop_context_output();

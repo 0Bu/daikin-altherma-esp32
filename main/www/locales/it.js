@@ -1,4 +1,4 @@
-// translation-source: d49db3661f1d34dea3ed1f6d9bfd64bb4d79036cf8ed10732c6037a4b5479a45
+// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -303,7 +303,7 @@ I18N.it = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Fine ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Attivo all’ultima lettura.",
   /* check.cycling.cause_unavailable */ "Nessun dettaglio",
-  /* check.cycling.cause_since_boot */ "Le cause di avvio e arresto vengono registrate solo dall'ultimo riavvio.",
+  /* check.cycling.cause_older_unavailable */ "Per questi cicli precedenti non sono disponibili dettagli salvati sull’avvio e sull’arresto.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

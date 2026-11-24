@@ -483,7 +483,7 @@ async function prepareObservationViewport(page, selector, animationIds) {
 
 async function observe(page, server, context, selectors, { inspector = false, status = false,
   fixture = null, animationIds = ["fSup1", "rfHot", "scFan", "scPump"],
-  inactiveAnimationIds = [] } = {}) {
+  inactiveAnimationIds = [], cachedMarkup = false } = {}) {
   await page.bringToFront();
   await page.waitFor("document.visibilityState === 'visible' && !document.hidden");
   // Opening/disclosure transitions may legitimately finish. Persistent flow CSSAnimation objects
@@ -676,8 +676,10 @@ async function observe(page, server, context, selectors, { inspector = false, st
   assert.equal(motion.holds, 0, context + ": polling must not be hidden behind interaction holds");
   assert.equal(motion.closedBuilds, 0, context + ": polls must not rebuild cached charts in closed rows");
   assert.equal(motion.hiddenCharts, 0, context + ": closed rows must not retain duplicate history SVGs");
-  if (inspector) assert.equal(motion.builds, 0, context +
-    ": unchanged inspector must not rebuild history; revisions=" + JSON.stringify(motion.revisions));
+  if (inspector || cachedMarkup) assert.equal(motion.builds, 0, context +
+    (inspector ? ": unchanged inspector must not rebuild history" :
+      ": unchanged numeric disclosure must reuse its history markup") +
+    "; revisions=" + JSON.stringify(motion.revisions));
   const retainedPlots = new Set(motion.plots.filter(plot => plot.same).map(plot => plot.selector));
   const detachedRetained = motion.detachedAncestors.filter(row =>
     row.selectors.some(selector => retainedPlots.has(selector)));
@@ -1378,7 +1380,7 @@ export async function assertHistoryMotion(page, server, context) {
       if (variant === "modbus-numeric") {
         await disclosure(page, server, frame, label,
           ['#valueGroups [data-dashboard-card="modbus"] [data-trend="flow"]'], ["flow"], false,
-          { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"] });
+          { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"], cachedMarkup: true });
       } else {
         const key = variant === "env3-no-forecast" ? "env3" : "room";
         const chart = await openInspector(page, key, INSPECTOR_TRENDS[key], label);

@@ -1,4 +1,4 @@
-// translation-source: d49db3661f1d34dea3ed1f6d9bfd64bb4d79036cf8ed10732c6037a4b5479a45
+// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -308,7 +308,7 @@ I18N.pl = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Koniec ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Praca przy ostatnim odczycie.",
   /* check.cycling.cause_unavailable */ "Brak szczegółów",
-  /* check.cycling.cause_since_boot */ "Przyczyny uruchomień i zatrzymań są rejestrowane dopiero od ostatniego restartu.",
+  /* check.cycling.cause_older_unavailable */ "Brak zapisanych szczegółów uruchomienia i zatrzymania dla tych wcześniejszych cykli.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · średnia ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

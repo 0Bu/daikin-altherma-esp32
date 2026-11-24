@@ -680,16 +680,16 @@ off-only hour has no fill. The timed chart orders mixed categories chronological
 timed hour button's accessible name distinguishes missing readings from unassigned runtime.
 Each block is selectable through the full plot height. The caption sits above the selection
 highlight. Shift-clicking or dragging across any timed chart selects a contiguous multi-hour range.
-On timed charts with `run_contexts`, the latest contiguous episode of short heating runs (or the latest
-contextual hour when no episode is present) auto-selects on open unless overridden, and selection
-replaces time labels with the selected span and renders a flat period summary plus a quiet 3-column
+On timed charts with at least one run matched to `run_contexts`, the latest contiguous episode of
+short heating runs (or the latest hour with matched details when no episode exists) auto-selects
+on open unless overridden. Selection replaces time labels with the selected span and renders a flat period summary plus a quiet 3-column
 table (`Start`, `Duration`, `Why it stopped`) with borderless tap-to-expand start and stop telemetry
 prose keyed by poll-invariant boot-relative or wall-clock run start so live polls keep open rows
-expanded (marking stopped runs without retained RAM context as **No cause details**, truly
-unstopped gap runs as **Stop unknown**, and pre-reboot X10A runs with **Start and stop details are
-recorded from the last restart onward**). Charts without `run_contexts` keep that pre-reboot X10A
-note when all selected runs preceded the current boot, omit the period summary, and fall back to
-`Start`, `Stop`, `Duration`. Both run grouping and short-run counts bridge brief `<= 15 s`
+expanded. Saved details are shown for earlier runs with matching observed start and stop edges.
+A stopped run without details shows **No cause details**. Interrupted runs show **Stop unknown**.
+Selections with matched and unmatched runs keep the period summary and mark individual missing
+details in the stop column. A chart with no match uses `Start`, `Stop`, `Duration` and can note
+missing details for older X10A runs. Run grouping and short-run counts bridge brief `<= 15 s`
 intra-boot sampling gaps while keeping `> 15 s` gaps and reboot boundaries severed. During a timed-chart drag, the highlight and range follow the pointer and
 commit the dragged range on release (hourly fallback previews the hovered hour readout on drag while preserving
 the pinned hour on release).

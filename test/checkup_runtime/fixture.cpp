@@ -18,6 +18,7 @@ unsigned                    circulation_samples = 0;
 void (*on_circulation)()                        = nullptr;
 void (*on_time)()                               = nullptr;
 int64_t unix_origin                             = 1700000000;
+int32_t unix_offset_ms                          = 0;
 bool    clock_synced                            = true;
 } // namespace adapter
 namespace daik {
@@ -37,8 +38,10 @@ void time_now(int64_t& s, int32_t& ms) {
         adapter::on_time = nullptr;
         f();
     }
-    s  = adapter::clock_synced ? adapter::unix_origin + sdk::now_us / 1000000 : -1;
-    ms = adapter::clock_synced ? static_cast<int32_t>(sdk::now_us % 1000000 / 1000) : 0;
+    const int64_t wall_ms =
+        adapter::unix_origin * 1000 + sdk::now_us / 1000 + adapter::unix_offset_ms;
+    s  = adapter::clock_synced ? wall_ms / 1000 : -1;
+    ms = adapter::clock_synced ? static_cast<int32_t>(wall_ms % 1000) : 0;
 }
 bool     hp_poll_generation_matches(uint32_t g) { return g == adapter::poll_generation; }
 uint32_t hp_poll_generation() { return adapter::poll_generation; }
@@ -449,8 +452,18 @@ void restored_cycling_detail() {
     ++other.diagnostics_generation;
     require(checkup_cycling_restore(saved, other, wall, 0) == Result::Ignored,
             "cycling_rejects_different_consent");
-    require(checkup_cycling_restore(saved, identity, wall - 905, 0) == Result::Ignored,
+    adapter::unix_origin -= 905;
+    require(checkup_cycling_restore(saved, identity, wall - 905, 0) == Result::TryOlder,
             "cycling_rejects_future_checkpoint");
+    adapter::unix_origin    = wall;
+    adapter::unix_offset_ms = 750;
+    sdk::now_us             = 10500000;
+    auto overlaps           = saved;
+    overlaps.unix_s = static_cast<uint32_t>(wall + 2); // Its final observation is at wall + 1.
+    require(checkup_cycling_restore(overlaps, identity, wall + 11, 0) == Result::TryOlder,
+            "cycling_rejects_predecode_clock_rounded_across_boot_boundary");
+    sdk::now_us             = 0;
+    adapter::unix_offset_ms = 0;
     require(checkup_cycling_restore(saved, identity, wall, 0) == Result::Restored,
             "cycling_restored");
     Trace view;
@@ -1852,15 +1865,17 @@ void x10a_cycling_run_contexts() {
             "run_context_second_run");
 
     checkup_set_diagnostics(false, 23);
-    require(!checkup_has_cycling_run_contexts(DiagnosticsSource::X10a),
+    require(!checkup_has_cycling_run_contexts(DiagnosticsSource::X10a, 780, 0),
             "run_context_hidden_while_paused");
     require(!checkup_cycling_run_contexts(snap, 780, DiagnosticsSource::X10a) && snap.count == 0,
             "run_context_snapshot_blocked_while_paused");
     checkup_set_diagnostics(true, 23);
     sample(785, ctx_rows("0", "32.0", "29.5", "35.0", "0.0", "0"), cov, true, false);
     sdk::now_us = 790LL * 1000000LL;
-    require(checkup_has_cycling_run_contexts(DiagnosticsSource::X10a),
+    require(checkup_has_cycling_run_contexts(DiagnosticsSource::X10a, 790, 0),
             "run_context_preserved_after_pause_resume");
+    require(!checkup_has_cycling_run_contexts(DiagnosticsSource::X10a, CHECKUP_WINDOW_S + 840, 0),
+            "cycling_context_expired_runs_do_not_admit_snapshot");
     require(checkup_cycling_run_contexts(snap, 790, DiagnosticsSource::X10a) && snap.count == 2 &&
                 snap.flow_typical_tenths == 180,
             "run_context_entries_survive_pause_resume");
@@ -1887,6 +1902,144 @@ void x10a_cycling_run_contexts() {
     checkup_cycling_forget();
     require(!checkup_cycling_run_contexts(snap, 840, DiagnosticsSource::X10a) && snap.count == 0,
             "cycling_forget_withholds_run_contexts");
+}
+void x10a_cycling_run_context_restart() {
+    boot();
+    const auto               cov = coverage();
+    std::vector<CachedValue> rows{
+        row({0x61, 2, 105}, "34.0"), row({0x61, 8, 105}, "30.0"),
+        row({0x60, 9, 105}, "35.0"), row(CHECKUP_LOC_FLOW, "18.0"),
+        row({0x60, 2, 303}, "1"),    row(CHECKUP_LOC_DEFROST, "0"),
+        row(CHECKUP_LOC_VALVE, "0"), row(CHECKUP_LOC_IU_MODE, "Heating"),
+    };
+    auto running = rows;
+    rows.push_back(row({0x30, 0, 152}, "0"));
+    running.push_back(row({0x30, 0, 152}, "24.0"));
+    sample(10, rows, cov);
+    sample(20, running, cov, true, true);
+    sample(30, running, cov, true, true);
+    sample(40, rows, cov);
+
+    const auto            first_anchor = static_cast<uint32_t>(adapter::unix_origin);
+    CyclingRunJournalPage page;
+    uint32_t              cursor = 0;
+    CheckupCyclingTrace   trace;
+    CyclingTraceIdentity  identity;
+    uint32_t              barrier = 0;
+    sdk::now_us                   = 60LL * 1000000;
+    require(checkup_cycling_checkpoint(trace, identity, barrier, 0, true) && !barrier,
+            "cycling_context_checkpoint_has_companion_trace");
+    require(!checkup_cycling_runs_checkpoint(page, 0, cursor, 0, 40, first_anchor),
+            "cycling_context_not_saved_before_refinement");
+    sdk::now_us           = 72LL * 1000000;
+    adapter::clock_synced = false;
+    require(!checkup_cycling_runs_checkpoint(page, 0, cursor, 0, 40, first_anchor),
+            "cycling_context_waits_for_wall_clock");
+    adapter::clock_synced = true;
+    require(!checkup_cycling_runs_checkpoint(page, 0, cursor, 0, 0, first_anchor),
+            "cycling_context_waits_for_verified_trace");
+    CheckupRunContextSnapshot snap;
+    require(checkup_cycling_run_contexts(snap, 72) && snap.count == 1 &&
+                (snap.entries[0].flags & RUN_CTX_F_STOPPED),
+            "cycling_context_producer_observed_stop");
+    ++adapter::unix_origin; // SNTP steps after the trace is saved, before the run page.
+    require(!checkup_cycling_runs_checkpoint(page, 0, cursor, 0, 39, first_anchor),
+            "cycling_context_waits_for_verified_stop_edge");
+    require(checkup_cycling_runs_checkpoint(page, 0, cursor, 0, 40, first_anchor),
+            "cycling_context_checkpoint_contains_finalized_observed_run");
+    require(cursor == 40 && cycling_run_journal_count(page) == 1 &&
+                page.entries[0].flow_tenths == 180 &&
+                page.entries[0].start_s == first_anchor + 20 &&
+                page.entries[0].stop_s == first_anchor + 40,
+            "cycling_context_checkpoint_has_original_measurements");
+    const auto archived = page;
+    require(!checkup_cycling_runs_checkpoint(page, cursor, cursor, 0, 40, first_anchor),
+            "cycling_context_durable_cursor_excludes_saved_run");
+    require(checkup_cycling_checkpoint(trace, identity, barrier, 0, true) &&
+                trace.unix_s == first_anchor + 40 && trace.boot_s == 40,
+            "cycling_context_checkpoint_date_ends_at_sample_despite_forward_step");
+    adapter::unix_origin -= 2; // A later trace checkpoint must keep the same stored time frame.
+    sample(72, rows, cov);
+    require(checkup_cycling_checkpoint(trace, identity, barrier, 0, true) &&
+                trace.unix_s == first_anchor + 71 && trace.boot_s == 71 &&
+                trace.end_s == CHECKUP_WINDOW_S,
+            "cycling_context_keeps_archive_anchor_with_a_newer_live_sample");
+    CheckupCyclingTrace live;
+    checkup_report(nullptr, &live);
+    require(live.unix_s == first_anchor + 71 && live.boot_s == 72,
+            "cycling_context_live_trace_uses_corrected_clock");
+    adapter::unix_origin -= 50;
+    require(!checkup_cycling_checkpoint(live, identity, barrier, 0, true),
+            "cycling_context_future_observation_cannot_supplant_checkpoint");
+
+    sdk::now_us          = 0;
+    adapter::unix_origin = first_anchor + 90;
+    const auto wall      = static_cast<uint32_t>(adapter::unix_origin);
+    boot();
+    using Result = CheckupFlashRestoreResult;
+    require(checkup_cycling_runs_restore(archived, wall, 0) == Result::Ignored,
+            "cycling_context_cannot_restore_without_trace");
+    require(checkup_cycling_restore(trace, identity, wall, 0) == Result::Restored,
+            "cycling_context_restores_companion_trace");
+    auto wrong = archived;
+    ++wrong.identity.diagnostics_generation;
+    require(checkup_cycling_runs_restore(wrong, wall, 0) == Result::Ignored,
+            "cycling_context_refuses_other_consent");
+    wrong = archived;
+    ++wrong.entries[0].stop_s;
+    require(checkup_cycling_runs_restore(wrong, wall, 0) == Result::Ignored,
+            "cycling_context_refuses_nonmatching_stop");
+    require(checkup_cycling_runs_restore(archived, wall, 0) == Result::Restored &&
+                checkup_cycling_runs_restore(archived, wall, 0) == Result::Ignored,
+            "cycling_context_restores_once_with_both_edges");
+
+    // The first live sample cannot erase the restored prefix.
+    sample(10, rows, cov);
+    require(checkup_cycling_run_contexts(snap, 10, DiagnosticsSource::X10a, wall + 10) &&
+                snap.count == 1 && snap.entries[0].start_s == CHECKUP_WINDOW_S - 80 &&
+                snap.entries[0].stop_s == CHECKUP_WINDOW_S - 60 &&
+                (snap.entries[0].flags & RUN_CTX_F_RESTORED) &&
+                snap.entries[0].flow_tenths == archived.entries[0].flow_tenths,
+            "cycling_context_projects_preboot_evidence_with_original_measurements");
+    require(
+        checkup_has_cycling_run_contexts(DiagnosticsSource::X10a, 10, wall + 10) &&
+            !checkup_has_cycling_run_contexts(DiagnosticsSource::X10a, 10, wall + CHECKUP_WINDOW_S),
+        "cycling_context_snapshot_admission_expires_restored_rows");
+    sample(20, running, cov, true, true);
+    sample(30, rows, cov);
+    require(checkup_cycling_checkpoint(trace, identity, barrier, 0, true) && trace.live,
+            "cycling_context_recheckpoint_combines_restored_and_live_edges");
+    sdk::now_us = 0;
+    adapter::unix_origin += 90;
+    boot();
+    require(checkup_cycling_restore(trace, identity, adapter::unix_origin, 0) == Result::Restored &&
+                checkup_cycling_runs_restore(archived, adapter::unix_origin, 0) == Result::Restored,
+            "cycling_context_survives_second_boot_with_combined_trace");
+
+    sample(10, rows, cov);
+    sample(20, running, cov, true, true);
+    sample(30, running, cov, true, true);
+    sample(40, rows, cov);
+    require(checkup_cycling_checkpoint(trace, identity, barrier, 0, true),
+            "cycling_context_sets_checkpoint_anchor_before_day_step");
+    const uint32_t before_step = trace.unix_s - trace.boot_s;
+    sdk::now_us                = 72LL * 1000000;
+    for (const int64_t delta : {2LL, -4LL}) {
+        adapter::unix_origin += delta * CHECKUP_WINDOW_S;
+        const auto corrected = static_cast<uint32_t>(adapter::unix_origin);
+        require(checkup_cycling_checkpoint(trace, identity, barrier, 0, true) &&
+                    trace.unix_s - trace.boot_s == corrected,
+                "cycling_context_reanchors_after_a_clock_step_exceeding_retention");
+        require(!checkup_cycling_runs_checkpoint(page, 0, cursor, 0, 40, before_step),
+                "cycling_context_refuses_coverage_from_previous_clock_frame");
+        require(checkup_cycling_runs_checkpoint(page, 0, cursor, 0, 40, corrected) &&
+                    page.entries[0].start_s == corrected + 20 &&
+                    page.entries[0].stop_s == corrected + 40,
+                "cycling_context_accepts_coverage_verified_on_the_corrected_clock_frame");
+    }
+    checkup_reset();
+    require(!checkup_cycling_run_contexts(snap, 10, DiagnosticsSource::X10a, wall + 10),
+            "cycling_context_reset_withdraws_restored_evidence");
 }
 } // namespace
 int main(int argc, char** argv) {
@@ -1945,6 +2098,8 @@ int main(int argc, char** argv) {
             x10a_modbus_fault_trace_lifecycle();
         else if (name == "x10a_cycling_run_contexts")
             x10a_cycling_run_contexts();
+        else if (name == "x10a_cycling_run_context_restart")
+            x10a_cycling_run_context_restart();
         else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0 ||
                  name.rfind("consent_caller_", 0) == 0)
             consent_staged_sample(name);

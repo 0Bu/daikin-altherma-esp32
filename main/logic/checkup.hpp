@@ -552,7 +552,8 @@ struct CheckupCyclingTrace {
 // interval spanning that edge, and never join a run across the end of a previous boot.
 inline void checkup_cycling_snapshot(CheckupCyclingTrace& out, const CheckupCyclingTrace& saved,
                                      const CheckupCyclingTrace& current, uint32_t unix_s,
-                                     uint32_t boot_s, int64_t saved_oldest_unix_s) {
+                                     uint32_t boot_s, int64_t saved_oldest_unix_s,
+                                     bool clip_live = false) {
     using Trace = CheckupCyclingTrace;
     out.reset();
     out.window_end_s  = CHECKUP_WINDOW_S;
@@ -566,6 +567,7 @@ inline void checkup_cycling_snapshot(CheckupCyclingTrace& out, const CheckupCycl
             const auto packed = trace.at(i);
             const auto kind   = Trace::kind(packed);
             const auto at     = shift + Trace::second(packed);
+            if (at > CHECKUP_WINDOW_S) break;
             if (at < cutoff) {
                 if (kind < Trace::Start) leading = kind;
                 continue;
@@ -588,11 +590,14 @@ inline void checkup_cycling_snapshot(CheckupCyclingTrace& out, const CheckupCycl
         append(saved, saved_offset, saved_cutoff);
         out.end_s = static_cast<uint32_t>(saved_end);
     }
-    if (current.count && current.end_s <= boot_s && live_offset + current.end_s >= 0) {
+    const uint32_t live_end = std::min(current.end_s, boot_s);
+    if (current.count &&
+        (current.end_s <= boot_s || (clip_live && Trace::second(current.at(0)) <= boot_s)) &&
+        live_offset + live_end >= 0) {
         if (out.count && Trace::kind(out.at(out.count - 1)) != Trace::Gap)
             out.push(out.end_s, Trace::Gap);
         append(current, live_offset, 0);
-        out.end_s = static_cast<uint32_t>(live_offset + current.end_s);
+        out.end_s = static_cast<uint32_t>(live_offset + live_end);
         out.live  = true;
     }
     if (out.count) out.unix_s = unix_s;

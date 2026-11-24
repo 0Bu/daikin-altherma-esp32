@@ -823,6 +823,7 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
             symbol_address = int(header.group(1), 16)
             # Check symbol headers even when their first instruction is not recognized.
             if any(helper in current for helper in ("flash_build_for_service",
+                                                    "cycling_run_journal_entry_valid",
                                                     "flash_index_cycling_page",
                                                     "flash_cycling_appended",
                                                     "flash_decode_cycling_group",
@@ -833,7 +834,11 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
                                                     "fault_trace_encode_page")):
                 raise BudgetError(f"cycling journal: unmodeled outlined helper {current}")
             for helper, key in (*CYCLING_TRACKED_HELPERS.items(), *FAULT_TRACKED_HELPERS.items()):
-                if helper in current and not re.fullmatch(budgets["symbols"][key]["pattern"], current):
+                if helper not in current:
+                    continue
+                matches = (re.search(r"\b" + helper + r"\b", current) or
+                           (current.startswith("_Z") and f"{len(helper)}{helper}" in current))
+                if matches and not re.fullmatch(budgets["symbols"][key]["pattern"], current):
                     raise BudgetError(f"cycling journal: unmodeled helper clone {current}")
             for name in INLINED_MQTT_HELPERS:
                 if (re.match(r"^daik::(?:\(anonymous namespace\)::)?" + name + r"\(", current)
@@ -943,6 +948,7 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "cycling_hours_anchor": ["checkup_cycling_hours_locked", "checkup_cycling_anchor"],
         "cycling_trace": ["cycling_trace_snapshot", "cycling_trace_emit", "cycling_trace_push",
                           "room_time_now"],
+        "cycling_trace_clock": ["cycling_trace_snapshot", "cycling_run_wall_time", "room_time_now"],
         "defrost_start_fence": ["defrost_start_copy", "stop_stop_observation_suppressed"],
         "defrost_start_generation": ["defrost_start_copy", "defrost_poll_generation"],
         "checkup_fault_flags": ["fault_saved_flags", "fault_saved_window_flags"],
@@ -1299,12 +1305,22 @@ def shutdown_path_members() -> dict[str, list[str]]:
 CYCLING_WRITE_STACK = {
     "checkpoint": ["cycling_flash_build", "cycling_checkpoint", "cycling_trace_snapshot",
                    "cycling_trace_emit", "cycling_trace_push", "room_time_now"],
+    "snapshot_clock": ["cycling_flash_build", "cycling_checkpoint", "cycling_trace_snapshot",
+                       "cycling_run_wall_time", "room_time_now"],
     "reset_check": ["cycling_flash_build", "cycling_reset_pending"],
     "build_crc": ["cycling_flash_build", "cycling_flash_crc", "history_config_crc"],
     "build_shape": ["cycling_flash_build", "cycling_page_valid", "cycling_part_count"],
     "append_shape": ["history_append", "cycling_part_count"],
     "append_ack": ["history_append", "cycling_checkpoint_acked"],
     "append_owner": ["history_append", "cycling_record_owner"],
+    "run_checkpoint": ["cycling_run_flash_build", "cycling_run_checkpoint", "cycling_run_finalize",
+                       "cycling_run_typical_flow", "cycling_run_restored_window"],
+    "run_checkpoint_clock": ["cycling_run_flash_build", "cycling_run_checkpoint",
+                             "cycling_run_wall_time", "room_time_now"],
+    "run_checkpoint_edges": ["cycling_run_flash_build", "cycling_run_checkpoint",
+                             "cycling_run_trace_match"],
+    "run_build_page": ["cycling_run_flash_build", "cycling_run_page_valid"],
+    "run_build_crc": ["cycling_run_flash_build", "cycling_flash_crc", "history_config_crc"],
 }
 CYCLING_RESTORE_STACK = {
     "read": ["cycling_flash_restore", "cycling_flash_record_read", "sdk_partition_read"],
@@ -1314,13 +1330,26 @@ CYCLING_RESTORE_STACK = {
               "cycling_part_count"],
     "decode": ["cycling_flash_restore", "cycling_trace_push"],
     "adopt": ["cycling_flash_restore", "cycling_trace_restore"],
+    "adopt_clock": ["cycling_flash_restore", "cycling_trace_restore", "cycling_run_wall_time",
+                    "room_time_now"],
+}
+CYCLING_RUN_RESTORE_STACK = {
+    "run_read": ["cycling_run_flash_restore", "cycling_flash_record_read", "sdk_partition_read"],
+    "run_validate": ["cycling_run_flash_restore", "cycling_run_page_valid"],
+    "run_crc": ["cycling_run_flash_restore", "cycling_run_physical_valid",
+                "cycling_flash_crc", "history_config_crc"],
+    "run_adopt": ["cycling_run_flash_restore", "cycling_run_restore", "cycling_run_trace_match"],
+    "run_adopt_clock": ["cycling_run_flash_restore", "cycling_run_restore", "cycling_run_wall_time",
+                        "room_time_now"],
 }
 CYCLING_TRACKED_HELPERS = {"flash_build_next_cycling": "cycling_flash_build",
+                           "flash_insert_ranked_slot": "cycling_scan_rank",
                            "checkup_cycling_reset_pending": "cycling_reset_pending",
                            "checkup_cycling_checkpoint_appended": "cycling_checkpoint_acked",
                            "flash_cycling_owned": "cycling_record_owner",
                            "flash_record_valid": "history_record_scope",
                            "cycling_trace_page_valid": "cycling_page_valid",
+                           "cycling_trace_page_valid_schema": "cycling_page_valid",
                            "cycling_trace_part_count": "cycling_part_count"}
 
 
@@ -1330,7 +1359,14 @@ def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str
             **{f"poll_cycling_{phase}": ["poll_task", "history_board", "history_journal", *tail]
                for phase, tail in CYCLING_WRITE_STACK.items()},
             **{f"poll_cycling_{phase}": ["poll_task", "history_board", "history_flash_restore", *tail]
-               for phase, tail in CYCLING_RESTORE_STACK.items()},
+               for phase, tail in (*CYCLING_RESTORE_STACK.items(), *CYCLING_RUN_RESTORE_STACK.items())},
+            "poll_cycling_run_finalize": ["poll_task", "cycling_run_checkup_record",
+                                          "cycling_run_record_locked", "cycling_run_finalize",
+                                          "cycling_run_typical_flow", "cycling_run_restored_window"],
+            "poll_cycling_gap_finalize": ["poll_task", "stop_checkup_record_poll_gap",
+                                          "cycling_run_checkup_record", "cycling_run_record_locked",
+                                          "cycling_run_finalize", "cycling_run_typical_flow",
+                                          "cycling_run_restored_window"],
             "poll_cycling_trend_filter": ["poll_task", "history_board", "history_flash_restore",
                                           "history_record_scope", "cycling_record_owner"],
         },
@@ -1342,6 +1378,8 @@ def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str
                                         "cycling_part_count"],
             "main_cycling_scan_owner": ["main_task", "boot_sequence", "history_start",
                                         "history_record_scope", "cycling_record_owner"],
+            "main_cycling_run_scan_rank": ["main_task", "boot_sequence", "history_start",
+                                           "cycling_scan_rank"],
         },
     }
     for owner, paths in tasks.items():
@@ -1355,6 +1393,7 @@ def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str
     checkup = stack_source_code(sources["main/checkup.cpp"])
     for source, caller, callee in [
         (history, "flash_journal_scan", "flash_index_cycling_page"),
+        (history, "flash_journal_scan", "flash_insert_ranked_slot"),
         (history, "history_service_flash_restore", "history_restore_cycling_flash"),
         (history, "history_flash_service_journal", "history_restore_cycling_flash"),
         (history, "history_restore_cycling_flash", "flash_decode_cycling_group"),
@@ -1364,6 +1403,14 @@ def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str
         (history, "flash_build_next_cycling", "checkup_cycling_reset_pending"),
         (history, "flash_build_next_cycling", "history_journal_crc_bytes"),
         (checkup, "checkup_cycling_checkpoint", "cycling_snapshot_locked"),
+        (history, "history_service_flash_restore", "history_restore_cycling_runs_flash"),
+        (history, "history_restore_cycling_runs_flash", "checkup_cycling_runs_restore"),
+        (history, "flash_build_for_service", "flash_build_next_cycling_runs"),
+        (history, "flash_build_next_cycling_runs", "checkup_cycling_runs_checkpoint"),
+        (checkup, "cycling_snapshot_locked", "cycling_wall_time"),
+        (checkup, "checkup_cycling_restore", "cycling_wall_time"),
+        (checkup, "checkup_cycling_runs_checkpoint", "cycling_run_context_finalize"),
+        (checkup, "record_cycling_run_context_locked", "cycling_run_context_finalize"),
     ]:
         if len(re.findall(r"\b" + callee + r"\s*\(", stack_function_body(source, caller))) != 1:
             raise BudgetError(f"cycling journal source: {caller}/{callee} changed")
@@ -1726,10 +1773,8 @@ def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> No
                 "ota_health_shutdown_checkup_fault_handoff",
                 "ota_health_shutdown_checkup_fault_handoff_clock",
                 "ota_health_shutdown_checkup_fault_handoff_crc",
-                *(f"ota_health_shutdown_cycling_{phase}"
-                  for phase in ("snapshot", "reset_check", "build_crc", "build_shape",
-                                "append_shape", "append_ack", "append_owner",
-                                *CYCLING_RESTORE_STACK)),
+                *(f"ota_health_shutdown_cycling_{'snapshot' if phase == 'checkpoint' else phase}"
+                  for phase in (*CYCLING_WRITE_STACK, *CYCLING_RESTORE_STACK)),
                 *(f"ota_health_shutdown_fault_{phase}"
                   for phase in (*FAULT_WRITE_STACK, *FAULT_RESTORE_STACK)),
             }:
@@ -2164,9 +2209,8 @@ CONFIG_DOCUMENT_PATHS = frozenset({
       for phase in ("journal", "checkup",
                     "checkup_fault_handoff", "checkup_fault_handoff_clock",
                     "checkup_fault_handoff_crc",
-                    "cycling_snapshot", "cycling_reset_check",
-                    "cycling_build_crc", "cycling_build_shape", "cycling_append_shape",
-                    "cycling_append_ack", "cycling_append_owner",
+                    *(f"cycling_{'snapshot' if part == 'checkpoint' else part}"
+                      for part in CYCLING_WRITE_STACK),
                     *(f"cycling_{part}" for part in CYCLING_RESTORE_STACK),
                     *(f"fault_{part}" for part in FAULT_WRITE_STACK),
                     *(f"fault_{part}" for part in FAULT_RESTORE_STACK))),
@@ -2599,22 +2643,35 @@ def load_budgets(path: Path) -> dict[str, Any]:
 
 
 def evaluate(frames: dict[str, int], budgets: dict[str, Any]) -> dict[str, int]:
-    selected: dict[str, int] = {}
-    errors: list[str] = []
+    return _evaluate_matched(frames, budgets, _matching_frame_names(frames, budgets))
+
+
+def _matching_frame_names(
+    frames: dict[str, int], budgets: dict[str, Any],
+) -> dict[str, tuple[str, ...]]:
     rules = tuple(budgets["symbols"].items())
     match = _frame_rule_matcher(tuple(rule["pattern"] for _, rule in rules))
-    matches_by_rule: list[list[tuple[str, int]]] = [[] for _ in rules]
-    for name, frame in frames.items():
+    names: list[list[str]] = [[] for _ in rules]
+    for name in frames:
         for index in match(name):
-            matches_by_rule[index].append((name, frame))
-    for (key, rule), matches in zip(rules, matches_by_rule):
+            names[index].append(name)
+    return {key: tuple(found) for (key, _), found in zip(rules, names)}
+
+
+def _evaluate_matched(
+    frames: dict[str, int], budgets: dict[str, Any], matching: dict[str, tuple[str, ...]],
+) -> dict[str, int]:
+    selected: dict[str, int] = {}
+    errors: list[str] = []
+    for key, rule in budgets["symbols"].items():
         maximum = rule["max_bytes"]
+        matches = [name for name in matching[key] if name in frames]
         if not matches:
             errors.append(f"symbol {key}: required pattern {rule['pattern']!r} is absent")
             continue
-        selected[key] = max(frame for _, frame in matches)
+        selected[key] = max(frames[name] for name in matches)
         if selected[key] > maximum:
-            names = ", ".join(name for name, _ in matches)
+            names = ", ".join(matches)
             errors.append(
                 f"symbol {key}: {selected[key]} B exceeds {maximum} B ({names})"
             )
@@ -3335,8 +3392,8 @@ def self_test() -> None:
         'daik::logic::cycling_trace_part_count(unsigned int)': 32,
         'daik::(anonymous namespace)::flash_build_next_cycling(daik::(anonymous namespace)::FlashJournalRecord&, unsigned long, bool, bool)': 128,
         'daik::checkup_cycling_reset_pending(daik::DiagnosticsSource)': 32,
-        'daik::(anonymous namespace)::cycling_snapshot_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupCyclingTrace&, long long)': 64,
-        'daik::logic::checkup_cycling_snapshot(daik::logic::CheckupCyclingTrace&, daik::logic::CheckupCyclingTrace const&, daik::logic::CheckupCyclingTrace const&, unsigned long, unsigned long, long long)::{lambda(daik::logic::CheckupCyclingTrace const&, long long, long long)\x231}::operator()(daik::logic::CheckupCyclingTrace const&, long long, long long) const': 48,
+        'daik::(anonymous namespace)::cycling_snapshot_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupCyclingTrace&, long long, bool)': 64,
+        'daik::logic::checkup_cycling_snapshot(daik::logic::CheckupCyclingTrace&, daik::logic::CheckupCyclingTrace const&, daik::logic::CheckupCyclingTrace const&, unsigned long, unsigned long, long long, bool)::{lambda(daik::logic::CheckupCyclingTrace const&, long long, long long)\x231}::operator()(daik::logic::CheckupCyclingTrace const&, long long, long long) const': 48,
         'daik::logic::CheckupCyclingTrace::push(unsigned long, daik::logic::CheckupCyclingTrace::Kind)': 32,
         'daik::checkup_cycling_checkpoint(daik::logic::CheckupCyclingTrace&, daik::logic::CyclingTraceIdentity&, unsigned long&, unsigned long, bool, daik::DiagnosticsSource)': 64,
         'daik::history_restore_cycling_flash(unsigned long)': 176,
@@ -3377,12 +3434,24 @@ def self_test() -> None:
         'daik::logic::fault_trace_decode_page(daik::logic::CheckupFaultTrace&, daik::logic::FaultTracePageInfo const&, unsigned char const*)': 112,
         'daik::checkup_fault_restore(daik::logic::CheckupFaultTrace const&, daik::logic::CyclingTraceIdentity const&, long long, unsigned long, daik::DiagnosticsSource)': 64,
         'daik::logic::checkup_fault_handoff_decode(daik::logic::CheckupFaultTrace&, daik::logic::FaultHandoffPayload const&)': 64,
-        '_ZN4daikL32append_cycling_run_contexts_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_mNS_17DiagnosticsSourceE$constprop$0': 64,
-        'daik::append_cycling_run_contexts_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, unsigned long, daik::DiagnosticsSource)::{lambda(char const*, short)\x231}::operator()(char const*, short) const': 32,
-        'daik::checkup_has_cycling_run_contexts(daik::DiagnosticsSource)': 48,
-        'daik::checkup_cycling_run_contexts(daik::logic::CheckupRunContextSnapshot&, unsigned long, daik::DiagnosticsSource)': 48,
+        '_ZN4daikL32append_cycling_run_contexts_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_mm$constprop$0': 64,
+        'daik::append_cycling_run_contexts_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, unsigned long, unsigned long)::{lambda(char const*, short)\x231}::operator()(char const*, short) const': 32,
+        'daik::checkup_has_cycling_run_contexts(daik::DiagnosticsSource, unsigned long, unsigned long)': 48,
+        'daik::checkup_cycling_run_contexts(daik::logic::CheckupRunContextSnapshot&, unsigned long, daik::DiagnosticsSource, unsigned long)': 48,
         'daik::logic::cycling_run_context_expire(daik::logic::CyclingRunContextTracker&, long long)': 32,
-        'daik::logic::cycling_run_context_snapshot(daik::logic::CheckupRunContextSnapshot&, daik::logic::CheckupRunContextTrace const&, unsigned long)': 160,
+        'daik::logic::cycling_run_context_snapshot(daik::logic::CheckupRunContextSnapshot&, daik::logic::CheckupRunContextTrace const&, unsigned long, unsigned long, unsigned long)': 80,
+        'daik::(anonymous namespace)::flash_build_next_cycling_runs(daik::(anonymous namespace)::FlashJournalRecord&, unsigned long, bool)': 64,
+        'daik::(anonymous namespace)::flash_insert_ranked_slot(daik::(anonymous namespace)::CyclingFinalPage*, unsigned int, unsigned long long, unsigned short)': 32,
+        'daik::checkup_cycling_runs_checkpoint(daik::logic::CyclingRunJournalPage&, unsigned long, unsigned long&, unsigned long, unsigned long, unsigned long)': 96,
+        'daik::logic::cycling_run_context_finalize(daik::logic::CheckupRunContextTrace&, long long, unsigned long, unsigned long)': 64,
+        'daik::logic::cycling_run_context_typical_flow(daik::logic::CheckupRunContextTrace const&, unsigned long, unsigned long, unsigned long)': 144,
+        'daik::(anonymous namespace)::cycling_wall_time(long long)': 80,
+        'daik::(anonymous namespace)::cycling_trace_has_run(daik::logic::CheckupCyclingTrace const&, long long, unsigned long, unsigned long)': 48,
+        'daik::logic::cycling_run_journal_page_valid(daik::logic::HistoryJournalHeader const&, daik::logic::CyclingRunJournalPage const&)': 64,
+        'daik::logic::cycling_run_context_restored_in_window(daik::logic::CyclingRunContext const&, unsigned long, unsigned long, unsigned long)': 32,
+        'daik::history_restore_cycling_runs_flash()': 64,
+        'daik::(anonymous namespace)::flash_record_physically_valid(daik::(anonymous namespace)::FlashJournalRecord const&)': 128,
+        'daik::checkup_cycling_runs_restore(daik::logic::CyclingRunJournalPage const&, unsigned long, unsigned long)': 96,
         'daik::(anonymous namespace)::record_cycling_run_context_locked(daik::logic::StopContextSample const&, daik::CachedValue const*, unsigned int, daik::logic::CheckupSample const&, int, bool, long long, unsigned long)': 96,
         'daik::logic::cycling_run_context_step(daik::logic::CyclingRunContextTracker&, daik::logic::CheckupRunContextTrace&, daik::logic::CyclingRunSample const&, long long, unsigned long)': 112,
         'daik::resolve_rwt_locator(daik::logic::ProfileView const&)': 64,
@@ -4666,6 +4735,12 @@ def self_test() -> None:
         ("daik::logic::cycling_trace_decode_part()", "unmodeled outlined helper"),
         ("daik::(anonymous namespace)::flash_build_next_cycling() [clone .isra.1]",
          "unmodeled helper clone"),
+        ("daik::(anonymous namespace)::flash_insert_ranked_slot(daik::(anonymous namespace)::CyclingFinalPage*, "
+         "unsigned int, unsigned long long, unsigned short) [clone .isra.1]",
+         "unmodeled helper clone"),
+        ("daik::logic::cycling_trace_page_valid_schema(daik::logic::HistoryJournalHeader const&, "
+         "daik::logic::CyclingTracePageInfo const&, unsigned long) [clone .isra.1]",
+         "unmodeled helper clone"),
     ):
         for first in ("004136 entry a1, 32", "000000 .word 0x000000"):
             reject_disassembly(helper, fixture + f"\n00004000 <{helper}>:\n"
@@ -4758,15 +4833,17 @@ def self_test() -> None:
 
     # Exercise every required anchor, not only the original HTTP examples. Small fixture frames
     # establish acceptance/control behavior; the real ELF supplies the production measurements.
+    # These mutants only remove known names or change their sizes. Reuse the name matches while
+    # evaluating each mutant's full set of symbol sizes and path budgets.
+    matching = _matching_frame_names(frames, budgets)
     inventory_controls = 0
     for key, rule in budgets["symbols"].items():
-        pattern = re.compile(rule["pattern"])
-        names = [name for name in frames if pattern.search(name)]
+        names = matching[key]
         removed = dict(frames)
         for name in names:
             removed.pop(name)
         try:
-            evaluate(removed, budgets)
+            _evaluate_matched(removed, budgets, matching)
         except BudgetError as exc:
             assert f"symbol {key}: required pattern" in str(exc)
         else:
@@ -4774,7 +4851,7 @@ def self_test() -> None:
         grown = dict(frames)
         grown[names[0]] = rule["max_bytes"] + 16
         try:
-            evaluate(grown, budgets)
+            _evaluate_matched(grown, budgets, matching)
         except BudgetError as exc:
             assert f"symbol {key}:" in str(exc)
         else:

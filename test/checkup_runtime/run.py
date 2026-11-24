@@ -39,7 +39,7 @@ CASES = [
     "hydronic_waiting", "hydronic_population", "hydronic_age", "hydronic_expiry",
     "hydronic_consent_lock", "hydronic_source_lock", "hydronic_shared_witness", "hydronic_shutdown",
     "hydronic_reader_generation", "hydronic_pause_resume",
-    "x10a_cycling_run_contexts",
+    "x10a_cycling_run_contexts", "x10a_cycling_run_context_restart",
     "dhw_trace_capture", "dhw_trace_restore_forward", "dhw_trace_restore_backward",
     "dhw_trace_checkpoint_clock_step",
     "dhw_trace_pause", "dhw_trace_source_reset",

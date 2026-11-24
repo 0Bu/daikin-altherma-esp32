@@ -743,6 +743,7 @@ def self_test(budgets, sources, error):
     # convenient semantic anchors above. Existing leases and their mutation controls stay intact.
     for path, names in (
         ('main/hp_modbus.cpp', ('mb_record_poll_gap',)),
+        ('main/history.cpp', ('flash_insert_ranked_slot',)),
         ('main/checkup.cpp', ('copy_dhw_trace_locked', 'commit_and_fold_locked', 'apply_dhw_reset_locked',
                               'persist_wipe', 'slot_start', 'slot_set_diagnostics')),
         ('main/logic/checkup.hpp', ('dhw_loss_step_impl', 'dhw_loss_step_traced',
