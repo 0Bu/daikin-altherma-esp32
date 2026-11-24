@@ -66,6 +66,8 @@ inline daik::Config                   current;
 inline std::vector<daik::CachedValue> rows, modbus_rows;
 inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
+inline bool                           ota_brief_busy  = false;
+inline const char*                    ota_brief_state = "idle";
 // Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
 inline int                              values_readers = 0, values_readers_peak = 0;
 inline bool                                   refuse_values_admission = false, clock_synced = true;
@@ -381,8 +383,14 @@ std::string config_profile() { return fixture::current.profile; }
 bool        config_stored_blob_unreadable() { return fixture::config_unreadable; }
 bool        hw_octal_spi() { return false; }
 bool        provisioning_ap_active() { return false; }
-bool        ota_download_active() { return fixture::ota; }
-bool        ota_busy() { return fixture::ota; }
+bool           ota_download_active() { return fixture::ota; }
+bool           ota_busy() { return fixture::ota; }
+OtaStatusBrief ota_status_brief() {
+    OtaStatusBrief out{};
+    out.busy  = fixture::ota_brief_busy;
+    out.state = fixture::ota_brief_state;
+    return out;
+}
 size_t      heap_largest_internal_block() { return 32768; }
 uint8_t     heap_guard_restarts() { return 0; }
 void        stack_watch_sample(StackWatch) noexcept { ++fixture::stack_samples; }
@@ -1887,6 +1895,40 @@ int main(int argc, char** argv) {
         check(req.response.find("\"run_contexts\"") == std::string::npos &&
                   req.response.find("\"flow_typical_l_min\"") == std::string::npos,
               "modbus /status leaked X10A cycling run_contexts");
+    });
+    run("status_ota_brief", [] {
+        ota             = false;
+        ota_brief_busy  = false;
+        ota_brief_state = "idle";
+        auto req        = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "idle status ota brief failed");
+        successful(req);
+        check(req.response.find(
+                  "\"ota\":{\"channel\":\"release\",\"busy\":false,\"state\":\"idle\"}") !=
+                      std::string::npos ||
+                  req.response.find(
+                      "\"ota\":{\"channel\":\"dev\",\"busy\":false,\"state\":\"idle\"}") !=
+                      std::string::npos,
+              "idle /status missing expected ota brief fields");
+
+        ota_brief_busy  = true;
+        ota_brief_state = "checking";
+        req             = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "busy status ota brief failed");
+        successful(req);
+        check(req.response.find("\"busy\":true,\"state\":\"checking\"") != std::string::npos,
+              "busy /status missing expected ota brief fields");
+
+        ota_brief_busy  = false;
+        ota_brief_state = "";
+        req             = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "empty-state ota brief failed");
+        successful(req);
+        check(req.response.find("\"busy\":false,\"state\":\"idle\"") != std::string::npos,
+              "empty ota_brief.state did not fall back to idle");
+
+        ota_brief_busy  = false;
+        ota_brief_state = "idle";
     });
     check(count > 0, "unknown oracle");
     std::printf("PASS total=%u\n", count);

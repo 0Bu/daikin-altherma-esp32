@@ -499,7 +499,7 @@ function invalidateLiveReadings(reason, busy = false) {
   S.transportBusy = busy;
   if (reason === "status" && typeof markCheckupDhwStale === "function") markCheckupDhwStale();
   if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
-  renderApp();
+  if (typeof _bootReady === "undefined" || !_bootReady) renderApp();
 }
 async function refreshStatus(paint = true) {
   return !!(await readStatusFrame(paint));
@@ -521,12 +521,27 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   catch (error) {
     if (!current()) return false;
     const busy = String(error.message) === "503";
+    const bootPending = typeof _bootReady !== "undefined" && _bootReady ? _bootReady : null;
     if (!S.otaCached) invalidateLiveReadings("status", busy);
-    if (quiet) return false;
+    if (quiet) {
+      if (bootPending && !S.otaCached) {
+        void bootPending.then(() => {
+          if (current() && !S.otaCached) renderApp();
+        });
+      }
+      return false;
+    }
     const ota = busy && typeof probeRunningOta === "function"
       ? await probeRunningOta() : false;
     if (!current()) return false;
-    if (ota) renderOtaDashboardStatus(); else markUnreachable();
+    const finishErrorPaint = () => {
+      if (!current()) return;
+      if (bootPending && !S.otaCached) renderApp();
+      if (ota) renderOtaDashboardStatus(); else markUnreachable();
+    };
+    const nowBoot = typeof _bootReady !== "undefined" && _bootReady ? _bootReady : null;
+    if (nowBoot) void nowBoot.then(finishErrorPaint);
+    else finishErrorPaint();
     return false;
   }
   if (!current() || !acceptImageLease(s)) return false;
@@ -557,6 +572,16 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
     loadHpProbeCatalog(profile);
   hydrateRoutedPopup();
+  const otaState = typeof s?.ota?.state === "string" ? s.ota.state : "idle";
+  const otaActiveBrief = s?.ota?.busy === true || (otaState !== "idle" && otaState !== "error");
+  if (otaState !== "error") S.otaErrorProbed = false;
+  const shouldProbeOta = otaActiveBrief || (otaState === "error" && !S.otaErrorProbed);
+  if (!S.otaBusy && shouldProbeOta && typeof probeRunningOta === "function") {
+    if (otaState === "error") S.otaErrorProbed = true;
+    const runProbe = () => { if (!S.otaBusy && !S.imageReloading) void probeRunningOta(); };
+    if (typeof _bootReady !== "undefined" && _bootReady) void _bootReady.then(runProbe);
+    else runProbe();
+  }
   if (paint) renderApp();
   return request;
 }

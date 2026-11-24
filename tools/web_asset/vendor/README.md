@@ -18,8 +18,8 @@ tag `zopfli-1.0.3`, commit `bd64b2f0553d4f1ef4e6627647c5d9fc8c71ffc0`.
 `UPSTREAM.json` records the source archive and individual file hashes. PNG code, the upstream CLI,
 the zlib container and the unused library dispatcher are omitted. No generated binaries are vendored.
 
-The firmware build selects Zopfli with five iterations for `index.html.gz`, the locale bundle and
-the twelve per-catalog quality-check artifacts. The Python adapter compiles its
+The firmware build selects Zopfli with five iterations for `index.html.gz`, the five embedded
+locale packs and the twelve per-catalog quality-check artifacts. The Python adapter compiles its
 small stdin/stdout helper using native `cc` (`HOST_CC` can name another native compiler), with no
 package installation or network access. It caches the executable in a private temporary directory
 keyed by source/adapter hashes, compiler identity, options and platform. `WEB_ASSET_CACHE_DIR` can
@@ -30,9 +30,9 @@ unless `--gzip-encoder zopfli` is selected.
 
 ## Browser decoder
 
-`lzma-js/` contains the unmodified decompressor and its complete MIT license, with exact upstream
-commit and file hashes in `UPSTREAM.json`. `pack_startup_script.py` and `build_locale_bundle.py`
-use Python's standard-library LZMA encoder and embed this decoder in the dashboard and locale
-resources, respectively. The
+`../lzma1_decoder.js` is a first-party, pure-TypedArray standalone LZMA1 decoder with strict
+13-byte header and bounds checks and zero globals. `pack_startup_script.py` and
+`build_locale_bundle.py` use Python's standard-library LZMA encoder and embed this decoder in the
+dashboard and the four cognate locale packs (`de` is served as plain gzipped JavaScript). The
 [architecture reference](../../../docs/ARCHITECTURE.md#http-and-browser-transport) owns the delivery
 and resource bounds.

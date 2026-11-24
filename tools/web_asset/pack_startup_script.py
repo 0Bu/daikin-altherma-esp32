@@ -16,6 +16,7 @@ SCRIPT_TAG = re.compile(r"</?script(?=[\t\n\f\r />]|$)", re.IGNORECASE)
 SCRIPT_END = re.compile(r"</script(?=[\t\n\f\r />]|$)", re.IGNORECASE)
 BODY_END = re.compile(r"\s*</body>\s*</html>\s*\Z")
 APP_MARKER = "//@@INLINE:app.js@@"
+LOCALE_TAG_DECL = 'const LOCALE_ASSET_TAG=""'
 
 
 def script_span(page: str) -> tuple[int, int]:
@@ -54,14 +55,28 @@ def validate_assembled_app(page: str, manifest: Path) -> None:
         raise ValueError("startup script slot differs from the assembled app.sources")
 
 
-def pack_startup_script(page: str) -> str:
+def stamp_locale_tag(script_text: str, locale_tag: str | None) -> str:
+    if not locale_tag:
+        return script_text
+    if re.fullmatch(r"[0-9a-f]{8}", locale_tag) is None:
+        raise ValueError(f"invalid locale asset tag: {locale_tag!r}")
+    count = script_text.count(LOCALE_TAG_DECL)
+    if count == 1:
+        return script_text.replace(LOCALE_TAG_DECL, f'const LOCALE_ASSET_TAG="{locale_tag}"', 1)
+    if count > 1 or "LOCALE_ASSET_TAG" in script_text:
+        raise ValueError("startup script must contain at most one exact LOCALE_ASSET_TAG placeholder")
+    return script_text
+
+
+def pack_startup_script(page: str, locale_tag: str | None = None) -> str:
     """Replace only the minified script content and leave the exact HTML slot in place."""
     start, end = script_span(page)
-    source = page[start:end].encode("utf-8")
+    script_text = stamp_locale_tag(page[start:end], locale_tag)
+    source = script_text.encode("utf-8")
     frame = PREFIX + source
     if not source or len(frame) > MAX_DECODED_BYTES:
         raise ValueError("startup script frame must be nonempty and fit the 1 MiB decoded bound")
-    decoder, license_text, _ = load_decoder()
+    decoder = load_decoder()
     try:
         packed = encode_frame(frame, MAX_DECODED_BYTES)
     except lzma.LZMAError as error:
@@ -75,19 +90,19 @@ def pack_startup_script(page: str) -> str:
     # existing body-end element as the anchor. This slot deliberately accepts no attributes;
     # a nonce, module conversion or a new CSP needs its own execution review.
     wrapper = (
-        '(()=>{const slot=document.currentScript;if(!slot||!slot.isConnected)throw Error("app script slot");'
-        f'const packed=Uint8Array.from(atob("{encoded}"),c=>c.charCodeAt(0));'
+        '(()=>{"use strict";const slot=document.currentScript;if(!slot||!slot.isConnected)throw Error("app script slot");'
+        f'const bin=atob("{encoded}"),packed=new Uint8Array(bin.length);'
+        'for(let i=0;i<bin.length;i++)packed[i]=bin.charCodeAt(i);'
         f'if(packed.length<13||!{header}.every((v,i)=>packed[i]===v))'
         'throw Error("app LZMA header");'
-        'const decoder=(function(){/*' + license_text + '*/' + decoder + ';return this.LZMA}).call({});'
-        'const raw=decoder.decompress(packed);'
-        'if(!Array.isArray(raw)&&!ArrayBuffer.isView(raw))throw Error("app payload type");'
-        f'const all=Uint8Array.from(raw);if(all.length!=={len(frame)})throw Error("app payload length");'
+        + decoder +
+        f'const all=lzma1Decompress(packed,{len(frame)});'
+        f'if(all.length!=={len(frame)})throw Error("app payload length");'
         f'if(!{prefix}.every((v,i)=>all[i]===v))throw Error("app payload prefix");'
         f'const bytes=all.subarray({len(PREFIX)});'
-        'const table=Array.from({length:256},(_,n)=>{for(let i=0;i<8;i++)'
-        'n=n&1?3988292384^(n>>>1):n>>>1;return n>>>0});'
-        'let checksum=4294967295;for(const b of bytes)checksum=table[(checksum^b)&255]^(checksum>>>8);'
+        'const table=new Int32Array(256);for(let n=0;n<256;n++){let c=n;'
+        'for(let k=0;k<8;k++)c=c&1?-306674912^(c>>>1):c>>>1;table[n]=c;}'
+        'let checksum=-1;for(let i=0;i<bytes.length;i++)checksum=table[(checksum^bytes[i])&255]^(checksum>>>8);'
         f'if(((checksum^4294967295)>>>0)!=={crc})throw Error("app payload integrity");'
         'const source=new TextDecoder("utf-8",{fatal:true,ignoreBOM:true}).decode(bytes);'
         'const script=document.createElement("script");script.textContent=source;'

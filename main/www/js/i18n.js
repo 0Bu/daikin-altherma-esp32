@@ -125,6 +125,7 @@ let LANG = (() => { const c = lsGet("uiLang"); return uiLangSupported(c) ? c : a
 // the startup page stays independent of that request and the internet. One Promise per
 // language coalesces boot/status races and a failed asset is remembered for this page lifetime.
 const LOCALE_LOADS = new Map();
+const LOCALE_ASSET_TAG = "";
 function localeReady(lang) {
   if (!I18N[lang]) return false;
   if (lang === "en") return true;
@@ -143,19 +144,39 @@ function localeReady(lang) {
            (!!faultCodes && faultCodes.values.length === FAULT_CODE_LOCALE_COUNT &&
             !!mbDeltas && MB_DELTA_LOCALE_KEYS.every((key) => !!mbDeltas[key])));
 }
+const LOCALE_LOAD_TIMEOUT_MS = 6000;
 function loadLocale(lang) {
   if (localeReady(lang)) return Promise.resolve(true);
   if (!uiLangSupported(lang)) return Promise.resolve(false);
   if (LOCALE_LOADS.has(lang)) return LOCALE_LOADS.get(lang);
-  const pending = new Promise((resolve) => {
+  let settled = false;
+  let pending;
+  pending = new Promise((resolve) => {
     const script = document.createElement("script");
-    script.src = `/locale.js?lang=${encodeURIComponent(lang)}`;
+    let timer = null;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null && typeof clearTimeout === "function") clearTimeout(timer);
+      script.onload = null;
+      script.onerror = null;
+      if (!ok) {
+        if (LOCALE_LOADS.get(lang) === pending) LOCALE_LOADS.delete(lang);
+        script.remove?.();
+      }
+      resolve(ok);
+    };
+    const q = LOCALE_ASSET_TAG
+      ? `lang=${encodeURIComponent(lang)}&v=${encodeURIComponent(LOCALE_ASSET_TAG)}`
+      : `lang=${encodeURIComponent(lang)}`;
+    script.src = `/locale.js?${q}`;
     script.async = true;
-    script.onload = () => resolve(localeReady(lang));
-    script.onerror = () => resolve(false);
+    script.onload = () => finish(localeReady(lang));
+    script.onerror = () => finish(false);
+    if (typeof setTimeout === "function") timer = setTimeout(() => finish(false), LOCALE_LOAD_TIMEOUT_MS);
     document.head.appendChild(script);
   });
-  LOCALE_LOADS.set(lang, pending);
+  if (!settled) LOCALE_LOADS.set(lang, pending);
   return pending;
 }
 // Each key is a string, or a function for the parameterised ones (same arity in every catalog).
