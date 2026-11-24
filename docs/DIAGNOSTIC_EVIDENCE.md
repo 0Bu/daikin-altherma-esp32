@@ -1,8 +1,9 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: b4fc9cf5ce32d885cb01ae0fa9741fe0c8a628ad7830c28881ac5f671039078f -->
+<!-- diagnostic-evidence-contract: ac7ded427a3eb99eed8053147078eb561c76646e05b1f5aefe32bbcd98d60d42 -->
 
-For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
+For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
+answers four questions.
 
 1. Which fact is supported by external evidence?
 2. What does the firmware actually evaluate?
@@ -17,9 +18,9 @@ paused time on resume. Only factory reset or a source/mapping change clears stor
 the results below is a recommendation. Polls begun before a consent transition cannot supply
 diagnosis evidence for the replacement state.
 
-The card observes ordinary operation; it does not command service mode, full load, or a stationary
-refrigerant test. No manufacturer settling duration can therefore be inferred from a complete
-24-hour window, and none of the eight results is a passed commissioning test.
+Plant diagnostics observes ordinary operation. It does not command service mode, full load, or
+a stationary refrigerant test. A complete 24-hour window establishes neither a manufacturer
+settling duration nor a passed commissioning test.
 
 X10A evidence is scoped to its configured target generation, and HomeHub/Altherma 4 Modbus evidence
 to its configured target endpoint and detected Modbus profile. Changed wiring, profile, endpoint or
@@ -646,7 +647,7 @@ station and its separate pump in the lower-temperature main heating zone. Its la
 systems with and without hydraulic separators. The guide describes the equipment and control
 topology. The X10A input mapping comes from the project catalog.
 
-**Firmware rule:** The row reports the lowest accepted flow after the internal pump ran
+**Firmware rule:** The check reports the lowest accepted flow after the internal pump ran
 continuously for at least 60 seconds. It assigns no good/bad assessment. On Modbus,
 `checkup_modbus_coverage` enables `flow` only when `HomeHub` EKRHH scaling is affirmatively
 verified (`ModbusProfileBasis::Affirmative` via probe register 79)
@@ -654,6 +655,11 @@ and the committed row carries `!cv.modbus_flow_scale_unverified`; `Probing`, `Fa
 `Altherma4` sweeps leave `flow` unsupported (`unavailable`, withheld from Modbus checkups), and
 Modbus mode leaves `flow.hydronic` unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`,
 null metrics). See CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
+
+After diagnostic opt-in, the **Flow rate** inspector displays the accepted `min_l_min` from the
+`flow` check in `/status.health`. When the matching source has a visible series with samples, the
+horizontal reference uses the same Y-axis as the five-minute trend. The reference leaves the
+trend samples unchanged.
 
 The independent X10A hydronic population uses the same completed X10A sweep for measured pre-heater
 leaving water, return water, flow and the required operating witnesses. Readable endpoints count
@@ -687,12 +693,12 @@ active-zone controller target is available in current queryable profiles. No 900
 classifier, 9 K alarm or model minimum compressor speed is inferred. The secondary comparison
 keeps zone intent unknown even where multiple setpoints are visible.
 
-**Not established:** The minimum has no retained operating-mode context and is not a design-flow
-measurement. It cannot be compared generally with a model manual's commissioning minimum or
-identify a hydraulic restriction. The hydronic ranges do not establish steady operation, emitter
-output, bypass, restriction, sensor calibration or available pump head. The secondary temperature
-difference alone establishes neither flow through a separator nor heat lost from a buffer or
-extra electricity use.
+**Not established:** The minimum has no retained timestamp or operating-mode context and is not a
+design-flow measurement. It cannot be compared generally with a model manual's commissioning
+minimum or identify a hydraulic restriction. The hydronic ranges do not establish steady operation,
+emitter output, bypass, restriction, sensor calibration or available pump head. The secondary
+temperature difference alone establishes neither flow through a separator nor heat lost from a
+buffer or extra electricity use.
 
 <a id="diagnosis-heater"></a>
 ### 7. Electric backup and booster heaters (`heater`)

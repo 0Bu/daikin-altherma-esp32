@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -172,6 +172,11 @@ I18N.ja = localeValues([
   /* check.defrost */ "霜取り回数",
   /* check.pressure */ "水圧",
   /* check.flow */ "最低流量",
+  /* check.flow.lowest */ "最低実測流量",
+  /* check.flow.runup */ "ポンプが1分以上連続運転した後",
+  /* check.flow.assessment */ "必要な流量は機種と運転モードによって異なります。",
+  /* check.flow.measurements */ "測定の詳細",
+  /* check.flow.live */ "現在",
   /* check.heater */ "電気ヒーター",
   /* check.retries */ "保護カウンタ",
   /* check.status.ok */ "OK",

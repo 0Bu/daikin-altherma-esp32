@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -172,6 +172,11 @@ I18N.fi = localeValues([
   /* check.defrost */ "Sulatukset",
   /* check.pressure */ "Vedenpaine",
   /* check.flow */ "Alin virtaama",
+  /* check.flow.lowest */ "Pienin mitattu virtaama",
+  /* check.flow.runup */ "Kun pumppu on käynyt yhtäjaksoisesti vähintään 1 min",
+  /* check.flow.assessment */ "Virtaaman riittävyys riippuu mallista ja käyttötilasta.",
+  /* check.flow.measurements */ "Mittaustiedot",
+  /* check.flow.live */ "Nyt",
   /* check.heater */ "Sähkövastukset",
   /* check.retries */ "Suojauslaskurit",
   /* check.status.ok */ "OK",

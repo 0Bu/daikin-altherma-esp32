@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -172,6 +172,11 @@ I18N.it = localeValues([
   /* check.defrost */ "Sbrinamenti",
   /* check.pressure */ "Pressione acqua",
   /* check.flow */ "Portata min.",
+  /* check.flow.lowest */ "Portata minima misurata",
+  /* check.flow.runup */ "Dopo almeno 1 min di funzionamento continuo della pompa",
+  /* check.flow.assessment */ "La portata necessaria dipende dal modello e dalla modalità di funzionamento.",
+  /* check.flow.measurements */ "Dettagli delle misure",
+  /* check.flow.live */ "Ora",
   /* check.heater */ "Resistenze",
   /* check.retries */ "Contatori protezione",
   /* check.status.ok */ "OK",

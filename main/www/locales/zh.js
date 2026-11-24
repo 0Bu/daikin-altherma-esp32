@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -172,6 +172,11 @@ I18N.zh = localeValues([
   /* check.defrost */ "除霜次数",
   /* check.pressure */ "水压",
   /* check.flow */ "最低流量",
+  /* check.flow.lowest */ "实测最低流量",
+  /* check.flow.runup */ "水泵连续运行至少 1 分钟后",
+  /* check.flow.assessment */ "流量是否足够取决于机型和运行模式。",
+  /* check.flow.measurements */ "测量详情",
+  /* check.flow.live */ "当前",
   /* check.heater */ "电加热器",
   /* check.retries */ "保护计数器",
   /* check.status.ok */ "正常",

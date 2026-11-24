@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -172,6 +172,11 @@ I18N.es = localeValues([
   /* check.defrost */ "Desescarches",
   /* check.pressure */ "Presión de agua",
   /* check.flow */ "Caudal mín.",
+  /* check.flow.lowest */ "Menor caudal medido",
+  /* check.flow.runup */ "Tras al menos 1 min de funcionamiento continuo de la bomba",
+  /* check.flow.assessment */ "Que el caudal sea suficiente depende del modelo y del modo de funcionamiento.",
+  /* check.flow.measurements */ "Detalles de medición",
+  /* check.flow.live */ "Ahora",
   /* check.heater */ "Resistencias",
   /* check.retries */ "Contadores protección",
   /* check.status.ok */ "OK",

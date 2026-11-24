@@ -276,10 +276,16 @@ and target use the same selected accent. The labelled SVG is a group, not an acc
 tree. Opening preserves scroll position; tapping the same target, close or Escape closes the panel.
 
 The inspector is an attached, inset explanation tongue using the shared clipped 220 ms pull-out
-transition. It is inert while collapsed. Content order is title/headline/exact source identity,
+transition. It is inert while collapsed. The usual order is title/headline/exact source identity,
 explanation, optional history, then member values. Assemblies with no single measurement have no
 headline or numeric chart. A leaf omits its own duplicated value row but keeps a current HomeHub
 twin with its comparison; grouped components keep their full member list.
+
+**Flow rate** shows the live value and source above the trend. When Plant diagnostics is enabled,
+the lowest-flow observation follows the trend and identifies its own source. A labelled red
+horizontal reference marks the observed minimum on the shared Y-axis when the matching source
+has visible samples. Gaps and cursor readouts still refer to the five-minute samples.
+**Measurement details** holds the explanation, related readings and diagnostic details.
 
 Explain what the quantity is, its bounded normal context, then current state or absence. Held data
 cannot reappear in a headline, members or state sentence. A fallback pressure row must own headline,
@@ -398,8 +404,12 @@ not establish identical readings. Translated Model rows have stable explanation 
 
 The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in and while the active
 source (`X10A` or `Modbus`) is live or has retained/confirmed window state. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
-Rows cover fault, tank loss, starts, defrost, water pressure, steady flow, heater runtime and retry
-changes. Collapsed rows show the primary measured value when available (or checking, no window, measured, tentative and N/A); the collapsed `fault` row stays visually quiet when no active or retained fault exists (retaining an accessible label) and otherwise renders `<code> · <duration>` (or `<code> · Unknown` when stale, falling back to status text without a code).
+Rows cover fault, tank loss, starts, defrost, water pressure, heater runtime and retry changes. The
+observation-only flow result appears in the **Flow rate** inspector. Collapsed rows show the primary
+measured value when available, or a status such as checking, no window, measured, tentative or N/A.
+The collapsed `fault` row retains an accessible label and stays quiet when no active or retained
+fault exists. It otherwise shows `<code> · <duration>` or `<code> · Unknown` when stale, with status
+text if no code is available.
 Expanders usually show the reading and its time, an interpretation, and expected conditions or
 assessment limits. The fault expander shows a hero summary of the latest episode, a second-resolution
 24-hour categorical pill bar (`min-width: 3px`, fault-free grey, unmeasured hatch, distinct colors
@@ -434,8 +444,8 @@ See [plant persistence](PLANT.md#reboot-and-persistence) for restore admission a
 Initial opt-in starts fresh; pausing (`Off`) preserves collected 24-hour histories while stopping new recording. X10A re-detection/profile/pin changes reset only X10A; HomeHub host/port/unit changes reset only Modbus.
 A pending identity reset hides
 old evidence and discards an in-flight sample. Missing capabilities stay unknown/unavailable.
-Pressure distinguishes an immediate low sample from sustained confirmation; flow is observation
-only; BSH/BUH have separate clocks and sub-minute activity remains visible. Source limitations and
+Pressure distinguishes an immediate low sample from sustained confirmation. BSH and BUH have
+separate clocks, and sub-minute activity remains visible. Source limitations and
 all rule details are maintained in [DIAGNOSTICS.md](DIAGNOSTICS.md) and its evidence reference.
 
 A separate neutral **Refrigerant (heating)** row uses passive fresh-sweep observation.
@@ -668,8 +678,7 @@ Use shared components rather than near-identical render paths:
 - Full-width label/value rows with tabular readings. Expanders are real buttons with chevron and
   `aria-expanded`; their inset tint panel emerges beneath the divider with bottom-only corners,
   top shadow and synchronized 220 ms height/slide motion.
-- The schematic inspector uses that same attached tongue treatment, with description before
-  chart before values. Collapsed panels are inert; motion is not necessary to understand them.
+- The schematic inspector uses that same attached tongue treatment. Collapsed panels are inert.
 - Toasts carry ordinary save outcomes. OTA progress is inline, terminal OTA errors persistent
   alerts, and crash deletion uses the in-banner danger action.
 - Pill-to-pipe leader ties end before the pipe centre and inherit selection tint. Contained readings

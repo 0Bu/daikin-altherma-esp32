@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -172,6 +172,11 @@ I18N.de = localeValues([
   /* check.defrost */ "Abtauvorgänge",
   /* check.pressure */ "Wasserdruck",
   /* check.flow */ "Min. Durchfluss",
+  /* check.flow.lowest */ "Niedrigster Messwert",
+  /* check.flow.runup */ "Ab 1 min durchgehendem Pumpenlauf",
+  /* check.flow.assessment */ "Ob der Durchfluss ausreicht, hängt vom Modell und der Betriebsart ab.",
+  /* check.flow.measurements */ "Messdetails",
+  /* check.flow.live */ "Jetzt",
   /* check.heater */ "Heizstäbe",
   /* check.retries */ "Schutzzähler",
   /* check.status.ok */ "OK",

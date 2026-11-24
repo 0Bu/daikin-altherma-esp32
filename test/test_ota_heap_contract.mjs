@@ -990,13 +990,13 @@ assert.ok(streamDeadline >= 0 && redirectReset > streamDeadline && rangeReset > 
           clearResponse > redirectClose,
   "each stream must arm before headers, then join before a redirected socket is cleared/reopened");
 
-// ── Two exact, fail-closed mid-stream resumes ────────────────────────────────────────────────
+// ── Bounded, exact mid-stream resumes ───────────────────────────────────────────────────────
 // Dynamic TLS records can lose allocations or socket reads after the OTA slot/hash are already
-// partially advanced. Recovery stays inside the accepted operation: at most two fresh HTTPS
+// partially advanced. Recovery stays inside the accepted operation: at most three fresh HTTPS
 // clients ask for the exact remaining suffix while the original OTA handle, PSA hash and absolute
 // deadline remain authoritative. Every resumed stream must advance before another reconnect.
-assert.match(transport, /OTA_TRANSFER_MAX_RESUMES\s*=\s*2/,
-  "a transfer may reconnect at most twice, never loop until a broken network happens to pass");
+assert.match(transport, /^constexpr unsigned OTA_TRANSFER_MAX_RESUMES\s*=\s*3\s*;$/m,
+  "a transfer may reconnect at most three times");
 assert.match(transport,
   /resumes\s*<\s*OTA_TRANSFER_MAX_RESUMES[\s\S]{0,160}?total\s*>\s*0[\s\S]{0,120}?stream_started_at\s*<\s*written[\s\S]{0,80}?written\s*<\s*total/,
   "resume must require unused budget and progress in the current known-size image stream");

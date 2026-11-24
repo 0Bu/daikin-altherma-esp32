@@ -1319,12 +1319,176 @@ async function assertDiagnosisSummaryRows(page, context) {
   assert.deepEqual(layout.invalid, [], `${context}: complete diagnosis readings must fit beside their labels`);
 }
 
+async function assertFlowInspector(page, context, missingDay) {
+  await page.evaluate(`(() => {
+    S.status.health.source = "x10a";
+    S.status.hp.connected = true;
+    S.status.modbus = { ...S.status.modbus, enabled: true, connected: true,
+      host: "flow.fixture.invalid", profile: "homehub", profile_basis: "affirmative" };
+    S._values = [...S._values.filter(row => !/flow sensor/i.test(row.label)),
+      { label: "Flow sensor", value: "14.2", unit: "L/min", reg: 0x62, concept: "flow" }];
+    S._modbus = [{ off: 49, label: "Flow rate", value: 14.6, unit: "L/min", concept: "flow" }];
+    S.status.history.rows = [...S.status.history.rows.filter(row => row.id !== "flow"),
+      { id: "flow", label: "Flow sensor" }];
+    S.status.history.modbus_rows = [{ id: "flow", label: "Flow rate" }];
+    syncHistSources();
+    S.histHidden.delete("flow");
+    S.histPin.delete("flow");
+    const ring = { at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: "L/min", b0: 280,
+      t0: 1791868800, held: [] };
+    S.hist.set("flow", { ...ring, v: [142, null, 150, 145, 120, 151, 153, 146] });
+    S.hist.set(histCacheKey("flow", "modbus"), { ...ring, v: [146, 148, 154, null, 123, 153, 154, 149] });
+    renderApp();
+    return true;
+  })()`);
+  // A previous inspector can still be collapsing. Its scroll clamp must settle before the
+  // native pointer position is measured.
+  await page.waitFor(`document.getElementById("inspect").getAnimations({subtree: true})
+    .every(animation => animation.playState !== "running")`);
+  await clickElement(page, '#schem [data-insp="flow"]');
+  await page.waitFor(`S.insp === "flow" && document.querySelector("#inspHist [data-hist=flow]") &&
+    document.getElementById("inspect").getAnimations({subtree: true})
+      .every(animation => animation.playState !== "running")`);
+  const diagnosisText = () => page.evaluate('document.getElementById("inspFlowDiagnosis").innerText');
+  const flowLine = () => page.evaluate('!!document.querySelector("#inspHist .vhist-flow-min")');
+  assert.deepEqual(await page.evaluate(`(() => {
+    const chart = document.getElementById("inspHist"), brief = document.getElementById("inspFlowDiagnosis");
+    const details = document.getElementById("inspFlowDetails");
+    return { chartFirst: chart.getBoundingClientRect().bottom <= brief.getBoundingClientRect().top + 1,
+      closed: details.tagName === "DETAILS" && !details.open && !details.hidden,
+      containsDetails: ["inspBody", "inspRows", "inspFlowEvidence"].every(id => details.contains(document.getElementById(id))),
+      label: details.querySelector("summary").innerText,
+      duplicate: Boolean(document.querySelector("[data-desc='model:health_flow']")) };
+  })()`), { chartFirst: true, closed: true, containsDetails: true, duplicate: false,
+    label: await page.evaluate("t('check.flow.measurements')") },
+  `${context}: real schematic click opens chart, diagnosis and collapsed supporting details in order`);
+  const waiting = await diagnosisText();
+  assert.ok(waiting.includes(await page.evaluate("t('check.status.collecting')")) &&
+            waiting.includes(await page.evaluate("t('check.detail.period_label') + ' 15 min'")) &&
+            !waiting.includes(missingDay), `${context}: flow collection has a period and no full-day wait`);
+  assert.equal(await flowLine(), false, `${context}: waiting cannot mark a fabricated lowest reading`);
+  await assertLayout(await page.evaluate(layoutAudit), `${context}/waiting`);
+  await assertAccessibility(page, `${context}/waiting`, { nativeTree: true });
+  await captureNativeEvidence(page, `${context}/waiting`, "#inspFlowDiagnosis", "#inspCard");
+
+  await page.evaluate(`(() => {
+    const h = S.status.health;
+    Object.assign(h.checks.find(c => c.id === "flow"), {
+      verdict: "ok", min_l_min: 5.9, observed_s: 60,
+      hydronic: { confirmed: true, current: true, dated: true, method: 1, samples: 4, reason_code: 0,
+        first_evidence_unix_s: 1791868800, last_evidence_unix_s: 1791868860,
+        flow_l_min: { min: 11, mean: 12, max: 13 } },
+    });
+    renderInspect();
+    return true;
+  })()`);
+  assert.ok((await diagnosisText()).includes(await page.evaluate("checkupFmt1(5.9) + ' l/min'")),
+    `${context}: lowest reading comes from the pump-run diagnosis rather than the heater statistics or trend`);
+  assert.deepEqual(await page.evaluate(`(() => {
+    const plot = document.querySelector("#inspHist [data-hist=flow]");
+    const line = plot.querySelector("svg .vhist-flow-min");
+    const legend = document.querySelector("#inspHist .vhist-legend-flow-min").textContent;
+    const y = Number(line.getAttribute("y1"));
+    const style = getComputedStyle(line);
+    const colour = document.createElement("canvas").getContext("2d");
+    colour.fillStyle = style.stroke;
+    colour.fillRect(0, 0, 1, 1);
+    const [red, green, blue] = colour.getImageData(0, 0, 1, 1).data;
+    const ordinates = Array.from(plot.querySelectorAll(".vhist-line")).flatMap(path =>
+      Array.from(path.getAttribute("d").matchAll(/[ML][0-9.]+ ([0-9.]+)/g), match => Number(match[1])));
+    const ticks = [...plot.parentElement.querySelectorAll(".vhist-y-label")];
+    const guides = [...plot.querySelectorAll(".vhist-grid")];
+    return { minimum: Number(plot.dataset.flowMin), horizontal: y === Number(line.getAttribute("y2")),
+      inScale: y >= 0 && y <= HIST_H,
+      reddishDashed: red > green && red > blue && style.strokeDasharray !== "none",
+      belowSamples: ordinates.length > 0 && ordinates.every(ordinate => ordinate < y),
+      alignedGrid: guides.length > 0 && guides.length === ticks.length &&
+        guides.every((guide, i) => Number(guide.getAttribute("y1")) === parseFloat(ticks[i].style.top)),
+      identifiesMinimum: legend.includes(t("check.flow.lowest")) && legend.includes("X10A") &&
+        legend.includes(checkupFmt1(5.9)) };
+  })()`), { minimum: 5.9, horizontal: true, inScale: true, reddishDashed: true,
+    belowSamples: true, alignedGrid: true, identifiesMinimum: true },
+  `${context}: the labeled historical reference uses the numeric scale, even below the sampled curve`);
+  await page.waitFor("!S.clickHold && !S.scrub && !S.histBusy.size");
+  assert.equal(await page.evaluate(`(() => {
+    const line = document.querySelector("#inspHist .vhist-flow-min");
+    recoverOpenHistory();
+    return !!line && line === document.querySelector("#inspHist .vhist-flow-min");
+  })()`), true, `${context}: the polling history refresh preserves the unchanged reference node`);
+  await page.evaluate('document.querySelector("#inspHist [data-hist=flow]").focus(); true');
+  await page.key("End", { code: "End", keyCode: 35 });
+  assert.equal(await page.evaluate(`(() => {
+    const plot = document.querySelector("#inspHist [data-hist=flow]");
+    const path = Array.from(plot.querySelectorAll(".vhist-line:not(.mb)")).at(-1);
+    const marker = plot.querySelector(".vhist-mark.vhist-live[data-source=x10a]");
+    const y = Number(path.getAttribute("d").split(" ").at(-1));
+    return !marker.hidden && Math.abs(parseFloat(marker.style.top) * HIST_H / 100 - y) < .2;
+  })()`), true, `${context}: keyboard readout marker uses the expanded scale of its own curve`);
+  await page.evaluate('document.querySelector("#inspHist [data-hist=flow]").blur(); true');
+  await assertLayout(await page.evaluate(layoutAudit), `${context}/measured`);
+  await captureNativeEvidence(page, `${context}/measured`, "#inspFlowDiagnosis", "#inspCard");
+
+  const x10aLegend = '#inspHist [data-hist-series="x10a"]';
+  await clickElement(page, x10aLegend);
+  assert.equal(await flowLine(), false, `${context}: hiding the diagnosis source removes its line from the other curve`);
+  assert.ok((await diagnosisText()).includes("X10A"), `${context}: source toggles keep the independent textual observation`);
+  await clickElement(page, x10aLegend);
+  assert.equal(await flowLine(), true, `${context}: showing the diagnosis source restores its line`);
+
+  await clickElement(page, "#inspFlowDetails summary");
+  assert.equal(await page.evaluate(`(() => {
+    const details = document.getElementById("inspFlowDetails");
+    const evidence = document.getElementById("inspFlowEvidence").innerText;
+    return details.open && details.contains(document.getElementById("inspRows")) &&
+      evidence.includes(t("service.metric.range", "11", "12", "13", "l/min"));
+  })()`), true, `${context}: measurement details explicitly retain the independent heating statistics`);
+  await assertLayout(await page.evaluate(layoutAudit), `${context}/details`);
+
+  await page.evaluate(`(() => {
+    S.status.health.checks.find(c => c.id === "flow").min_l_min = 0;
+    renderInspect();
+    return true;
+  })()`);
+  assert.equal(await page.evaluate('document.querySelector("#inspHist [data-hist=flow]").dataset.flowMin'), "0",
+    `${context}: measured zero remains a valid plotted minimum on a later status update`);
+  assert.equal(await page.evaluate('document.getElementById("inspFlowDetails").open'), true,
+    `${context}: changing the minimum preserves the opened details`);
+  await page.evaluate("S.status.diagnostics.enabled = false; renderInspect(); true");
+  assert.deepEqual(await page.evaluate(`({
+    hidden: document.getElementById("inspFlowDiagnosis").hidden,
+    graph: Boolean(document.querySelector("#inspHist .vhist-line")),
+    line: Boolean(document.querySelector("#inspHist .vhist-flow-min")),
+    details: !document.getElementById("inspFlowDetails").hidden,
+  })`), { hidden: true, graph: true, line: false, details: true },
+  `${context}: opting out hides diagnostic evidence and keeps the ordinary flow readings`);
+  await page.evaluate("S.status.diagnostics.enabled = true; renderInspect(); true");
+  assert.equal(await flowLine(), true, `${context}: opted-in historical zero is restored`);
+  await page.evaluate(`(() => {
+    S.status.health.source = "modbus";
+    S.status.health.checks.find(c => c.id === "flow").min_l_min = 7.3;
+    renderInspect();
+  })()`);
+  assert.equal(await page.evaluate(`document.getElementById("inspSrc").innerText.includes("X10A") &&
+    document.querySelector("#inspHist .vhist-legend-flow-min").textContent.includes("Modbus")`), true,
+  `${context}: reference and live headline retain separate instruments`);
+  await page.evaluate("S._modbus[0].flow_scale_unverified = true; renderApp(); true");
+  assert.equal(await flowLine(), false, `${context}: new provisional Modbus readings retire the historical line`);
+  assert.equal(await page.evaluate(`["inspFlowDiagnosis", "inspFlowEvidence"].some(id =>
+    document.getElementById(id).innerText.includes(checkupFmt1(7.3)))`), false,
+  `${context}: provisional Modbus cannot leave a measured minimum in the brief or expanded details`);
+  await page.evaluate("S.status.health.persist = 'unknown'; renderInspect(); true");
+  assert.equal(await page.evaluate('document.getElementById("inspFlowDiagnosis").hidden'), true,
+    `${context}: an unreadable snapshot cannot display a diagnosis`);
+  assert.equal(await flowLine(), false, `${context}: an unreadable snapshot cannot leave an old minimum line`);
+}
+
 async function assertPlantDiagnosis(page, context) {
   // Exercise the shipped renderer with independently scoped observations, including a real zero,
   // an absent heater channel and stale-source evidence. These fixtures do not certify a plant.
   await page.evaluate(`(() => {
     window.__browserDiagnosisOriginal = {
       status: S.status, open: new Set(S.descOpen), card: S.dashboardCard,
+      values: S._values, modbus: S._modbus, insp: S.insp,
       hist: new Map(S.hist), histPin: new Map(S.histPin),
       histHidden: new Map(S.histHidden), histEpoch: S.histEpoch,
       histIdentity: S.histIdentity, histUptime: S.histUptime,
@@ -1417,8 +1581,8 @@ async function assertPlantDiagnosis(page, context) {
   })()`);
   try {
     const selector = "[data-desc^='model:health_']";
-    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 8,
-      `${context}: all eight diagnosis rows must render`);
+    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 7,
+      `${context}: seven remaining diagnosis rows must render`);
     await activateDashboardCardForSelector(page, "[data-desc='model:health_pressure']");
     await assertDiagnosisSummaryRows(page, `${context}/compact-summary`);
     await captureNativeEvidence(page, `${context}/overview`,
@@ -1457,7 +1621,7 @@ async function assertPlantDiagnosis(page, context) {
         normal: body.children[2]?.querySelector('.vdesc-n')?.innerText,
         text: Array.from(body.children, block => block.innerText) };
     })`);
-    assert.equal(blocks.length, 9, `${context}: include the independent refrigerant observation`);
+    assert.equal(blocks.length, 8, `${context}: include the independent refrigerant observation`);
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
       if (block.id === "model:health_cycling" || block.id === "model:health_pressure") continue;
@@ -1887,26 +2051,20 @@ async function assertPlantDiagnosis(page, context) {
       .closest('.vitem').innerText`);
     const pressureDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
       .closest('.vitem').innerText`);
-    const flowDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_flow']")
-      .closest('.vitem').innerText`);
     assert.ok(defrostDetail.includes(missingDay),
       `${context}: collecting daily check must retain its missing-day explanation`);
     assert.ok(!pressureDetail.includes(missingDay),
       `${context}: collecting graph-first pressure keeps detail free of missing-day prose`);
-    assert.ok(!flowDetail.includes(missingDay),
-      `${context}: collecting flow must not require a full day`);
-    assert.ok(flowDetail.includes(await page.evaluate("t('check.detail.period_label') + ' 15 min'")),
-      `${context}: collecting flow must retain its observed period`);
-    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_flow'] .vrow-val").innerText`),
-      await page.evaluate("t('check.status.collecting')"),
-      `${context}: missing eligible flow stays neutral collection`);
-    await captureNativeEvidence(page, `${context}/flow-waiting`,
-      "[data-desc='model:health_flow']", ".vitem");
+    await assertFlowInspector(page, `${context}/flow-inspector`, missingDay);
   } finally {
     await page.evaluate(`(() => {
       S.status = window.__browserDiagnosisOriginal.status;
       S.descOpen = window.__browserDiagnosisOriginal.open;
       S.dashboardCard = window.__browserDiagnosisOriginal.card;
+      S._values = window.__browserDiagnosisOriginal.values;
+      S._modbus = window.__browserDiagnosisOriginal.modbus;
+      S.insp = window.__browserDiagnosisOriginal.insp;
+      S.inspSig = S.inspHistSig = null;
       S.hist = window.__browserDiagnosisOriginal.hist;
       S.histPin = window.__browserDiagnosisOriginal.histPin;
       S.histHidden = window.__browserDiagnosisOriginal.histHidden;
@@ -2284,12 +2442,14 @@ async function assertNativeAltherma4(page, context, locale = "en") {
           })`));
           throw error;
         }
-        assert.deepEqual(await page.evaluate(`(() => ({
-          help: document.getElementById(${JSON.stringify(connected ? "inspRows" : "inspBody")})
-            .innerText.includes(t(${JSON.stringify(key)})),
-          headline: document.getElementById("inspNow").innerText.split(" ")[0],
-          deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length,
-        }))()`), {help: true, headline: connected ? "2.5" : nativeValue, deltas: 0},
+        if (target === "flow" && connected) await clickElement(page, "#inspFlowDetails summary");
+        const helpId = connected ? "inspRows" : target === "flow" ? "inspFlowNotice" : "inspBody";
+        assert.deepEqual(await page.evaluate(`(() => {
+          const help = document.getElementById(${JSON.stringify(helpId)});
+          return { help: help.getBoundingClientRect().height > 0 && help.innerText.includes(t(${JSON.stringify(key)})),
+            headline: document.getElementById("inspNow").innerText.split(" ")[0],
+            deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length };
+        })()`), {help: true, headline: connected ? "2.5" : nativeValue, deltas: 0},
         `${context}/${target}/${connected}: real inspector click retains the native limit`);
         assertLayout(await page.evaluate(layoutAudit), `${context}/${target}/native-inspector`);
         await captureNativeEvidence(page,
@@ -2318,7 +2478,8 @@ async function assertNativeAltherma4(page, context, locale = "en") {
       dtPill: document.getElementById("svDt").textContent,
       pumpOn: document.getElementById("schem").classList.contains("pump-on"),
       waterFlowOn: document.getElementById("fPhe").classList.contains("on"),
-      help: document.getElementById("inspBody").innerText.includes(t("mb.flow_scale_help")),
+      help: !document.getElementById("inspFlowNotice").hidden &&
+        document.getElementById("inspFlowNotice").innerText.includes(t("mb.flow_scale_help")),
       deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length,
     }))()`), {
       flowPill: expectedFlow, dtPill: "—", pumpOn: true, waterFlowOn: false, help: true, deltas: 0,

@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -172,6 +172,11 @@ I18N.sv = localeValues([
   /* check.defrost */ "Avfrostningar",
   /* check.pressure */ "Vattentryck",
   /* check.flow */ "Lägsta vattenflöde",
+  /* check.flow.lowest */ "Lägsta uppmätta flöde",
+  /* check.flow.runup */ "Efter minst 1 min sammanhängande pumpdrift",
+  /* check.flow.assessment */ "Om flödet räcker beror på modell och driftläge.",
+  /* check.flow.measurements */ "Mätdetaljer",
+  /* check.flow.live */ "Nu",
   /* check.heater */ "Elpatroner",
   /* check.retries */ "Skyddsräknare",
   /* check.status.ok */ "OK",

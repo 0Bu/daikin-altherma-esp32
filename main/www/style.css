@@ -441,6 +441,19 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 /* A source comparison belongs to the Modbus value immediately above it, not to the description.
    It therefore gets no divider of its own; the next reading supplies the next list line. */
 .inspect-rows > .mb-delta { margin: -1px 0 0; padding: 0 0 5px; }
+.inspect-flow-diagnosis { margin-top: 10px; }
+.inspect-flow-result {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px;
+  flex-wrap: wrap; color: var(--fg);
+}
+.inspect-flow-result strong { white-space: nowrap; }
+.inspect-flow-diagnosis p { margin: 3px 0 0; }
+.inspect-flow-details { margin-top: 8px; border-top: 1px solid var(--line); }
+.inspect-flow-details summary { padding: 7px 0; color: var(--fg); cursor: pointer; }
+.inspect-flow-details .inspect-rows { margin-top: 0; }
+@media (pointer: coarse) {
+  .inspect-flow-details summary { min-height: 44px; align-content: center; }
+}
 
 /* Models without a DHW tank / room sensor: hide those schematic parts instead of dangling "—".
    The derived PHE pills are different: every supported profile can compute them at a valid working
@@ -1235,6 +1248,10 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-thresh { fill: none; stroke-width: 1px; stroke-dasharray: 3 3; pointer-events: none; }
 .vhist-thresh.low { stroke: var(--warn); opacity: .55; }
 .vhist-thresh.crit { stroke: var(--err); opacity: .65; }
+.vhist-flow-min {
+  fill: none; stroke: color-mix(in srgb, var(--err) 72%, var(--muted));
+  stroke-width: 1.5px; stroke-dasharray: 5 3; pointer-events: none;
+}
 .vhist-thresh-label { position: absolute; right: 4px; transform: translateY(-100%);
   font-size: 9.5px; line-height: 1.1; pointer-events: none; opacity: .78; padding: 0 2px; }
 .vhist-thresh-label.low { color: var(--warn); }
@@ -1260,6 +1277,14 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-now.err, .vhist-mark.err { background: var(--err); }
 .vhist-source.vhist-legend-low { --vhist-colour: var(--warn); }
 .vhist-source.vhist-legend-crit { --vhist-colour: var(--err); }
+.vhist-source.vhist-legend-flow-min {
+  --vhist-colour: color-mix(in srgb, var(--err) 72%, var(--muted));
+  overflow-wrap: anywhere;
+}
+.vhist-source.vhist-legend-flow-min i {
+  flex: 0 0 16px; border: 0; border-top: 1.5px dashed var(--vhist-colour);
+  height: 0; border-radius: 0; background: none;
+}
 .vhist-source.vhist-legend-low i,
 .vhist-source.vhist-legend-crit i { border: none; border-top: 1.5px dashed var(--vhist-colour);
   border-radius: 0; background: transparent; height: 0; }

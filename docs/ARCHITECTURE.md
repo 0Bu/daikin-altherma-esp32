@@ -576,7 +576,7 @@ Weather downloads for that boot. Later saves
 cannot relabel a missing worker as waiting.
 
 Only allocator-shaped TLS setup failure gets one cleaned-up setup retry. A validated known-length
-firmware prefix may resume at most twice, inside the same generation and five-minute budget,
+firmware prefix may resume at most three times, inside the same generation and five-minute budget,
 requiring HTTP 206, one exact Content-Range and matching remaining length. Every resumed stream
 must advance the existing OTA handle and hash; other transport/payload failures fail closed.
 

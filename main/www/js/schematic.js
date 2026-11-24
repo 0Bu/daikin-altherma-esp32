@@ -1718,7 +1718,7 @@ function inspectSig(e) {
 //
 // Chart state has its own signature, independent of changing inspector readings. A new series
 // (`gen`), categorical live cap or pin updates its markup; ordinary scalar polls keep it mounted.
-function renderInspectHist(e, row, mode = "") {
+function renderInspectHist(e, row, mode = "", flow = null) {
   const mayFetch = mode === "open" ||
     (mode === "refresh" && (typeof _pollBusy === "undefined" || !_pollBusy));
   let started;
@@ -1798,11 +1798,12 @@ function renderInspectHist(e, row, mode = "") {
     ? [typeof modbusFlowScaleUnverified === "function" && modbusFlowScaleUnverified(),
        !!S.histHidden?.has(id)].join(":")
     : "";
+  const flowReference = Number.isFinite(flow?.minimum) ? `${flow.source}:${flow.minimum}` : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh), historyRingRevision(rh),
                id === "room_temp" ? roomHistName() : "",
-               liveGen, auxGen, sourceDefault, flowScaleKey, JSON.stringify(pin ?? null)].join("|");
+               liveGen, auxGen, sourceDefault, flowScaleKey, flowReference, JSON.stringify(pin ?? null)].join("|");
   if (sig === S.inspHistSig) return started;
   S.inspHistSig = sig;
   const el = $("inspHist");
@@ -1811,15 +1812,36 @@ function renderInspectHist(e, row, mode = "") {
   const mb = pairedId ? mbByConcept(pairedId) : null;
   const mbHist = useMbFallback ? (S._modbus || []).find((m) => m && m.history === id) : null;
   const chartName = DERIVED[id] && e && e.aria ? inspFieldText(e, "aria", null) : null;
+  const history = (unit, name) => histHtml(id, unit, name, trendSource, false, flow);
   replaceHistoryHtml(el, !id ? ""
-    : mbHist ? histHtml(id, typeof displayUnit === "function" ? displayUnit(mbHist) : (mbHist.unit || ""),
-                        typeof displayHomeHubLabel === "function" ? displayHomeHubLabel(mbHist) : (mbHist.label || id),
-                        trendSource)
-    : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label, row), trendSource)
-    : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
-               : histHtml(id, DERIVED[id]?.unit || h?.unit || mh?.unit || "",
-                          e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource));
+    : mbHist ? history(typeof displayUnit === "function" ? displayUnit(mbHist) : (mbHist.unit || ""),
+                       typeof displayHomeHubLabel === "function" ? displayHomeHubLabel(mbHist) : (mbHist.label || id))
+    : row ? history(displayUnit(row), chartName || displayReadingLabel(row.label, row))
+    : pairedId ? history(mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null))
+               : history(DERIVED[id]?.unit || h?.unit || mh?.unit || "",
+                         e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null)));
   return started;
+}
+
+function renderInspectFlow(isFlow, flow) {
+  const details = $("inspFlowDetails");
+  if (!isFlow && details?.hidden !== false) return;
+  if (details.hidden === isFlow) {
+    details.hidden = !isFlow;
+    if (isFlow) {
+      // Keep the existing live row and description hosts, including their update identity.
+      details.append($("inspRows"), $("inspBody"), $("inspFlowEvidence"));
+    } else {
+      details.open = false;
+      $("inspFlowNotice").before($("inspBody"));
+      details.after($("inspRows"));
+      $("inspFlowNotice").hidden = true;
+    }
+  }
+  $("inspFlowDiagnosis").hidden = !flow;
+  setHtml("inspFlowDiagnosis", flow ? checkupFlowBriefHtml(flow) : "", false);
+  setHtml("inspFlowEvidence", flow ? checkupDetailHtml(flow.check, flow.health.full_span === true,
+    { ...flow.health, source: flow.source }) : "", false);
 }
 
 function renderInspect(mode = "") {
@@ -1828,16 +1850,22 @@ function renderInspect(mode = "") {
   // Freeze with the other trend hosts during a scrub so structural updates cannot replace the
   // captured plot. scrubEnd resumes every affected host.
   if (S.scrub) return;
+  const isFlow = e === INSPECT.flow;
+  const flow = isFlow ? checkupFlowReport() : null;
   // The chart is decided ahead of the early return below, because its own state moves independently
   // of the card's: the series arrives from an async fetch that changes no live value.
   // inspCurRow refuses a retained X10A row. renderInspectHist may still resolve this target's paired
   // Modbus ring, so a petrol headline gets petrol history without reviving stale X10A samples.
-  renderInspectHist(e, S.live && e ? inspCurRow(e) : null, mode);
+  renderInspectHist(e, S.live && e ? inspCurRow(e) : null, mode, flow);
   // Compare the inspector signature before rendering changed live readings; unchanged polls need
   // no DOM writes and preserve the reader's text selection.
-  const sig = inspectSig(e);
+  const health = flow?.health;
+  const sig = inspectSig(e) + (flow ? JSON.stringify([
+    flow.source, flow.minimum, health.span_s, health.full_span, health.source_fresh, health.source_age_s, flow.check,
+  ]) : "");
   if (sig === S.inspSig) return;
   S.inspSig = sig;
+  renderInspectFlow(isFlow, flow);
   // Use the same live-class accordion as the value/Settings tongues. The body stays mounted inside
   // its 0fr clip so the browser has a real closed geometry to transition FROM; toggling `hidden`
   // here painted the full infobox immediately and could never reproduce their pull-out motion.
@@ -1910,10 +1938,11 @@ function renderInspect(mode = "") {
   // and invisible to anyone who cannot separate the two hues — DESIGN.md's own rule is that colour
   // never carries a fact by itself. Everywhere else the badge already appears beside a gateway
   // reading; this was the one place it did not.
-  const srcName = fb ? displayHomeHubLabel(fb)
+  const srcName = isFlow ? [t("check.flow.live"), fb ? "Modbus" : row ? "X10A" : ""].filter(Boolean).join(" · ")
+                : fb ? displayHomeHubLabel(fb)
                      : displayReadingLabel(row ? row.label : (e.sample || ""), row);
   setHtml("inspSrc", esc(srcName) +
-    (fb ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : ""), false);
+    (fb && !isFlow ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : ""), false);
   $("inspSrc").hidden = !(row || fb || e.sample);
   // Headline = the ONE compact reading this target stands for (its row, or a derived `head` for the
   // computed pills). An assembly like the outdoor unit has no single number, so it gets no headline
@@ -1947,6 +1976,13 @@ function renderInspect(mode = "") {
   const preferSourceDesc = fb && desc?.sourceQualified;
   const what = ownWhat && !preferSourceDesc ? descParaHtml(esc(ownWhat))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value, descriptionCopy(desc)) : "");
+  if (isFlow) {
+    // Preserve the provisional headline's qualification even when its details are closed.
+    const notice = fb && modbusFlowScaleUnverified()
+      ? (desc?.sourceQualified ? what : descParaHtml(esc(t("hist.modbus_flow_unverified")))) : "";
+    $("inspFlowNotice").hidden = !notice;
+    setHtml("inspFlowNotice", notice, false);
+  }
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.
   // The inspector records its signature immediately, so its writes cannot wait for clickHold.

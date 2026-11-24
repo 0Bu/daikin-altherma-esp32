@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const ukNoun = (n, a, b, c) => n % 10 === 1 && n % 100 !== 11 ? a
   : n % 10 >= 2 && n % 10 <= 4 && !(n % 100 >= 12 && n % 100 <= 14) ? b : c;
 const ukAria = (x) => (l, d) => `${l} — часова шкала ${x}. ${d}. Клавіші зі стрілками озвучують окремі зразки.`;
@@ -176,6 +176,11 @@ I18N.uk = localeValues([
   /* check.defrost */ "Відтавання",
   /* check.pressure */ "Тиск води",
   /* check.flow */ "Мін. витрата",
+  /* check.flow.lowest */ "Найнижча виміряна витрата",
+  /* check.flow.runup */ "Після щонайменше 1 хв безперервної роботи насоса",
+  /* check.flow.assessment */ "Потрібна витрата залежить від моделі та режиму роботи.",
+  /* check.flow.measurements */ "Подробиці вимірювання",
+  /* check.flow.live */ "Зараз",
   /* check.heater */ "Електронагрівачі",
   /* check.retries */ "Лічильники захисту",
   /* check.status.ok */ "НОРМА",

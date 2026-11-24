@@ -9,11 +9,14 @@ const appStateSource = readAppFragments(["app_state.js"]);
 const schematicSource = readAppFragments(["schematic.js"]);
 
 const pickValueSource = appStateSource.match(/function pickValue\(re\) \{[\s\S]*?\n\}/)[0];
+const flowReportSource = readAppFragments(["dashboard.js"])
+  .match(/function checkupFlowReport\(\) \{[\s\S]*?\n\}/)[0];
 
 function renderer(lang, removeNativePrecedence = false) {
   let source = readAppFragments(["i18n.js"]) +
     (lang === "en" ? "" : readUiLocale(lang)) +
-    readAppFragments(["history.js", "descriptions.js", "schematic.js"]) + pickValueSource + readHtmlRenderer();
+    readAppFragments(["history.js", "descriptions.js", "schematic.js"]) +
+    pickValueSource + flowReportSource + readHtmlRenderer();
   if (removeNativePrecedence) {
     const anchor = "const preferSourceDesc = fb && desc?.sourceQualified;";
     assert.equal(source.split(anchor).length, 2, "unique production mutation anchor");
@@ -21,8 +24,8 @@ function renderer(lang, removeNativePrecedence = false) {
   }
   const nodes = new Map();
   const element = (id) => {
-    if (!nodes.has(id)) nodes.set(id, { innerHTML: "", textContent: "", hidden: false,
-      classList: { toggle() {} }, removeAttribute() {}, setAttribute() {} });
+    if (!nodes.has(id)) nodes.set(id, { innerHTML: "", textContent: "", hidden: id === "inspFlowDetails",
+      classList: { toggle() {} }, removeAttribute() {}, setAttribute() {}, append() {}, before() {}, after() {} });
     return nodes.get(id);
   };
   const context = {
@@ -137,10 +140,15 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
     ui.renderInspect();
     assert.ok(ui.element("inspBody").innerHTML.includes(escaped),
       `${lang}/${off}: actual replacement inspector retains its native interpretation limit`);
+    if (off === 49)
+      assert.ok(ui.element("inspFlowNotice").innerHTML.includes(escaped) && !ui.element("inspFlowNotice").hidden,
+        `${lang}/flow: provisional headline retains its visible source caveat`);
     ui.state._modbus[0].profile = "homehub";
     ui.renderInspect();
     assert.ok(!ui.element("inspBody").innerHTML.includes(escaped),
       `${lang}/${off}: the base inspector must not inherit native limits`);
+    if (off === 49)
+      assert.ok(ui.element("inspFlowNotice").hidden, `${lang}/flow: verified scaling clears the caveat`);
   }
 }
 const precedenceMutation = renderer("es", true);

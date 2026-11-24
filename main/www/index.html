@@ -804,10 +804,15 @@
                   </div>
                   <div class="inspect-src mono" id="inspSrc"></div>
                   <div class="inspect-body" id="inspBody"></div>
-                  <!-- The headline row's 24-hour trend, when the firmware keeps one for it. Same
-                       sparkline the value list draws (app.js histHtml): description first, then the
-                       graphical evidence, then every additional X10A/Modbus value in one list. -->
+                  <div class="inspect-body" id="inspFlowNotice" hidden></div>
+                  <!-- The Flow inspector puts the trend first and moves its prose and member
+                       values into the disclosure. Other targets keep their regular reading order. -->
                   <div class="inspect-hist" id="inspHist" hidden></div>
+                  <div class="inspect-flow-diagnosis" id="inspFlowDiagnosis" hidden></div>
+                  <details class="inspect-flow-details" id="inspFlowDetails" hidden>
+                    <summary data-i18n="check.flow.measurements">Measurement details</summary>
+                    <div class="inspect-body" id="inspFlowEvidence"></div>
+                  </details>
                   <div class="inspect-rows" id="inspRows"></div>
                 </div>
               </div>

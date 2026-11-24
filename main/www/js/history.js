@@ -684,13 +684,16 @@ const HIST_W = 320, HIST_H = 88;
 // in one would leave the crosshair marker sitting off the line it is pointing at, and the drawing
 // would still look perfectly plausible. Returns the mapping, not the numbers, so no caller can
 // re-derive it slightly differently.
-function histScale(pts, sampleCount, id = "") {
+function histScale(pts, sampleCount, id = "", reference = NaN) {
   const real = pts.filter((x) => x != null);
   const lo = Math.min(...real), hi = Math.max(...real);
   const isPressure = id === "water_pressure";
-  const pad = (hi - lo) < 1 ? 1 : (hi - lo) * 0.12;   // a flat series gets a band, not a divide-by-zero
-  const y0 = isPressure ? Math.min(0, lo - pad) : lo - pad;
-  const y1 = isPressure ? Math.max(2.2, hi + Math.max(0.25, hi * 0.12)) : hi + pad;
+  const domainLo = Number.isFinite(reference) ? Math.min(lo, reference) : lo;
+  const domainHi = Number.isFinite(reference) ? Math.max(hi, reference) : hi;
+  const span = domainHi - domainLo;
+  const pad = span < 1 ? 1 : span * 0.12;           // a flat series gets a band, not a divide-by-zero
+  const y0 = isPressure ? Math.min(0, lo - pad) : domainLo - pad;
+  const y1 = isPressure ? Math.max(2.2, hi + Math.max(0.25, hi * 0.12)) : domainHi + pad;
   const n = sampleCount || pts.length;
   return {
     lo, hi, y0, y1,
@@ -1553,7 +1556,7 @@ function histRuns(pts, n, X, Y, cls, r, splitZones = false) {
   return [line, area, dots];
 }
 
-function histHtml(id, unit, name, source = "", identifySource = false) {
+function histHtml(id, unit, name, source = "", identifySource = false, flow = null) {
   const offeredX = (!source || source === "x10a") && hasHist(id);
   const offeredM = (!source || source === "modbus") && hasModbusHist(id);
   const offeredE = (!source || source === "env3") && hasEnv3Hist(id);
@@ -1578,7 +1581,12 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   // grows with the board; after that every source remains a rolling day. A source that started or
   // changed later contributes explicit null gaps, never a shorter axis or fabricated flat data.
   const full  = n * view.dt >= 23.5 * 3600;
-  const scale = histScale(allPts, n, id);
+  const visible = histVisibleSeries(view);
+  // The reference follows the diagnostic instrument's own visible series.
+  const flowSeries = id === "flow" && Number.isFinite(flow?.minimum)
+    ? visible.find(s => s.source === flow.source && s.v.some(v => v != null)) : null;
+  const flowMinimum = flowSeries ? flow.minimum : NaN;
+  const scale = histScale(allPts, n, id, flowMinimum);
   const { lo, hi, X, Y } = scale;
   const isPressure = id === "water_pressure";
 
@@ -1587,7 +1595,7 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   // the same geometry and are made more transparent by the wrapper class below. A run of ONE sample
   // still gets a dot because there is no interval whose area or upper edge could honestly be drawn.
   let line = "", area = "", dots = "";
-  for (const s of histVisibleSeries(view)) {
+  for (const s of visible) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
     const [l, a, d] = histRuns(pts, n, X, Y, histSourceClass(s.source), 1.6, isPressure && s.source === "x10a");
     line += l; area += a; dots += d;
@@ -1596,7 +1604,7 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
   // scale exactly, and stays right whatever width the panel ends up at.
   const nowDots = view.series.map((s) => {
-    if (!histVisibleSeries(view).includes(s)) return "";
+    if (!visible.includes(s)) return "";
     const splitZones = isPressure && s.source === "x10a";
     if (s.raw.refreshFailed || s.raw.aged) {
       const last = lastSample(s.v);
@@ -1629,7 +1637,7 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
     const frac = scrubFrac(pi, n);
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
-    pinMarks = histVisibleSeries(view).map((s) => {
+    pinMarks = visible.map((s) => {
       if (s.v[pi] == null) return "";
       const zoneCls = isPressure && s.source === "x10a" ? pressureZoneClass(s.v[pi] / 10) : "";
       return `<span class="vhist-mark vhist-pinned${histSourceClass(s.source)}${zoneCls}"` +
@@ -1657,6 +1665,14 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
     ["modbus", "room"].includes(view.series[0].source))
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
+  let flowSvg = "", flowAttr = "";
+  if (flowSeries) {
+    const y = Y(flowMinimum).toFixed(1);
+    flowSvg = `<line class="vhist-flow-min" x1="0" x2="${HIST_W}" y1="${y}" y2="${y}" vector-effect="non-scaling-stroke"/>`;
+    flowAttr = ` data-flow-min="${flowMinimum}"`;
+    legendItems.push(`<span class="vhist-source vhist-legend-flow-min"><i aria-hidden="true"></i>` +
+      `<span>${esc(t("check.flow.lowest"))} · ${esc(flowSeries.name)} · ${esc(histFmt1(flowMinimum) + u)}</span></span>`);
+  }
   if (isPressure) {
     legendItems.push(
       `<span class="vhist-source vhist-legend-low"><i></i>${esc(t("check.detail.current_label"))}</span>`,
@@ -1702,9 +1718,9 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
     `<div class="vhist-graph${grid.yAxis ? " vhist-has-y" : ""}">` + grid.yAxis +
       histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
-      `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
+      `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)}${flowAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", chartName || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}">` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${phaseBands}${area}${line}${dots}</svg>` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${phaseBands}${area}${line}${flowSvg}${dots}</svg>` +
         threshHtml + nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
@@ -2311,7 +2327,7 @@ function scrubMove(plot, i) {
   // marker, never the other one.
   const separateScales = env3ChartId(h.id);
   const allPts = h.series.flatMap((s) => s.v.map((z) => z == null ? null : z / 10));
-  const sharedY = separateScales ? null : histScale(allPts, n, h.id).Y;
+  const sharedY = separateScales ? null : histScale(allPts, n, h.id, Number(plot.dataset.flowMin)).Y;
   for (const mark of marks) {
     const s = h.series.find((q) => q.source === mark.dataset.source);
     const v = s ? s.v[i] : null;

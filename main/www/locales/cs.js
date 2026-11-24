@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -172,6 +172,11 @@ I18N.cs = localeValues([
   /* check.defrost */ "Cykly odmrazování",
   /* check.pressure */ "Tlak vody",
   /* check.flow */ "Min. průtok",
+  /* check.flow.lowest */ "Nejnižší naměřený průtok",
+  /* check.flow.runup */ "Po nejméně 1 min nepřetržitého chodu čerpadla",
+  /* check.flow.assessment */ "Zda průtok stačí, závisí na modelu a provozním režimu.",
+  /* check.flow.measurements */ "Podrobnosti měření",
+  /* check.flow.live */ "Nyní",
   /* check.heater */ "Topná tělesa",
   /* check.retries */ "Ochranné čítače",
   /* check.status.ok */ "V POŘÁDKU",

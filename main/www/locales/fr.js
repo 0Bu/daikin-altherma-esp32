@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -172,6 +172,11 @@ I18N.fr = localeValues([
   /* check.defrost */ "Dégivrages",
   /* check.pressure */ "Pression d’eau",
   /* check.flow */ "Débit min.",
+  /* check.flow.lowest */ "Débit mesuré le plus bas",
+  /* check.flow.runup */ "Après au moins 1 min de fonctionnement continu de la pompe",
+  /* check.flow.assessment */ "Le débit nécessaire dépend du modèle et du mode de fonctionnement.",
+  /* check.flow.measurements */ "Détails de mesure",
+  /* check.flow.live */ "Maintenant",
   /* check.heater */ "Résistances",
   /* check.retries */ "Compteurs de protection",
   /* check.status.ok */ "OK",

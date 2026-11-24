@@ -1,4 +1,4 @@
-// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
+// translation-source: 16df79b41555e247337db48a570358f764777afca386f3f703a5d10dad9f9e78
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -172,6 +172,11 @@ I18N.nb = localeValues([
   /* check.defrost */ "Avriminger",
   /* check.pressure */ "Vanntrykk",
   /* check.flow */ "Laveste vannmengde",
+  /* check.flow.lowest */ "Laveste målte vannmengde",
+  /* check.flow.runup */ "Etter minst 1 min sammenhengende pumpedrift",
+  /* check.flow.assessment */ "Om vannmengden er tilstrekkelig, avhenger av modellen og driftsmodusen.",
+  /* check.flow.measurements */ "Måledetaljer",
+  /* check.flow.live */ "Nå",
   /* check.heater */ "Elkolber",
   /* check.retries */ "Beskyttelsestellere",
   /* check.status.ok */ "OK",
