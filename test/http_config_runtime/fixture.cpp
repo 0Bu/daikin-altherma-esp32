@@ -39,7 +39,7 @@ const char*          oracle = "initial";
 unsigned             checks = 0, saves = 0, service_writes = 0, link_writes = 0, config_reads = 0;
 unsigned             reboots = 0, delays = 0, runtime_changes = 0, env_probes = 0, body_reads = 0;
 unsigned mqtt_inits = 0, mqtt_starts = 0, mqtt_stops = 0, mqtt_destroys = 0, semaphore_deletes = 0;
-unsigned dns_calls = 0, socket_calls = 0, socket_closes = 0, weather_commits = 0;
+unsigned             dns_calls = 0, socket_calls = 0, socket_closes = 0;
 unsigned post_write_allocations = 0, stale_attempts = 0, save_fault = 0;
 
 unsigned detection_writes = 0, link_snapshot_reads = 0, restart_guard_calls = 0;
@@ -56,7 +56,7 @@ bool   deny_after_boot_id = false, deny_rejection_allocations = false;
 bool   tracking = false, durable_started = false, network = true, dns_ok = true, tcp_ok = true;
 bool   semaphore_ok = true, mqtt_init_ok = true, mqtt_connected = true, mqtt_error = false;
 bool   mqtt_register_ok = true, mqtt_start_ok = true, mqtt_wait_ok = true, semaphore_given = false;
-bool   proof_ok = true, weather_admission = true, refresh_ok = true;
+bool   proof_ok                 = true;
 size_t largest_block            = 65536;
 daik::Env3ProbeResult env_probe = daik::Env3ProbeResult::Ok;
 daik::Env3Status      env_status;
@@ -70,8 +70,6 @@ bool                     ota_downgrade = false;
 // generation the handler handed to the live checkup producer.
 uint32_t random_value = 0x10203040U, runtime_generation = 0;
 unsigned random_calls = 0, runtime_generation_calls = 0;
-uint32_t room_history_identity = 0;
-unsigned room_history_resets   = 0;
 unsigned modbus_checkup_resets = 0;
 
 [[noreturn]] void fail(const char* reason) {
@@ -135,15 +133,9 @@ void reset() {
     current.mb_port                        = 502;
     current.mb_unit_id                     = 1;
     current.mb_discovery_done              = true;
-    current.ref_temp_topic                 = "fixture/old-room";
-    current.ref_temp_path                  = "temperature";
-    current.ref_temp_fixed_setpoint_tenths = 200;
     current.circulation_topic              = "fixture/old-circ";
     current.circulation_power_path         = "apower";
     current.circulation_time_path          = "timestamp";
-    current.weather_enabled                = true;
-    current.weather_latitude_e6            = 0;
-    current.weather_longitude_e6           = 0;
     current.diagnostics_enabled            = true;
     current.diagnostics_generation         = 9;
     current.ota_channel                    = daik::OtaChannel::Release;
@@ -155,7 +147,7 @@ void reset() {
     link.reserve(128);
     saves = service_writes = link_writes = config_reads = reboots = delays = runtime_changes = 0;
     env_probes = body_reads = mqtt_inits = mqtt_starts = mqtt_stops = mqtt_destroys = 0;
-    semaphore_deletes = dns_calls = socket_calls = socket_closes = weather_commits = 0;
+    semaphore_deletes = dns_calls = socket_calls = socket_closes = 0;
     post_write_allocations = stale_attempts = save_fault = 0;
     detection_writes = link_snapshot_reads = restart_guard_calls = 0;
     detect_before_service_save = reset_latched = latch_during_delay = false;
@@ -166,8 +158,7 @@ void reset() {
     fail_next_array           = false;
     deny_after_boot_id = deny_rejection_allocations = false;
     network = dns_ok = tcp_ok = semaphore_ok = mqtt_init_ok = mqtt_connected = true;
-    mqtt_register_ok = mqtt_start_ok = mqtt_wait_ok = proof_ok = weather_admission = refresh_ok =
-        true;
+    mqtt_register_ok = mqtt_start_ok = mqtt_wait_ok = proof_ok = true;
     mqtt_error = semaphore_given = false;
     largest_block                = 65536;
     env_probe                    = daik::Env3ProbeResult::Ok;
@@ -179,8 +170,6 @@ void reset() {
     ota_downgrade                           = false;
     random_value                            = 0x10203040U;
     random_calls = runtime_generation = runtime_generation_calls = 0;
-    room_history_identity = daik::logic::history_room_identity(current);
-    room_history_resets   = 0;
     modbus_checkup_resets = 0;
 }
 using Handler = esp_err_t (*)(httpd_req_t*);
@@ -195,9 +184,6 @@ const Route routes[] = {
     {"mqtt", daik::set_mqtt,
      R"({"broker":"mqtts://fixture.invalid","user":"new-user","pass":"new-pass","base":"fixture-new-base"})",
      true},
-    {"ref", daik::set_ref_temp,
-     R"({"name":"Room","topic":"fixture/new-room","temperature_path":"room.tC","fixed_setpoint_c":20.1,"max_age_s":600})",
-     false},
     {"circ", daik::set_circulation,
      R"({"name":"Pump","topic":"fixture/new-circ","power_path":"apower","timestamp_path":"timestamp","test_proof":83})",
      false},
@@ -207,7 +193,6 @@ const Route routes[] = {
      false},
     {"syslog", daik::set_syslog, R"({"host":"collector.invalid","port":1514})", true},
     {"ntp", daik::set_ntp, R"({"server":"new.pool.invalid"})", true},
-    {"weather", daik::set_weather, R"({"latitude":"12.345678","longitude":"23.456789"})", false},
     {"board", daik::set_board,
      R"({"preset_id":"custom","led_gpio":21,"led_type":0,"btn_gpio":-1,"env3_enabled":false})",
      true},
@@ -280,7 +265,7 @@ void rejection(const Route& candidate, const std::string& body,
     check(service == old_service && link == old_link &&
               daik::config_blob_serialize(daik::config_blob_from(current)) == before,
           "rejected request changed durable entries or live services");
-    check(saves == 0 && reboots == 0 && runtime_changes == 0 && weather_commits == 0,
+    check(saves == 0 && reboots == 0 && runtime_changes == 0,
           "invalid request reached save/reboot/runtime mutation");
     if (strict_no_work)
         check(config_reads == 0 && env_probes == 0 && dns_calls == 0 && mqtt_inits == 0,
@@ -399,11 +384,8 @@ ReservedPins net_eth_reserved_pins() { return {}; }
 bool         net_is_up() { return fixture::network; }
 size_t       heap_largest_internal_block() { return fixture::largest_block; }
 void         diag_printf(const char*, ...) {}
-void         mqtt_reference_reconfigure() { ++fixture::runtime_changes; }
 void         mqtt_circulation_reconfigure(bool) { ++fixture::runtime_changes; }
-void         mqtt_request_weather_cleanup() { ++fixture::runtime_changes; }
 void         mqtt_request_modbus_cleanup() { ++fixture::runtime_changes; }
-void         mqtt_heating_curve_homehub_reset() noexcept { ++fixture::runtime_changes; }
 void         checkup_set_diagnostics(bool, uint32_t g) { fixture::checkup_generation(g); }
 void         checkup_reset() { ++fixture::runtime_changes; }
 void         checkup_modbus_reset() {
@@ -423,12 +405,6 @@ void history_set_diagnostics(bool) { ++fixture::runtime_changes; }
 void history_circulation_reset() { ++fixture::runtime_changes; }
 void mqtt_circulation_set_diagnostics(bool) { ++fixture::runtime_changes; }
 void history_modbus_reset(uint32_t) noexcept { ++fixture::runtime_changes; }
-void history_room_reset(uint32_t identity) noexcept {
-    if (fixture::room_history_identity != identity) {
-        fixture::room_history_identity = identity;
-        ++fixture::room_history_resets;
-    }
-}
 void hp_poll_reconfigure() { ++fixture::runtime_changes; }
 void mb_reconfigure(bool) noexcept { ++fixture::runtime_changes; }
 bool mb_discover_homehub(std::string& found) {
@@ -450,19 +426,6 @@ CirculationSourceTestResult mqtt_circulation_test(const CirculationSourceTestCon
     result.proof   = 83;
     result.power_w = 5;
     return result;
-}
-WeatherSourceChange::WeatherSourceChange(bool configured, bool diagnostics) {
-    configured_          = configured;
-    diagnostics_enabled_ = diagnostics;
-    held_                = fixture::weather_admission;
-}
-WeatherSourceChange::~WeatherSourceChange() noexcept = default;
-void WeatherSourceChange::commit() noexcept { ++fixture::weather_commits; }
-void weather_forecast_reconfigure() { ++fixture::runtime_changes; }
-bool weather_forecast_request_refresh(uint64_t& token) noexcept {
-    if (!fixture::refresh_ok) return false;
-    token = 73;
-    return true;
 }
 esp_err_t http_send_json(httpd_req_t* request, const char* body) {
     // The harness records bytes in a string. Exclude that copy from the handler's budget.
@@ -628,17 +591,6 @@ const Field fields[] = {
     {"mqtt", "pass", 's'},
     {"mqtt", "base", 's'},
     {"mqtt", "clear_creds", 'b'},
-    {"ref", "name", 's'},
-    {"ref", "topic", 's'},
-    {"ref", "temperature_path", 's'},
-    {"ref", "setpoint_topic", 's'},
-    {"ref", "setpoint_path", 's'},
-    {"ref", "timestamp_topic", 's'},
-    {"ref", "timestamp_path", 's'},
-    {"ref", "enabled_path", 's'},
-    {"ref", "hvac_mode_path", 's'},
-    {"ref", "fixed_setpoint_c", 'n'},
-    {"ref", "max_age_s", 'i'},
     {"circ", "name", 's'},
     {"circ", "topic", 's'},
     {"circ", "power_path", 's'},
@@ -658,9 +610,6 @@ const Field fields[] = {
     {"syslog", "host", 's'},
     {"syslog", "port", 'i'},
     {"ntp", "server", 's'},
-    {"weather", "latitude", 's'},
-    {"weather", "longitude", 's'},
-    {"weather", "refresh", 'b'},
     {"board", "preset_id", 's'},
     {"board", "led_gpio", 'i'},
     {"board", "led_type", 'i'},
@@ -716,11 +665,6 @@ void bounds_and_modes() {
         {"wifi", "pass", R"("seven12")"},
         {"mqtt", "base", R"("bad/#")"},
         {"mqtt", "broker", R"("mqtt://fixture.invalid")"},
-        {"ref", "max_age_s", "9"},
-        {"ref", "max_age_s", "3601"},
-        {"ref", "fixed_setpoint_c", "4.9"},
-        {"ref", "fixed_setpoint_c", "35.1"},
-        {"ref", "fixed_setpoint_c", "20.11"},
         {"circ", "power_path", R"("bad path")"},
         {"circ", "timestamp_path", R"("")"},
         {"circ", "max_age_s", "9"},
@@ -738,14 +682,6 @@ void bounds_and_modes() {
         {"homehub", "mb_unit_id", "248"},
         {"syslog", "port", "0"},
         {"syslog", "port", "65536"},
-        {"weather", "latitude", R"("90.000001")"},
-        {"weather", "latitude", R"("-90.000001")"},
-        {"weather", "latitude", R"("1e1")"},
-        {"weather", "latitude", R"(" 51 ")"},
-        {"weather", "latitude", R"("+51")"},
-        {"weather", "latitude", R"("51.1234567")"},
-        {"weather", "latitude", R"("")"},
-        {"weather", "longitude", R"("180.000001")"},
         {"board", "led_gpio", "44"},
         {"board", "led_gpio", "49"},
         {"board", "led_type", "2"},
@@ -768,8 +704,8 @@ void bounds_and_modes() {
         unsigned    size;
     };
     for (const auto& bound :
-         {Length{"wifi", "ssid", 33}, Length{"wifi", "pass", 64}, Length{"ref", "name", 49},
-          Length{"ref", "topic", 193}, Length{"ref", "temperature_path", 129},
+         {Length{"wifi", "ssid", 33}, Length{"wifi", "pass", 64}, Length{"circ", "name", 49},
+          Length{"circ", "topic", 193}, Length{"circ", "power_path", 129},
           Length{"homehub", "mb_host", 513}}) {
         const auto& candidate = route(bound.route);
         prepare(candidate);
@@ -792,26 +728,13 @@ void bounds_and_modes() {
               current.mqtt_uri.empty() && current.mqtt_user.empty() && current.mqtt_pass.empty() &&
               current.mqtt_base.empty() && mqtt_inits == 0,
           "explicit empty broker/credential clear/base reset must remain valid");
-    prepare(route("weather"));
-    const auto refresh =
-        invoke(daik::set_weather, R"({"latitude":"0","longitude":"0","refresh":true})");
-    check(refresh.status == "200 OK" && saves == 0 && runtime_changes == 0,
-          "unchanged explicit weather refresh must remain nonpersistent");
-    daik::JsonGuard response(daik::json_parse_document(refresh.response));
-    const auto      token = cJSON_GetObjectItem(response, "refresh_token");
-    check(token && token->valuedouble == 73 &&
-              cJSON_IsTrue(cJSON_GetObjectItem(response, "refresh_requested")),
-          "weather refresh response must carry its causal token");
-    prepare(route("weather"));
-    rejection(route("weather"),
-              R"({"latitude":"12.345678","longitude":"23.456789","refresh":true})", "409 Conflict");
 }
 void unchanged() {
     for (const auto& candidate : routes) {
         success(candidate);
         const auto before_service = service, before_link = fixture::link;
-        saves = service_writes = link_writes = reboots = delays = runtime_changes =
-            weather_commits                                     = 0;
+        saves = service_writes = link_writes = reboots = delays = runtime_changes = 0;
+
         durable_started                                         = false;
         const auto result = invoke(candidate.handler, candidate.valid);
         check(result.status == "200 OK", "unchanged request must remain successful");
@@ -846,7 +769,7 @@ void persistence_failure() {
         check(service == before_service && fixture::link == before_link &&
                   daik::config_blob_serialize(daik::config_blob_from(current)) == before_ram,
               "route-owned write failure changed live or durable config");
-        check(reboots == 0 && runtime_changes == 0 && weather_commits == 0,
+        check(reboots == 0 && runtime_changes == 0,
               "failed save rebooted or committed a runtime successor");
     }
     for (const auto& candidate : routes)
@@ -864,11 +787,10 @@ void request_scratch() {
         size_t  capacity;
     };
     const RequestScope scopes[] = {
-        {daik::set_wifi, 512},         {daik::set_mqtt, 512},        {daik::set_ref_temp, 8192},
-        {daik::set_circulation, 1280}, {daik::set_diagnostics, 128}, {daik::set_hp, 2048},
-        {daik::set_syslog, 512},       {daik::set_ntp, 256},         {daik::set_weather, 256},
-        {daik::set_board, 512},        {daik::set_env3, 256},        {daik::set_ota, 128},
-        {daik::set_lang, 128},         {daik::hp_query_probe, 192},
+        {daik::set_wifi, 512},        {daik::set_mqtt, 512},  {daik::set_circulation, 1280},
+        {daik::set_diagnostics, 128}, {daik::set_hp, 2048},   {daik::set_syslog, 512},
+        {daik::set_ntp, 256},         {daik::set_board, 512}, {daik::set_env3, 256},
+        {daik::set_ota, 128},         {daik::set_lang, 128},  {daik::hp_query_probe, 192},
     };
     for (const auto& scope : scopes) {
         reset();
@@ -920,8 +842,7 @@ void ingress() {
     }
 }
 void missing_and_disabled() {
-    for (const char* name :
-         {"mqtt", "ref", "circ", "syslog", "ntp", "weather", "hp", "board", "env3"}) {
+    for (const char* name : {"mqtt", "circ", "syslog", "ntp", "hp", "board", "env3"}) {
         const auto& candidate = route(name);
         prepare(candidate);
         const auto response = invoke(candidate.handler, "{}");
@@ -930,9 +851,6 @@ void missing_and_disabled() {
             check(current.mqtt_uri.empty() && current.mqtt_user == "old-user" &&
                       current.mqtt_base == "fixture-old-base",
                   "missing MQTT broker disables while credentials/base remain");
-        if (std::strcmp(name, "ref") == 0)
-            check(current.ref_temp_topic.empty() && current.ref_temp_path.empty(),
-                  "missing room topic disables mapping");
         if (std::strcmp(name, "circ") == 0)
             check(current.circulation_topic.empty(), "missing circulation topic disables mapping");
         if (std::strcmp(name, "syslog") == 0)
@@ -941,8 +859,6 @@ void missing_and_disabled() {
         if (std::strcmp(name, "ntp") == 0)
             check(current.ntp_server.empty(),
                   "missing NTP server retains reset-to-default contract");
-        if (std::strcmp(name, "weather") == 0)
-            check(!current.weather_enabled, "both absent coordinates disable forecast");
         if (std::strcmp(name, "hp") == 0)
             check(current.rx_pin == 44 && current.mb_host == "old-hh.invalid",
                   "empty HP patch keeps independent domains");
@@ -966,12 +882,12 @@ void special_chars() {
     check(response.status == "200 OK" && current.wifi_ssid == " \"é\\網 " &&
               current.wifi_pass == "ääää",
           "SSID/password quote/backslash/space/Unicode bytes changed");
-    prepare(route("ref"));
-    const auto room = invoke(
-        daik::set_ref_temp,
-        R"({"name":"Room \"A\" \\ é","topic":"fixture/a\"b\\c","temperature_path":"room.key","fixed_setpoint_c":20})");
-    check(room.status == "200 OK" && current.ref_temp_name == "Room \"A\" \\ é" &&
-              current.ref_temp_topic == "fixture/a\"b\\c",
+    prepare(route("circ"));
+    const auto source = invoke(
+        daik::set_circulation,
+        R"({"name":"Pump \"A\" \\ é","topic":"fixture/a\"b\\c","power_path":"switch.apower","timestamp_path":"ts","test_proof":83})");
+    check(source.status == "200 OK" && current.circulation_name == "Pump \"A\" \\ é" &&
+              current.circulation_topic == "fixture/a\"b\\c",
           "escaped source identity changed or broke JSON response");
     for (const auto& candidate : routes) {
         prepare(candidate);
@@ -1038,14 +954,6 @@ void preflight_failures() {
     prepare(env);
     env_probe = daik::Env3ProbeResult::Qmp6988Unavailable;
     rejection(env, env.valid, "422 Unprocessable Entity");
-    const auto& forecast = route("weather");
-    prepare(forecast);
-    weather_admission = false;
-    rejection(forecast, forecast.valid, "503 Service Unavailable");
-    const auto& diagnostics = route("diagnostics");
-    prepare(diagnostics);
-    weather_admission = false;
-    rejection(diagnostics, diagnostics.valid, "503 Service Unavailable");
     const auto& circ = route("circ");
     prepare(circ);
     proof_ok = false;
@@ -1162,8 +1070,7 @@ void local_pin_reconcile() {
                           current.runtime_revision == daik::config_next_revision(before_revision),
                       "refused local pin save changed HTTP durability or RAM beyond detection");
                 check(
-                    link_snapshot_reads == 1 && reboots == 0 && delays == 0 &&
-                        runtime_changes == 0 && weather_commits == 0,
+                    link_snapshot_reads == 1 && reboots == 0 && delays == 0 && runtime_changes == 0,
                     "refused local pin save copied Config, rebooted or changed a runtime producer");
                 daik::JsonGuard document(daik::json_parse_document(response.response));
                 const cJSON*    error = cJSON_GetObjectItem(document, "error");
@@ -1203,7 +1110,7 @@ uint32_t persisted_generation() {
 // One actual /set_diagnostics transition from the stated generation with the given draw. Returns
 // the generation the handler committed to RAM, the durable service entry and the live producer.
 uint32_t transition(bool enabled, uint32_t draw, unsigned expected_draws) {
-    saves = service_writes = link_writes = runtime_changes = weather_commits = 0;
+    saves = service_writes = link_writes = runtime_changes = 0;
     random_calls = runtime_generation_calls = 0;
     durable_started                         = false;
     random_value                            = draw;
@@ -1292,78 +1199,10 @@ void board_draft_revision() {
             reboots == 0 && service == before && current.rx_pin == 9 && current.tx_pin == 10,
         "detection at the save boundary must keep its link and reject a previously current draft");
 }
-void room_history_lifetime() {
-    reset();
-    const auto send = [](Handler handler, const std::string& body) {
-        durable_started = false;
-        return invoke(handler, body);
-    };
-    const auto generation = [] {
-        daik::ConfigBlob blob;
-        check(daik::config_blob_deserialize(service.data(), service.size(), blob),
-              "room lifetime service entry must decode");
-        check(blob.ref_temp_generation == current.ref_temp_generation,
-              "room lifetime must agree in durable and live config");
-        return blob.ref_temp_generation;
-    };
-    const std::string body = route("ref").valid;
-    check(send(daik::set_ref_temp, body).status == "200 OK", "room source replacement must save");
-    const uint32_t first = generation();
-    check(first != 0 && room_history_resets == 1 &&
-              room_history_identity == daik::logic::history_room_identity(current),
-          "source replacement must durably advance lifetime and cut over matching history");
-    const std::string renamed = changed(body.c_str(), "name", "\"Renamed\"");
-    check(send(daik::set_ref_temp, renamed).status == "200 OK" && generation() == first &&
-              room_history_resets == 1,
-          "rename must preserve actual room-temperature history");
-    const std::string target = changed(renamed.c_str(), "fixed_setpoint_c", "21");
-    check(send(daik::set_ref_temp, target).status == "200 OK" && generation() == first &&
-              room_history_resets == 1,
-          "target-only edit must preserve actual room-temperature history");
-    const auto prior_runtime_changes = runtime_changes;
-    const auto prior_saves           = saves;
-    const auto retry                 = send(daik::set_ref_temp, target);
-    check(retry.status == "200 OK" &&
-              retry.response ==
-                  R"({"ok":true,"saved":false,"reboot":false,"room_evidence_reset":true})" &&
-              runtime_changes == prior_runtime_changes + 1 && saves == prior_saves &&
-              generation() == first && room_history_resets == 1,
-          "unchanged retry must acknowledge the runtime reset and preserve stored room history");
-    check(send(daik::set_ref_temp, R"({"topic":""})").status == "200 OK" &&
-              generation() == first + 1 && room_history_identity == 0 && room_history_resets == 2,
-          "source deletion must durably retire only its history");
-    check(send(daik::set_ref_temp, body).status == "200 OK" && generation() == first + 2 &&
-              room_history_resets == 3,
-          "readding the prior mapping must not restore its prior history lifetime");
-    const auto     before          = service;
-    const uint32_t before_identity = room_history_identity;
-    const unsigned before_resets   = room_history_resets;
-    save_fault                     = 1;
-    const std::string replacement  = changed(body.c_str(), "topic", "\"fixture/failed-room\"");
-    check(send(daik::set_ref_temp, replacement).status == "500 Internal Server Error" &&
-              service == before && generation() == first + 2 &&
-              room_history_identity == before_identity && room_history_resets == before_resets,
-          "failed room save must preserve durable lifetime and runtime history");
-    save_fault = 0;
-    check(send(daik::set_mqtt, R"({"broker":"","clear_creds":true})").status == "200 OK" &&
-              generation() == first + 3 && room_history_identity == 0,
-          "broker removal must durably retire the room history");
-    check(send(daik::set_mqtt, R"({"broker":"mqtt://room-history.invalid"})").status == "200 OK" &&
-              generation() == first + 4 && room_history_identity != 0,
-          "broker replacement must open a distinct room history lifetime");
-    const uint32_t active = room_history_identity;
-    const unsigned resets_before = room_history_resets;
-    check(send(daik::set_diagnostics, R"({"enabled":false})").status == "200 OK" &&
-              room_history_identity == active && room_history_resets == resets_before,
-          "pausing diagnostics must preserve room history identity");
-    check(send(daik::set_diagnostics, R"({"enabled":true})").status == "200 OK" &&
-              room_history_identity == active && room_history_resets == resets_before,
-          "resuming diagnostics must preserve existing room history");
-}
 void diagnostics_source() {
     reset();
     const auto send = [](Handler handler, const std::string& body) {
-        saves = service_writes = link_writes = runtime_changes = weather_commits = 0;
+        saves = service_writes = link_writes = runtime_changes                   = 0;
         modbus_checkup_resets                                                    = 0;
         durable_started                                                          = false;
         return invoke(handler, body);
@@ -1381,22 +1220,19 @@ void diagnostics_source() {
     check(send(daik::set_diagnostics, R"({"enabled":true,"source":"modbus"})").status == "200 OK" &&
               saves == 1 && service_writes == 1 &&
               current.diagnostics_source == daik::DiagnosticsSource::Modbus &&
-              persisted().diagnostics_generation == 9 && runtime_changes == 0 &&
-              weather_commits == 0,
+              persisted().diagnostics_generation == 9 && runtime_changes == 0,
           "enabling or selecting modbus must persist source without advancing generation or "
           "clearing data");
     check(send(daik::set_diagnostics, R"({"source":"x10a"})").status == "200 OK" && saves == 1 &&
               current.diagnostics_source == daik::DiagnosticsSource::X10a &&
-              persisted().diagnostics_generation == 9 && runtime_changes == 0 &&
-              weather_commits == 0,
+              persisted().diagnostics_generation == 9 && runtime_changes == 0,
           "source switch to x10a must omit enabled requirement and keep generation");
     check(send(daik::set_diagnostics, R"({"source":"x10a"})").status == "200 OK" && saves == 0 &&
               service_writes == 0 && persisted().diagnostics_generation == 9,
           "unchanged source switch must be a no-op");
     check(send(daik::set_diagnostics, R"({"source":"modbus"})").status == "200 OK" && saves == 1 &&
               current.diagnostics_source == daik::DiagnosticsSource::Modbus &&
-              persisted().diagnostics_generation == 9 && runtime_changes == 0 &&
-              weather_commits == 0,
+              persisted().diagnostics_generation == 9 && runtime_changes == 0,
           "source switch back to modbus must keep generation and dual storage");
     check(send(daik::set_diagnostics, R"({"enabled":false})").status == "200 OK" && saves == 1 &&
               !current.diagnostics_enabled && persisted().diagnostics_generation == 9 &&
@@ -1448,22 +1284,10 @@ int main(int argc, char** argv) {
                           {"query_flags", test::query_flags},
                           {"diagnostics_generation", test::diagnostics_generation},
                           {"board_draft_revision", test::board_draft_revision},
-                          {"room_history_lifetime", test::room_history_lifetime},
                           {"diagnostics_source", test::diagnostics_source}};
     unsigned   ran     = 0;
     for (const auto& candidate : cases) {
-        if (argc > 1) {
-            if (std::strcmp(argv[1], "legacy_cases") == 0) {
-                if (std::strcmp(candidate.name, "factory_reset_reboot") == 0 ||
-                    std::strcmp(candidate.name, "local_pin_reconcile") == 0 ||
-                    std::strcmp(candidate.name, "diagnostics_generation") == 0 ||
-                    std::strcmp(candidate.name, "board_draft_revision") == 0 ||
-                    std::strcmp(candidate.name, "room_history_lifetime") == 0 ||
-                    std::strcmp(candidate.name, "diagnostics_source") == 0)
-                    continue;
-            } else if (std::strcmp(argv[1], candidate.name) != 0)
-                continue;
-        }
+        if (argc > 1 && std::strcmp(argv[1], candidate.name) != 0) continue;
         oracle = candidate.name;
         candidate.run();
         ++ran;

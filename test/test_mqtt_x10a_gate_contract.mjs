@@ -14,8 +14,8 @@ assert.ok(taskStart >= 0 && taskEnd > taskStart);
 const task = mqtt.slice(taskStart, taskEnd);
 const sample = task.indexOf("mqtt_cycle_gate(publish_gate, x10a_connected)");
 const withdrawal = task.indexOf('mqtt_publish(s_x10a_avail, "offline", 0, 1, 1)');
-const config = task.indexOf("const Config ref_config = config()");
-const frames = task.indexOf("service_reference_frames(ref_config)");
+const config = task.indexOf("const Config cycle_config = config()");
+const frames = task.indexOf("service_circulation_frames(cycle_config)");
 const gateAt = task.indexOf("if (gate.publish_cycle) {");
 assert.ok(task.indexOf("start_current_client()") < sample && sample < withdrawal &&
   withdrawal < config && config < frames && frames < gateAt,
@@ -43,8 +43,7 @@ assert.match(x10a, /if \(x10a_connected && !s_last_x10a_digest_valid\)/,
 assert.match(x10a,
   /s_x10a_publish_proven\.load[\s\S]*?hp_mqtt_source_state\(\)\.recent[\s\S]*?mqtt_publish\(s_x10a_avail, "online"/,
   "source online needs an accepted state seed and a still-recent source");
-for (const call of ["publish_modbus_state", "publish_weather_state", "publish_env3_state",
-  "publish_heartbeat()", "publish_heating_curve_telemetry(ref_config)"]) {
+for (const call of ["publish_modbus_state", "publish_env3_state", "publish_heartbeat()"]) {
   assert.ok(task.indexOf(call, gateEnd) > gateEnd, `${call} must remain outside X10A authority`);
 }
 assert.doesNotMatch(mqtt, /promote_client_to_publisher|publisher_lwt|s_client_is_publisher/,

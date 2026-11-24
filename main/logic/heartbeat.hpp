@@ -220,7 +220,6 @@ struct HeartbeatFields {
     uint32_t    httpd_stack_min_free_bytes  = 0;
     uint32_t    poll_stack_min_free_bytes   = 0;
     uint32_t    mqtt_stack_min_free_bytes   = 0;
-    uint32_t    weather_stack_min_free_bytes = 0;
     std::string reset_reason;         // reset_reason_name() slug — why the device last booted
     // The SAME answer as a NUMBER. The slug above is the readable one and stays, but a metrics
     // consumer never sees it: Telegraf's json parser takes numeric fields only, so `reset_reason`
@@ -265,7 +264,7 @@ struct HeartbeatFields {
     bool        eth_link      = false;
 
     bool        mqtt_connected  = false;
-    uint32_t    mqtt_count      = 0;   // successful publishes (state+heartbeat+heating_curve+discovery)
+    uint32_t    mqtt_count      = 0;   // successful state, heartbeat and discovery publishes
     uint32_t    mqtt_fails      = 0;   // cumulative failed esp_mqtt_client_publish() calls
     uint32_t    mqtt_reconnects = 0;   // cumulative RE-connects (excludes the first-ever connect)
     // WHAT NEVER GOT PUBLISHED, and why — the counters legacy-380 was opened for. `mqtt_fails`
@@ -277,7 +276,7 @@ struct HeartbeatFields {
     // mqtt_skipped  — the cycle THREW (std::bad_alloc; the task guard caught it) and the reading is
     //                 gone. The wired board logged 337 of these in 30 days, 125 in the last of
     //                 them, every one immediately before an OTA reboot.
-    // mqtt_quiesced — the cycle stood aside DELIBERATELY because an OTA/weather TLS operation
+    // mqtt_quiesced — the cycle stood aside DELIBERATELY because an OTA TLS operation
     //                 owned the heap
     //                 (logic/ota_quiesce.hpp). Same missing second, stated reason.
     //
@@ -444,8 +443,6 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f, size_t extra_b
     append_stack_bytes(j, f.poll_stack_min_free_bytes);
     j += ",\"mqtt_stack_min_free_bytes\":";
     append_stack_bytes(j, f.mqtt_stack_min_free_bytes);
-    j += ",\"weather_stack_min_free_bytes\":";
-    append_stack_bytes(j, f.weather_stack_min_free_bytes);
     j += ",\"reset_reason\":\"";
     json_append_escaped(j, f.reset_reason);
     // Numeric twin of the slug above — see HeartbeatFields. A string never reaches a metrics store.
@@ -482,7 +479,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f, size_t extra_b
     json_append_integer_field(j, ",\"mqtt_count\":", f.mqtt_count);
     json_append_integer_field(j, ",\"mqtt_fails\":", f.mqtt_fails);
     json_append_integer_field(j, ",\"mqtt_reconnects\":", f.mqtt_reconnects);
-    // Cycles that produced nothing — an OOM skip and a deliberate OTA/weather TLS hold-off
+    // Cycles that produced nothing — an OOM skip and a deliberate OTA TLS hold-off
     // (legacy-380).
     json_append_integer_field(j, ",\"mqtt_skipped\":", f.mqtt_skipped);
     json_append_integer_field(j, ",\"mqtt_quiesced\":", f.mqtt_quiesced);

@@ -6,7 +6,8 @@
 >
 > **There is no write path, and that is a property of the code.** No source file contains a write
 > entry point, an FC06/FC16 request builder or an issued write function code, and
-> `test/test_heating_curve_diagnosis_contract.mjs` walks every file under `main/` to keep it that way.
+> [`test_read_only_modbus_contract.mjs`](../test/test_read_only_modbus_contract.mjs) checks `main/`
+> for these write paths.
 > A write capability existed briefly and was removed unused; re-adding one is a deliberate design
 > decision that fails that test first. There is no MQTT/HA/HTTP/MCP/raw-Modbus control surface
 > either. Other clients on the LAN (the Onecta app, the unit's MMI, evcc) do write the hub — segment
@@ -104,8 +105,8 @@ This is a project responsiveness bound, not a manufacturer discovery guarantee.
 
 The user may instead enter an IP, `.local` name or ordinary DNS name verbatim. Saving `mb_host` is an
 explicit decision: non-empty starts polling that address; empty disables HomeHub completely and
-persists the latch. Empty-after-searched therefore means no task, no socket, no HomeHub request, no
-HomeHub-dependent heating-curve diagnosis and no future automatic search. If several `homehub-*`
+persists the latch. Empty-after-searched stops the HomeHub task, closes its socket and prevents
+future automatic searches. If several `homehub-*`
 responders answer, the first resolved IPv4 is used/offered and the count is logged to `/diag` rather
 than silently guessed at.
 
@@ -225,12 +226,11 @@ whatever the first cycle read.
 * **Batching.** The 37 EKRHH offsets fall into **ten contiguous runs** across the two function
   spaces, so a full cycle is ten requests. The per-request cap is 16 registers, far below the
   protocol's 125: a batch is the unit of *loss* as much as of saving, and the longest run here is six.
-* **Two cadences.** A **full** cycle every fifth poll tick; the four between it read three fast
-  batches. Two carry the diagnosis gates — inputs 53 (normal space operation), 37 (space rather than
-  DHW routing) and 38 (heating rather than cooling), with adjacent flags 35/36 riding the 35–38 run. The third carries input 44, optional plant outdoor context which
-  legacy-441 requires from the same current cycle. It is explicitly **not** a gate. The extra 40–45 batch
-  is one deliberate bundled request; borrowing the five-second cache would not establish event-time
-  freshness. Neighbouring registers ride these batches because leaving them out saves no request.
+* **Two cadences.** A **full** cycle runs every fifth poll tick. The four intervening cycles read
+  three fast batches, including inputs 53 (normal space operation), 37 (space or DHW routing),
+  38 (operating mode) and 44 (outdoor temperature). Inputs 53 and 38 can refresh `/status.modbus`.
+  Neighbouring registers ride these batches because leaving them out saves no request. Only eligible
+  full polls supply measurements to the plant checkup, including input 44 for outdoor context.
 * **Five poll ticks.** Chosen from the *dashboard*, not from how fast the values move: the
   browser polls `/values` every two seconds, and a HomeHub reading up to ten seconds old beside a
   one-second X10A reading of the same quantity invites exactly the "which of these is current?"
@@ -418,8 +418,8 @@ not merely while the stack is configured, and not merely while it was connected 
 arrived. Its rows belong to that live session's latest **full** cycle, subject to the 614-second
 full-cache and seven-second reply-age bounds described above; bounded network reads add to the
 four intervening fast polls. At native promotion, the answered pressure probe alone is exposed
-until the following full native sweep. Fast cycles update link, diagnosis-gate state and the sealed
-input-44 event context without turning their fifteen rows into a partial cache. These are transport
+until the following full native sweep. Fast cycles update the link and the separate status
+observations without turning their fifteen rows into a partial value cache. These are transport
 limits, not proof that every row was observed simultaneously. Liveness and the cache sit behind two
 different mutexes, so every successful TCP connect gets a generation and every cache commit records
 the generation that produced it. `mb_values_snapshot()` reports live only when the post-copy link
@@ -509,9 +509,10 @@ worst stack headroom in bytes, from the shared owner-task sampler
 cannot answer the same question with two numbers; `null` until the Modbus task has been sampled
 during this boot, with recorded minima retained after disabling the source) and the
 plant-gate pair `plant_gate_known` / `plant_gate_active` (raw input 53).
-[PLANT.md](PLANT.md#heating-curve-diagnosis) defines the diagnosis's combined route prerequisite
-and separate mode check. There is no actuator object: it was removed with the write path. `host`
-is the configured value and is redacted in bug reports. See
+The independently aged `heating_mode_known` / `heating_mode_active` pair reports whether heating is
+active (input 38). Native Altherma 4 reports known and inactive for both `None` and `Cooling`.
+The input 38 row in `/values` distinguishes the decoded modes. `host` is the configured value and
+is redacted in bug reports. See
 [`../README.md`](../README.md).
 
 ## Security

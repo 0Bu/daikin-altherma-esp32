@@ -75,7 +75,7 @@ menu "Daikin Altherma Configuration"
         string "MQTT base topic prefix"
         default "daikin-altherma-esp32"
         help
-            DEFAULT base topic for this installation: the x10a/modbus/heartbeat/heating_curve/crash
+            DEFAULT base topic for this installation: the x10a/modbus/heartbeat/crash
             topics sit directly under it, e.g. "daikin-altherma-esp32/x10a". It is also the HA
             installation identity — its injective discovery node preserves the default
             "daikin_altherma_esp32" id, so replacing the board keeps one X10A/diagnostics device in Home

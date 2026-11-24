@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Hydrate the historical source blobs needed by offline/read-only CI consumers.
+"""Hydrate the historical source needed by offline/read-only CI.
 
-Keep full commits, trees and tags in a blob-filtered checkout. Only these source witnesses need
-eager materialization; historical firmware/GIF binaries need not be downloaded with them.
+Keep full commits, trees and tags in a blob-filtered checkout. Only the HTTP deadline witness
+needs eager materialization. Historical firmware and GIF binaries remain lazy.
 """
 from __future__ import annotations
 
 import argparse
-import ast
 from pathlib import Path
 import re
 import subprocess
@@ -32,40 +31,14 @@ def git(*arguments: str, capture: bool = True) -> bytes:
     return result.stdout if capture else b""
 
 
-def source_text(path: str, source_tree: str | None) -> tuple[str, str]:
+def source_text(path: str, source_tree: str | None) -> str:
     if source_tree:
-        filename = f"{source_tree}:{path}"
-        return git("show", filename).decode("utf-8"), filename
-    filename = ROOT / path
-    return filename.read_text(encoding="utf-8"), str(filename)
-
-
-def http_config_witness(source_tree: str | None) -> str:
-    """Read the existing runtime-test pin without executing the test or duplicating that pin."""
-    source, filename = source_text("test/http_config_runtime/run.py", source_tree)
-    tree = ast.parse(source, filename=filename)
-    assignments = {
-        name: [node.value for node in tree.body if isinstance(node, ast.Assign)
-               and any(isinstance(target, ast.Name) and target.id == name
-                       for target in node.targets)]
-        for name in ("original_commit", "original_text")
-    }
-    pins = assignments["original_commit"]
-    if len(pins) != 1 or not isinstance(pins[0], ast.Constant) or not isinstance(pins[0].value, str) \
-            or not re.fullmatch(r"[0-9a-f]{40}", pins[0].value):
-        raise HistoryError("HTTP runtime test must declare one literal full original_commit")
-    expected = ast.parse(
-        "command(['git', '-c', 'core.fsmonitor=false', '-C', ROOT, 'show', "
-        "original_commit + ':main/http_config.cpp']).stdout", mode="eval",
-    ).body
-    reads = assignments["original_text"]
-    if len(reads) != 1 or ast.dump(reads[0]) != ast.dump(expected):
-        raise HistoryError("HTTP runtime historical read changed; review its hydration contract")
-    return pins[0].value + ":main/http_config.cpp"
+        return git("show", f"{source_tree}:{path}").decode("utf-8")
+    return (ROOT / path).read_text(encoding="utf-8")
 
 
 def http_deadline_witness(source_tree: str | None) -> str:
-    source, _ = source_text("test/test_http_deadline_runtime.mjs", source_tree)
+    source = source_text("test/test_http_deadline_runtime.mjs", source_tree)
     pins = re.findall(r'^const originalCommit = "([0-9a-f]{40})";$', source, re.MULTILINE)
     read = 'execute("git", ["-c", "core.fsmonitor=false", "show", `${originalCommit}:main/http_deadline.cpp`])'
     if len(pins) != 1 or source.count(read) != 1:
@@ -99,15 +72,13 @@ def main() -> int:
         raise HistoryError("--source-tree requires a full SHA")
     if git("rev-parse", "--is-shallow-repository").strip() != b"false":
         raise HistoryError("full commit history and tags are required; shallow checkout refused")
-    witnesses = (http_config_witness(args.source_tree), http_deadline_witness(args.source_tree))
-    for witness in witnesses:
-        revision, path = witness.split(":", 1)
-        hydrate(revision, path)
+    revision, path = http_deadline_witness(args.source_tree).split(":", 1)
+    hydrate(revision, path)
     return 0
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (HistoryError, OSError, SyntaxError, subprocess.TimeoutExpired) as exc:
+    except (HistoryError, OSError, subprocess.TimeoutExpired) as exc:
         raise SystemExit(f"CI history: {exc}") from exc

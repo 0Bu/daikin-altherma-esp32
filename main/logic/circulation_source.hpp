@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "reference_temperature.hpp"  // exact-topic/path validators + retained freshness contract
+#include "mqtt_source.hpp" // exact-topic/path validators + retained freshness contract
 
 namespace daik {
 
@@ -32,8 +32,8 @@ struct CirculationTestProofClock {
         if (!valid || now_ms < tested_ms || age_s_at_test > max_age_s) return false;
         const uint64_t remaining_ms = (uint64_t{max_age_s} - age_s_at_test + 1) * 1000;
         if (now_ms - tested_ms >= remaining_ms) return false;
-        return reference_freshness(true, true, true, source_unix_s, tested_ms, now_unix_s, now_ms,
-                                   max_age_s)
+        return mqtt_source_freshness(true, true, true, source_unix_s, tested_ms, now_unix_s, now_ms,
+                                     max_age_s)
             .fresh;
     }
 };
@@ -46,10 +46,10 @@ inline bool circulation_source_config_valid(std::string_view name, std::string_v
                                             const char** why = nullptr) {
     auto fail = [&](const char* text) { if (why) *why = text; return false; };
     if (name.size() > CIRC_SOURCE_NAME_MAX) return fail("Source name is too long");
-    if (!reference_topic_valid(topic, why)) return false;
+    if (!mqtt_source_topic_valid(topic, why)) return false;
     if (topic.empty()) return true;                 // empty topic is the explicit disabled state
-    if (!reference_json_path_valid(power_path, why)) return false;
-    if (!reference_json_path_valid(timestamp_path, why)) return false;
+    if (!mqtt_source_json_path_valid(power_path, why)) return false;
+    if (!mqtt_source_json_path_valid(timestamp_path, why)) return false;
     if (max_age_s < CIRC_SOURCE_MAX_AGE_MIN_S || max_age_s > CIRC_SOURCE_MAX_AGE_MAX_S)
         return fail("Maximum age must be between 10 and 3600 seconds");
     if (on_tenths_w <= off_tenths_w)

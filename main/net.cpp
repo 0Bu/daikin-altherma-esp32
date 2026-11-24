@@ -234,7 +234,7 @@ bool net_eth_probe() {
 // Above WIFI_STA_DEF's 100 (esp_netif_defaults.h ships ETH_DEF at 50), so the wire takes the
 // DEFAULT ROUTE when both transports hold a lease. Precise about what that buys, because half of
 // it is a well-known lwIP asymmetry rather than a setting:
-//   • OFF-LINK destinations — the MQTT broker, syslog, SNTP, the OTA feed, Open-Meteo — go to
+//   • OFF-LINK destinations — the MQTT broker, syslog, SNTP, and the OTA feed — go to
 //     netif_default, and route_prio is exactly what esp_netif uses to choose it.
 //   • ON-LINK destinations do NOT consult it: ip4_route() walks netif_list and takes the first
 //     up netif whose subnet matches, so with both interfaces on one /24 same-subnet traffic

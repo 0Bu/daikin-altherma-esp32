@@ -98,8 +98,8 @@ review unless the user explicitly requested a live-device test.
 For polling, rendering, history or animation changes, run the browser gate's temporal matrix as well
 as its static locale matrix. Derive the entry inventory from production: every schematic inspector
 must either exercise its history or have an explicit no-history classification. Include catalog,
-Modbus-only, board-memory and circulation disclosures, derived/categorical graphs, ENV III and the
-independent room source. Use full 288-sample rings, source-specific gaps and changing live values
+Modbus-only, board-memory and circulation disclosures, derived and categorical graphs, and ENV III
+measurements. Use full 288-sample rings, source-specific gaps and changing live values
 through the real two-second polling/render loop at phone and desktop widths in Chromium and both
 iPad orientations in headless WebKit. WebKit must use trusted native touch events and verify actual
 painted flow movement as well as animation clocks; its frozen-paint control must fail for that reason.

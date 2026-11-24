@@ -1,15 +1,14 @@
-// POST config routes: /set_wifi, /set_mqtt, /set_ref_temp,
-// /test_circulation, /set_circulation, /set_weather,
+// POST config routes: /set_wifi, /set_mqtt,
+// /test_circulation, /set_circulation,
 // /set_syslog, /set_ntp, /set_hp,
 // /set_board, /set_env3, /set_ota, /set_lang, /set_diagnostics, /discover_homehub, /detect,
 // /hp/query.
 // Parse JSON, validate, then apply:
-// WiFi/MQTT/syslog/NTP/board persist to NVS + reboot; the reference mapping persists immediately and
-// rebinds live only while the v19 diagnostics master is enabled; when enabled, its subscriber
-// reports missing/wrong paths only after a payload arrives;
+// WiFi/MQTT/syslog/NTP/board persist to NVS and reboot; the optional circulation mapping persists
+// immediately and rebinds live while diagnostics are enabled;
 // /set_hp persists the RX/TX pin cache (no reboot) but keeps the model session-only;
-// /set_ota and /set_lang persist their UI settings and apply them live; /detect re-runs detection in
-// RAM; /hp/query persists nothing at all — it is the free register probe, a one-shot read of a
+// /set_ota and /set_lang persist their UI settings and apply them live; /detect re-runs detection
+// in RAM; /hp/query persists nothing at all — it is the free register probe, a one-shot read of a
 // caller-chosen page served on the poll task (logic/hp_probe.hpp).
 #include "http_handlers.hpp"
 #include "http_chunks.hpp"
@@ -33,13 +32,10 @@
 #include "logic/json.hpp"       // json_append_escaped — the ONE encoder every payload uses
 #include "logic/mqtt_base.hpp"  // mqtt_base_valid — the installation base topic's rules, host-tested
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
-#include "logic/reference_temperature.hpp"
-#include "logic/weather_forecast.hpp"
 #include "hp_modbus.hpp"        // mb_reconfigure — start/stop the second, independent stack
 #include "mqtt_ha.hpp"          // mqtt_reference_reconfigure — re-evaluate its master-gated binding
 #include "net.hpp"              // net_eth_reserved_pins — the pads a detected W5500 is clocking
 #include "nvs_storage.hpp" // nvs_restart_held_by_factory_reset — reboot_soon defers to a reset
-#include "weather_forecast.hpp"
 
 #include "cJSON.h"
 #include "esp_http_server.h"
@@ -549,30 +545,17 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
 
     {
         Config         c                      = config();
-        const uint32_t previous_room_identity = logic::history_room_identity(c);
         c.mqtt_uri                            = std::move(broker);
         c.mqtt_user                           = std::move(user);
         c.mqtt_pass                           = std::move(pass);
         c.mqtt_base                           = std::move(base);
-        if (logic::history_room_identity(c) != previous_room_identity)
-            c.ref_temp_generation =
-                diagnostics_next_generation(c.ref_temp_generation, esp_random());
-        const uint32_t room_identity = logic::history_room_identity(c);
         if (!config_save(c))
             return send_err(req, "500 Internal Server Error", "config write failed");
-        history_room_reset(room_identity);
         http_send_json(req, "{\"ok\":true,\"reboot\":true}");
         reboot_soon();
         return ESP_OK;
     }
 }
-
-struct RefTempRequest {
-    std::string name, topic, path, setpoint_topic, setpoint_path, time_topic, time_path,
-                enabled_path, hvac_mode_path;
-    uint16_t fixed_setpoint_tenths = 0;
-    uint32_t max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
-};
 
 static bool parse_tenths_bounded(cJSON* root, const char* key, double max_val, uint16_t fallback,
                                  uint16_t& out, bool* present = nullptr) {
@@ -589,124 +572,6 @@ static bool parse_tenths_bounded(cJSON* root, const char* key, double max_val, u
     if (std::fabs(tenths - std::round(tenths)) > 0.000001) return false;
     out = static_cast<uint16_t>(std::round(tenths));
     return true;
-}
-
-static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out) {
-    // Three independently escaped MQTT topic/path mappings can exceed 1536 JSON bytes.
-    // Keep the bounded body off the HTTP stack; the handler's OOM boundary returns 503.
-    const char* parse_error = nullptr;
-    JsonGuard   j(read_config_document(req, 8192, parse_error));
-    if (!j) return parse_error;
-    if (const char* error = config_request_field_error(
-            j, HttpConfigFieldType::String,
-            {"name", "topic", "temperature_path", "setpoint_topic", "setpoint_path",
-             "timestamp_topic", "timestamp_path", "enabled_path", "hvac_mode_path"}))
-        return error;
-    const bool has_setpoint_topic = cJSON_HasObjectItem(j, "setpoint_topic");
-    const bool has_time_topic     = cJSON_HasObjectItem(j, "timestamp_topic");
-    struct RefStringField {
-        const char*  key;
-        std::string* dst;
-    };
-    const RefStringField fields[] = {
-        {"name", &out.name},
-        {"topic", &out.topic},
-        {"temperature_path", &out.path},
-        {"setpoint_topic", &out.setpoint_topic},
-        {"setpoint_path", &out.setpoint_path},
-        {"timestamp_topic", &out.time_topic},
-        {"timestamp_path", &out.time_path},
-        {"enabled_path", &out.enabled_path},
-        {"hvac_mode_path", &out.hvac_mode_path},
-    };
-    for (const RefStringField& f : fields) *f.dst = js(j, f.key);
-    bool       has_fixed_item   = false;
-    const bool fixed_type_valid = parse_tenths_bounded(j, "fixed_setpoint_c", 35.0, 0,
-                                                       out.fixed_setpoint_tenths, &has_fixed_item);
-    cJSON* age_item = cJSON_GetObjectItem(j, "max_age_s");
-    const bool age_type_valid = !age_item || (cJSON_IsNumber(age_item) &&
-                                age_item->valuedouble == static_cast<double>(age_item->valueint));
-    out.max_age_s = age_item && cJSON_IsNumber(age_item)
-                  ? static_cast<uint32_t>(age_item->valueint)
-                  : REF_TEMP_MAX_AGE_DEFAULT_S;
-    j.reset();
-
-    if (!fixed_type_valid) return "Fixed target temperature must use at most one decimal place";
-    if (!age_type_valid) return "Maximum age must be a whole number";
-    if (out.topic.empty()) {                             // empty topic is the explicit Off state
-        out.fixed_setpoint_tenths = 0;
-        for (size_t i = 2; i < sizeof(fields) / sizeof(fields[0]); ++i) fields[i].dst->clear();
-    }
-    // v16 and older API clients only send the one topic. Preserve that request contract while new
-    // clients can state each exact value source independently.
-    if (!out.topic.empty() && !has_setpoint_topic && !has_fixed_item && !out.setpoint_path.empty())
-        out.setpoint_topic = out.topic;
-    if (!out.topic.empty() && !has_time_topic && !out.time_path.empty())
-        out.time_topic = out.topic;
-    if (!out.topic.empty() && out.fixed_setpoint_tenths == 0 && out.setpoint_topic.empty())
-        return "Target temperature needs an MQTT mapping or a fixed value";
-    const char* why = nullptr;
-    if (!reference_temperature_config_valid(out.name, out.topic, out.path,
-                                            out.setpoint_topic, out.setpoint_path,
-                                            out.fixed_setpoint_tenths,
-                                            out.time_topic, out.time_path,
-                                            out.enabled_path, out.hvac_mode_path,
-                                            out.max_age_s, &why))
-        return why ? why : "invalid reference temperature config";
-    return nullptr;
-}
-
-// Decision-ready, read-only room source. Saving records user intent and re-evaluates its binding on
-// the existing MQTT connection immediately; actual subscription/decoding remains gated by the v19
-// diagnostics master. Payload/path/freshness errors remain runtime evidence while enabled: they are
-// visible in /status and keep the write-free SHADOW diagnosis fail-closed.
-static esp_err_t set_ref_temp(httpd_req_t* req) {
-    RefTempRequest in;
-    if (const char* error = parse_ref_temp_request(req, in)) return send_bad_req(req, error);
-
-    Config c = config();
-    struct RefBindingPair {
-        std::string* cur;
-        std::string* next;
-    };
-    const RefBindingPair pairs[] = {
-        {&c.ref_temp_name, &in.name},
-        {&c.ref_temp_topic, &in.topic},
-        {&c.ref_temp_path, &in.path},
-        {&c.ref_temp_setpoint_topic, &in.setpoint_topic},
-        {&c.ref_temp_setpoint_path, &in.setpoint_path},
-        {&c.ref_temp_time_topic, &in.time_topic},
-        {&c.ref_temp_time_path, &in.time_path},
-        {&c.ref_temp_enabled_path, &in.enabled_path},
-        {&c.ref_temp_hvac_mode_path, &in.hvac_mode_path},
-    };
-    bool unchanged = c.ref_temp_fixed_setpoint_tenths == in.fixed_setpoint_tenths &&
-                     c.ref_temp_max_age_s == in.max_age_s;
-    for (const RefBindingPair& p : pairs) {
-        if (*p.cur != *p.next) {
-            unchanged = false;
-            break;
-        }
-    }
-    if (unchanged) {
-        mqtt_reference_reconfigure(); // retry the saved mapping and clear old evidence
-        return http_send_json(
-            req, "{\"ok\":true,\"saved\":false,\"reboot\":false,\"room_evidence_reset\":true}");
-    }
-    const bool     mapping_disabled       = in.topic.empty();
-    const uint32_t previous_room_identity = logic::history_room_identity(c);
-    for (const RefBindingPair& p : pairs) *p.cur = std::move(*p.next);
-    c.ref_temp_fixed_setpoint_tenths = in.fixed_setpoint_tenths;
-    c.ref_temp_max_age_s             = in.max_age_s;
-    if (logic::history_room_identity(c) != previous_room_identity)
-        c.ref_temp_generation = diagnostics_next_generation(c.ref_temp_generation, esp_random());
-    const uint32_t room_identity = logic::history_room_identity(c);
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
-    history_room_reset(room_identity);
-    mqtt_reference_reconfigure();
-    diag_printf("mqtt: reference temperature mapping saved%s\n",
-                mapping_disabled ? " (disabled)" : "");
-    return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }
 
 struct CirculationRequest {
@@ -831,7 +696,6 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
     const bool              source_chg   = c.diagnostics_source != next_source;
     if (!enabled_chg && !source_chg)
         return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
-    const bool weather_was_publishable = c.diagnostics_enabled && c.weather_enabled;
     c.diagnostics_enabled              = next_enabled;
     c.diagnostics_source               = next_source;
     if (enabled_chg) {
@@ -841,28 +705,18 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
                 diagnostics_next_generation(c.diagnostics_generation, esp_random());
         }
         const bool          generation_chg = c.diagnostics_generation != prev_generation;
-        const uint32_t      room_identity  = logic::history_room_identity(c);
-        WeatherSourceChange weather_change(c.weather_enabled, next_enabled);
-        if (!weather_change)
-            return send_err(req, "503 Service Unavailable",
-                            "weather request still active; retry diagnostics change");
         if (!config_save(c))
             return send_err(req, "500 Internal Server Error", "config write failed");
-        weather_change.commit();
 
         checkup_set_diagnostics(next_enabled, c.diagnostics_generation);
         if (generation_chg)
             history_checkup_reset();
         else
             history_set_diagnostics(next_enabled);
-        history_room_reset(room_identity);
-        mqtt_reference_reconfigure();
         if (generation_chg)
             mqtt_circulation_reconfigure(!c.circulation_topic.empty());
         else
             mqtt_circulation_set_diagnostics(!c.circulation_topic.empty());
-        if (weather_was_publishable && !next_enabled) mqtt_request_weather_cleanup();
-        weather_forecast_reconfigure();
         diag_printf("diagnostics: %s (generation %lu, source %s)\n",
                     next_enabled ? "enabled" : "disabled",
                     static_cast<unsigned long>(c.diagnostics_generation),
@@ -1067,8 +921,6 @@ static esp_err_t set_hp(httpd_req_t* req) {
             // The HomeHub stack is told separately, because it IS separate: this starts or stops
             // its task and re-resolves its address without touching the X10A poll engine above.
             mb_reconfigure(modbus_enabled);
-            // The heating-curve event and cadence came from the previous endpoint's gates.
-            mqtt_heating_curve_homehub_reset();
             // Publish the tombstone only after generation, status and cache have crossed to the new
             // identity. mqtt_task can then never consume this request and republish predecessor A
             // from the same cycle before the HomeHub owner notices B/disabled.
@@ -1149,72 +1001,6 @@ static esp_err_t set_ntp(httpd_req_t* req) {
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
-}
-
-// POST /set_weather {latitude, longitude[, refresh]}. Two empty strings disable weather traffic;
-// otherwise both strict decimal coordinates are required. Saving is local and non-blocking: the
-// dedicated weather task performs TLS/DNS/JSON work only after this response. `refresh:true` is a
-// deliberately narrow observation-only trigger: it is accepted only when the submitted location
-// exactly matches the enabled saved location, so release HIL can schedule a real weather TLS cycle
-// without changing or rewriting NVS.
-static esp_err_t set_weather(httpd_req_t* req) {
-    const char* parse_error = nullptr;
-    JsonGuard   j(read_config_document(req, 256, parse_error));
-    if (!j) return send_bad_req(req, parse_error);
-    if (const char* error =
-            config_request_field_error(j, HttpConfigFieldType::String, {"latitude", "longitude"}))
-        return send_bad_req(req, error);
-    const std::string latitude = js(j, "latitude");
-    const std::string longitude = js(j, "longitude");
-    cJSON*            refresh_item = cJSON_GetObjectItemCaseSensitive(j, "refresh");
-    if (refresh_item && !cJSON_IsBool(refresh_item)) {
-        j.reset();
-        return send_bad_req(req, "refresh must be boolean");
-    }
-    const bool refresh = cJSON_IsTrue(refresh_item);
-    j.reset();
-    const WeatherLocationParse location = weather_location_parse(latitude, longitude);
-    if (!location.valid) {
-        if (std::strcmp(location.reason, "both_coordinates_required") == 0)
-            return send_bad_req(req, "latitude and longitude are both required");
-        if (std::strcmp(location.reason, "invalid_latitude") == 0)
-            return send_bad_req(req, "latitude must be between -90 and 90");
-        return send_bad_req(req, "longitude must be between -180 and 180");
-    }
-    Config c = config();
-    const bool weather_was_enabled = c.weather_enabled;
-    const bool unchanged           = location.enabled == c.weather_enabled &&
-                           location.latitude_e6 == c.weather_latitude_e6 &&
-                           location.longitude_e6 == c.weather_longitude_e6;
-    if (refresh) {
-        if (!unchanged || !location.enabled)
-            return send_err(req, "409 Conflict", "refresh requires the saved enabled location");
-        if (!c.diagnostics_enabled)
-            return send_err(req, "409 Conflict", "refresh requires diagnostics enabled");
-        uint64_t refresh_token = 0;
-        if (!weather_forecast_request_refresh(refresh_token))
-            return send_err(req, "503 Service Unavailable",
-                            "weather task unavailable or refresh already pending");
-        char response[160];
-        std::snprintf(response, sizeof(response),
-                      "{\"ok\":true,\"reboot\":false,\"saved\":false,"
-                      "\"refresh_requested\":true,\"refresh_token\":%llu}",
-                      static_cast<unsigned long long>(refresh_token));
-        return http_send_json(req, response);
-    }
-    if (unchanged) return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":false}");
-    c.weather_enabled = location.enabled;
-    c.weather_latitude_e6 = location.latitude_e6;
-    c.weather_longitude_e6 = location.longitude_e6;
-    WeatherSourceChange weather_change(location.enabled, c.diagnostics_enabled);
-    if (!weather_change)
-        return send_err(req, "503 Service Unavailable",
-                        "weather request still active; retry location change");
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
-    weather_change.commit();
-    if (weather_was_enabled) mqtt_request_weather_cleanup();
-    weather_forecast_reconfigure();
-    return http_send_json(req, "{\"ok\":true,\"reboot\":false,\"saved\":true}");
 }
 
 // POST /set_board {preset_id, led_gpio, led_type, led_inverted, btn_gpio, btn_active_low,
@@ -1622,12 +1408,10 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     // re-detect are trusted-LAN only, so a nearby radio client cannot reconfigure the device.
     http_register_on(s, surface, "/set_wifi", HTTP_POST, set_wifi);
     http_register_on(s, surface, "/set_mqtt", HTTP_POST, set_mqtt);
-    http_register_on(s, surface, "/set_ref_temp", HTTP_POST, set_ref_temp);
     http_register_on(s, surface, "/test_circulation", HTTP_POST, test_circulation);
     http_register_on(s, surface, "/set_circulation", HTTP_POST, set_circulation);
     http_register_on(s, surface, "/set_syslog", HTTP_POST, set_syslog);
     http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
-    http_register_on(s, surface, "/set_weather", HTTP_POST, set_weather);
     http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);
     http_register_on(s, surface, "/discover_homehub", HTTP_POST, discover_homehub_now);
     http_register_on(s, surface, "/set_board", HTTP_POST, set_board);

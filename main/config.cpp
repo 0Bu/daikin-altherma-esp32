@@ -4,7 +4,6 @@
 #include "diag_log.hpp"
 #include "logic/config_store.hpp"   // ConfigBlob (de)serialize — the atomic CRC-checked config blob
 #include "logic/config_transaction.hpp" // the save/commit transactions executed here over NVS
-#include "logic/weather_forecast.hpp"
 #include "logic/board_presets.hpp"
 #include "logic/env3.hpp"
 #include "sdkconfig.h"
@@ -247,32 +246,6 @@ void config_load() {
         // (logic/mqtt_base.hpp). There is deliberately no Kconfig fallback to apply here: unlike
         // the board block, "absent" and "default" are the same state for this field.
         if (b.has_mqtt_base) c.mqtt_base = std::move(b.mqtt_base);
-        if (b.has_ref_temp) {
-            c.ref_temp_name          = std::move(b.ref_temp_name);
-            c.ref_temp_path          = std::move(b.ref_temp_path);
-            c.ref_temp_time_path     = std::move(b.ref_temp_time_path);
-            c.ref_temp_setpoint_path = std::move(b.ref_temp_setpoint_path);
-            if (b.has_ref_multi_source) {
-                c.ref_temp_setpoint_topic = std::move(b.ref_temp_setpoint_topic);
-                c.ref_temp_time_topic     = std::move(b.ref_temp_time_topic);
-            } else {
-                if (!c.ref_temp_setpoint_path.empty()) c.ref_temp_setpoint_topic = b.ref_temp_topic;
-                if (!c.ref_temp_time_path.empty()) c.ref_temp_time_topic = b.ref_temp_topic;
-            }
-            c.ref_temp_topic = std::move(b.ref_temp_topic);
-            if (b.has_ref_multi_source && b.ref_temp_fixed_setpoint_tenths <= UINT16_MAX)
-                c.ref_temp_fixed_setpoint_tenths =
-                    static_cast<uint16_t>(b.ref_temp_fixed_setpoint_tenths);
-            c.ref_temp_enabled_path   = std::move(b.ref_temp_enabled_path);
-            c.ref_temp_hvac_mode_path = std::move(b.ref_temp_hvac_mode_path);
-            c.ref_temp_max_age_s      = b.ref_temp_max_age_s;
-            c.ref_temp_generation     = b.ref_temp_generation;
-        }
-        if (b.has_weather) {
-            c.weather_enabled      = b.weather_enabled;
-            c.weather_latitude_e6  = b.weather_latitude_e6;
-            c.weather_longitude_e6 = b.weather_longitude_e6;
-        }
         if (b.has_diagnostics) {
             c.diagnostics_enabled    = b.diagnostics_enabled;
             c.diagnostics_generation = b.diagnostics_generation;
@@ -417,13 +390,6 @@ void config_load() {
     // "" (either no ntp_server yet, or an explicit empty save via POST /set_ntp) falls back to the
     // Kconfig default — unlike syslog_host, an empty ntp_server is not a disabled state to preserve.
     if (c.ntp_server.empty()) c.ntp_server = CONFIG_DAIKIN_NTP_SERVER;
-    if (!weather_location_e6_valid(c.weather_enabled, c.weather_latitude_e6,
-                                   c.weather_longitude_e6)) {
-        diag_printf("config: persisted Open-Meteo location rejected — weather forecast disabled\n");
-        c.weather_enabled = false;
-        c.weather_latitude_e6 = 0;
-        c.weather_longitude_e6 = 0;
-    }
 
     // Persisted X10A LINK cache: RX/TX pins + protocol. New builds use one CRC-protected blob so a
     // failed/interrupted pin swap cannot leave a mixed pair. Legacy per-key values are read only

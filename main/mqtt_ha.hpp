@@ -4,15 +4,11 @@
 // per value on (re)connect (logic/discovery.hpp), republishes retained heat-pump state when its
 // value set changes, and publishes each fresh ENV III sample on its own retained topic with three
 // discovery entities (temperature, humidity, pressure). Read-only: no command subscriptions —
-// optional exact inbound subscriptions assemble one configured room sample and never actuate the
-// heat pump. No-op if mqtt_uri is empty.
-#include <array>
+// exact inbound subscriptions observe the potable-water circulation witness. No-op if mqtt_uri is
+// empty.
 #include <cstdint>
 #include <string>
-#include "logic/heating_curve_diagnosis.hpp"
-#include "logic/heating_curve_bins.hpp"
 #include "logic/circulation_source.hpp"
-#include "logic/reference_temperature.hpp"
 
 namespace daik {
 
@@ -30,7 +26,7 @@ uint32_t mqtt_retirement_evidence() noexcept;
 
 // Publish cycles that produced nothing, since boot — the heartbeat's mqtt_skipped/mqtt_quiesced
 // (legacy-380). `skipped` threw and lost the reading; `quiesced` stood aside on purpose while an
-// OTA download or weather fetch owned the heap (logic/ota_quiesce.hpp). Reported on /status too,
+// OTA operation owned the heap (logic/ota_quiesce.hpp). Reported on /status too,
 // and not only on the heartbeat, because the heartbeat needs a BROKER: an installation whose MQTT
 // is misconfigured — or one being debugged over the LAN with nothing subscribed — is exactly where
 // a reader is asking why values keep disappearing, and it is the one place that could not answer.
@@ -47,10 +43,10 @@ bool mqtt_x10a_publish_proven();
 bool mqtt_x10a_publish_required();
 
 // Has the firmware publish cycle left its allocating work, with no esp-mqtt TLS handshake/reconnect
-// in flight? True when no publisher task exists. Weather and OTA use this acknowledgement before TLS.
+// in flight? True when no publisher task exists. OTA uses this acknowledgement before TLS.
 bool mqtt_publish_network_quiesced();
 
-// OTA/Weather raise this lock-free request before waiting for heap ownership. The MQTT publish task
+// OTA raises this lock-free request before waiting for heap ownership. The MQTT publish task
 // cleanly stops esp-mqtt on its own (never from the event callback), which releases an existing
 // MQTTS transport/task and prevents keepalive/subscription I/O from allocating dynamic TLS records
 // after admission. Resume is asynchronous after the network owner clears its activity flag.
@@ -61,47 +57,6 @@ bool mqtt_transport_network_quiesced();
 // the clean stop, because an install can restart the board before that client reconnects
 // (logic/mqtt_publish_gate.hpp). Resume discards an intent that no stop consumed.
 void mqtt_transport_withdraw_online_on_pause();
-
-// Observation + decision-readiness status for the one configured living-room source. `received_ms` is
-// monotonic MQTT arrival time; source_unix_s is present only when the configured payload field was
-// parsed. The status endpoint derives freshness from these without mutating the captured sample.
-// The write-free shadow controller reads this canonical view. There is no actuator to call.
-struct ReferenceTemperatureStatus {
-    bool configured=false, subscribed=false, has_value=false, retained=false, has_source_time=false;
-    double temperature_c=0.0;
-    bool has_setpoint=false, has_enabled=false, enabled=false, has_hvac_mode=false;
-    double setpoint_c=0.0;
-    uint64_t received_ms=0;
-    int64_t received_unix_s=-1;
-    int64_t source_unix_s=-1;
-    uint32_t messages=0, errors=0, rejections=0;
-    ReferenceRoomReason rejection_reason=ReferenceRoomReason::InvalidPayload;
-    std::string hvac_mode, timestamp_source, eligibility_error, error;
-};
-// Read against the caller's configuration snapshot. A saved replacement source cannot expose its
-// predecessor's raw sample while subscription work is pending, paused or failed.
-ReferenceTemperatureStatus reference_temperature_status(const Config& expected);
-
-struct HeatingCurveBinsReport {
-    std::array<logic::HeatingCurveBinSummary, logic::HEATING_CURVE_BIN_COUNT> homehub{};
-    std::array<logic::HeatingCurveBinSummary, logic::HEATING_CURVE_BIN_COUNT> env3{};
-    double                                                                    target_c = 0.0;
-    bool                                                                      valid    = false;
-};
-
-// Copy the aged diagnosis and optional outdoor bins under one owner lock, without allocating
-// or producing an event. Reporting ages the window even while collection is paused.
-logic::HeatingCurveSnapshot heating_curve_status(HeatingCurveBinsReport* bins = nullptr);
-
-// Wake the existing MQTT task after POST /set_ref_temp. Topic changes are re-evaluated live without
-// a second MQTT client or reboot, but subscription/decoding remains gated by the v19 diagnostics
-// master. Once enabled, the new binding starts without a value and becomes usable only after its
-// runtime decoder accepts a fresh payload.
-void mqtt_reference_reconfigure();
-// End the heating-curve sample scope after a HomeHub endpoint change (host, port or unit). Last
-// event and 30-minute cadence came from the previous endpoint's gates and outdoor axis.
-// Allocation-free; takes the MQTT owner mutex like mqtt_reference_reconfigure.
-void mqtt_heating_curve_homehub_reset() noexcept;
 
 // Independent read-only power witness for the potable-water circulation pump.  It shares the
 // configured MQTT client but has its own exact topic, parser, freshness and test proof.
@@ -144,8 +99,7 @@ void                        mqtt_circulation_reconfigure(bool configured);
 
 // Explicit source/consent changes own these retained-topic tombstones independently of X10A.
 // Requests stay pending across broker outages and are
-// reconstructed on reconnect; Weather and HomeHub cleanup also cover enabled identity changes.
-void mqtt_request_weather_cleanup();
+// reconstructed when MQTT starts a replacement client.
 void mqtt_request_modbus_cleanup();
 
 } // namespace daik

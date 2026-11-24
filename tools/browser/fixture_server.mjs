@@ -24,9 +24,8 @@ const STATUS = Object.freeze({
     families: ["Altherma 3 R"], ou_eeprom: "012345" },
   sys: { free_heap: 155648, max_alloc: 90112, safe_mode: false },
   diagnostics: { enabled: false },
-  reference_temperature: { configured: false },
   circulation_source: { configured: false },
-  weather_forecast: { latitude: "", longitude: "" },
+
   modbus: { host: "", port: 502, unit_id: 1, enabled: false, connected: false },
   board: {
     preset_id: "seeed_xiao_esp32s3", preset_name: "Seeed XIAO ESP32-S3", user_set: true,

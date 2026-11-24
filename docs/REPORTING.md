@@ -35,11 +35,9 @@ using the [redaction list](SECURITY.md#report-redaction-contract) before posting
 <a id="what-is-removed-and-what-deliberately-is-not"></a>
 ## Privacy and crash evidence
 
-The report protects known network/location identifiers and user-entered service/source names, topics
-and paths. The complete **status redaction contract** has one home in
-[SECURITY.md](SECURITY.md#report-redaction-contract). Unset fields remain unset/empty rather than
-inventing a configured service. Room-source HVAC mode keeps only the fixed public vocabulary
-`off`, `heat`, `cool`, `heat_cool`, `auto`, `dry`, `fan_only`; other source text is redacted.
+The report protects known network identifiers and user-entered service or source names, topics
+and paths. [SECURITY.md](SECURITY.md#report-redaction-contract) defines status redaction. Unset
+fields stay unset or empty.
 
 `/ota/status?redact=1` additionally hides set `effective_manifest_url` and
 `effective_firmware_base_url`; empty URLs stay empty. Operational `/ota/status` keeps them and can

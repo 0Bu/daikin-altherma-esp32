@@ -79,7 +79,7 @@
 #include "fault_state.hpp"   // FaultClass — the fault check composes conv 203's own class table
 #include "modbus_profile.hpp" // ModbusProfile — structural capability selection for HomeHub/Altherma 4
 #include "ou_stale.hpp"      // ou_is_rps_witness — the compressor witness, called not restated
-#include "outdoor_evidence.hpp" // one provenance/freshness answer shared with heating-curve events
+#include "outdoor_evidence.hpp"
 
 namespace daik::logic {
 

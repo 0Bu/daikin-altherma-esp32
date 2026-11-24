@@ -248,7 +248,7 @@ inline uint64_t fnv1a64(std::string_view data) {
     return h;
 }
 
-// Allocation-free per-topic publish deduplication guard for Modbus, Weather, and ENV III state
+// Allocation-free per-topic publish deduplication guard for Modbus and ENV III state
 // payloads. Storing an 8-byte FNV-1a digest instead of a heap-backed std::string copy saves ~2 KiB
 // of steady-state heap and avoids post-reconnect allocations splitting ESP32-S3's 31 KiB block.
 struct MqttPayloadDigest {

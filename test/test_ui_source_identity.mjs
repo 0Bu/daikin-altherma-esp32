@@ -1,4 +1,4 @@
-// Execute the actual mapping and history consumers: source identity is independent of a plausible
+// Execute the actual history consumers: source identity is independent of a plausible
 // value, a recent fetch and a request that happened to finish after a replacement was configured.
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -26,12 +26,11 @@ const inspectorHistory = schematic.slice(schematic.indexOf("function renderInspe
   schematic.indexOf("function renderInspect("));
 vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
   inspectorHistory + "\n" +
-  settings.slice(settings.indexOf("const OTA_RENDER_CACHE_KEY"), settings.indexOf("function otaCacheStore()")) + "\n" +
-  settings.slice(settings.indexOf("function fillRefTemp()"),
-    settings.indexOf("// ── DHW circulation-pump")) + `
+  settings.slice(settings.indexOf("const OTA_RENDER_CACHE_KEY"), settings.indexOf("function otaCacheStore()")) + `
+
   renderApp = () => {};
   hydrateRoutedPopup = () => {};
-  this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
+  this.ui = { S, refreshStatus,
     ensureHist, ensureHistPair, ensureDerived, historyView, histPinIndex, histCacheKey, syncHistSources,
     yieldHistoryToPoll, pumpHistoryQueue, histPinToggle, histSeriesToggle,
     histAxisEnd, scrubTime, histHtml, renderInspectHist };
@@ -81,91 +80,6 @@ const historyReply = (request, body) => {
 const reply = (request, value, epoch = 1, boot_id = "boot-a") =>
   historyReply(request, sample(value, epoch, boot_id));
 await reset();
-
-// Actual historical unchanged-save witness: missing time must stay absent, with hidden gates intact.
-const room = { configured: true, name: "Room", topic: "room/state", temperature_path: "temperature",
-  setpoint_topic: "", setpoint_path: "", fixed_setpoint_c: 20,
-  timestamp_topic: "", timestamp_path: "", enabled_path: "enabled", hvac_mode_path: "mode",
-  max_age_s: 600 };
-ui.S.status.reference_temperature = room;
-ui.fillRefTemp();
-assert.equal($("rtTimestampSource").value, "");
-let saved = ui.refTempFormPayload();
-assert.equal(saved.timestamp_topic, "");
-assert.equal(saved.timestamp_path, "");
-assert.equal(saved.enabled_path, "enabled");
-assert.equal(saved.hvac_mode_path, "mode");
-
-// Older source mappings use the temperature topic implicitly. Normalizing their visible topics
-// does not change the mapping and must not discard invisible eligibility gates.
-ui.S.status.reference_temperature = { ...room, fixed_setpoint_c: null,
-  setpoint_path: "target", timestamp_path: "time" };
-ui.fillRefTemp();
-saved = ui.refTempFormPayload();
-assert.equal(saved.setpoint_topic, "room/state");
-assert.equal(saved.timestamp_topic, "room/state");
-assert.equal(saved.enabled_path, "enabled");
-assert.equal(saved.hvac_mode_path, "mode");
-$("rtTemperatureSource").value = "other/state$temperature";
-saved = ui.refTempFormPayload();
-assert.equal(saved.enabled_path, "");
-assert.equal(saved.hvac_mode_path, "");
-
-// Dollars and backslashes belong to MQTT topics/JSON keys too. Exercise canonical forms, plain
-// legacy syntax and dollar-prefixed broker topics rather than matching parser source text.
-for (const [topic, path] of [
-  ["room/state", "price$temperature"], ["room$state", "temperature"],
-  ["room$state", ""], ["$SYS/room", "t$C"],
-  ["room\\state", "sensor\\$temperature"], ["room\\$state\\", "\\$key\\"],
-  [" room/state ", " temperature.. "], [" room$state\\ ", " .bad$path\\ "],
-  [" room/state ", ""], [" ", " . "],
-  ["20", ""],
-  ["$".repeat(192), "$".repeat(128)],
-]) assert.deepEqual(plain(ui.parseRefSource(ui.formatRefSource(topic, path))), { topic, path });
-const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
-for (const id of ["rtTemperatureSource", "rtTarget", "rtTimestampSource"])
-  assert.match(html, new RegExp(`id="${id}" maxlength="641"`));
-assert.deepEqual(plain(ui.parseRefSource("room/state$temperature")),
-  { topic: "room/state", path: "temperature" });
-assert.deepEqual(plain(ui.parseRefSource("$SYS/room$temp")), { topic: "$SYS/room", path: "temp" });
-assert.deepEqual(plain(ui.parseRefSource("room\\state$temp\\raw")),
-  { topic: "room\\state", path: "temp\\raw" });
-ui.S.status.reference_temperature = { ...room, topic: "room$state\\", temperature_path: "t\\$C",
-  setpoint_topic: "target$state", setpoint_path: "target\\value", fixed_setpoint_c: null,
-  timestamp_topic: "$SYS/clock", timestamp_path: "unix$seconds" };
-ui.fillRefTemp();
-saved = ui.refTempFormPayload();
-for (const [field, sourceField] of [["topic", "topic"], ["temperature_path", "temperature_path"],
-  ["setpoint_topic", "setpoint_topic"], ["setpoint_path", "setpoint_path"],
-  ["timestamp_topic", "timestamp_topic"], ["timestamp_path", "timestamp_path"],
-  ["enabled_path", "enabled_path"], ["hvac_mode_path", "hvac_mode_path"]])
-  assert.equal(saved[field], ui.S.status.reference_temperature[sourceField]);
-
-// Valid topic spaces and unverified path bytes are operator intent. Opening the form must not
-// normalize them, silently replace the subscription or clear hidden eligibility gates.
-for (const mapping of [
-  { topic: " room/state ", temperature_path: " temperature.. ",
-    setpoint_topic: " target/state ", setpoint_path: " target.. ",
-    timestamp_topic: " clock/state ", timestamp_path: " source..time " },
-  { topic: " room$state\\ ", temperature_path: " .bad$path\\ ",
-    setpoint_topic: "", setpoint_path: " target.. ",
-    timestamp_topic: "", timestamp_path: " time.. " },
-  { topic: " room/state ", temperature_path: "", setpoint_topic: " 20 ", setpoint_path: "",
-    timestamp_topic: " clock/state ", timestamp_path: "" },
-]) {
-  ui.S.status.reference_temperature = { ...room, fixed_setpoint_c: null, ...mapping };
-  ui.fillRefTemp();
-  saved = ui.refTempFormPayload();
-  assert.equal(saved.topic, mapping.topic);
-  assert.equal(saved.temperature_path, mapping.temperature_path);
-  assert.equal(saved.setpoint_topic, mapping.setpoint_topic || mapping.topic);
-  assert.equal(saved.setpoint_path, mapping.setpoint_path);
-  assert.equal(saved.timestamp_topic, mapping.timestamp_topic || mapping.topic);
-  assert.equal(saved.timestamp_path, mapping.timestamp_path);
-  assert.equal(saved.fixed_setpoint_c, 0, "numeric-looking MQTT topic stays a mapped target");
-  assert.equal(saved.enabled_path, "enabled");
-  assert.equal(saved.hvac_mode_path, "mode");
-}
 
 // A history response carries its own snapshot lifetime. A request begun under the last status
 // cannot admit samples from a reset or a reboot that status has not observed yet. A refusal neither
@@ -532,4 +446,4 @@ for (const failOld of [false, true]) {
   assert.equal(rendered.at(-1), "", "INV pel keeps inspector history hidden");
   ui.S.insp = null;
 }
-console.log("room mapping round trips, snapshot identity admission and shared history awaits pass");
+console.log("snapshot identity admission and shared history awaits pass");

@@ -1066,7 +1066,6 @@ button.vhist-source { appearance: none; border: 0; background: none; font: inher
 button.vhist-source[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
 button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 3px; }
 .vhist-source.mb { --vhist-colour: var(--src-mb); }
-.vhist-source.room { --vhist-colour: var(--src-room); overflow-wrap: anywhere; }
 .vhist-source small { color: inherit; font-size: 10.5px; }
 /* Component states are categorical timelines, not numeric curves. X10A and paired
    HomeHub/Modbus start active when available and can be toggled via the source legend; exact phase ranges
@@ -1194,7 +1193,6 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   box-shadow: 0 4px 14px rgba(16,20,28,.12); }
 .vhist-env3 .vhist-tip-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr);
   gap: 0 1ch; text-align: left; }
-.vhist-env3 .vhist-tip-meta { display: block; }
 .vhist-tip-rows .env-temperature { color: var(--flow-hot); }
 .vhist-tip-rows .env-humidity { color: var(--flow-cold); }
 .vhist-tip-rows .env-pressure { color: var(--env-pressure); }
@@ -1214,9 +1212,6 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-area.mb { fill: var(--src-mb); }
 .vhist-pt.mb { fill: var(--src-mb); }
 .vhist-mark.mb { background: var(--src-mb); }
-.vhist-line.room { stroke: var(--src-room); stroke-width: 1.8px; }
-.vhist-area.room, .vhist-pt.room { fill: var(--src-room); }
-.vhist-mark.room, .vhist-now.room { background: var(--src-room); }
 .vhist-source.env-temperature { --vhist-colour: var(--flow-hot); }
 .vhist-mark.env-temperature, .vhist-now.env-temperature { background: var(--flow-hot); }
 .vhist-line.env-temperature { stroke: var(--flow-hot); }
@@ -1232,15 +1227,6 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-line.env-pressure { stroke: var(--env-pressure); }
 .vhist-area.env-pressure { fill: var(--env-pressure); }
 .vhist-pt.env-pressure { fill: var(--env-pressure); }
-.vhist-mark.env-forecast-temperature { background: var(--flow-hot); }
-.vhist-mark.env-forecast-humidity { background: var(--flow-cold); }
-.vhist-mark.env-forecast-pressure { background: var(--env-pressure); }
-.vhist-line.env-forecast-temperature { stroke: var(--flow-hot); opacity: .68; }
-.vhist-line.env-forecast-humidity { stroke: var(--flow-cold); opacity: .68; }
-.vhist-line.env-forecast-pressure { stroke: var(--env-pressure); opacity: .68; }
-.vhist-area.env-forecast-temperature { fill: var(--flow-hot); opacity: .065; stroke: none; }
-.vhist-area.env-forecast-humidity { fill: var(--flow-cold); opacity: .065; stroke: none; }
-.vhist-area.env-forecast-pressure { fill: var(--env-pressure); opacity: .065; stroke: none; }
 /* Threshold zones, dashed reference lines and segmented severity paint for water_pressure */
 .vhist-band { pointer-events: none; stroke: none; }
 .vhist-band-low { fill: var(--warn); opacity: .06; }
@@ -1310,15 +1296,10 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 }
 .vhist-source.vhist-phase-outline i { border: 1px dashed var(--vhist-colour); }
 .vhist-source.vhist-phase-outline i { background: transparent; }
-/* Forecasts repeat the same area-plus-upper-line construction below the measured ENV III opacity;
-   the rest of the future stays transparent and provenance remains in the tooltip. */
-.vhist-forecast-divider { stroke: var(--muted); stroke-width: 1px;
-  stroke-dasharray: 3 3; opacity: .65; }
 /* The live end of the series. An HTML dot, not an SVG circle: the plot is scaled non-uniformly, so
    a circle inside it would render as an ellipse (app.js maps its % position onto the same scale). */
 .vhist-now { position: absolute; right: 0; width: 7px; height: 7px; border-radius: 50%;
   background: var(--brand); box-shadow: 0 0 0 2.5px var(--card); transform: translate(50%, -50%); }
-.vhist-now.timed { transform: translate(-50%, -50%); }
 .vhist-now.mb { background: var(--src-mb); }
 /* The same plot inside the schematic inspector — one chart, one vocabulary; only what it sits on
    differs. The card is --brand-tint rather than --card, and the "now" dot separates itself from the
@@ -1339,9 +1320,6 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   background: var(--vhist-surface); box-shadow: 0 0 3px 1px var(--vhist-surface); }
 .vhist-time.vhist-live { z-index: 4; background: var(--vhist-surface);
   box-shadow: 0 0 3px 1px var(--vhist-surface); }
-.vhist-axis.vhist-axis-future { position: relative; min-height: 18px; }
-.vhist-axis-future .vhist-axis-now { position: absolute; left: calc(var(--now-p) * 1%);
-  transform: translateX(-50%); color: var(--muted); font-weight: 700; }
 /* The global reduced-motion rule (line ~127) kills `animation` only — these shared tongue and
    chevron movements are transitions, so they need their own explicit opt-out (DESIGN.md §9). */
 @media (prefers-reduced-motion: reduce) {
@@ -1668,8 +1646,8 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
    glance while staying quiet, which matters because X10A remains the prominent source: Modbus only
    ever appears as a second opinion inside an explainer, as a marked stand-in while X10A is down, or
    in its own group at the very end of the list. */
-:root { --src-mb:#0E8A8A; --src-mb-soft:rgba(14,138,138,.10); --src-room:#B56B27; }
-@media (prefers-color-scheme: dark) { :root { --src-mb:#3FB6B6; --src-mb-soft:rgba(63,182,182,.15); --src-room:#E6A460; } }
+:root { --src-mb:#0E8A8A; --src-mb-soft:rgba(14,138,138,.10); }
+@media (prefers-color-scheme: dark) { :root { --src-mb:#3FB6B6; --src-mb-soft:rgba(63,182,182,.15); } }
 
 /* ── Unit fault 24 h timeline & progressive disclosure table ───────────────────────────── */
 .fault-tone-0 { --fc:#D23B3B; }
@@ -1782,8 +1760,6 @@ button.fault-chip[aria-pressed="true"] {
    .inspect-row span:first-child/:last-child, which set the two-tone label/value ink; equal
    specificity, won on order, which is why this block stays BELOW them in the file. */
 .inspect-row.mb-row span { color: var(--src-mb); }
-.inspect-row.room-row span, .src-val-room { color: var(--src-room); }
-svg .sc-val.sc-room { fill: var(--src-room); }
 /* A value the Modbus stack supplied: the fallback stand-in, and every row of the Modbus-only group. */
 .vrow-val.src-val-mb, .src-val-mb { color: var(--src-mb); }
 .src-val-mb .vrow-unit { color: var(--src-mb); opacity: .75; }

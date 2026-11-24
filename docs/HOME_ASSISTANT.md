@@ -57,9 +57,8 @@ id is board-specific, so the broker can accept both connections without exposing
 | Crash report | A pending fault/dump indication and summary, never the raw memory dump. |
 | ENV III, when supported and enabled | Separate temperature, humidity and pressure sensors for the accessory. |
 
-There are **no HA value entities for HomeHub, weather forecasts or heating-curve evidence**. They
-remain available to direct MQTT/metrics consumers. Installing a HomeHub does not add an HA control
-path through this firmware.
+HomeHub values are available to direct MQTT and metrics consumers. The firmware exposes no
+HomeHub entities to Home Assistant discovery and provides no HomeHub controls.
 
 Entity count varies by model, physically fitted hardware and available converters. A row used only
 for detection is not polled or announced as a measurement. A profile in the catalog does not prove
@@ -168,8 +167,7 @@ configs can share that node.
 <a id="topics"></a>
 ## MQTT and derived measurements
 
-Use [MQTT.md](MQTT.md) for exact topics, payload shapes, freshness and discovery identity. Direct
-MQTT access is useful when an analysis needs HomeHub or forecast evidence that HA discovery omits.
+Use [MQTT.md](MQTT.md) for exact topics, payload shapes, freshness and discovery identity.
 
 <a id="protection-retries--drop-control-new-entities"></a>
 Protection counters and flags are experimental leads, not fault verdicts. Counters are 3-bit values

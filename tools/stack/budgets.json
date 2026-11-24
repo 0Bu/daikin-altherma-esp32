@@ -16,7 +16,7 @@
     "dhw_trace_restore": {"pattern": "^daik::history_restore_dhw_flash\\(unsigned\\ long\\)$", "max_bytes": 64},
     "dhw_trace_fence": {"pattern": "^daik::\\(anonymous\\ namespace\\)::flash_note_barrier_fence\\(daik::logic::HistoryJournalHeader\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long\\ long\\&\\)$", "max_bytes": 32},
     "dhw_trace_physical": {"pattern": "^daik::\\(anonymous\\ namespace\\)::flash_record_physically_valid\\(daik::\\(anonymous\\ namespace\\)::FlashJournalRecord\\ const\\&\\)$", "max_bytes": 128},
-    "dhw_trace_header_shape": {"pattern": "^daik::logic::history_journal_header_matches\\(daik::logic::HistoryJournalHeader\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ short,\\ unsigned\\ long\\)$", "max_bytes": 32},
+    "dhw_trace_header_shape": {"pattern": "^daik::logic::history_journal_header_matches\\(daik::logic::HistoryJournalHeader\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ short,\\ unsigned\\ long,\\ unsigned\\ char\\)$", "max_bytes": 32},
     "dhw_trace_header": {"pattern": "^daik::logic::dhw_loss_trace_header_matches\\(daik::logic::HistoryJournalHeader\\ const\\&,\\ bool\\)$", "max_bytes": 32},
     "dhw_trace_page": {"pattern": "^daik::logic::dhw_loss_trace_page_valid\\(daik::logic::DhwLossTracePage\\ const\\&,\\ bool\\)$", "max_bytes": 48},
     "dhw_trace_unpack": {"pattern": "^daik::logic::dhw_loss_trace_unpack\\(unsigned\\ char\\ const\\ \\(\\&\\)\\ \\[6\\],\\ unsigned\\ long,\\ daik::logic::DhwLossTraceWindow\\&\\)$", "max_bytes": 32},
@@ -54,26 +54,6 @@
     "mqtt_task": {
       "pattern": "^daik::mqtt_task\\(",
       "max_bytes": 2048
-    },
-    "weather_task": {
-      "pattern": "^daik::.*weather_task\\(",
-      "max_bytes": 6144
-    },
-    "weather_cycle": {
-      "pattern": "^(?:daik::.*weather_cycle\\(|_ZN4daik12_GLOBAL__N_1L13weather_cycleEmRNS0_21RefreshRequestAttemptE\\$constprop\\$[0-9]+$)",
-      "max_bytes": 4096
-    },
-    "weather_fetch": {
-      "pattern": "^daik::.*fetch_forecast\\(",
-      "max_bytes": 2048
-    },
-    "weather_download": {
-      "pattern": "^(?:daik::\\(anonymous namespace\\)::download_json\\([^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik12_GLOBAL__N_1L13download_jsonERKNS_21WeatherConfigSnapshotERNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_RbRNS_15HttpClientProbeE\\$constprop\\$[0-9]+$)",
-      "max_bytes": 3072
-    },
-    "weather_parse": {
-      "pattern": "^daik::.*parse_forecast\\(",
-      "max_bytes": 3072
     },
     "ota_task": {
       "pattern": "^daik::.*ota_task\\(",
@@ -134,10 +114,6 @@
     "env3_save_preflight": {
       "pattern": "^daik::env3_save_preflight\\(",
       "max_bytes": 128
-    },
-    "config_weather": {
-      "pattern": "^daik::set_weather\\(",
-      "max_bytes": 1776
     },
     "config_diagnostics": {
       "pattern": "^daik::set_diagnostics\\(",
@@ -215,14 +191,6 @@
       "pattern": "^daik::wifi_scan\\(",
       "max_bytes": 1920
     },
-    "reference_dispatch": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_reference_frames\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24service_reference_frames[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 48
-    },
-    "reference_decode": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?decode_reference_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22decode_reference_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 96
-    },
     "circulation_frame": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_circulation_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?25service_circulation_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 352
@@ -234,10 +202,6 @@
     "circulation_decode": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?decode_circulation_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24decode_circulation_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 64
-    },
-    "reference_subscription": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_reference_subscription\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?30service_reference_subscription[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 240
     },
     "circulation_subscription": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_circulation_subscription\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?32service_circulation_subscription[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -271,14 +235,6 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?discovery_config\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?16discovery_config[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 176
     },
-    "mqtt_weather_publish": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_weather_state\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21publish_weather_state[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 64
-    },
-    "mqtt_weather_payload": {
-      "pattern": "^daik::build_weather_mqtt_json\\[abi:cxx11\\]\\(",
-      "max_bytes": 112
-    },
     "mqtt_heartbeat": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_heartbeat\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?17publish_heartbeat[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 64
@@ -290,14 +246,6 @@
     "mqtt_crash": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_crash\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13publish_crash[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 256
-    },
-    "mqtt_curve": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_heating_curve_telemetry\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?31publish_heating_curve_telemetry[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 64
-    },
-    "mqtt_curve_evaluate": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?evaluate_heating_curve\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22evaluate_heating_curve[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 1200
     },
     "poll_task": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?poll_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?9poll_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -485,7 +433,7 @@
     },
     "http_diag_redact": {
       "pattern": "^daik::redact_diag_line\\[abi:cxx11\\]\\(",
-      "max_bytes": 48
+      "max_bytes": 64
     },
     "http_coredump": {
       "pattern": "^daik::h_coredump\\(httpd_req\\*\\)$",
@@ -501,7 +449,7 @@
     },
     "syslog_task": {
       "pattern": "^_ZZN4daik11syslog_initEvENKUlPvE_clES0_\\$constprop\\$[0-9]+$",
-      "max_bytes": 720
+      "max_bytes": 736
     },
     "syslog_task_entry": {
       "pattern": "^daik::syslog_init\\(\\)::\\{lambda\\(void\\*\\)\\x231\\}::_FUN\\(void\\*\\)$",
@@ -518,14 +466,6 @@
     "http_coredump_body": {
       "pattern": "^_ZN4daikL10h_coredumpEP9httpd_req\\$part\\$[0-9]+$",
       "max_bytes": 560
-    },
-    "double_string": {
-      "pattern": "^std::__cxx11::to_string\\(double\\)$",
-      "max_bytes": 32
-    },
-    "dynamic_double_string": {
-      "pattern": "^[^\\n]+ __gnu_cxx::__to_xstring<[^\\n]+>\\(",
-      "max_bytes": 416
     },
     "sdk_mqtt_publish": {
       "pattern": "^esp_mqtt_client_publish$",
@@ -586,14 +526,6 @@
     "runtime_task_entry": {
       "pattern": "^vPortTaskWrapper$",
       "max_bytes": 32
-    },
-    "reference_frame": {
-      "pattern": "^(?:daik::service_reference_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23service_reference_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 192
-    },
-    "reference_apply": {
-      "pattern": "^(?:daik::apply_reference_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL21apply_reference_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 448
     },
     "json_guard_reset": {
       "pattern": "^daik::JsonGuard::reset\\(cJSON\\*\\)$",
@@ -727,10 +659,6 @@
       "pattern": "^(?:daik::build_heartbeat_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23build_heartbeat_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 1040
     },
-    "mqtt_curve_builder": {
-      "pattern": "^(?:daik::build_heating_curve_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL27build_heating_curve_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 736
-    },
     "mqtt_cycle_gate": {
       "pattern": "^(?:daik::mqtt_cycle_gate(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL15mqtt_cycle_gate[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 112
@@ -739,21 +667,9 @@
       "pattern": "^(?:daik::crash_publication_changed(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL25crash_publication_changed[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 208
     },
-    "mqtt_weather_builder": {
-      "pattern": "^(?:daik::build_weather_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL21build_weather_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 656
-    },
     "sdk_mqtt_task": {
       "pattern": "^esp_mqtt_task$",
       "max_bytes": 96
-    },
-    "mqtt_reference_binding": {
-      "pattern": "^(?:daik::apply_reference_binding\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?23apply_reference_binding[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 592
-    },
-    "mqtt_retire_reference": {
-      "pattern": "^(?:daik::retire_reference_topics\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?23retire_reference_topics[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 32
     },
     "mqtt_circulation_probe_subscription": {
       "pattern": "^(?:daik::service_circulation_probe_subscription\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?38service_circulation_probe_subscription[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -798,10 +714,6 @@
     "history_board": {
       "pattern": "^(?:daik::history_record_board\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?20history_record_board[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 48
-    },
-    "mqtt_curve_payload": {
-      "pattern": "^(?:daik::build_heating_curve_mqtt_json(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29build_heating_curve_mqtt_json[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 240
     },
     "json_integer_append": {
       "pattern": "^daik::json_append_integer_field_impl\\(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, std::basic_string_view<char, std::char_traits<char> >, unsigned long long, bool, bool\\)$",
@@ -2144,7 +2056,7 @@
       "max_bytes": 48
     },
     "mqtt_input_capture": {
-      "pattern": "^daik::capture_reference_frame\\(",
+      "pattern": "^daik::capture_circulation_frame\\(",
       "max_bytes": 80
     },
     "mqtt_input_filter": {
@@ -2343,61 +2255,9 @@
       "pattern": "^daik::logic::checkup_layout_fingerprint\\(\\)$",
       "max_bytes": 32
     },
-    "mqtt_room_history": {
-      "pattern": "^daik::record_room_history\\(daik::Config\\ const\\&,\\ unsigned\\ long\\)$",
-      "max_bytes": 256
-    },
-    "room_history_record": {
-      "pattern": "^daik::history_record_room\\(bool,\\ double,\\ unsigned\\ long\\)$",
-      "max_bytes": 64
-    },
-    "room_request_current": {
-      "pattern": "^daik::reference_request_current_locked\\(unsigned\\ long,\\ daik::Config\\ const\\&\\)$",
-      "max_bytes": 192
-    },
-    "room_config_binding": {
-      "pattern": "^daik::reference_config_binding\\(daik::Config\\ const\\&\\)$",
-      "max_bytes": 160
-    },
-    "room_applied_binding": {
-      "pattern": "^daik::reference_applied_binding_locked\\(\\)$",
-      "max_bytes": 32
-    },
-    "room_binding_matches": {
-      "pattern": "^daik::reference_binding_matches\\(daik::ReferenceSourceBinding\\ const\\&,\\ daik::ReferenceSourceBinding\\ const\\&,\\ bool,\\ bool\\)$",
-      "max_bytes": 176
-    },
-    "room_freshness": {
-      "pattern": "^daik::reference_room_freshness\\(bool,\\ bool,\\ bool,\\ bool,\\ long\\ long,\\ unsigned\\ long\\ long,\\ long\\ long,\\ unsigned\\ long\\ long,\\ unsigned\\ long\\)$",
-      "max_bytes": 64
-    },
-    "room_base_freshness": {
-      "pattern": "^daik::reference_freshness\\(bool,\\ bool,\\ bool,\\ long\\ long,\\ unsigned\\ long\\ long,\\ long\\ long,\\ unsigned\\ long\\ long,\\ unsigned\\ long\\)$",
-      "max_bytes": 32
-    },
-    "room_sample": {
-      "pattern": "^daik::reference_room_sample\\(daik::ReferenceRoomRaw\\ const\\&,\\ daik::ReferenceFreshness\\ const\\&\\)$",
-      "max_bytes": 96
-    },
-    "room_sample_reason": {
-      "pattern": "^daik::reference_room_freshness_reason\\(std::basic_string_view<char,\\ std::char_traits<char>\\ >\\)$",
-      "max_bytes": 64
-    },
-    "room_sample_reject": {
-      "pattern": "^_ZZN4daik21reference_room_sampleERKNS_16ReferenceRoomRawERKNS_18ReferenceFreshnessEENKUlNS_19ReferenceRoomReasonEE_clES6_\\$isra\\$0$",
-      "max_bytes": 32
-    },
     "room_time_now": {
       "pattern": "^daik::time_now\\(long\\ long\\&,\\ long\\&\\)$",
       "max_bytes": 48
-    },
-    "room_history_seal": {
-      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_seal_locked\\(\\)$",
-      "max_bytes": 32
-    },
-    "room_history_crc": {
-      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_crc\\(\\)$",
-      "max_bytes": 32
     },
     "history_crc_ring": {
       "pattern": "^daik::\\(anonymous\\ namespace\\)::persist_crc_ring\\(unsigned\\ long,\\ daik::logic::TrendRing\\ const\\&\\)$",
@@ -2407,14 +2267,6 @@
       "pattern": "^daik::config_crc32_update\\(unsigned\\ long,\\ unsigned\\ char\\ const\\*,\\ unsigned\\ int\\)$",
       "max_bytes": 32
     },
-    "room_liveness_touch": {
-      "pattern": "^daik::logic::history_liveness_touch\\(daik::logic::HistoryLiveness\\&,\\ long\\ long\\)$",
-      "max_bytes": 32
-    },
-    "room_liveness_commit": {
-      "pattern": "^daik::logic::history_liveness_commit\\(daik::logic::HistoryLiveness\\&,\\ daik::logic::HistoryJournalSource,\\ long\\ long\\)$",
-      "max_bytes": 32
-    },
     "room_liveness_seal": {
       "pattern": "^daik::logic::history_liveness_seal\\(daik::logic::HistoryLiveness\\&\\)$",
       "max_bytes": 32
@@ -2422,14 +2274,6 @@
     "room_liveness_crc": {
       "pattern": "^daik::logic::history_liveness_crc\\(daik::logic::HistoryLiveness\\ const\\&\\)$",
       "max_bytes": 80
-    },
-    "room_ring_commit": {
-      "pattern": "^daik::logic::TrendRing::commit\\(unsigned\\ long\\)$",
-      "max_bytes": 32
-    },
-    "room_ring_reset": {
-      "pattern": "^daik::logic::TrendRing::reset_with_gaps\\(unsigned\\ int\\)$",
-      "max_bytes": 32
     },
     "checkup_detect_schema": {
       "pattern": "^daik::checkup_reset_on_detect\\(",
@@ -2919,18 +2763,6 @@
       "pattern": "^daik::\\(anonymous\\ namespace\\)::history_persist_crc\\(\\)$",
       "max_bytes": 32
     },
-    "stop_forget_room_wipe": {
-      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_wipe_locked\\(unsigned\\ long\\)$",
-      "max_bytes": 32
-    },
-    "stop_forget_room_seal": {
-      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_seal_locked\\(\\)$",
-      "max_bytes": 32
-    },
-    "stop_forget_room_crc": {
-      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_crc\\(\\)$",
-      "max_bytes": 32
-    },
     "stop_forget_liveness_begin": {
       "pattern": "^daik::logic::history_liveness_begin\\(daik::logic::HistoryLiveness\\&,\\ long\\ long\\)$",
       "max_bytes": 32
@@ -3087,78 +2919,6 @@
       "pattern": "^void daik::append_status_fmt_double<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, char const\\*, bool, double\\)$",
       "max_bytes": 144
     },
-    "curve_status_json": {
-      "pattern": "^void daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)$",
-      "max_bytes": 704
-    },
-    "curve_bins_json": {
-      "pattern": "^void daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&\\)$",
-      "max_bytes": 80
-    },
-    "curve_axis_json": {
-      "pattern": "^auto daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&\\)::\\{lambda\\(auto:1 const&\\)[#]1\\}::operator\\(\\)<std::array<daik::logic::HeatingCurveBinSummary, 4u> >\\(std::array<daik::logic::HeatingCurveBinSummary, 4u> const&\\) const$",
-      "max_bytes": 64
-    },
-    "curve_number_json": {
-      "pattern": "^daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&\\)::\\{lambda\\(char const\\*, long long\\)[#]1\\}::operator\\(\\)\\(char const\\*, long long\\) const$",
-      "max_bytes": 48
-    },
-    "curve_status": {
-      "pattern": "^daik::heating_curve_status\\(daik::HeatingCurveBinsReport\\*\\)$",
-      "max_bytes": 80
-    },
-    "curve_bins_snapshot": {
-      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?fill_heating_curve_bins_locked\\(daik::HeatingCurveBinsReport&, daik::ModbusProfile\\)$|_ZN4daik(?:12_GLOBAL__N_1)?L?30fill_heating_curve_bins_locked[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 208
-    },
-    "curve_bin_summary": {
-      "pattern": "^daik::logic::HeatingCurveBins::summary\\(daik::logic::OutdoorSource, unsigned int, long long\\) const$",
-      "max_bytes": 112
-    },
-    "curve_bin_clock": {
-      "pattern": "^daik::logic::HeatingCurveBins::observe_clock\\(long long\\)$",
-      "max_bytes": 48
-    },
-    "curve_bin_clear": {
-      "pattern": "^daik::logic::HeatingCurveBins::forget\\(\\)$",
-      "max_bytes": 48
-    },
-    "curve_bin_add": {
-      "pattern": "^daik::logic::HeatingCurveBins::add\\(std::array<daik::logic::HeatingCurveBins::Bin, 4u>&, daik::logic::OutdoorSource, daik::logic::OutdoorEvidence const&, short, unsigned long\\)$",
-      "max_bytes": 64
-    },
-    "curve_outdoor_valid": {
-      "pattern": "^daik::logic::outdoor_evidence_valid\\(daik::logic::OutdoorEvidence const&\\)$",
-      "max_bytes": 48
-    },
-    "curve_bin_target": {
-      "pattern": "^(?:daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::observe_bin_target\\(double\\)$|_ZN4daik5logic25HeatingCurveDiagnosisImplIRNS0_16HeatingCurveBinsEE18observe_bin_targetEd\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 48
-    },
-    "curve_logic_eval": {
-      "pattern": "^daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::evaluate\\(daik::logic::HeatingCurveInputs const&\\)$",
-      "max_bytes": 160
-    },
-    "curve_forget_samples": {
-      "pattern": "^daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::forget_samples\\(\\)$",
-      "max_bytes": 48
-    },
-    "curve_reset_samples": {
-      "pattern": "^daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::reset_samples\\(\\)$",
-      "max_bytes": 48
-    },
-    "curve_reference_reconfigure": {
-      "pattern": "^daik::mqtt_reference_reconfigure\\(\\)$",
-      "max_bytes": 256
-    },
-    "curve_homehub_reset": {
-      "pattern": "^daik::mqtt_heating_curve_homehub_reset\\(\\)$",
-      "max_bytes": 80
-    },
-    "config_ref_temp": {
-      "pattern": "^daik::set_ref_temp\\(httpd_req\\*\\)$",
-      "max_bytes": 1280
-    },
     "modbus_active_profile": {
       "pattern": "^daik::mb_active_profile\\(\\)$",
       "max_bytes": 64
@@ -3201,22 +2961,6 @@
     },
     "status_service_meta": {
       "pattern": "^void daik::append_status_service_meta<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, daik::logic::RefrigerantServiceMetricSnapshot const&, daik::logic::RefrigerantServiceSource const&\\)$",
-      "max_bytes": 64
-    },
-    "curve_json_bool": {
-      "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, bool\\)[#]1\\}::operator\\(\\)\\(char const\\*, bool\\) const$",
-      "max_bytes": 48
-    },
-    "curve_json_uint": {
-      "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, unsigned long long\\)[#]1\\}::operator\\(\\)\\(char const\\*, unsigned long long\\) const$",
-      "max_bytes": 48
-    },
-    "curve_json_quoted": {
-      "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, std::basic_string_view<char, std::char_traits<char> >\\)[#]1\\}::operator\\(\\)\\(char const\\*, std::basic_string_view<char, std::char_traits<char> >\\) const$",
-      "max_bytes": 64
-    },
-    "curve_json_source": {
-      "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, bool, daik::logic::OutdoorSource\\)[#]1\\}::operator\\(\\)\\(char const\\*, bool, daik::logic::OutdoorSource\\) const$",
       "max_bytes": 64
     },
     "defrost_start_copy": {
@@ -3494,6 +3238,10 @@
     "cycling_run_restored_window": {
       "pattern": "^daik::logic::cycling_run_context_restored_in_window\\(",
       "max_bytes": 32
+    },
+    "circulation_dispatch": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_circulation_frames\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?26service_circulation_frames[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
     }
   },
   "paths": {
@@ -4003,8 +3751,12 @@
         "mcp_post",
         "http_send_status_json",
         "status_serializer",
-        "double_string",
-        "dynamic_double_string"
+        "status_fixed_double",
+        "sdk_snprintf",
+        "sdk_vfprintf",
+        "sdk_dtoa",
+        "sdk_dtoa_mul_shift",
+        "sdk_dtoa_mul"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -4014,8 +3766,12 @@
       "symbols": [
         "http_send_status_json",
         "status_serializer",
-        "double_string",
-        "dynamic_double_string"
+        "status_fixed_double",
+        "sdk_snprintf",
+        "sdk_vfprintf",
+        "sdk_dtoa",
+        "sdk_dtoa_mul_shift",
+        "sdk_dtoa_mul"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -4295,53 +4051,6 @@
       "base_bytes": 1024,
       "max_bytes": 2048
     },
-    "weather_task_download": {
-      "symbols": [
-        "weather_task",
-        "weather_cycle",
-        "weather_fetch",
-        "weather_download"
-      ],
-      "multipliers": {},
-      "base_bytes": 2048,
-      "max_bytes": 6656
-    },
-    "weather_task_tls": {
-      "symbols": [
-        "weather_task",
-        "weather_cycle",
-        "weather_fetch",
-        "weather_download",
-        "sdk_http_client_open",
-        "sdk_http_client_connect",
-        "tls_esp_transport_connect",
-        "tls_ssl_connect",
-        "tls_esp_tls_conn_new_sync",
-        "tls_esp_tls_low_level_conn",
-        "tls_esp_mbedtls_handshake"
-      ],
-      "multipliers": {},
-      "base_bytes": 4608,
-      "max_bytes": 6656
-    },
-    "weather_task_parse": {
-      "symbols": [
-        "weather_task",
-        "weather_cycle",
-        "weather_fetch",
-        "weather_parse",
-        "cjson_parse_length_opts",
-        "cjson_parse_value",
-        "cjson_delete",
-        "cjson_parse_string"
-      ],
-      "multipliers": {
-        "cjson_parse_value": 17,
-        "cjson_delete": 17
-      },
-      "base_bytes": 2048,
-      "max_bytes": 6656
-    },
     "ota_health_gate": {
       "symbols": [
         "ota_health_task"
@@ -4401,22 +4110,6 @@
     "httpd_config_env3": {
       "symbols": [
         "config_env3",
-        "config_document",
-        "cjson_parse_length_opts",
-        "cjson_parse_value",
-        "cjson_delete",
-        "cjson_parse_string"
-      ],
-      "multipliers": {
-        "cjson_parse_value": 17,
-        "cjson_delete": 17
-      },
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_config_weather": {
-      "symbols": [
-        "config_weather",
         "config_document",
         "cjson_parse_length_opts",
         "cjson_parse_value",
@@ -4542,30 +4235,10 @@
       "base_bytes": 5632,
       "max_bytes": 8192
     },
-    "mqtt_reference_parse": {
-      "symbols": [
-        "mqtt_task",
-        "reference_dispatch",
-        "reference_frame",
-        "reference_decode",
-        "cjson_parse_length_opts",
-        "cjson_parse_value",
-        "cjson_delete",
-        "cjson_parse_string",
-        "json_guard_reset",
-        "json_guard_destroy"
-      ],
-      "multipliers": {
-        "cjson_parse_value": 17,
-        "cjson_delete": 17
-      },
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
     "mqtt_circulation_parse": {
       "symbols": [
         "mqtt_task",
-        "reference_dispatch",
+        "circulation_dispatch",
         "circulation_frame",
         "circulation_decode",
         "cjson_parse_length_opts",
@@ -4585,7 +4258,7 @@
     "mqtt_circulation_probe_parse": {
       "symbols": [
         "mqtt_task",
-        "reference_dispatch",
+        "circulation_dispatch",
         "circulation_probe",
         "circulation_decode",
         "cjson_parse_length_opts",
@@ -4599,15 +4272,6 @@
         "cjson_parse_value": 17,
         "cjson_delete": 17
       },
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_reference_subscribe": {
-      "symbols": [
-        "mqtt_task",
-        "reference_subscription"
-      ],
-      "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 5120
     },
@@ -4641,15 +4305,6 @@
       "base_bytes": 1536,
       "max_bytes": 5120
     },
-    "mqtt_weather": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_weather_publish"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
     "mqtt_heartbeat": {
       "symbols": [
         "mqtt_task",
@@ -4665,15 +4320,6 @@
         "mqtt_crash",
         "json_literal_member",
         "ha_discovery_identity"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_curve": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_curve"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -5000,17 +4646,6 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
-    },
-    "mqtt_reference_apply": {
-      "symbols": [
-        "mqtt_task",
-        "reference_dispatch",
-        "reference_frame",
-        "reference_apply"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
     },
     "main_wifi_config_success": {
       "symbols": [
@@ -5340,20 +4975,6 @@
       "base_bytes": 1536,
       "max_bytes": 5120
     },
-    "mqtt_curve_build": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_curve_builder",
-        "mqtt_curve_payload",
-        "json_integer_append",
-        "json_integer_to_chars",
-        "json_integer_length",
-        "json_integer_digits"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
     "sdk_mqtt_tls": {
       "symbols": [
         "sdk_mqtt_task"
@@ -5380,26 +5001,6 @@
       "base_bytes": 1536,
       "max_bytes": 5120
     },
-    "mqtt_weather_build": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_weather_builder",
-        "mqtt_weather_payload"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_reference_binding": {
-      "symbols": [
-        "mqtt_task",
-        "reference_subscription",
-        "mqtt_reference_binding"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
     "mqtt_circulation_history": {
       "symbols": [
         "mqtt_task",
@@ -5420,15 +5021,6 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 7168
-    },
-    "mqtt_curve_evaluate": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_curve_evaluate"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
     },
     "mqtt_x10a_build": {
       "symbols": [
@@ -5461,16 +5053,6 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 5120
-    },
-    "mqtt_reference_subscribe_tls": {
-      "symbols": [
-        "mqtt_task",
-        "reference_subscription",
-        "mqtt_retire_reference"
-      ],
-      "multipliers": {},
-      "base_bytes": 4608,
-      "max_bytes": 6144
     },
     "mqtt_circulation_subscribe_tls": {
       "symbols": [
@@ -8086,81 +7668,6 @@
         "cycling_layout_fingerprint",
         "checkup_schema_crc",
         "history_config_crc"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "weather_task_tls_headers": {
-      "symbols": [
-        "weather_task",
-        "weather_cycle",
-        "weather_fetch",
-        "weather_download",
-        "sdk_http_client_fetch_headers",
-        "tls_esp_transport_read",
-        "tls_ssl_read",
-        "tls_esp_tls_conn_read",
-        "tls_esp_mbedtls_read"
-      ],
-      "multipliers": {},
-      "base_bytes": 4608,
-      "max_bytes": 6656
-    },
-    "weather_task_tls_body": {
-      "symbols": [
-        "weather_task",
-        "weather_cycle",
-        "weather_fetch",
-        "weather_download",
-        "sdk_http_client_read",
-        "tls_esp_transport_read",
-        "tls_ssl_read",
-        "tls_esp_tls_conn_read",
-        "tls_esp_mbedtls_read"
-      ],
-      "multipliers": {},
-      "base_bytes": 4608,
-      "max_bytes": 6656
-    },
-    "mqtt_room_history_validate": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_room_history",
-        "room_request_current",
-        "room_config_binding",
-        "room_applied_binding",
-        "room_binding_matches",
-        "room_freshness",
-        "room_base_freshness",
-        "room_sample",
-        "room_sample_reason",
-        "room_sample_reject",
-        "room_time_now",
-        "mqtt_input_lock",
-        "mqtt_input_unlock"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_room_history_commit": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_room_history",
-        "room_history_record",
-        "room_history_seal",
-        "room_history_crc",
-        "history_crc_ring",
-        "history_config_crc",
-        "room_liveness_touch",
-        "room_liveness_commit",
-        "room_liveness_seal",
-        "room_liveness_crc",
-        "room_ring_commit",
-        "room_ring_reset",
-        "mqtt_input_lock",
-        "mqtt_input_unlock"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -12898,22 +12405,6 @@
       "base_bytes": 192,
       "max_bytes": 2048
     },
-    "button_stop_forget_room_crc": {
-      "symbols": [
-        "button_task",
-        "history_forget",
-        "stop_forget_wipe",
-        "stop_forget_room_wipe",
-        "stop_forget_room_seal",
-        "stop_forget_room_crc",
-        "history_crc_ring",
-        "history_config_crc",
-        "runtime_task_entry"
-      ],
-      "multipliers": {},
-      "base_bytes": 192,
-      "max_bytes": 2048
-    },
     "button_stop_forget_liveness_crc": {
       "symbols": [
         "button_task",
@@ -15470,71 +14961,6 @@
       "base_bytes": 1536,
       "max_bytes": 8192
     },
-    "httpd_direct_curve_snapshot": {
-      "symbols": [
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_status",
-        "curve_bins_snapshot",
-        "curve_bin_summary",
-        "room_time_now",
-        "mqtt_input_lock",
-        "mqtt_input_unlock",
-        "modbus_active_profile"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_direct_curve_expire": {
-      "symbols": [
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_status",
-        "curve_bins_snapshot",
-        "curve_bin_clock",
-        "curve_bin_clear",
-        "mqtt_input_lock",
-        "mqtt_input_unlock",
-        "modbus_active_profile"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_direct_curve_format_bin": {
-      "symbols": [
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_bins_json",
-        "status_fixed_double",
-        "sdk_snprintf",
-        "sdk_vfprintf",
-        "sdk_dtoa",
-        "sdk_dtoa_mul_shift",
-        "sdk_dtoa_mul"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_direct_curve_axis_number": {
-      "symbols": [
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_bins_json",
-        "curve_axis_json",
-        "curve_number_json",
-        "status_unsigned_number"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
     "httpd_mcp_status_rfc3339": {
       "symbols": [
         "mcp_post",
@@ -15548,176 +14974,6 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
-    },
-    "httpd_mcp_curve_snapshot": {
-      "symbols": [
-        "mcp_post",
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_status",
-        "curve_bins_snapshot",
-        "curve_bin_summary",
-        "room_time_now",
-        "mqtt_input_lock",
-        "mqtt_input_unlock",
-        "modbus_active_profile"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_mcp_curve_expire": {
-      "symbols": [
-        "mcp_post",
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_status",
-        "curve_bins_snapshot",
-        "curve_bin_clock",
-        "curve_bin_clear",
-        "mqtt_input_lock",
-        "mqtt_input_unlock",
-        "modbus_active_profile"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_mcp_curve_format_bin": {
-      "symbols": [
-        "mcp_post",
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_bins_json",
-        "status_fixed_double",
-        "sdk_snprintf",
-        "sdk_vfprintf",
-        "sdk_dtoa",
-        "sdk_dtoa_mul_shift",
-        "sdk_dtoa_mul"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_mcp_curve_axis_number": {
-      "symbols": [
-        "mcp_post",
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_bins_json",
-        "curve_axis_json",
-        "curve_number_json",
-        "status_unsigned_number"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_curve_homehub_reset": {
-      "symbols": [
-        "config_hp",
-        "config_document",
-        "curve_homehub_reset",
-        "curve_forget_samples",
-        "curve_reset_samples",
-        "curve_bin_clear",
-        "mqtt_input_lock",
-        "mqtt_input_unlock"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_ref_temp_reset": {
-      "symbols": [
-        "config_ref_temp",
-        "config_document",
-        "curve_reference_reconfigure",
-        "curve_forget_samples",
-        "curve_reset_samples",
-        "curve_bin_clear",
-        "mqtt_input_lock",
-        "mqtt_input_unlock"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "mqtt_reference_bin_target": {
-      "symbols": [
-        "mqtt_task",
-        "reference_dispatch",
-        "reference_frame",
-        "reference_apply",
-        "curve_bin_target",
-        "curve_bin_clear",
-        "mqtt_input_lock",
-        "mqtt_input_unlock"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_curve_record": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_curve_evaluate",
-        "curve_logic_eval",
-        "curve_bin_add",
-        "curve_outdoor_valid",
-        "mqtt_input_lock",
-        "mqtt_input_unlock"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_curve_expire": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_curve_evaluate",
-        "curve_logic_eval",
-        "curve_bin_clock",
-        "curve_bin_target",
-        "curve_forget_samples",
-        "curve_reset_samples",
-        "curve_bin_clear",
-        "mqtt_input_lock",
-        "mqtt_input_unlock"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_curve_status_read": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_curve_builder",
-        "curve_status",
-        "mqtt_input_lock",
-        "mqtt_input_unlock",
-        "modbus_active_profile"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
-    },
-    "mqtt_curve_format_double": {
-      "symbols": [
-        "mqtt_task",
-        "mqtt_curve_builder",
-        "mqtt_curve_payload",
-        "double_string",
-        "dynamic_double_string"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 5120
     },
     "httpd_direct_status_redacted": {
       "symbols": [
@@ -15776,26 +15032,6 @@
         "http_send_status_json",
         "status_serializer",
         "status_service_meta",
-        "status_unsigned_number"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_direct_curve_scalar_fields": {
-      "symbols": [
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_json_bool",
-        "curve_json_uint",
-        "curve_json_quoted",
-        "curve_json_source",
-        "status_opt_uint",
-        "status_opt_int",
-        "status_quoted_string",
-        "status_escaped_string",
-        "status_utf8_sequence_length",
         "status_unsigned_number"
       ],
       "multipliers": {},
@@ -15864,27 +15100,6 @@
         "http_send_status_json",
         "status_serializer",
         "status_service_meta",
-        "status_unsigned_number"
-      ],
-      "multipliers": {},
-      "base_bytes": 1536,
-      "max_bytes": 8192
-    },
-    "httpd_mcp_curve_scalar_fields": {
-      "symbols": [
-        "mcp_post",
-        "http_send_status_json",
-        "status_serializer",
-        "curve_status_json",
-        "curve_json_bool",
-        "curve_json_uint",
-        "curve_json_quoted",
-        "curve_json_source",
-        "status_opt_uint",
-        "status_opt_int",
-        "status_quoted_string",
-        "status_escaped_string",
-        "status_utf8_sequence_length",
         "status_unsigned_number"
       ],
       "multipliers": {},
@@ -20946,7 +20161,6 @@
         "httpd_config_mqtt",
         "httpd_config_board",
         "httpd_config_env3",
-        "httpd_config_weather",
         "httpd_config_diagnostics",
         "httpd_config_circulation",
         "httpd_hp_query_probe",
@@ -21215,29 +20429,17 @@
         "httpd_shutdown_board_cycling_append_owner",
         "httpd_shutdown_env3_cycling_append_owner",
         "httpd_direct_status_rfc3339",
-        "httpd_direct_curve_snapshot",
-        "httpd_direct_curve_expire",
-        "httpd_direct_curve_format_bin",
-        "httpd_direct_curve_axis_number",
         "httpd_mcp_status_rfc3339",
-        "httpd_mcp_curve_snapshot",
-        "httpd_mcp_curve_expire",
-        "httpd_mcp_curve_format_bin",
-        "httpd_mcp_curve_axis_number",
-        "httpd_curve_homehub_reset",
-        "httpd_ref_temp_reset",
         "httpd_direct_status_redacted",
         "httpd_direct_status_opt_quoted",
         "httpd_direct_status_outdoor_context",
         "httpd_direct_status_service_metric",
         "httpd_direct_status_service_meta",
-        "httpd_direct_curve_scalar_fields",
         "httpd_mcp_status_redacted",
         "httpd_mcp_status_opt_quoted",
         "httpd_mcp_status_outdoor_context",
         "httpd_mcp_status_service_metric",
         "httpd_mcp_status_service_meta",
-        "httpd_mcp_curve_scalar_fields",
         "httpd_direct_defrost_start_fence",
         "httpd_mcp_defrost_start_fence",
         "httpd_direct_defrost_start_generation",
@@ -21450,33 +20652,23 @@
       "stack_bytes": 7168,
       "reserve_bytes": 1024,
       "paths": [
-        "mqtt_reference_parse",
         "mqtt_circulation_parse",
         "mqtt_circulation_probe_parse",
-        "mqtt_reference_subscribe",
         "mqtt_circulation_subscribe",
         "mqtt_cleanup",
         "mqtt_discovery",
-        "mqtt_weather",
         "mqtt_heartbeat",
         "mqtt_crash",
-        "mqtt_curve",
         "mqtt_sync_tls_publish",
-        "mqtt_reference_apply",
         "mqtt_heartbeat_build",
         "mqtt_heartbeat_discovery_build",
         "mqtt_env3_discovery_build",
-        "mqtt_curve_build",
         "mqtt_cycle_gate",
         "mqtt_crash_changed",
-        "mqtt_weather_build",
-        "mqtt_reference_binding",
         "mqtt_circulation_history",
-        "mqtt_curve_evaluate",
         "mqtt_x10a_build",
         "mqtt_modbus_build",
         "mqtt_env3_build",
-        "mqtt_reference_subscribe_tls",
         "mqtt_circulation_subscribe_tls",
         "mqtt_circulation_probe_subscribe_tls",
         "mqtt_cleanup_probe_tls",
@@ -21528,18 +20720,11 @@
         "mqtt_cycling_evidence",
         "mqtt_cycling_expire",
         "mqtt_cycling_expire_fingerprint",
-        "mqtt_room_history_validate",
-        "mqtt_room_history_commit",
         "mqtt_stop_report",
         "mqtt_stop_json_mqtt",
         "mqtt_stop_suppression",
         "mqtt_stop_unavailable",
-        "mqtt_stop_store_suppression",
-        "mqtt_reference_bin_target",
-        "mqtt_curve_record",
-        "mqtt_curve_expire",
-        "mqtt_curve_status_read",
-        "mqtt_curve_format_double"
+        "mqtt_stop_store_suppression"
       ]
     },
     "poll": {
@@ -21904,7 +21089,6 @@
         "button_stop_forget_wipe_release",
         "button_stop_forget_latch",
         "button_stop_forget_persist_crc",
-        "button_stop_forget_room_crc",
         "button_stop_forget_liveness_crc",
         "button_stop_forget_catalog_crc",
         "button_stop_forget_manifest_reset",
@@ -22039,17 +21223,6 @@
       "reserve_bytes": 1024,
       "paths": [
         "dns_socket"
-      ]
-    },
-    "weather": {
-      "stack_bytes": 8192,
-      "reserve_bytes": 1536,
-      "paths": [
-        "weather_task_download",
-        "weather_task_tls",
-        "weather_task_parse",
-        "weather_task_tls_headers",
-        "weather_task_tls_body"
       ]
     },
     "ota": {

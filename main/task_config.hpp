@@ -30,9 +30,8 @@
 //       connectivity watchdog, the wired-link loss watch (which decides a reboot, so it must not
 //       sit behind a long publish), the boot-resident OTA delivery worker — which may hold a TLS
 //       peer that will time out — and the one-shot OTA health task.
-//   3 — local reporting with relaxed deadlines: best-effort UDP syslog, the 45-minute weather
-//   fetch,
-//       and the recovery button's debounced sampling.
+//   3 — local reporting and controls with relaxed deadlines: best-effort UDP syslog and the
+//       recovery button's debounced sampling.
 //   2 — cosmetics. The status indicator is below everything: a dropped tick costs nothing (the next
 //       one recomputes the pattern from scratch).
 // The esp_http_server task and esp-mqtt's own event task are created by ESP-IDF with their own
@@ -54,7 +53,6 @@ inline constexpr UBaseType_t TASK_PRIO_OTA =
     4; // ota_update.cpp      boot-resident manifest/download worker
 inline constexpr UBaseType_t TASK_PRIO_OTA_GATE    = 4;  // ota_update.cpp      one-shot rollback health gate
 inline constexpr UBaseType_t TASK_PRIO_SYSLOG      = 3;  // syslog.cpp          best-effort UDP forwarder (opt-in)
-inline constexpr UBaseType_t TASK_PRIO_WEATHER     = 3;  // weather_forecast.cpp Open-Meteo fetch (opt-in)
 inline constexpr UBaseType_t TASK_PRIO_BUTTON      = 3;  // recovery_button.cpp physical factory reset (opt-in)
 inline constexpr UBaseType_t TASK_PRIO_LED         = 2;  // status_led.cpp      status indicator
 

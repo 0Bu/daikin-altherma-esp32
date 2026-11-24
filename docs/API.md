@@ -7,7 +7,7 @@ privacy; [ARCHITECTURE.md](ARCHITECTURE.md) describes ownership. HTTP implementa
 
 ## Surface and errors
 
-The trusted-LAN route count of 40 includes assets, aliases and the catch-all. The open setup AP
+The trusted-LAN route count of 38 includes assets, aliases and the catch-all. The open setup AP
 serves only provisioning (`/`, `/index.html`, `/favicon.ico`, `/set_wifi` and captive GET fallback).
 A withheld GET serves the setup page; a withheld POST is 404. `/scan`, live data, configuration other
 than WiFi, OTA and MCP are not available on that AP.
@@ -41,9 +41,7 @@ U+FFFD in JSON output without changing configuration. Clients must reject trunca
 
 During active OTA, every non-OTA route fails fast with a small busy-503, including assets, both
 `/models` and `/diag` forms and MCP. Only OTA routes remain reachable. The common admission guard
-also refuses non-OTA work below a 6,144-byte contiguous internal block. During Weather's TLS phase (not its
-lead), `/values` waits in 250-ms steps for at most four seconds, then returns busy-503 with the body
-`network operation in progress`.
+also refuses non-OTA work below a 6,144-byte contiguous internal block.
 
 ## Assets
 
@@ -66,15 +64,24 @@ or live WebSocket route.
 
 ## GET /status
 
-A snapshot of device configuration and source evidence. Optional measurements are null when unknown;
+A snapshot of device configuration and source evidence. `status_schema_version:2` identifies the
+current schema. A missing version identifies legacy schema 1. Optional measurements are null when unknown;
 unset identifying strings remain empty. Independent source snapshots do not imply simultaneous
 physical measurement. `?redact=1` applies the [report redaction contract](SECURITY.md#report-redaction-contract).
+
+### Migrating API clients to status schema 2
+
+Schema 2 omits `heating_curve`, `reference_temperature`, `weather_forecast`, `history.room_rows`
+and `sys.stack_min_free_bytes.weather`. Remove clients' calls to `/set_ref_temp` and `/set_weather`
+and requests for `/history` with `source=room`.
+See [plant features after upgrading](PLANT.md#after-upgrading-to-status-schema-2) for the owner-facing
+changes and [MQTT migrations](MQTT.md#migrations) for topic and discovery cleanup.
 
 ### Device, links and configuration
 
 | Object | Fields | Meaning |
 |---|---|---|
-| Root | `version`, `platform`, `uptime_s`, `boot_id`, `app_elf_sha256`, `pins_avail` | Running build, uptime, 16-hex-digit random per-boot token and X10A-eligible GPIOs. The configured nine-character ELF hash prefix helps correlate symbols; it is not full artifact/flash verification. |
+| Root | `status_schema_version`, `version`, `platform`, `uptime_s`, `boot_id`, `app_elf_sha256`, `pins_avail` | Running build, uptime, 16-hex-digit random per-boot token and X10A-eligible GPIOs. The configured nine-character ELF hash prefix helps correlate symbols; it is not full artifact/flash verification. |
 | `board` | `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`, `btn_active_low`, `user_set`, `preset_id`, `preset_name`, `vendor`, `pins_local`, `presets` | Persisted hardware identity and local-I/O candidates, excluding current X10A claims. A preset fills fields; submission saves them. |
 | `board.config_revision` | Unsigned 32-bit integer | RAM-only configuration revision for draft validation. Pair with `boot_id`. |
 | `board.presets[]` | `id`, `name`, `vendor`, `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`, `btn_active_low`, `i2c_pins` | Supported hardware presets. A selected identity remains listed even if its original factory pins are now unavailable; other presets whose pins are claimed (including detected Ethernet) are withheld. |
@@ -92,7 +99,7 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 | `detect` | `proto`, `rx`, `tx`, `valid`, `capacity_kw`, `capacity_kw_iu`, `ou_eeprom`, `candidates`, `families`, `ambiguous`, `model{ name,family,marketing }` or null | Fingerprint and candidates. Ambiguity leaves unestablished model fields null; decoder `profile.id` is separate. Outdoor and indoor capacities are separate and null without evidence. |
 | `modbus` | `enabled`, `connected`, `discovering`, `searched`, `profile`, `profile_basis`, `host`, `port`, `unit_id`, `rx`, `fails`, `values`, `task_stack_min_free_bytes`, `plant_gate_known`, `plant_gate_active`, `heating_mode_known`, `heating_mode_active`, optional `error`, `error_code`, `error_detail`, `error_register` | Independent read-only Modbus. Profile/basis identify HomeHub or native Altherma 4 semantics. Empty host disables it. Manual discovery is request-local; `discovering` stays false. Gate and mode need individually fresh valid replies. |
 | `sys` | `free_heap`, `min_free_heap`, `max_alloc`, `heap_restarts`, `mqtt_skipped`, `mqtt_quiesced`, `poll_skipped`, `reset_reason`, optional `config_unreadable:true`, `safe_mode`, `safe_mode_cause`, `stack_min_free_bytes` | Heap bytes (`max_alloc`: largest contiguous internal block), cycle loss, reset/recovery and kept unreadable service settings; the optional flag survives redaction. |
-| `sys.stack_min_free_bytes` | `httpd`, `poll`, `mqtt`, `modbus`, `weather`, `ota`, `syslog`, `env3`, `led`, `button`, `wifi_watchdog`, `eth_fallback`, `captive_dns`, `ota_health`, `http_deadline`, `main`, `sdk_mqtt` | Boot-local sampled minimum free stack bytes; null until that task was sampled. Samples survive task recreation. `sdk_mqtt` uses transport-task callbacks; synchronous caller error events do not sample it. |
+| `sys.stack_min_free_bytes` | `httpd`, `poll`, `mqtt`, `modbus`, `ota`, `syslog`, `env3`, `led`, `button`, `wifi_watchdog`, `eth_fallback`, `captive_dns`, `ota_health`, `http_deadline`, `main`, `sdk_mqtt` | Boot-local sampled minimum free stack bytes; null until that task was sampled. Samples survive task recreation. `sdk_mqtt` uses transport-task callbacks; synchronous caller error events do not sample it. |
 | `last_crash` | null or `{reason,reason_code,fault,coredump[,task,pc,backtrace,corrupted,elf_sha256]}` | Current boot reset/fault plus any stored dump summary. Stored incident age/reset relationship remain unknown even for matching ELF. Proven foreign dumps are preserved but suppressed. Dump presence is live; dismissal preserves `sys.reset_reason`. |
 
 `mqtt.retirement_evidence` is a maintainer bit mask. Journal bits remain zero before journal service;
@@ -113,26 +120,6 @@ Support requires an M5Stack board preset. Readings are null unless fresh. I²C c
 live X10A pins and are offered before a board change; `/set_board` validates the whole proposed
 snapshot, including its LED/button claims.
 
-`reference_temperature` fields:
-
-```text
-configured, name, topic, temperature_path, setpoint_topic, setpoint_path, fixed_setpoint_c,
-timestamp_topic, timestamp_path, enabled_path, hvac_mode_path, max_age_s,
-subscribed, has_value, source_id, calibration_k, temperature_min_c, temperature_max_c,
-temperature_c, has_setpoint, setpoint_c, enabled, hvac_mode,
-received_at, received_ago_s, source_at, source_unix_s, timestamp_source,
-age_s, fresh, freshness_reason, temperature_valid, setpoint_valid, control_eligible,
-room_error_k, reason, reason_code, retained, messages, errors, rejections,
-optional error, eligibility_error
-```
-
-Presence, timestamp freshness, physical validity and heating eligibility are separate. `reason`
-distinguishes disabled thermostat, non-heating mode, stale data and decoding failures. A retained
-message without usable source time is not fresh. A configured timestamp mapping is the sole age
-authority: absent source time reports `missing_source_time`, never arrival-time freshness.
-Source epochs discard queued frames from a previous binding. Saved mappings subscribe/decode only while the
-master consent is on; disabling it clears captured state without deleting the mapping.
-
 `circulation_source` fields:
 
 ```text
@@ -144,91 +131,13 @@ retained, messages, errors, rejections, optional error
 
 `state` is confirmed `on`, `off` or `unknown`, using hysteresis and the confirmation window. A single
 power spike or a reading in the hysteresis band is not proof of off/on. This independently measured
-DHW circulation witness follows the same consent/deletion lifecycle as the room input.
-
-`weather_forecast` fields:
-
-```text
-configured, provider, model, fetch_interval_s, max_age_s, fetching, available, has_value,
-latitude, longitude, state, outdoor_mean_2h_c, solar_energy_2h_wh_m2,
-hourly[{time_unix_s,temperature_c,humidity_pct,pressure_hpa}],
-issued_at, fetched_at, valid_for_decision_at, last_attempt_at, age_s, fresh,
-freshness_reason, successes, errors, refresh_requested_token, refresh_started_token,
-refresh_completed_token, refresh_success_token, task_stack_min_free_bytes,
-optional reason, error
-```
-
-`available` requires active consent/location, an operating task and fresh valid evidence. A failed
-refresh may retain `has_value` and previous forecast data while `available`/`fresh` are false.
-`hourly` is empty without a value; units are Unix seconds, °C, %, hPa. `issued_at` stays null because
-the provider exposes no model-run instant. Coordinates are null when unset and redacted on request.
-A boot-latched task/deadline startup failure remains an error across saves.
-
-Refresh tokens are uint64 causal witnesses; zero means no event. Requested, started and completed
-track that explicit trigger; success advances only when its exact result commits. A cancellation
-is final and cannot be overwritten by a late superseded fetch. OTA may release and later reclaim
-the same outstanding token. An unrelated scheduled success cannot satisfy a requested refresh.
-
-### Heating-curve diagnosis
-
-`heating_curve` fields:
-
-```text
-method_version, armed, state, state_code, reason, reason_code, sample_eligible,
-current_room_error_k, last_sample_room_error_k, last_sample_unix_s,
-outdoor_temperature_c, outdoor_source, last_sample_outdoor_temperature_c,
-last_sample_outdoor_source, plant_outdoor_temperature_c, plant_outdoor_source,
-last_sample_plant_outdoor_temperature_c, last_sample_plant_outdoor_source,
-forecast_available, plant_gate_known, plant_gate_active, heating_mode_known,
-heating_mode_active, room_source_unix_s, room_age_s, sequence, evaluations, samples, holds, blocks,
-outdoor_bins
-```
-
-`heating_curve.plant_gate_*` reports the combined input-53/space-route prerequisite defined in
-[PLANT.md](PLANT.md#heating-curve-diagnosis); `modbus.plant_gate_*` remains the raw input-53 fact.
-Method version 4 retains the independent space-route requirement and adds `outdoor_bins`.
-
-States: `off`, `recording`, `hold`, `degraded`, `blocked`. Reasons: `disabled`, `sample_recorded`,
-`sampling_interval`, `room_unavailable`, `x10a_unavailable` (retained wire code; Methods 3–4 do not require X10A), `homehub_unavailable`, `plant_gate_unknown`,
-`plant_inactive`, `forecast_unavailable`, `clock_invalid`, `heating_mode_unknown`, `non_heating_mode`,
-`sampler_inactive`, `evaluation_stale`. Numeric codes are stable; retired 3/4 are unused. `sampler_inactive`
-(14) means configuration is armed but the MQTT sampler is not running: safe mode, the boot window or a
-failed MQTT start.
-
-`evaluation_stale` (15) reports a previously armed evaluation that is no longer current: state
-`blocked`, `sample_eligible:false`, current error/source time/age and outdoor readings null,
-current source names null, forecast/known/active flags false. Dated samples and counters remain
-unchanged. [PLANT.md](PLANT.md#heating-curve-diagnosis) owns the evaluation-age rule.
-
-Arming requires diagnostics consent, a configured MQTT broker, an MQTT room path with a fixed or
-mapped target, and a configured HomeHub host; forecast is optional. Recording requires fresh room-time evidence.
-Error values are null unless established. Sequence plus absolute time identifies a recorded event. Room error is not an LWT offset or actuator result.
-
-The legacy outdoor pair is fresh/plausible ENV III; `plant_*` is HomeHub input 44 from the current
-session. Current and recorded-event values remain separate and name their source. Both are optional
-context, never sampling gates. An absent sample clears the corresponding prior event value.
-
-`outdoor_bins` covers this boot's observations on the current UTC date and the six preceding UTC
-dates. Redacted status omits the field. In normal status, null means the current source scope or
-reporting clock is unavailable. An object with `scope_samples:0` means the reporting scope is known
-and contains no recorded events in those dates. The object contains `target_c`, `scope_samples`,
-and the two arrays `homehub` and `env3`. Their four positions represent outdoor air below 0 °C, 0 to
-below 5 °C, 5 to below 10 °C, and at least 10 °C. A null entry
-means that axis has no observations in the band. Each populated entry contains `samples`,
-`first_unix_s`, `last_unix_s`, and the `sum_tenths`, `min_tenths` and `max_tenths` fields prefixed by
-`room_` or `outdoor_`. The first and last times are UTC Unix seconds from the sampler when it
-admitted those observations. They describe the span of the recorded events. Room quantities
-are signed differences in tenths of a kelvin. Outdoor quantities use tenths of a degree Celsius.
-Divide each sum by the bin count and by 10 for its mean.
-`scope_samples` counts each event admitted to the current bin scope once, including events
-without outdoor readings.
+DHW circulation witness runs only while plant diagnostics is enabled.
 
 ### History and 24-hour checks
 
 `history` fields: `epoch`, `dt`, `persist`, `dwell_persist`, `rows[{id,label}]`, `modbus_rows[{id,label}]`,
-`env3_rows[{id,label}]`, `room_rows[{id,label}]`. Trend ids name concepts; labels follow the detected profile
-or configured MQTT room-source name. Unsupported rows
-are omitted. RAM adoption verdicts include `accept`, `power_cycle`, `wrong_catalog`, `bad_crc`,
+`env3_rows[{id,label}]`. Trend ids name concepts; labels follow the active source and profile.
+Unsupported rows are omitted. RAM adoption verdicts include `accept`, `power_cycle`, `wrong_catalog`, `bad_crc`,
 `wrong_version`, `no_record`, `safe_mode`, `not_committed`, `stale_commit`; they do not report flash
 restoration. `stale_commit` means unmeasurable age, not an ordinary stalled raster (booked as gaps).
 Individual Modbus/ENV III rings may be retired beside an X10A `accept`. Dwell v4 books restart
@@ -394,8 +303,8 @@ unassigned. Hourly runtime and starts measure different populations and cannot p
 average completed run.
 
 `cycling.timeline` is optional. It requires unredacted status, enabled diagnostics, a synchronized
-clock, eligible compressor observations and space for the snapshot. The weather client can reserve
-that space for TLS. Eligible observations can come from compatible flash records or live readings.
+clock, eligible compressor observations and space for the snapshot. Eligible observations can come
+from compatible flash records or live readings.
 Factory history forgetting advances `history.epoch` and suppresses the precise timeline for the
 rest of the boot, even if the journal erase fails.
 `unix_s` is the Unix time at the right edge. `boot_s`, when present, gives current uptime at the
@@ -457,9 +366,8 @@ whose edges matched the restored checkpoint. Saved times use the journal's origi
 Match both pre-boot edges in the emitted `timeline` before attaching the run to a row. Record
 eviction or a clock correction can omit those edges.
 The serializer always omits `run_contexts` and `flow_typical_l_min` for Modbus and in redacted
-reports. Unredacted X10A output can omit the fields when empty, during active Weather TLS admission,
-on allocation failure or after reset/forget. Completed-run verdicts use their independent hourly
-evidence.
+reports. Unredacted X10A output can omit the fields when empty, on allocation failure or after
+reset/forget. Completed-run verdicts use their independent hourly evidence.
 
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed
@@ -653,8 +561,9 @@ MCP `get_hp_values` uses the same serializer. There is no retained model-sized r
 
 ## GET /history
 
-Query: `row=<trend-id>` and optional `source=x10a|modbus|env3|room`; absent source means `x10a`.
-Unknown ids return 404. Available rows are listed in `/status.history`. The payload is:
+Query: `row=<trend-id>` and optional `source=x10a|modbus|env3`; absent source means `x10a`.
+Unsupported sources return 400. Unknown ids return 404. Available rows are listed in `/status.history`.
+The payload is:
 
 ```text
 {id,source,label,epoch,boot_id,dt,unit[,t0][,b0|boot_b0],v:[number|null,…],held:[[from,count],…]}
@@ -692,11 +601,6 @@ its bucket, but any other outdoor sample without a readable speed stays a number
 proof that the page was current.
 The circulation-state trend is selected through `source=x10a` but reports its physical source as
 `"mqtt"` in the response.
-`source=room&row=room_temp` returns the independent MQTT actual-temperature trend with `source:"room"`.
-It is offered outside safe mode while plant diagnostics and a room source with an MQTT broker are
-configured; fresh, valid temperatures are recorded independently of thermostat state or heating-curve
-eligibility. Disabled/unconfigured sources and safe mode return 404; a changed source identity during
-retrieval returns 503.
 Catalog ids and source eligibility are in `main/logic/history.hpp` and `homehub_map.hpp`.
 
 ## Catalog, probes and evidence
@@ -751,17 +655,19 @@ the link blob; it does not migrate or write the service blob.
 
 | NVS item | Purpose |
 |---|---|
-| `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation mappings, weather, ENV III, diagnostics consent/generation/source |
+| `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, circulation mapping, ENV III, diagnostics consent/generation/source |
 | `link` | Complete RX/TX/protocol/observation-identity cache; failed write preserves the previous complete entry. A rejected entry is reported in `/diag`; only detection (cached pair, build default, their swaps) or `/set_hp` rewrites it |
 | Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
 | `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; which boot or uptime clears which is in [ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) |
 
-The current service layout is v21; it appends the preferred plant-diagnostics display source byte
-(`0` = X10A, `1` = Modbus; older records default to X10A). v20 appended a room-history generation that
-defaults to zero for
-older records and prevents a removed or replaced source from restoring its earlier history.
-Retired v9 actuation and v14 controller-mode bytes keep their
-positions, are written zero and ignored. Pre-v18 HomeHub configurations migrate as already searched
+The service layout remains v21. The preferred plant-diagnostics display source byte uses
+`0` for X10A and `1` for Modbus, with X10A as the default for older records.
+Retired room-input and forecast slots keep their positions for compatibility with previous firmware.
+The next successful service configuration save writes empty room mappings and default forecast values.
+Downgrading to earlier firmware that supports v21 preserves access to the record and requires
+configuring these retired sources again after a service configuration save.
+Legacy room trend records are outside the current history sources.
+The retired v9 actuation and v14 controller-mode bytes are written zero and ignored. Pre-v18 HomeHub configurations migrate as already searched
 so an old empty target stays opted out; fresh state searches once on its first networked boot and
 persists the result or miss. Pre-v19 diagnostics migrate off. See `logic/config_store.hpp` for exact
 byte/version layouts.
@@ -844,64 +750,27 @@ the revision has changed. Both refusals leave the submitted settings unwritten.
 
 ### Plant diagnostics and sources
 
-`/set_ref_temp`, `/set_circulation` and `/set_weather` replace their complete source configuration;
-they are not patches. An omitted topic or both omitted coordinate strings disables that source.
-
 `POST /set_diagnostics {enabled?:boolean, source?:"x10a"|"modbus"}` persists diagnostics state and
 applies live (at least one field is required; invalid `source` returns `400`). The first opt-in
 (`enabled:true` while `diagnostics_generation == 0`) draws a durable non-zero generation. Setting
-`enabled:false` pauses new diagnostic, room, forecast and circulation collection while preserving
-collected 24 h X10A and Modbus diagnostic stores (checkup/DHW/cycling/stop-context plus room and
-circulation 24 h histories continue aging out after 24 h; weather MQTT cleanup still clears
-retained forecast evidence), and re-enabling resumes within the same generation without bridging
-the paused interval. Switching `source` between `"x10a"` and `"modbus"` updates the displayed card
-source without advancing `diagnostics_generation`, resetting weather/room state, or clearing
-collected X10A or Modbus history. In-flight diagnosis samples captured before a transition are
+`enabled:false` pauses new checks and circulation collection. Existing X10A and Modbus diagnostic
+stores (checkup/DHW/cycling/stop-context) and circulation history age out after 24 hours.
+Re-enabling resumes within the same generation without bridging the paused interval. Switching
+`source` between `"x10a"` and `"modbus"` updates the displayed card source without advancing
+`diagnostics_generation` or clearing collected X10A or Modbus history. In-flight diagnosis samples captured before a transition are
 rejected. X10A, HomeHub, history, ENV III and heartbeat remain active.
-
-`POST /set_ref_temp` fields:
-
-```text
-name, topic, temperature_path, setpoint_topic, setpoint_path, fixed_setpoint_c,
-timestamp_topic, timestamp_path, enabled_path, hvac_mode_path, max_age_s
-```
-
-Exact topics (no wildcards), bounded dotted JSON paths, integer max age 10–3600 s, and a target
-mapping or fixed target 5.0–35.0 °C at 0.1 °C precision are required for a non-empty source.
-`fixed_setpoint_c:0` selects an MQTT target rather than a usable fixed temperature.
-Old clients' setpoint/timestamp
-paths fall back to their single topic. Save/rebind is live with no proof step. Saving an unchanged
-mapping retries the binding and returns `saved:false,reboot:false,room_evidence_reset:true`.
-This clears the current room reading and the heating-curve sample memory, cadence and outdoor bins.
-The heating-curve counters, sequence and room history remain available. Empty topic clears all mapping
-fields and captured state even if the old source is broken.
-An empty temperature path can decode a numeric scalar, but does not arm heating-curve diagnosis.
-Arming needs a non-empty temperature path and a non-empty target path unless the target is fixed.
-Recording additionally requires fresh source-time evidence.
 
 `POST /test_circulation` fields: `name`, `topic`, `power_path`, `timestamp_path`, `max_age_s`,
 `on_threshold_w`, `off_threshold_w`, `confirm_s`. Diagnostics off is 409, empty topic 400. Probe the
 candidate mapping through the already connected MQTT client for up to 12 seconds;
 `{ok,test_proof,power_w,state,retained}` or 422. No config is written.
 
-`POST /set_circulation` adds `test_proof` to that mapping. A non-empty topic needs a current proof
+`POST /set_circulation` replaces the complete mapping and adds `test_proof` to those fields.
+A non-empty topic needs a current proof
 bound to the seven behavioral fields and the original observation's `max_age_s` lifetime;
 clock rollback cannot extend it. Absent, expired or invalid proof is 409. Empty topic disables without
 proof. Save applies live; cosmetic renaming does not retire evidence. Unchanged mapping returns
 `saved:false,reboot:false`. Numeric bounds/decoder policy are in `logic/circulation_source.hpp`.
-
-`POST /set_weather {latitude,longitude[,refresh:true]}` saves/notifies without reboot or request-path
-DNS/TLS. Coordinates are strict decimal strings with optional minus, dot/comma, at most six decimals;
-no plus, exponent or whitespace. Both empty disables; one empty is 400. Saving location is consent
-to disclose coordinates and source IP; fetching also needs diagnostics consent.
-A source change must acquire bounded admission, commit config and synchronously clear the old
-snapshot/generation. Admission failure after four seconds is 503 with no change; failed persistence
-keeps the authoritative source. Source replacement/removal cleans retained forecast evidence.
-
-`refresh:true` is only a non-persistent trigger for the unchanged, enabled location with diagnostics
-on. Otherwise it is 409; unavailable task/safe mode is 503. Success returns
-`{ok:true,reboot:false,saved:false,refresh_requested:true,refresh_token:N}`. It proves a requested
-trigger, not a successful fetch; observe the exact four causal tokens and success-counter increment.
 
 ## OTA operation contract
 

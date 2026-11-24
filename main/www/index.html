@@ -831,7 +831,7 @@
     <!-- ═══ SETTINGS (reached from the header gear) ═══
          The device's configuration, on ONE screen — no menu level in between: Connections, the
          three ESP32-family cards and, while explicitly enabled under Firmware, the plant-diagnostics
-         and heating-curve source cards. esp32CardHtml() emits them as one string so their live
+         card. esp32CardHtml() emits them as one string so their live
          summaries update together. -->
     <section class="view" id="viewSettings">
       <div class="pad">
@@ -936,45 +936,6 @@
     </form>
   </div>
 
-  <!-- ═══ Room-temperature MQTT source (required heating-curve-diagnosis input) ═══ -->
-  <div class="modal" id="refTempModal" hidden>
-    <div class="modal-backdrop" id="refTempBackdrop"></div>
-    <form class="modal-card" id="refTempForm" role="dialog" aria-modal="true" aria-labelledby="refTempModalTitle" tabindex="-1">
-      <div class="section-label card-title" id="refTempModalTitle" data-i18n="ref.title">Room-temperature source</div>
-      <label class="field">
-        <span class="field-label plain" data-i18n="ref.name">Name</span>
-        <input class="input" name="name" id="rtName" maxlength="48" placeholder="Living room" autocomplete="off">
-      </label>
-      <label class="field">
-        <span class="field-label plain" data-i18n="ref.temperature_source">Temperature source</span>
-        <input class="input mono" id="rtTemperatureSource" maxlength="641" placeholder="shellyhtg3-…/status/temperature:0$tC" autocomplete="off" aria-describedby="rtTemperatureSourceHelp">
-        <span class="field-help" id="rtTemperatureSourceHelp" data-i18n="ref.temperature_source_help">Exact MQTT topic and optional JSON path after $. Missing or wrong paths are reported when a payload arrives. Escape literal $ as \$ and literal \ as \\ in topics and paths.</span>
-      </label>
-      <label class="field">
-        <span class="field-label plain" data-i18n="ref.target">Target temperature</span>
-        <input class="input mono" id="rtTarget" maxlength="641" placeholder="20 or thermostat/status$target_temperature_c" autocomplete="off" aria-describedby="rtTargetHelp">
-        <span class="field-help" id="rtTargetHelp" data-i18n="ref.target_help">A fixed value in °C, or an exact MQTT topic with an optional JSON path after $.</span>
-      </label>
-      <label class="field">
-        <span class="field-label plain" data-i18n="ref.timestamp_source">Timestamp source · optional</span>
-        <input class="input mono" id="rtTimestampSource" maxlength="641" placeholder="Optional: topic$unixtime" autocomplete="off" aria-describedby="rtTimestampSourceHelp">
-        <span class="field-help" id="rtTimestampSourceHelp" data-i18n="ref.timestamp_source_help">Optional RFC3339/Unix source time as topic$path. Empty uses live MQTT arrival time; retained values then fail closed.</span>
-      </label>
-      <label class="field">
-        <span class="field-label plain" data-i18n="ref.max_age">Maximum age · seconds</span>
-        <input class="input" type="number" name="max_age_s" id="rtMaxAge" min="10" max="3600" step="1" value="600" inputmode="numeric" aria-describedby="rtMaxAgeHelp">
-        <span class="field-help" id="rtMaxAgeHelp" data-i18n="ref.max_age_help">Maximum permitted age of the source reading, from 10 to 3600 seconds.</span>
-      </label>
-      <p class="hint" data-i18n="ref.save_help">Save stores the mapping. It subscribes while Plant diagnostics is enabled; otherwise it remains dormant. A readable, fresh MQTT value is still required.</p>
-      <p class="hint err" id="rtError" hidden></p>
-      <div class="modal-actions">
-        <button class="btn secondary" type="button" id="rtCancel" data-i18n="btn.cancel">Cancel</button>
-        <button class="btn danger" type="button" id="rtDeleteBtn" data-i18n="ref.delete">Delete</button>
-        <button class="btn primary" type="submit" id="rtBtn" data-i18n="btn.save">Save</button>
-      </div>
-    </form>
-  </div>
-
   <!-- ═══ Potable-water circulation-pump MQTT power source ═══ -->
   <div class="modal" id="circulationModal" hidden>
     <div class="modal-backdrop" id="circulationBackdrop"></div>
@@ -1024,28 +985,6 @@
         <button class="btn secondary" type="button" id="circCancel" data-i18n="btn.cancel">Cancel</button>
         <button class="btn danger" type="button" id="circDeleteBtn" data-i18n="circ.delete">Delete</button>
         <button class="btn primary" type="submit" id="circBtn" data-i18n="btn.save">Save</button>
-      </div>
-    </form>
-  </div>
-
-  <!-- Open-Meteo is fetched directly by the ESP32. Empty coordinates = no weather traffic. -->
-  <div class="modal" id="weatherModal" hidden>
-    <div class="modal-backdrop" id="weatherBackdrop"></div>
-    <form class="modal-card" id="weatherForm" role="dialog" aria-modal="true" aria-labelledby="weatherModalTitle" tabindex="-1">
-      <div class="section-label card-title" id="weatherModalTitle" data-i18n="wx.title">Open-Meteo weather forecast</div>
-      <label class="field">
-        <span class="field-label plain" data-i18n="wx.latitude">Latitude</span>
-        <input class="input mono" name="latitude" id="wxLatitude" inputmode="decimal" maxlength="48" placeholder="52.520000" autocomplete="off">
-      </label>
-      <label class="field">
-        <span class="field-label plain" data-i18n="wx.longitude">Longitude</span>
-        <input class="input mono" name="longitude" id="wxLongitude" inputmode="decimal" maxlength="48" placeholder="13.405000" autocomplete="off">
-      </label>
-      <p class="hint err" id="wxError" aria-live="polite" hidden></p>
-      <p class="hint"><a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer" data-i18n="wx.attribution">Weather data by Open-Meteo.com · DWD ICON model</a></p>
-      <div class="modal-actions">
-        <button class="btn secondary" type="button" id="wxCancel" data-i18n="btn.cancel">Cancel</button>
-        <button class="btn primary" type="submit" id="wxBtn" data-i18n="btn.save">Save</button>
       </div>
     </form>
   </div>

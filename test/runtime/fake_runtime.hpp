@@ -502,8 +502,8 @@ public:
             live_, expected_revision, std::move(profile), 0x5u, 60, 60, "1234");
     }
 
-    // config_load sanitises the RAM config (rejected board pins, a colliding ENV III mapping, an
-    // unusable weather location) without persisting the result. This applies such a sanitising step
+    // config_load sanitises the RAM config (rejected board pins or a colliding ENV III mapping)
+    // without persisting the result. This applies such a sanitising step
     // to the live config only, leaving everything durable as it was.
     template <class Edit> void sanitize_ram_only(Edit&& edit) { edit(live_); }
 

@@ -16,9 +16,7 @@ under the base with no node segment. `<node>` is the installation identity descr
 | `<base>/x10a` | Yes | Grouped JSON from readable publishable X10A rows, updated by the publisher's nominal one-second loop. |
 | `<base>/modbus` | Yes | Flat HomeHub register JSON while enabled; disconnected source yields `{}`. No HA value discovery. |
 | `<base>/env3` | Yes | Flat optional accessory readings/counters; each fresh sample, normally every 10 s. |
-| `<base>/weather/openmeteo/forecast` | Yes | Atomic weather evidence while location and diagnostics consent are enabled. No HA discovery. |
 | `<base>/heartbeat` | No | Flat board/link diagnostics and rolling cycling evidence, every 10 s while connected. |
-| `<base>/heating_curve` | No | Schema-v3 room/diagnosis evidence on the same 10 s cadence. No HA discovery. |
 | `<base>/crash` | Yes | Pending fault/dump summary; only while a notable record exists. |
 | `<prefix>/<component>/<node>/<group>_<object_id>/config` | Yes | X10A discovery config; `binary_sensor` for converter 300–307 bit flags, `sensor` otherwise. |
 
@@ -58,7 +56,7 @@ backoff. Failed event registration prevents transport start and reports an expli
 ## Outbound availability
 
 One client starts with the retained transport LWT immediately, without waiting for X10A. Bridge
-diagnostics, HomeHub, ENV III, forecast and inbound observers keep their independent lifecycles.
+diagnostics, HomeHub, ENV III and the circulation witness keep their independent lifecycles.
 X10A discovery uses `availability_mode: all`: both `<base>/status` and `<base>/x10a/status` must be
 online. Board discovery uses transport availability; accessory discovery also requires its own
 numeric reading, so missing accessory keys make that entity unavailable.
@@ -72,9 +70,9 @@ of the allocating configuration snapshot. Offline and cleanup requests survive a
 
 For an OTA check/install, a connected client attempts retained transport `offline` before its clean
 stop, without waiting for PUBACK. Refusal, delivery failure or an already reconnecting client can
-leave the previous marker until reconnection refreshes transport and source markers. Weather pauses leave
-transport availability unchanged. Retained markers alone are not current source proof, and older
-single-marker discovery needs the migration below before it can rely on this split.
+leave the previous marker until reconnection refreshes transport and source markers. Retained
+markers alone do not establish current source availability. Older single-marker discovery needs
+the migration below before it can rely on this split.
 
 ## Identity and discovery
 
@@ -176,21 +174,6 @@ reading key**, so only the accessory becomes unavailable on a sensor fault. Sele
 retracts this topic and retires its three discovery configs, subject to the
 [ownership migration boundary](#migrations). Hardware gate: [BOARDS.md](BOARDS.md).
 
-### Weather
-
-Schema `1` carries `provider`, `model`, numeric `configured`, `fetching`, `available`, `fresh`,
-`has_value`, textual `state`, `reason`, `freshness_reason`, `error`, and `max_age_s`. Times are
-`issued_unix_s`, `fetched_unix_s`, `forecast_start_unix_s`, `valid_until_unix_s` and `last_attempt_unix_s`;
-unknown times are null. Values are `outdoor_mean_2h_c`, `solar_energy_2h_wh_m2`; counters are
-`successes`, `errors`. **Coordinates are absent.** Provider issue time is null because the endpoint
-does not expose it; fetch time is not substituted.
-
-Current availability requires configured input, successful source availability and fresh evidence.
-Fetch-age expiry is 90 minutes. A failed refresh may retain earlier numbers for analysis but sets
-availability/freshness false; `has_value` alone is insufficient. Location changes invalidate the old
-value. Disabling location or diagnostics consent retracts the current topic rather than publishing
-a disabled forecast. MQTT is unnecessary for the ESP32's own HTTPS fetch.
-
 ### Cleanup guarantees
 
 Retractions use empty retained QoS-1 messages. One cleanup message is outstanding; only its matching
@@ -214,7 +197,7 @@ with a boot unless stated otherwise.
 |---|---|
 | Build / uptime | Text `version`, `platform`, `uptime`; numeric `uptime_s`. |
 | Memory | `free_heap`, `min_free_heap`, `max_alloc`, `heap_restarts`. |
-| Stack minima, bytes | `httpd_stack_min_free_bytes`, `poll_stack_min_free_bytes`, `mqtt_stack_min_free_bytes`, `modbus_stack_min_free_bytes`, `weather_stack_min_free_bytes`. |
+| Stack minima, bytes | `httpd_stack_min_free_bytes`, `poll_stack_min_free_bytes`, `mqtt_stack_min_free_bytes`, `modbus_stack_min_free_bytes`. |
 | Reset | Text `reset_reason`; numeric `reset_reason_code`, `reset_fault`. |
 | WiFi | `wifi_connected`, `wifi_rssi`, `wifi_reconnects`; text/null `wifi_mac`, `wifi_bssid`. |
 | Transport | `net_link` (0 none, 1 WiFi, 2 Ethernet), `eth_present`, `eth_link`. |
@@ -229,79 +212,10 @@ clean boot ([classification](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery
 state class `measurement`. `mqtt_skipped` counts a publish
 cycle interrupted by an allocation failure or the flat Modbus payload exceeding its **4 KiB**
 bound; earlier topics in that cycle may already have published. `mqtt_quiesced` counts deliberate
-OTA/Weather TLS pauses; `poll_skipped` counts sweeps not performed. These use `total_increasing`.
+OTA pauses; `poll_skipped` counts sweeps not performed. These use `total_increasing`.
 Field/entity definitions: [`heartbeat.hpp`](../main/logic/heartbeat.hpp).
 
-## Room input and heating-curve evidence
-
-Input subscriptions are exact configured topics, not command routes. They are active only while
-plant diagnostics are enabled. An empty room/circulation topic deletes its observer mapping.
-The UI accepts a temperature **`topic$path`**, a fixed target in °C or target **`topic$path`**, and an
-optional timestamp source. Dot-separated object paths have no array/filter operators; omitting the
-path admits a plain numeric payload. Saved mapping is intent, not a successful live decode.
-Escape a literal dollar sign as `\$` and a backslash as `\\`. Decoded topics are limited to 192 bytes,
-paths to 128 bytes; the combined UI field allows 641 characters. A numeric target without `$` is a
-fixed temperature; use an explicit delimiter for a numeric topic, for example `20$`.
-The current heating-curve sampler requires
-a non-empty temperature path and a fixed target or non-empty target path; scalar decoding alone
-does not arm it (see [PLANT.md](PLANT.md#heating-curve-diagnosis)).
-
-Room actual/target values must be 5–35 °C. Maximum age is configurable from 10–3600 s, default 600 s.
-Without source-time mapping only live non-retained arrival time is accepted; retained input requires
-trusted RFC3339/Unix source time. A mapped timestamp that has not arrived leaves age unknown
-(`missing_source_time`); it never falls back to arrival time. Unsynced clock,
-invalid/future/backward timestamps, stale values
-and missing configured eligibility gates fail closed. Configured `enabled_path` must report enabled;
-configured `hvac_mode_path` must report `heat`. Independent temperature/target/time topics are
-supported; a separate time topic must carry the measurement time of the same temperature sample, because
-the firmware cannot verify that pairing and ages a retained temperature by it. Targets have no age check:
-a mapped or fixed target is treated as the standing setpoint. Fixed targets cannot coexist with a mapped target. [API.md](API.md) owns request bounds.
-
-`<base>/heating_curve` has `schema_version:3` and two top-level objects:
-
-| Object | Fields |
-|---|---|
-| `room` | `source_id:"living_room"`, `calibration_k:0`, `temperature_valid`, `setpoint_valid`, `control_eligible`, nullable `temperature_c`, `setpoint_c`, `error_k`, `source_unix_s`, `age_s`, `reason_code`, `counters.{messages,errors,rejections}`. |
-| `diagnosis` | `method_version:4`, `armed`, `state`, `reason`, `sample_eligible`, `forecast_available`, `outdoor_available`, `outdoor_source`, `outdoor_source_code`, `plant_outdoor_available`, `plant_outdoor_source`, `plant_outdoor_source_code`. |
-| `diagnosis.gates` | `plant_known`, `plant_active`, `heating_mode_known`, `heating_mode_active`. |
-| `diagnosis.room_evidence` | Nullable `current_error_k`, `source_unix_s`, `age_s`. |
-| `diagnosis.last_sample` | Nullable `room_error_k`, `unix_s`, `outdoor_temperature_c`, `plant_outdoor_temperature_c`; `outdoor_source`, `outdoor_source_code`, `plant_outdoor_source`, `plant_outdoor_source_code`; numeric `sequence`. |
-| `diagnosis.counters` | `evaluations`, `samples`, `holds`, `blocks`. |
-
-`diagnosis.gates.plant_*` combines normal-operation input 53 with independent space routing
-(input 37 = 0); the raw `/status.modbus.plant_gate_*` fields still describe input 53 alone.
-[PLANT.md](PLANT.md#heating-curve-diagnosis) owns the admission rule and method-version boundary.
-
-The same age-projected diagnosis serves HTTP and MQTT: `reason:15` (`evaluation_stale`), `state:4`
-and `sample_eligible:0` mean the owner has not evaluated recently. Current diagnosis evidence is null
-or unavailable, while `last_sample`, counters and independently fresh `room` evidence are preserved.
-Reads neither renew that evaluation nor create events. The project age rule is defined in
-[PLANT.md](PLANT.md#heating-curve-diagnosis). Method 4 keeps MQTT schema 3. Its outdoor-bin
-projection is available over HTTP. [API.md](API.md#heating-curve-diagnosis) defines the bin fields.
-
-Boolean facts use numeric 1/0; unestablished numbers are null. Source codes are 0 `none`, 1 `x10a`,
-2 `homehub`, 3 `env3`; the two recorded axes use their own current source. HomeHub input 44 must be
-from the current Modbus cycle/session; ENV III must be fresh/plausible and its physical placement
-remains the owner's fact. Both axes are context, never event gates.
-
-Room reason codes: 0 eligible; 1 not configured; 2 no value; 3 invalid payload; 4 missing source time;
-5 clock unsynced; 6 future timestamp; 7 backward timestamp; 8 retained without timestamp; 9 stale;
-10 invalid arrival clock; 11 temperature out of range; 12 missing target mapping; 13 missing target;
-14 target out of range; 15 missing enabled state; 16 disabled; 17 missing HVAC mode; 18 non-heating.
-The textual slug is `/status.reference_temperature.reason`.
-
-Diagnosis state codes: 0 off, 1 recording, 2 hold, 3 degraded, 4 blocked. Reason codes: 0 disabled,
-1 sample recorded, 2 interval, 5 room unavailable, 6 X10A unavailable, 7 HomeHub unavailable,
-8 plant gate unknown, 9 plant inactive, 10 forecast unavailable, 11 clock invalid, 12 mode unknown,
-13 non-heating, 15 evaluation stale. Codes 3/4 are retired and never reused; 14 sampler inactive
-describes an unstarted owner on HTTP, before MQTT can publish.
-
-An eligible event records raw **target − actual** room deviation at most every 30 minutes, with
-absolute `last_sample.unix_s` and an incremented `sequence`. `unix_s` is the evaluation time; the
-room reading it used can be up to the configured maximum age older. Count **sequence increases**,
-not the repeated 10 s publications. Sequence/uptime reset denotes a reboot. This is not a leaving-water
-offset. Schema v2 added the ENV III axis; v3 adds HomeHub's separate axis/provenance without changing
-method v2. Current-room and last-event fields must not be confused. Sampler limits: [PLANT.md](PLANT.md).
+## Circulation witness input
 
 The circulation observer reads actual active power in W and source time, not relay-command state.
 Its configurable on/off thresholds, max age and confirmation period produce bounded pump evidence.
@@ -326,9 +240,9 @@ latest reset remain unknown. Preserve private memory evidence before dismissal; 
 | X10A bracket-subscript discovery templates | Current `.get(..., 'None')` templates make omitted keys/groups unknown. Expect gaps in numeric statistics and `numeric_state` conditions while inputs are unknown. Older numeric/binary templates could keep the last state; text could become empty or a missing group could log a template error. |
 | `<base>/state` | Use `<base>/x10a`; grouped keys unchanged. Union old/new topic labels for historical queries. |
 | `<base>/modbus/status` | Use heartbeat HomeHub link fields. |
-| `<base>/weather_forecast` and four weather discovery configs | Use `<base>/weather/openmeteo/forecast`; no weather HA entities. |
+| `<base>/weather/openmeteo/forecast`, `<base>/weather_forecast` and four weather discovery configs | Retired. The MQTT owner schedules retraction of the former forecast topic on boot and probes the historical alias for a retained payload. Discovery cleanup requires the ownership evidence below. |
 | 27 historical HomeHub discovery configs under `<node>_modbus` | Retired; data topic `<base>/modbus` remains. Delete-only passes run on connect and every five minutes outside the X10A gate. |
-| Flat `room_*` / `heating_curve_*` heartbeat fields | Move consumers to the grouped `heating_curve` paths above; heartbeat is non-retained, so no tombstone applies. |
+| `<base>/heating_curve` and former flat room/diagnosis heartbeat fields | Retired. Remove subscriptions and dependent metrics rules. These messages were non-retained. |
 | Single-marker X10A availability | `<base>/status` now means transport availability. Current discovery requires transport **and** `<base>/x10a/status`. Confirm current configs have both before trusting X10A availability. If X10A is absent during the first upgrade, old configs cannot be automatically replaced: pause consumers and migrate confirmed old configs explicitly. Raw consumers must check both markers and actual source freshness. |
 | Custom-base unique IDs / lossy base slugs | Every custom base is encoded exactly; IDs separate node and entity with `__`. Export customizations, identify the exact former configs, remove only abandoned IDs and reconcile HA references/history. Default and bench entity IDs remain unchanged. |
 | Three-byte MAC aliases / MAC-era discovery | Complete-MAC hardware IDs replace ambiguous aliases without advertising the old alias. Owner reconciliation is required for old discovery or already merged registry devices; do not delete a short-MAC namespace that another board may own. |

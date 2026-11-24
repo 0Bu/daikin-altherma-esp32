@@ -48,9 +48,6 @@ try {
   };
   const firmwarePage = literalSplice(literalSplice(html, "/*@@INLINE:style.css@@*/\n", css),
     "//@@INLINE:app.js@@\n", app);
-  const dollarSequence = "}$${";
-  assert.ok(app.includes(dollarSequence),
-    "premise: settings.js formatRefSource keeps the literal dollar separator this check guards");
   const gatePath = path.join(work, "render-gate.html");
   const gateRun = childProcess.spawnSync(process.execPath, ["tools/browser/assemble_page.mjs", gatePath],
     { cwd: root, encoding: "utf8" });
@@ -58,8 +55,6 @@ try {
   const gatePage = fs.readFileSync(gatePath, "utf8");
   assert.ok(assembled === firmwarePage,
     `the shared assembler must match the literal firmware splice; ${firstDifference(assembled, firmwarePage)}`);
-  assert.equal(assembled.split(dollarSequence).length, app.split(dollarSequence).length,
-    `the assembler must keep every ${dollarSequence} from settings.js`);
   const replacementPatterns = "a $$ b $& c $` d $' e $<name> f $1";
   assert.equal(spliceInlineAssets(
     "<style>\n/*@@INLINE:style.css@@*/\n</style><script>\n//@@INLINE:app.js@@\n</script>",
@@ -429,28 +424,17 @@ try {
   assert.match(adversarialMin, /return\n99/,
     "an automatic-semicolon-insertion return newline must remain significant");
 
-  // Execute the actual decoded dashboard script and its unminified source. These formatters carry
-  // nested template substitutions used by configuration payloads and visible readouts.
+  // Execute the actual decoded dashboard script and its unminified source.
   const productionContext = (source) => {
     assert.match(source, /boot\(\);?\s*$/, "the test must intercept only the final boot call");
     const context = vm.createContext({ navigator: { language: "en" },
       localStorage: { getItem: () => null, setItem() {} },
       document: { getElementById: () => null } });
-    vm.runInContext(source.replace(/boot\(\);?\s*$/, "") +
-      "\nthis.__format = { formatRefSource, parseRefSource, I18N };", context);
+    vm.runInContext(source.replace(/boot\(\);?\s*$/, ""), context);
     return context;
   };
   const originalProduction = productionContext(app);
   const shippedProduction = productionContext(script);
-  for (const [topic, field] of [["room/state", "temperature"], ["room$state", "t$C"],
-    [" room\\state ", " .raw$key\\ "], ["$SYS/room", ""], ["", ""]]) {
-    const before = originalProduction.__format.formatRefSource(topic, field);
-    const after = shippedProduction.__format.formatRefSource(topic, field);
-    assert.equal(after, before, "actual compressed dashboard must retain MQTT mapping bytes");
-    assert.equal(JSON.stringify(shippedProduction.__format.parseRefSource(after)),
-      JSON.stringify(originalProduction.__format.parseRefSource(before)));
-  }
-
   // Compare every locale's values/functions, including English from the real dashboard payload.
   // Exercise the locale minifier's compiler-free zlib path here. test_ui_locale_catalogs.mjs
   // checks the shipping encoder's 32 KiB per-source cap and the linked bundle's flash budget.

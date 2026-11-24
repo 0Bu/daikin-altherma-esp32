@@ -11,9 +11,7 @@
 #include "led_pattern.hpp"  // LedType — the indicator back-end, now a runtime choice not a Kconfig one
 #include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
 #include "modbus.hpp"       // MODBUS_TCP_PORT / MODBUS_DEFAULT_UNIT — the mb_* field defaults
-#include "heating_curve_diagnosis.hpp"
 #include "circulation_source.hpp"
-#include "reference_temperature.hpp"
 #include "ui_lang.hpp"      // UiLang — the web UI's manual language override (else browser-detected)
 
 namespace daik {
@@ -121,25 +119,6 @@ struct Config {
     // fact: two boards sharing it share their retained topics, their metrics series and their Home
     // Assistant device — silently, since every individual value stays plausible (legacy-215).
     std::string mqtt_base;
-    // One logical living-room sample assembled from exact MQTT value mappings. Temperature, target
-    // and source time may live on different topics; a target may instead be a fixed value in 0.1 C.
-    // An empty temperature topic disables capture. Optional legacy eligibility paths remain bound
-    // to the temperature topic.
-    // Without a timestamp path only a live non-retained MQTT arrival may be fresh; retained values
-    // require source time so a reconnect cannot reset their age (logic/reference_temperature.hpp).
-    std::string ref_temp_name;
-    std::string ref_temp_topic;
-    std::string ref_temp_path;
-    std::string ref_temp_setpoint_topic;
-    std::string ref_temp_setpoint_path;
-    uint16_t    ref_temp_fixed_setpoint_tenths = 0; // 0 = MQTT mapping / absent legacy mapping
-    std::string ref_temp_time_topic;
-    std::string ref_temp_time_path;
-    std::string ref_temp_enabled_path;
-    std::string ref_temp_hvac_mode_path;
-    uint32_t    ref_temp_max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
-    // Durable actual-temperature source lifetime; prevents A -> B -> A from restoring old A data.
-    uint32_t ref_temp_generation = 0;
     // Independent, read-only electrical witness for the potable-water circulation pump.  The
     // board subscribes to the exact MQTT status topic already consumed by observability; it never
     // queries VictoriaMetrics and never controls the relay.  Empty topic disables attribution while
@@ -152,17 +131,12 @@ struct Config {
     uint16_t    circulation_on_tenths_w = CIRC_SOURCE_ON_TENTHS_W_DEFAULT;
     uint16_t    circulation_off_tenths_w = CIRC_SOURCE_OFF_TENTHS_W_DEFAULT;
     uint16_t    circulation_confirm_s = CIRC_SOURCE_CONFIRM_DEFAULT_S;
-    // Open-Meteo location in signed microdegrees. The explicit bit keeps (0°, 0°) representable;
-    // disabled coordinates are canonicalized to zero and produce no weather traffic.
-    bool        weather_enabled = false;
-    bool        diagnostics_enabled = false; // master consent, described below; shares flag padding
-    int32_t     weather_latitude_e6 = 0;
-    int32_t     weather_longitude_e6 = 0;
     // One explicit, device-wide consent boundary for optional plant diagnostics. OFF is both the
-    // first-boot and every pre-v19 migration default: ordinary X10A/HomeHub values keep running, but
-    // the 24 h checkup, heating-curve evaluation and their MQTT/weather/circulation inputs do not
-    // subscribe, fetch, record or publish. Each transition advances the generation so evidence from
-    // an earlier consent interval cannot be restored from RAM/flash into a newly enabled one.
+    // first-boot and every pre-v19 migration default: ordinary X10A/HomeHub values keep running,
+    // but the 24 h checkup and its MQTT circulation input do not subscribe, record or publish.
+    // A runtime consent epoch rejects in-flight samples across transitions. Pause and resume keep
+    // the persisted generation, so eligible history can be restored after re-enabling.
+    bool              diagnostics_enabled    = false;
     uint32_t    diagnostics_generation = 0;
     DiagnosticsSource diagnostics_source     = DiagnosticsSource::X10a;
     std::string syslog_host;       // "" = Syslog disabled
@@ -283,22 +257,6 @@ struct Config {
     std::string fp_eeprom;          // rendered O/U EEPROM digits (display only)
     bool        fp_valid     = false;
 };
-
-// WHETHER THE HEATING-CURVE DIAGNOSIS RUNS. The master diagnostics consent is required first; the
-// canonical MQTT room source is its required configured data source. Forecast is an OPTIONAL
-// comparison covariate and must not block raw room-error samples or force a user to disclose a
-// location to Open-Meteo. Deleting the room source or switching diagnostics off disarms the sampler
-// immediately. This remains a read-only diagnosis, never a heat-pump operating mode.
-//
-// HomeHub supplies two required plant gates. An explicit HomeHub opt-out must therefore disarm this
-// dependent diagnosis rather than keep evaluating a permanently impossible prerequisite.
-inline bool heating_curve_diagnosis_armed(const Config& c) {
-    return c.diagnostics_enabled && !c.mb_host.empty() && !c.mqtt_uri.empty() &&
-           !c.ref_temp_topic.empty() &&
-           !c.ref_temp_path.empty() &&
-           (c.ref_temp_fixed_setpoint_tenths != 0 ||
-            !c.ref_temp_setpoint_path.empty());
-}
 
 // Zero is the migration/default-off generation. Once the owner makes an explicit choice, use a
 // non-zero value and never wrap back to zero; this keeps old anonymous diagnostic journal entries
@@ -680,7 +638,7 @@ inline BoardHardwareStatement config_board_hardware(const Config& c) {
 }
 
 // Carry a statement onto `fresh`, the config of a factory-fresh device, and NOTHING else: WiFi and
-// MQTT credentials, syslog, NTP, HomeHub (and its pending one-shot search), ENV III, weather,
+// MQTT credentials, syslog, NTP, HomeHub (and its pending one-shot search), ENV III,
 // diagnostics consent, the UI language and the OTA channel all stay at the fresh device's values.
 // Only a STATED board is carried. Without board_user_set the live values are merely the build's
 // defaults (or a load-path repair of them), which the fresh device already holds — and carrying a

@@ -1285,20 +1285,6 @@ for (const lang of locales) {
                       /^(?:maximal|enintään|högst|maksimalt|maksymalnie)(?=\s)/u,
                       `${lang} check.loss_max must name the observed peak, not an upper bound`);
 }
-// The heating-curve room source does not need its own timestamp; the inactive state does not
-// know why the sampler is stopped; a non-heating HomeHub mode is not necessarily cooling.
-for (const [lang, stamped, cause, notHeating, label, coolingLabel] of [
-  ["en", /timestamped/i, /safe mode|crash/i, /\bnot heating\b/, /^Not heating ·/, /^Cooling ·/],
-  ["de", /zeitgestempelt/i, /Sicherheitsmodus|abgesichert|Absturz/i, /\bkein Heiz/, /^Kein Heizbetrieb ·/,
-    /^Kühlbetrieb ·/],
-]) {
-  assert.doesNotMatch(ui.text(lang, "dyn.state_help_setup"), stamped, `${lang} setup help`);
-  assert.doesNotMatch(ui.text(lang, "dyn.state_help_inactive"), cause, `${lang} inactive help`);
-  assert.match(ui.text(lang, "dyn.state_cooling"), label, `${lang} non-heating state label`);
-  assert.doesNotMatch(ui.text(lang, "dyn.state_cooling"), coolingLabel, `${lang} non-heating state label`);
-  assert.match(ui.text(lang, "dyn.state_help_cooling"), notHeating, `${lang} non-heating state help`);
-}
-ui.setLang("de");
 
 const descriptionContext = {};
 vm.runInNewContext(`${i18nSource}${explanationSource}; this.model = MODEL_DESCRIPTIONS;

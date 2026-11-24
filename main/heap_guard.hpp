@@ -44,7 +44,7 @@ bool heap_guard_take_restart_marker();
 //
 // NOT COVERED IN SAFE MODE, deliberately and worth stating rather than discovering: the poll task
 // is one of the things safe mode does not start. Safe mode also shuts down the five largest
-// allocators on the board at once — the poll engine, the MQTT bridge, the weather client, the
+// allocators on the board at once — the poll engine, the MQTT bridge, the
 // HomeHub link and ENV III — so the sustained exhaustion this exists for is far less reachable
 // there, and a board in safe mode is already sitting in the reachable, minimal state a restart
 // would be trying to produce.

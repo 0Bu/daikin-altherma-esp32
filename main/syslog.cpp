@@ -11,7 +11,6 @@
 #include "nvs_storage.hpp" // nvs_storage_available — the boot record's nvs=
 #include "safe_mode.hpp"
 #include "sntp_time.hpp"
-#include "weather_forecast.hpp"
 #include "logic/bootlog.hpp"
 #include "logic/syslog_policy.hpp"
 #include "logic/timestamp.hpp"
@@ -382,12 +381,12 @@ void syslog_init() {
                     // Config copy, DNS/ping work or a fresh UDP socket beside the TLS handshake.
                     // The fixed queue is intentionally allowed to buffer/drop best-effort syslog
                     // while /diag and serial retain the authoritative local evidence.
-                    if (ota_download_active() || weather_fetch_active()) {
+                    if (ota_download_active()) {
                         vTaskDelay(pdMS_TO_TICKS(250));
                         continue;
                     }
                     SyslogNetworkActivity network_activity;
-                    if (ota_download_active() || weather_fetch_active()) {
+                    if (ota_download_active()) {
                         vTaskDelay(pdMS_TO_TICKS(250));
                         continue;
                     }
