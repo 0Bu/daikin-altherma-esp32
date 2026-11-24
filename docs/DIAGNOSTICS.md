@@ -12,13 +12,12 @@ source is available, only that option and **Off** are shown). Switching between 
 room, forecast and circulation collection, and hides the Diagnostics name and card (Model becomes
 the default card when available). Re-enabling resumes into the preserved 24 h window without
 bridging the paused interval or carrying an unfinished run/candidate across pausing.
-In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, `flow` on `Altherma4`,
-`Probing`, or `Fallback` sweeps, and passive **Refrigerant (heating)**) are unavailable and omitted
-from the card.
+In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, and passive
+**Refrigerant (heating)**) are unavailable and omitted from the card.
 
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
-Open a row to see what was measured and what the result means. The observation window describes
-the readings and can include gaps.
+Open a row to see what was measured and what the result means. The lowest water flow appears
+in the schematic's **Flow rate** inspector. Observation windows can include gaps.
 The summary shows the highest finding severity and the number of affected rows. Without a finding,
 it distinguishes ongoing collection, measurements and completed assessments. It is not a score for
 the installation's health.
@@ -224,24 +223,24 @@ within the 24-hour window.
 <!-- user-docs: health_flow -->
 ### Lowest water flow
 
-**In plain language:** The board reports the lowest accepted flow after the internal pump has run
-continuously for at least sixty seconds. Separately, readings taken after ten minutes of eligible
-heating summarize water-temperature spread, flow and commanded pump effort.
+**In plain language:** Open **Flow rate** in the schematic for its current reading and 24-hour
+trend. When Plant diagnostics is on, the measurement below the trend shows how low flow went after
+the internal pump had run continuously for at least one minute. The chart marks this value with a
+red horizontal line when it displays readings from the matching source.
 
-**Meaning:** **MEASURED**. The two observations have separate coverage: minimum flow filters
-pump-off and initial run-up values without retaining the operating mode, while the heating
-statistics show when their readings were collected and how many qualified, remain visible during a
-link interruption, and keep water ranges available when optional pump command is missing. With fresh
-readings from a supported mixed heating circuit, the same row can show the average difference
-between the heat-pump supply and the mixed supply, how long they were compared and how many
-readings qualified. A negative difference means the measured mixed supply was warmer. The current
-shipped X10A profiles leave this comparison empty because each lacks at least one required reading.
-When operating solely over Modbus, `flow` stays unavailable on `Altherma4`, `Probing`, or `Fallback`
-sweeps until `/100` HomeHub Input 49 scaling is affirmatively confirmed, and X10A hydronic
-spread/flow/command ranges and secondary comparison remain unpopulated.
+**Meaning:** The minimum is an observation. **Measurement details** shows separate X10A heating
+statistics for temperature difference, flow, pump command and coverage after ten minutes of eligible
+heating. The statistics can remain visible during a link interruption, and water ranges can be
+available when the pump command is missing. With fresh readings from a supported mixed heating
+circuit, the details can show the average difference between the heat-pump supply and the mixed
+supply, how long they were compared and how many readings qualified. A negative difference means
+the measured mixed supply was warmer. The current shipped X10A profiles leave this comparison empty
+because each lacks at least one required reading.
+Modbus offers the lowest measurement only for verified HomeHub flow scaling. Heating statistics and
+the mixed-supply comparison require X10A.
 
-**Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
-The minimum does not identify the operating mode or tell you the design flow. The spread concerns
+**Important limit:** The minimum is recorded without its time or operating mode. The model and
+operating mode determine how much flow is required. The temperature difference concerns
 the heat exchanger's water circuit, the pump percentage reports the controller command, and these
 readings do not measure room emitters, pump speed, or available head. The ten-minute filter does
 not establish steady operation or diagnose a bypass or restriction, and the controller's target

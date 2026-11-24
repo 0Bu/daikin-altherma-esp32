@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -170,6 +170,11 @@ I18N.nb = localeValues([
   /* check.defrost */ "Avriminger",
   /* check.pressure */ "Vanntrykk",
   /* check.flow */ "Laveste vannmengde",
+  /* check.flow.lowest */ "Laveste målte vannmengde",
+  /* check.flow.runup */ "Etter minst 1 min sammenhengende pumpedrift",
+  /* check.flow.assessment */ "Om vannmengden er tilstrekkelig, avhenger av modellen og driftsmodusen.",
+  /* check.flow.measurements */ "Måledetaljer",
+  /* check.flow.live */ "Nå",
   /* check.heater */ "Elkolber",
   /* check.retries */ "Beskyttelsestellere",
   /* check.status.ok */ "OK",

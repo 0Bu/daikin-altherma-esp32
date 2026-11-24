@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -170,6 +170,11 @@ I18N.cs = localeValues([
   /* check.defrost */ "Cykly odmrazování",
   /* check.pressure */ "Tlak vody",
   /* check.flow */ "Min. průtok",
+  /* check.flow.lowest */ "Nejnižší naměřený průtok",
+  /* check.flow.runup */ "Po nejméně 1 min nepřetržitého chodu čerpadla",
+  /* check.flow.assessment */ "Zda průtok stačí, závisí na modelu a provozním režimu.",
+  /* check.flow.measurements */ "Podrobnosti měření",
+  /* check.flow.live */ "Nyní",
   /* check.heater */ "Topná tělesa",
   /* check.retries */ "Ochranné čítače",
   /* check.status.ok */ "V POŘÁDKU",

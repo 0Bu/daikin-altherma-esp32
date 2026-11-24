@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -170,6 +170,11 @@ I18N.ja = localeValues([
   /* check.defrost */ "霜取り回数",
   /* check.pressure */ "水圧",
   /* check.flow */ "最低流量",
+  /* check.flow.lowest */ "最低実測流量",
+  /* check.flow.runup */ "ポンプが1分以上連続運転した後",
+  /* check.flow.assessment */ "必要な流量は機種と運転モードによって異なります。",
+  /* check.flow.measurements */ "測定の詳細",
+  /* check.flow.live */ "現在",
   /* check.heater */ "電気ヒーター",
   /* check.retries */ "保護カウンタ",
   /* check.status.ok */ "OK",

@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -170,6 +170,11 @@ I18N.it = localeValues([
   /* check.defrost */ "Sbrinamenti",
   /* check.pressure */ "Pressione acqua",
   /* check.flow */ "Portata min.",
+  /* check.flow.lowest */ "Portata minima misurata",
+  /* check.flow.runup */ "Dopo almeno 1 min di funzionamento continuo della pompa",
+  /* check.flow.assessment */ "La portata necessaria dipende dal modello e dalla modalità di funzionamento.",
+  /* check.flow.measurements */ "Dettagli delle misure",
+  /* check.flow.live */ "Ora",
   /* check.heater */ "Resistenze",
   /* check.retries */ "Contatori protezione",
   /* check.status.ok */ "OK",

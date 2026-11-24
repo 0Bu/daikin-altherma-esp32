@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -170,6 +170,11 @@ I18N.sv = localeValues([
   /* check.defrost */ "Avfrostningar",
   /* check.pressure */ "Vattentryck",
   /* check.flow */ "Lägsta vattenflöde",
+  /* check.flow.lowest */ "Lägsta uppmätta flöde",
+  /* check.flow.runup */ "Efter minst 1 min sammanhängande pumpdrift",
+  /* check.flow.assessment */ "Om flödet räcker beror på modell och driftläge.",
+  /* check.flow.measurements */ "Mätdetaljer",
+  /* check.flow.live */ "Nu",
   /* check.heater */ "Elpatroner",
   /* check.retries */ "Skyddsräknare",
   /* check.status.ok */ "OK",
