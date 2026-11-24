@@ -387,7 +387,7 @@ for production in (False, True):
             result["wifi"] = {"mac": "02:00:00:00:00:01", "connected": True, "rolled_back": False}
             result["sys"]["safe_mode"] = False
             result["hp"].update(connected=True, values=129)
-            result["weather_forecast"] = {"fetching": False}
+            result["weather_forecast"]["fetching"] = False
             result["sys"].update(free_heap=ns["MIN_FINAL_FREE_HEAP"],
                                  max_alloc=ns["MIN_FINAL_LARGEST_BLOCK"])
             first = requests[0] == 1
@@ -1426,14 +1426,15 @@ for feed in (dev, root):
       "crc_err", "timeout regression", "timeout excess", "timeout boundary", "mac", "version", "elf", "channel",
       "mqtt", "x10a", "values", "free_heap", "largest_block", "ack lost", "tag timeout")] + [
       (False, None), (False, "missing weather"), (False, "non-boolean weather"),
-      (False, "weather changed during readiness"), (False, "weather changed before write"),
-      (False, "weather changed after boot"), (False, "weather changed at final status")]:
+      (False, "weather changed during readiness"), (False, "transient weather drift during readiness"),
+      (False, "weather changed before write"), (False, "weather changed after boot"),
+      (False, "transient weather drift during probation"), (False, "weather changed at final status")]:
     target = "2.0.0-dev.5" if feed == dev else "2.0.0"
     documents = {feed: json.dumps(manifest(target, app), separators=(",", ":")).encode()}
     other_feed = root if feed == dev else dev
     other_version = "2.0.0" if feed == dev else "2.0.0-dev.5"
     documents[other_feed] = json.dumps(manifest(other_version, other_app), separators=(",", ":")).encode()
-    events, writes, sequence, reads = [], [], [], []
+    events, writes, sequence, reads, readiness_samples = [], [], [], [], []
     virtual = [0.0]
     def board(version=target, image=elf, uptime=13, mac=prod_mac):
         return {"version": version, "app_elf_sha256": image, "uptime_s": uptime,
@@ -1468,11 +1469,21 @@ for feed in (dev, root):
             if defect == "non-boolean weather": status["weather_forecast"]["configured"] = 0
             if defect == "weather changed before write" and "offer read" in events:
                 status["weather_forecast"]["configured"] = True
+            if defect == "transient weather drift during readiness" and "offer read" not in events:
+                drifted = len(readiness_samples) == 1
+                readiness_samples.append(not weather_enabled if drifted else weather_enabled)
+                status["weather_forecast"]["configured"] = readiness_samples[-1]
+                # This mixed sample cannot count toward a stable pair. Later samples restore the
+                # original configuration, so checking only the returned ready sample misses it.
+                if drifted: status["mqtt"]["connected"] = False
             return status
         if "stress passed" not in events: return board()
         after_image = bool(sequence) and sequence[-1] == "image"
+        transient_probation_drift = (defect == "transient weather drift during probation" and
+                                     sequence == ["status", "image"])
         sequence.append("status")
         status = board(uptime=206 if after_image else 194)
+        if transient_probation_drift: status["weather_forecast"]["configured"] = True
         if after_image:
             if defect == "weather changed at final status": status["weather_forecast"]["configured"] = True
             if defect == "reboot": status["uptime_s"] = 3
@@ -1500,7 +1511,7 @@ for feed in (dev, root):
     def promotion_readiness(endpoint, before, **kwargs):
         if defect == "weather changed during readiness":
             return {**before, "weather_forecast": {**before["weather_forecast"], "configured": True}}
-        return before
+        return g["wait_for_production_promotion_readiness"](endpoint, before, **kwargs)
     def json_request(endpoint, route, *, method="GET", **kwargs):
         check(endpoint == "production.invalid", "probation contacted another endpoint")
         if route.startswith("/ota/update?"):
@@ -1515,7 +1526,8 @@ for feed in (dev, root):
         check(route == "/ota/status" and method == "GET", "probation used a mutating/noncompact route")
         sequence.append("image")
         image = {"image_state": "valid", "rollback_pending": False}
-        if defect == "pending forever" or (defect == "pending then valid" and sequence.count("image") == 1):
+        pending_then_valid = defect in ("pending then valid", "transient weather drift during probation")
+        if defect == "pending forever" or (pending_then_valid and sequence.count("image") == 1):
             image = {"image_state": "pending_verify", "rollback_pending": True}
         if defect == "unknown": image["image_state"] = "unknown"
         if defect == "missing image": image.pop("image_state")
@@ -1572,7 +1584,8 @@ for feed in (dev, root):
             accepted = defect in (None, "pending then valid", "timeout boundary")
             check(result == (0 if accepted else 2), "unsafe/rejected production probation: " + str(defect))
             blocked_before_write = defect in ("tag timeout", "missing weather", "non-boolean weather",
-                "weather changed during readiness", "weather changed before write")
+                "weather changed during readiness", "transient weather drift during readiness",
+                "weather changed before write")
             check(len(writes) == (0 if blocked_before_write else 1), "production POST count disagreed with the result")
             if accepted:
                 probation = document["production"]["probation_after"]
@@ -1585,6 +1598,13 @@ for feed in (dev, root):
                 check("retained" not in events, "failed probation continued to retained acceptance")
                 if defect == "weather changed after boot":
                     check("stress passed" not in events, "post-boot Weather mismatch reached the canary")
+                if defect == "transient weather drift during readiness":
+                    check(readiness_samples == [False, True] and "offer read" not in events,
+                          "transient readiness Weather drift was not rejected at its first sample")
+                if defect in ("transient weather drift during probation", "weather changed at final status"):
+                    check(sequence == ["status", "image", "status"] and
+                          "production_probation_confirmed" not in ns["ACTIVE_JOURNAL"].phases,
+                          "probation Weather drift was not rejected before acceptance")
                 if defect in ("tag timeout", "ack lost"):
                     check(not sequence, "source/ambiguous write failure continued probation queries")
                 if defect == "tag timeout": check(not reads, "source timeout contacted production")

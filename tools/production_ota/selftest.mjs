@@ -212,8 +212,19 @@ const supplementalContract = () => {
   assert.match(offer, /status\.get\("available_channel"\)\s*!=\s*expected_channel/);
   assert.match(offer, /generation\s*!=\s*expected_generation/);
   const stress = section(gate, "def stress_board(", "\ndef verify_retained_x10a(");
-  assert.match(stress, /if pin_weather_config:\s*\n\s+production_weather_configured\(started, require_weather\)/);
-  assert.match(stress, /if pin_weather_config:\s*\n\s+production_weather_configured\(status, require_weather\)/);
+  const pressureIdentity = section(stress, "    def validate_pressure_identity(", "\n    pinned_endpoint = ");
+  assert.match(pressureIdentity, /if pin_weather_config:\s*\n\s+production_weather_configured\(status, require_weather\)/);
+  const statusReads = Array.from(stress.matchAll(/^\s*(\w+) = request_status_deadline\(/gm), match => match[1]);
+  for (const sample of new Set(statusReads)) {
+    const validations = stress.match(new RegExp(`validate_pressure_identity\\(${sample}\\)`, "g")) || [];
+    assert.equal(validations.length, statusReads.filter(name => name === sample).length,
+      `every pressure status read into ${sample} must retain the Weather pin`);
+  }
+  const mqttRecovery = section(gate, "def wait_for_post_stress_mqtt_recovery(", "\ndef stress_board(");
+  assert.match(mqttRecovery,
+    /if expected_weather_configured is not None:\s*\n\s+production_weather_configured\(recovered, expected_weather_configured\)/);
+  assert.match(stress,
+    /wait_for_post_stress_mqtt_recovery\([\s\S]{0,260}?expected_weather_configured=require_weather if pin_weather_config else None/);
   assert.match(stress, /request_json_deadline\([\s\S]{0,260}?"\/ota\/check\?ms=[\s\S]{0,220}?extra_headers=hil_headers/);
   assert.match(stress, /require_stress_ota_offer\([\s\S]{0,260}?manifest_url=hil_manifest_url[\s\S]{0,120}?firmware_base_url=hil_firmware_base_url/);
   const feedLease = section(gate, "def validate_feed_lease(", "\n@contextmanager\ndef leased_release_hil_feed(");
@@ -306,6 +317,8 @@ const supplementalContract = () => {
   assert.match(productionStress, /\bpin_weather_config=True,/);
   assert.match(productionStress, /\bexpected_app_sha256=args\.expected_app_sha256,/);
   assert.match(productionStress, /\*\*official_feed_override\(args\.manifest_url\)/);
+  assert.match(production,
+    /production_weather_configured\(final_status, weather_configured\)[\s\S]{0,120}?verify_retained_x10a\(final_status\)/);
 };
 
 const runCentral = () => spawnSync(process.execPath, [centralContract], {
@@ -1084,11 +1097,23 @@ try {
       replaceOnce("scripts/production-ota-gate.py", "pin_weather_config=True,",
         "pin_weather_config=False,"), "production-probation"],
     ["production stress readiness no longer checks the pinned Weather configuration", () =>
-      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(started, require_weather)",
-        "production_weather_configured(started)")],
+      replaceNth("scripts/production-ota-gate.py", "validate_pressure_identity(started)",
+        "validate_identity(started, host=host, mac=mac, version=version, elf=elf)", 2)],
     ["production stress samples no longer check the pinned Weather configuration", () =>
-      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(status, require_weather)",
-        "production_weather_configured(status)")],
+      replaceOnce("scripts/production-ota-gate.py", "validate_pressure_identity(status)",
+        "validate_identity(status, host=host, mac=mac, version=version, elf=elf)")],
+    ["production final pressure status no longer checks the pinned Weather configuration", () =>
+      replaceOnce("scripts/production-ota-gate.py", "validate_pressure_identity(finished)",
+        "validate_identity(finished, host=host, mac=mac, version=version, elf=elf)")],
+    ["production MQTT recovery no longer checks the pinned Weather configuration", () =>
+      replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(recovered, expected_weather_configured)",
+        "production_weather_configured(recovered)")],
+    ["production readiness samples ignore transient Weather configuration drift", () =>
+      replaceNth("scripts/production-ota-gate.py", "production_weather_configured(status, expected_weather_configured)",
+        "production_weather_configured(status)", 1), "production-probation"],
+    ["production probation samples ignore transient Weather configuration drift", () =>
+      replaceOnce("scripts/production-ota-gate.py", "expected_weather_configured=weather_configured,",
+        "expected_weather_configured=None,"), "production-probation"],
     ["production ignores a Weather configuration change during readiness", () =>
       replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(production_before, weather_configured)",
         "production_weather_configured(production_before)"), "production-probation"],
@@ -1100,7 +1125,7 @@ try {
         "production_weather_configured(returned)"), "production-probation"],
     ["production ignores a Weather configuration change at the final status", () =>
       replaceOnce("scripts/production-ota-gate.py", "production_weather_configured(final_status, weather_configured)",
-        "production_weather_configured(final_status)"), "production-probation"],
+        "production_weather_configured(final_status)")],
     ["raw OTA writes are no longer routed through the gate", () =>
       replaceOnce("tools/agent-hooks/agent_hook.py", "direct OTA writes are forbidden; run scripts/production-ota-gate.py", "direct OTA writes are allowed")],
     ["a failed health cap no longer forces rollback", () =>
