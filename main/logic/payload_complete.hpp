@@ -110,7 +110,7 @@ inline bool json_payload_strings_ok(std::string_view payload) noexcept {
 }
 
 // Bound recursive cJSON parse/delete before any external document reaches them. Sixteen levels
-// leave room for the callers even on the 6 KiB MQTT stack; HTTP and Weather use the same limit.
+// leave room for the callers even on the 6 KiB MQTT stack; HTTP uses the same limit.
 inline constexpr size_t JSON_MAX_DEPTH      = 16;
 inline constexpr size_t MQTT_JSON_MAX_DEPTH = JSON_MAX_DEPTH;
 

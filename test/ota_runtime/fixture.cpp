@@ -374,7 +374,6 @@ bool          mqtt_transport_network_quiesced() { return sdk::state.stalled_serv
 bool          mb_network_quiesced() { return sdk::state.stalled_service != 4; }
 bool          hp_modbus_ota_quiesced() { return true; }
 bool          syslog_network_quiesced() { return sdk::state.stalled_service != 5; }
-bool          weather_fetch_active() { return sdk::state.stalled_service == 6; }
 void          mqtt_transport_withdraw_online_on_pause() { ++sdk::state.withdraw; }
 void          mqtt_transport_pause_for_network_heap() { ++sdk::state.pause; }
 void          mqtt_transport_resume_after_network_heap() { ++sdk::state.resume; }
@@ -614,7 +613,7 @@ void worker(sdk::Fault fault, int stalled_service = 0, bool malformed_manifest =
         REQUIRE(s_status.state == "error");
         if (stalled_service) {
             REQUIRE(s.client_acquired == 0 && s.ota_begun == 0);
-            const TickType_t wait = stalled_service == 6 ? 20000 : 15000;
+            const TickType_t wait = 15000;
             REQUIRE(s.ticks == 1000 + 1100 + wait);
         }
         if (malformed_manifest) REQUIRE(s.firmware_acquired == 0 && s.ota_begun == 0);
@@ -1186,7 +1185,7 @@ int main(int argc, char** argv) {
         std::cout << "PASS image_binding\n";
         ++count;
     }
-    for (int stalled = 1; stalled <= 6; ++stalled) {
+    for (int stalled = 1; stalled <= 5; ++stalled) {
         const std::string name = "quiesce_" + std::to_string(stalled);
         if (argc > 1 && name != argv[1]) continue;
         try {

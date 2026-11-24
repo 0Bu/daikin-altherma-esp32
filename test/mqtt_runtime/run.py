@@ -75,54 +75,40 @@ scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guar
              'discovery_guard_modbus', 'discovery_guard_invalid', 'discovery_guard_oversize',
              'discovery_guard_gap', 'discovery_guard_suback', 'discovery_guard_reconnect',
              'discovery_guard_denied', 'discovery_guard_denied_qos', 'discovery_guard_denied_missing',
-             'discovery_guard_denied_shape', 'discovery_guard_inflight', 'discovery_guard_migration_rearm',
-             'discovery_guard_session_binding',
+             'discovery_guard_denied_shape', 'discovery_guard_inflight',
+             'discovery_guard_migration_rearm', 'discovery_guard_session_binding',
              'discovery_guard_descendant', 'discovery_guard_availability_descendant',
              'discovery_guard_raw_crash_cleanup', 'discovery_guard_raw_crash_notable',
              'discovery_guard_ingress_burst', 'discovery_guard_ingress_exact',
-             'discovery_guard_ingress_epoch',
-             'discovery_guard_retry_deleted', 'discovery_guard_retry_stop',
-             'discovery_guard_retry_protected',
-             'discovery_guard_retry_legacy_fixed',
-             'discovery_guard_count', 'transport_source_lifecycle', 'independent_source_reconnect',
+             'discovery_guard_ingress_epoch', 'discovery_guard_retry_deleted',
+             'discovery_guard_retry_stop', 'discovery_guard_retry_protected',
+             'discovery_guard_retry_legacy_fixed', 'discovery_guard_count',
+             'transport_source_lifecycle', 'independent_source_reconnect',
              'journal_reboot_mid_retirement', 'journal_reboot_after_save',
-             'journal_commit_write_through_failure', 'journal_load_errors',
-             'journal_foreign_scope', 'journal_foreign_board_scope', 'journal_bootstrap_auto',
-             'journal_load_oom_recovery', 'journal_failure_live_metrics',
-             'journal_prior_quarantined_row',
+             'journal_commit_write_through_failure', 'journal_load_errors', 'journal_foreign_scope',
+             'journal_foreign_board_scope', 'journal_bootstrap_auto', 'journal_load_oom_recovery',
+             'journal_failure_live_metrics', 'journal_prior_quarantined_row',
              'independent_source_cutover', 'availability_retry_oom', 'full_mac_identity',
-             'full_mac_read_failure',
-             'legacy_retirement_delivery', 'retirement_oom_recovery', 'retained_probe_delivery',
-             'stale_value_retirement', 'profile_scoped_label_retirement',
+             'full_mac_read_failure', 'legacy_retirement_delivery', 'retirement_oom_recovery',
+             'retained_probe_delivery', 'stale_value_retirement', 'profile_scoped_label_retirement',
              'profile_cutover_delivery', 'periodic_discovery_delivery',
              'periodic_discovery_task_timer', 'profile_return_during_retirement',
              'profile_retirement_scan_bounds', 'retirement_early_ack',
-             'retirement_after_gate_withdrawal',
-             'startup_failure_recovery', 'startup_preserves_concurrent_pause',
-             'event_registration_failure',
-             'ref_oom_recovery', 'circulation_oom_recovery', 'reconfigure_config_oom',
-             'failure_episodes', 'real_json_consumers', 'circulation_probe_postsubscribe_oom',
+             'retirement_after_gate_withdrawal', 'startup_failure_recovery',
+             'startup_preserves_concurrent_pause', 'event_registration_failure',
+             'circulation_oom_recovery', 'reconfigure_config_oom', 'failure_episodes',
+             'real_json_consumers', 'circulation_probe_postsubscribe_oom',
              'circulation_saved_postsubscribe_oom', 'circulation_saved_epoch_change',
              'circulation_saved_retry', 'circulation_saved_replacement_failure',
-             'circulation_saved_reconnect_oom',
-             'reference_saved_postsubscribe_oom',
-             'reference_saved_final_owner_oom', 'reference_saved_partial_retry',
-             'reference_saved_prior_owner_cleanup', 'reference_saved_prior_owner_retry',
-             'reference_saved_reconnect_oom',
-             'reference_saved_replacement_partial_failure', 'circulation_unsubscribe_rejection',
-             'circulation_replace_unsubscribe_rejection', 'reference_unsubscribe_rejection',
-             'reference_replace_unsubscribe_rejection', 'probe_unsubscribe_rejection',
+             'circulation_saved_reconnect_oom', 'circulation_unsubscribe_rejection',
+             'circulation_replace_unsubscribe_rejection', 'probe_unsubscribe_rejection',
              'probe_disabled_unsubscribe_rejection', 'shared_subscription_owners',
              'probe_active_replacement', 'probe_active_replacement_retire_rejection',
              'probe_saved_config_without_owner', 'probe_active_shared_prior_owner',
-             'sdk_event_stack_owner', 'outgoing_heartbeat', 'outgoing_weather',
-             'outgoing_curve', 'curve_space_route_gate', 'curve_evaluation_age', 'curve_consent_boundary', 'curve_room_source_boundary',
-             'curve_boundary_during_evaluation', 'curve_homehub_boundary',
-             'curve_homehub_boundary_during_evaluation', 'curve_bins_scopes', 'scalar_snapshot_helpers',
-             'discovery_topic_roundtrip',
-             'callback_fragments', 'callback_payload_bounds', 'callback_epoch_cutover',
-             'callback_queue_full', 'callback_timestamp_order', 'probe_capture_generation',
-             'probe_proof_expiry', 'room_history_observation', 'room_history_scope']
+             'sdk_event_stack_owner', 'outgoing_heartbeat', 'scalar_snapshot_helpers',
+             'discovery_topic_roundtrip', 'callback_fragments', 'callback_payload_bounds',
+             'callback_epoch_cutover', 'callback_queue_full', 'callback_timestamp_order',
+             'probe_capture_generation', 'probe_proof_expiry']
 if args.scenario:
     assert set(args.scenario) <= set(scenarios), 'unknown requested scenario'
     scenarios = [scenario for scenario in scenarios if scenario in args.scenario]
@@ -136,14 +122,6 @@ for scenario in scenarios:
     print(result.stdout.strip())
 
 mutations = [
-    ('curve-dhw-route-veto-bypassed', 'curve_space_route_gate',
-     'in.plant_gate_active = plant_gate.active;',
-     'in.plant_gate_active = mbs.plant_gate_active;',
-     'CURVE_DHW_ROUTE_BLOCKS_SPACE_HEATING_SAMPLE', 1),
-    ('curve-unknown-route-borrowed-permission', 'curve_space_route_gate',
-     'in.plant_gate_known = plant_gate.known;',
-     'in.plant_gate_known = mbs.plant_gate_known;',
-     'CURVE_UNKNOWN_ROUTE_CANNOT_BORROW_RAW_SPACE_PERMISSION', 1),
     ('periodic-rejected-delete-advance', 'periodic_discovery_delivery',
      'if (!retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic)) return;',
      '(void)retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic);',
@@ -265,8 +243,8 @@ mutations = [
      '(mqtt_publish(s_x10a_avail, "online", 0, 1, 1), true))',
      'SOURCE_ONLINE_RETRIES_REFUSED_MARKER_WITHOUT_DUPLICATING_ACCEPTED_SEED', 1),
     ('x10a-refused-generation-advanced', 'availability_retry_oom',
-     'publish_x10a_state(ref_config, false))',
-     '(publish_x10a_state(ref_config, false), true))',
+     'publish_x10a_state(cycle_config, false))',
+     '(publish_x10a_state(cycle_config, false), true))',
      'REFUSED_CHANGED_X10A_STATE_PRESERVES_ACCEPTED_GENERATION', 1),
     ('withdrawal-allocating-hp-stats', 'availability_retry_oom',
      'const HpMqttSourceState hp = hp_mqtt_source_state();',
@@ -337,8 +315,8 @@ mutations = [
      'transport_resume.wait_s = transport_resume.backoff_s;',
      '', 'INITIAL_START_FAILURE_DELAYS_FIRST_RETRY', 1),
     ('startup-clobbers-pause-state', 'startup_preserves_concurrent_pause',
-     '    s_ref_ring_produced = 0;\n    s_ref_ring_pos      = 0;',
-     '    s_transport_pause_state.store(0, std::memory_order_release);\n    s_ref_ring_produced = 0;\n    s_ref_ring_pos      = 0;',
+     '    s_inbound_ring_produced = 0;\n    s_inbound_ring_pos      = 0;',
+     '    s_transport_pause_state.store(0, std::memory_order_release);\n    s_inbound_ring_produced = 0;\n    s_inbound_ring_pos      = 0;',
      'STARTUP_PRESERVES_CONCURRENT_PAUSE_LEASE', 1),
     ('startup-ignores-concurrent-tls-pause', 'startup_preserves_concurrent_pause',
      '''    if (mqtt_initial_start_deferred(transport_pause_requested(), competing_tls_active())) {
@@ -378,88 +356,6 @@ mutations = [
      'f.max_alloc = heap_largest_internal_block();',
      'f.max_alloc = esp_get_free_heap_size();',
      'HEARTBEAT_LARGEST_INTERNAL_BLOCK_ON_WIRE', 1),
-    ('weather-allocating-accepted-cache', 'outgoing_weather',
-     's_last_weather_digest.record(js);', '(void)std::string(64, \'x\'); s_last_weather_digest.record(js);',
-     'WEATHER_ACCEPTED_PAYLOAD_COMMITTED_TO_CACHE', 1),
-    ('weather-rejected-sdk-cache-advance', 'outgoing_weather',
-     '''    if (!s_last_weather_digest.matches(js) &&
-        mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1))''',
-     '''    if (!s_last_weather_digest.matches(js) &&
-        (mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1), true))''',
-     'WEATHER_REJECTED_SDK_PUBLISH_RETAINS_LAST_ACCEPTED_CACHE', 1),
-    ('weather-unchanged-payload-repeat', 'outgoing_weather',
-     '''    if (!s_last_weather_digest.matches(js) &&
-        mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1))''',
-     '''    if (mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1))''',
-     'WEATHER_UNCHANGED_ACCEPTED_PAYLOAD_SUPPRESSES_REPEAT', 1),
-    ('weather-unconfigured-runtime-publish', 'outgoing_weather',
-     'weather_mqtt_action(config_enabled, status.configured);',
-     'weather_mqtt_action(config_enabled, true);',
-     'WEATHER_ENABLE_TRANSITION_SUPPRESSES_UNCONFIGURED_RUNTIME', 1),
-    ('weather-disable-forgets-cleanup', 'outgoing_weather',
-     'if (action != WeatherMqttAction::Publish)',
-     'if (config_enabled && action != WeatherMqttAction::Publish)',
-     'WEATHER_DISABLE_REQUESTS_CLEANUP_WITHOUT_SYNTHETIC_FORECAST_OR_CACHE_RESET', 1),
-    ('curve-wrong-topic', 'outgoing_curve',
-     'mqtt_publish(s_heating_curve_topic, js.c_str(), static_cast<int>(js.size()), 0, 0);',
-     'mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);',
-     'CURVE_TELEMETRY_USES_OWN_NONRETAINED_DOMAIN_TOPIC', 1),
-    ('curve-room-temperature-discarded', 'outgoing_curve',
-     'f.room_temperature_c = room.temperature_c;',
-     'f.room_temperature_c = 0;',
-     'CURVE_ACCEPTED_ROOM_TEMPERATURE_ON_WIRE', 1),
-    ('curve-disabled-consent-published', 'outgoing_curve',
-     'if (!cfg.diagnostics_enabled) return;',
-     '/* mutation: publish even after diagnostic consent was withdrawn */',
-     'CURVE_DISABLED_CONSENT_SUPPRESSES_PUBLICATION', 1),
-    ('curve-consent-boundary-keeps-prior-event', 'curve_consent_boundary',
-     's_heating_curve_diagnosis.forget_samples();', '(void)0;',
-     'CURVE_CONSENT_BOUNDARY_FORGETS_PRIOR_EVENT_IMMEDIATELY', 1),
-    ('curve-room-source-boundary-keeps-prior-event', 'curve_room_source_boundary',
-     's_heating_curve_diagnosis.forget_samples();', '(void)0;',
-     'CURVE_ROOM_SOURCE_BOUNDARY_FORGETS_PRIOR_EVENT_IMMEDIATELY', 1),
-    ('curve-boundary-resets-sequence', 'curve_consent_boundary',
-     's_heating_curve_diagnosis.forget_samples();',
-     's_heating_curve_bins = {}; new (&s_heating_curve_diagnosis) decltype(s_heating_curve_diagnosis){s_heating_curve_bins};',
-     'CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS', 1),
-    ('curve-homehub-boundary-keeps-prior-event', 'curve_homehub_boundary',
-     '''    forget_heating_curve_scope();
-    s_heating_curve_homehub_applied_epoch = requested;''',
-     '''    s_heating_curve_homehub_applied_epoch = requested;''',
-     'CURVE_HOMEHUB_BOUNDARY_FORGETS_PRIOR_EVENT_IMMEDIATELY', 1),
-    ('curve-homehub-epoch-not-bumped', 'curve_homehub_boundary_during_evaluation',
-     's_heating_curve_homehub_epoch.fetch_add(1, std::memory_order_acq_rel);', '(void)0;',
-     'CURVE_HOMEHUB_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING', 1),
-    ('curve-homehub-stale-endpoint-evaluated', 'curve_homehub_boundary_during_evaluation',
-     '''if (s_heating_curve_homehub_epoch.load(std::memory_order_acquire) != homehub_epoch ||
-        s_heating_curve_homehub_applied_epoch != homehub_epoch)''',
-     '(void)homehub_epoch;\n    if (false)',
-     'CURVE_HOMEHUB_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING', 1),
-    ('curve-homehub-pending-epoch-ignored', 'curve_homehub_boundary_during_evaluation',
-     's_heating_curve_homehub_applied_epoch != homehub_epoch)', 'false)',
-     'CURVE_PENDING_HOMEHUB_RESET_CANNOT_EVALUATE', 1),
-    ('curve-bins-profile-check-omitted', 'curve_bins_scopes',
-     '(live_profile != 0 && bins_profile != 0 && live_profile != bins_profile)',
-     '((void)live_profile, (void)bins_profile, false)',
-     'CURVE_BINS_WITHDRAW_BEFORE_NEW_MODBUS_PROFILE_EVALUATION', 1),
-    ('curve-eval-profile-omitted', 'curve_bins_scopes',
-     'in.plant_profile      = static_cast<uint8_t>(mbs.profile);', '(void)mbs; in.plant_profile = 1;',
-     'CURVE_NEW_MODBUS_PROFILE_CLEARS_BINS_WITHOUT_BREAKING_CADENCE', 1),
-    ('curve-inbound-target-not-observed', 'curve_bins_scopes',
-     's_heating_curve_diagnosis.observe_bin_target(candidate.setpoint_c);', '(void)0;',
-     'CURVE_MQTT_TARGET_CHANGE_CLEARS_BINS_AT_ONCE', 1),
-    ('curve-stale-scope-evaluated', 'curve_boundary_during_evaluation',
-     'if (s_ref_requested_epoch.load(std::memory_order_acquire) != scope_epoch)',
-     '(void)scope_epoch;\n    if (false)',
-     'CURVE_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING', 1),
-    ('curve-scope-epoch-captured-late', 'curve_boundary_during_evaluation',
-     '''    Lock lk(s_mtx);
-    if (s_ref_requested_epoch.load(std::memory_order_acquire) != scope_epoch)''',
-     '''    (void)scope_epoch;
-    const uint32_t late_epoch = s_ref_requested_epoch.load(std::memory_order_acquire);
-    Lock lk(s_mtx);
-    if (s_ref_requested_epoch.load(std::memory_order_acquire) != late_epoch)''',
-     'CURVE_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING', 1),
     ('scalar-hp-age-discarded', 'scalar_snapshot_helpers',
      'return mqtt_publish_gate_step(state, hp.recent, s_connected.load());',
      'return mqtt_publish_gate_step(state, true, s_connected.load());',
@@ -475,32 +371,6 @@ mutations = [
      'id == MQTT_EVENT_BEFORE_CONNECT || id == MQTT_EVENT_CONNECTED || id == MQTT_EVENT_DATA)',
      'id == MQTT_EVENT_BEFORE_CONNECT || id == MQTT_EVENT_CONNECTED || id == MQTT_EVENT_DATA || id == MQTT_EVENT_ERROR)',
      'CALLER_EVENT_DOES_NOT_MISFILE_SDK_STACK', 1),
-    ('activity-release', 'ref_oom_recovery',
-     '~MqttPublishActivity() {\n        s_publish_network_quiesced.store(true, std::memory_order_release);\n    }',
-     '~MqttPublishActivity() {\n        /* mutation: leave allocation ownership claimed */\n    }',
-     'MQTT_ACTIVITY_RELEASED_AT_DELAY', 1),
-    ('snapshot-lock-unwind', 'ref_oom_recovery',
-     '''    {
-        Lock lk(s_mtx);
-        if (!reference_request_current_locked(frame.reference_epoch, c)) return;
-        candidate           = s_ref_status;
-        candidate_watermark = s_ref_source_time;
-    }''',
-     '''    {
-        xSemaphoreTake(s_mtx, portMAX_DELAY);
-        if (!reference_request_current_locked(frame.reference_epoch, c)) return;
-        candidate           = s_ref_status;
-        candidate_watermark = s_ref_source_time;
-        xSemaphoreGive(s_mtx);
-    }''',
-     'MQTT_MUTEX_RELEASED_AT_DELAY', 1),
-    ('oom-counter', 'ref_oom_recovery',
-     's_mqtt_skipped.fetch_add(1, std::memory_order_relaxed);',
-     '/* mutation: omit skipped-cycle evidence */', 'OOM_COUNTED_ONCE', 2),
-    ('reference-time-retention', 'ref_oom_recovery',
-     'candidate           = s_ref_status;',
-     's_ref_source_time.reset(); candidate           = s_ref_status;',
-     'OOM_PRESERVES_REFERENCE_TIME_WATERMARK', 1),
     ('circulation-time-retention', 'circulation_oom_recovery',
      'candidate   = s_circulation_status;',
      's_circulation_source_time.reset(); candidate   = s_circulation_status;',
@@ -531,36 +401,6 @@ mutations = [
         if (!circulation_epoch_current_locked(epoch)) return;
         if (id >= 0) s_circulation_subscribed_topic.swap(prepared_owner);''',
      'CIRCULATION_EPOCH_CHANGE_RETAINS_ACCEPTED_CLEANUP_OWNER', 1),
-    ('reference-allocating-slot-owner', 'reference_saved_postsubscribe_oom',
-     '''        const int id = esp_mqtt_client_subscribe(s_client, topic.c_str(), 0);
-        if (id < 0) {''',
-     '''        const int id = esp_mqtt_client_subscribe(s_client, topic.c_str(), 0);
-        if (id >= 0) {
-            std::string allocating_owner = topic;
-            topic.swap(allocating_owner);
-        }
-        if (id < 0) {''',
-     'SAVED_REFERENCE_ACCEPTED_TOPIC_CLEANUP_OWNERSHIP', 1),
-    ('reference-allocating-final-owner-array', 'reference_saved_final_owner_oom',
-     's_ref_subscribed_topics.swap(desired);',
-     's_ref_subscribed_topics = desired;',
-     'SAVED_REFERENCE_FINAL_OWNER_ARRAY_COMMITTED', 1),
-    ('reference-drop-prior-owner-on-failure', 'reference_saved_prior_owner_cleanup',
-     'if (!reference_topic_set_contains(s_ref_subscribed_topics, topic)) topic.clear();',
-     'topic.clear();',
-     'REFERENCE_FAILED_RESUBSCRIBE_RETAINS_STILL_LIVE_PRIOR_OWNER', 1),
-    ('reference-keep-unaccepted-new-owner', 'reference_saved_partial_retry',
-     'if (!reference_topic_set_contains(s_ref_subscribed_topics, topic)) topic.clear();',
-     '/* mutation: keep owner even though its new SDK subscribe failed */',
-     'REFERENCE_PARTIAL_BATCH_RETAINS_ONLY_ACCEPTED_NEW_OWNERS', 1),
-    ('reference-owner-equality-bypasses-retry', 'reference_saved_prior_owner_retry',
-     'if (!force && !s_ref_subscription_retry && s_ref_subscribed_topics == desired)',
-     'if (!force && s_ref_subscribed_topics == desired)',
-     'REFERENCE_PRIOR_OWNER_ARRAY_EQUALITY_DOES_NOT_BYPASS_RETRY', 1),
-    ('reference-reconnect-oom-consumes-force', 'reference_saved_reconnect_oom',
-     'if (force) s_ref_subscription_retry = true;',
-     '/* mutation: lose the reconnect request before allocating preparation */',
-     'REFERENCE_RECONNECT_OOM_NEXT_CYCLE_RESUBSCRIBES_ALL_TOPICS', 1),
     ('circulation-reconnect-oom-consumes-force', 'circulation_saved_reconnect_oom',
      '''    if (force) {
         // Keep the reconnect request through any later allocation failure. The prior cleanup
@@ -578,13 +418,6 @@ mutations = [
      'if (retired) s_circulation_subscribed_topic.clear();',
      's_circulation_subscribed_topic.clear();',
      'CIRCULATION_REJECTED_UNSUBSCRIBE_RETAINS_EXACT_LIVE_OWNER', 1),
-    ('reference-drop-owner-on-rejected-unsubscribe', 'reference_unsubscribe_rejection',
-     '''        if (unsubscribe_reference_topic_if_unused(topic, keep)) topic.clear();
-        else retired = false;''',
-     '''        const bool released = unsubscribe_reference_topic_if_unused(topic, keep);
-        topic.clear();
-        if (!released) retired = false;''',
-     'REFERENCE_REJECTED_UNSUBSCRIBE_RETAINS_EXACT_LIVE_OWNER', 1),
     ('probe-drop-owner-on-rejected-unsubscribe', 'probe_unsubscribe_rejection',
      '''        if (retired) s_circulation_probe_subscribed_topic.clear();
         s_circulation_probe_task_generation = 0;
@@ -603,10 +436,6 @@ mutations = [
         s_circulation_probe_task_generation = 0;
         if (signal && s_circulation_probe_sem)''',
      'PROBE_REJECTED_UNSUBSCRIBE_RETAINS_EXACT_LIVE_OWNER', 1),
-    ('reference-drop-shared-circulation-protection', 'shared_subscription_owners',
-     'topic == s_circulation_subscribed_topic || topic == s_circulation_probe_subscribed_topic)',
-     'topic == s_circulation_probe_subscribed_topic)',
-     'REFERENCE_RETIRE_PRESERVES_SHARED_CIRCULATION_OWNER', 1),
     ('circulation-drop-shared-probe-protection', 'shared_subscription_owners',
      '''            s_circulation_subscribed_topic == s_circulation_probe_subscribed_topic ||
             esp_mqtt_client_unsubscribe''',
@@ -615,8 +444,7 @@ mutations = [
     ('probe-drop-active-prior-retirement', 'probe_active_replacement',
      '''    if (!s_circulation_probe_subscribed_topic.empty() &&
         s_circulation_probe_subscribed_topic != candidate.topic) {
-        if (!reference_topic_owned(s_circulation_probe_subscribed_topic) &&
-            s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic &&
+        if (s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic &&
             esp_mqtt_client_unsubscribe(s_client,
                                         s_circulation_probe_subscribed_topic.c_str()) < 0) {
             Lock lk(s_mtx);
@@ -637,24 +465,15 @@ mutations = [
                                         s_circulation_probe_subscribed_topic.c_str()) < 0 && false)) {''',
      'PROBE_ACTIVE_REJECTED_RETIRE_RETAINS_OWNER_AND_DEFERS_NEW_EFFECT', 1),
     ('probe-saved-configuration-pretends-to-own', 'probe_saved_config_without_owner',
-     '''    if (id >= 0 && candidate.topic != s_circulation_subscribed_topic &&
-        !reference_topic_owned(candidate.topic))''',
-     '''    if (id >= 0 && candidate.topic != saved.circulation_topic &&
-        !reference_topic_owned(candidate.topic))''',
+     '''    if (id >= 0 && candidate.topic != s_circulation_subscribed_topic)''',
+     '''    if (id >= 0 && candidate.topic != saved.circulation_topic)''',
      'PROBE_ACCEPTED_SAVED_CONFIG_TOPIC_RETAINS_OWN_CLEANUP_IDENTITY', 1),
     ('probe-inactive-configuration-pretends-to-own', 'probe_saved_config_without_owner',
      '''        const bool retired = s_circulation_probe_subscribed_topic.empty() ||
-            s_circulation_probe_subscribed_topic == s_circulation_subscribed_topic ||
-            reference_topic_owned(s_circulation_probe_subscribed_topic) ||''',
+            s_circulation_probe_subscribed_topic == s_circulation_subscribed_topic ||''',
      '''        const bool retired = s_circulation_probe_subscribed_topic.empty() ||
-            s_circulation_probe_subscribed_topic == saved.circulation_topic ||
-            reference_topic_owned(s_circulation_probe_subscribed_topic) ||''',
+            s_circulation_probe_subscribed_topic == saved.circulation_topic ||''',
      'PROBE_CONFIGURED_BUT_UNOWNED_SAVED_TOPIC_IS_CLEANED_EXACTLY_ONCE', 1),
-    ('probe-active-drop-shared-prior-owner-protection', 'probe_active_shared_prior_owner',
-     '''        if (!reference_topic_owned(s_circulation_probe_subscribed_topic) &&
-            s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic &&''',
-     '''        if (s_circulation_probe_subscribed_topic != s_circulation_subscribed_topic &&''',
-     'PROBE_ACTIVE_REPLACEMENT_PRESERVES_OTHER_ACTUAL_PRIOR_OWNER', 1),
 ]
 mutations.append(('discovery-ownership-bypass', 'discovery_guard_weather',
                   'state == DiscoveryOwnerState::Encoded;',
@@ -690,43 +509,11 @@ mutations.extend([
     ('discovery-ingress-unfiltered', 'discovery_guard_ingress_burst',
      '''!discovery_topic_is_current_input(
             std::string_view(e->topic, static_cast<size_t>(e->topic_len)))) {''',
-     'false) {', 'DISCOVERY_159_CONFIG_BURST_NEVER_DISPLACES_SIX_INTERLEAVED_INPUTS', 1),
+     'false) {', 'DISCOVERY_159_CONFIG_BURST_NEVER_DISPLACES_THREE_INTERLEAVED_INPUTS', 1),
     ('discovery-ingress-explicit-owner-ignored', 'discovery_guard_ingress_exact',
      'return !binding.empty() && topic == std::string_view(binding);',
      '(void)topic; (void)binding; return false;',
-     'DISCOVERY_EXACT_SAVED_REFERENCE_RECEIVES_EARLY_RETAINED_DATA', 1),
-])
-mutations.extend([
-    ('curve-evaluation-age-omitted', 'curve_evaluation_age',
-     'return s_heating_curve_diagnosis.snapshot_at(esp_timer_get_time() / 1000);',
-     'return s_heating_curve_diagnosis.snapshot();',
-     'CURVE_EVALUATION_FIRST_MILLISECOND_EXPIRES', 1),
-    ('curve-evaluation-age-one-ms-late', 'curve_evaluation_age',
-     'return s_heating_curve_diagnosis.snapshot_at(esp_timer_get_time() / 1000);',
-     'return s_heating_curve_diagnosis.snapshot_at(esp_timer_get_time() / 1000 - 1);',
-     'CURVE_EVALUATION_FIRST_MILLISECOND_EXPIRES', 1),
-    ('curve-evaluation-recovery-omitted', 'curve_evaluation_age',
-     'evaluate_heating_curve(ref_config, x10a_connected);',
-     'if (sdk::delays < 5) evaluate_heating_curve(ref_config, x10a_connected);',
-     'CURVE_OWNER_RESUMES_WITHOUT_DUPLICATE_EVENT', 1),
-])
-mutations.extend([
-    ('room-history-heating-eligibility', 'room_history_observation',
-     'history_record_room(room.temperature_valid, room.temperature_c, generation);',
-     'history_record_room(room.control_eligible, room.temperature_c, generation);',
-     'ROOM_HISTORY_ACCEPTS_VALID_TEMPERATURE_WITHOUT_TARGET_OR_HEAT_PERMISSION', 1),
-    ('room-history-stale-admission', 'room_history_observation',
-     'room = reference_room_sample(raw, freshness);',
-     'ReferenceFreshness trusted = freshness; trusted.fresh = true; room = reference_room_sample(raw, trusted);',
-     'ROOM_HISTORY_STALE_VALUE_IS_GAP', 1),
-    ('room-history-x10a-gate', 'room_history_observation',
-     'record_room_history(ref_config, room_history_generation);',
-     'if (gate.publish_cycle) record_room_history(ref_config, room_history_generation);',
-     'ROOM_HISTORY_TICKS_WITHOUT_X10A_PUBLICATION', 1),
-    ('room-history-generation-reloaded', 'room_history_scope',
-     'record_room_history(ref_config, room_history_generation);',
-     '(void)room_history_generation; record_room_history(ref_config, history_room_generation());',
-     'ROOM_HISTORY_GENERATION_CAPTURE_PRECEDES_CONFIG_CUTOVER', 1),
+     'DISCOVERY_EXACT_SAVED_CIRCULATION_RECEIVES_EARLY_RETAINED_DATA', 1),
 ])
 for name, scenario, before, after, assertion, count in mutations:
     if scenario not in scenarios:

@@ -9,7 +9,7 @@
 //                   OTA and its health gate, history / checkup / state-age bookkeeping (without
 //                   adopting RAM), the status indicator and the recovery button
 //   skipped       — ENV III, the X10A poll engine (and with it the heap watchdog's sampling), the
-//                   MQTT bridge, the Open-Meteo weather client and HomeHub, including its one-shot
+//                   MQTT bridge and HomeHub, including its one-shot
 //                   initial discovery
 #include "logic/boot_guard.hpp" // BootKind
 

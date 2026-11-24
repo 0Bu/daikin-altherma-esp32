@@ -22,13 +22,7 @@ const workflow = read(".github/workflows/build.yml");
 const ota = read("main/ota_update.cpp");
 const httpOta = read("main/http_ota.cpp");
 const otaHilFeed = read("main/logic/ota_hil_feed.hpp");
-const httpConfig = read("main/http_config.cpp");
 const httpStatus = read("main/http_status.cpp");
-const weatherSource = read("main/weather_forecast.cpp");
-const weatherHeader = read("main/weather_forecast.hpp");
-const weatherLogic = read("main/logic/weather_forecast.hpp");
-const stackWatch = read("main/stack_watch.hpp");
-const heartbeat = read("main/logic/heartbeat.hpp");
 const health = read("main/logic/health_gate.hpp");
 const mqtt = read("main/mqtt_ha.cpp");
 const hook = read("tools/agent-hooks/agent_hook.py");
@@ -908,11 +902,27 @@ rejected(lambda: wait_fixture(expected=periodic_baseline, cold=True, periodic=Tr
 check(bracket_reads == [1, 2], "bracketed clock step was forgotten by retry")
 
 # Execute the real HIL orchestrator; all artifact/controller/feed/device dependencies are fake.
-def run_hil(*, missing=False, cold_bad=False, periodic=False, clock_step=0, clock_stage="cold", elapsed_s=0):
+def run_hil(*, missing=False, cold_bad=False, periodic=False, clock_step=0, clock_stage="cold",
+            elapsed_s=0, bootstrap_schema=1, candidate_schema=1, status_override=None,
+            schema_rejection=None):
     events, clock = [], [0.0]
     current = {"version": "2.0.0", "elf": "123456789", "boot": old_boot, "installs": 0, "offset": 0}
     def board():
         value = status(current["boot"], current["version"], current["elf"])
+        if current["version"] == "2.0.0":
+            schema = bootstrap_schema
+            phase = ("bootstrap" if current["installs"] == 0 else
+                     "rolled-back bootstrap" if current["installs"] == 1 else "writer bootstrap")
+        else:
+            schema = candidate_schema
+            phase = "first candidate" if current["installs"] == 1 else "candidate"
+        if schema == 1:
+            value["weather_forecast"] = {"configured": False}
+        else:
+            value["status_schema_version"] = schema
+        value["env3"] = {"enabled": True}
+        if status_override and phase == status_override[0]:
+            value.update(status_override[1])
         value["ntp"]["time"] = datetime.fromtimestamp(
             wall + int(clock[0]) + current["offset"], timezone.utc).isoformat()
         return value
@@ -931,10 +941,11 @@ def run_hil(*, missing=False, cold_bad=False, periodic=False, clock_step=0, cloc
     @contextlib.contextmanager
     def watchdog(*a, **k):
         def trigger():
+            events.append("watchdog cycle")
             current.update(version="2.0.0" if current["installs"] == 1 else "2.0.1",
                            elf="123456789" if current["installs"] == 1 else "abcdef123",
                            boot=str(current["installs"]) * 16)
-        yield (lambda: None), trigger, (lambda: None)
+        yield (lambda: None), trigger, (lambda: events.append("approve"))
     def install(**kwargs):
         current["installs"] += 1
         events.append("install" + str(current["installs"]))
@@ -950,6 +961,9 @@ def run_hil(*, missing=False, cold_bad=False, periodic=False, clock_step=0, cloc
     def sleep(seconds):
         clock[0] += seconds
         check(clock[0] <= elapsed_s + 4, "orchestrator history wait exceeded deadline")
+    def stress(**kwargs):
+        check(kwargs.get("expected_status_schema") == candidate_schema, "stress lost candidate schema pin")
+        return {}
     lab = {"host": "fixture.invalid", "mac": "FIXTURE", "bootstrap_version": "2.0.0",
         "bootstrap_elf": "123456789", "bootstrap_app_sha256": "c" * 64,
         "channel": "release", "manifest_url": "https://candidate.invalid/manifest.json",
@@ -958,7 +972,8 @@ def run_hil(*, missing=False, cold_bad=False, periodic=False, clock_step=0, cloc
         "bootstrap_firmware_base_url": "https://bootstrap.invalid/", "require_x10a": True,
         "require_weather": True, "required_stack_tasks": ["httpd", "poll", "mqtt", "weather"],
         "min_stack_free_bytes": 1024, "persistence_paths": ["hp.rx", "hp.tx", "profile.id", "ota.channel",
-            "mqtt.base", "mqtt.base_custom"], "persistence_canaries": {"mqtt.base": "canary", "mqtt.base_custom": True}}
+            "mqtt.base", "mqtt.base_custom", "env3.enabled", "weather_forecast.configured"],
+        "persistence_canaries": {"mqtt.base": "canary", "mqtt.base_custom": True}}
     with tempfile.TemporaryDirectory() as folder:
         app = Path(folder) / "app.bin"; app.write_bytes(b"public-fixture")
         sha = hashlib.sha256(app.read_bytes()).hexdigest()
@@ -973,7 +988,7 @@ def run_hil(*, missing=False, cold_bad=False, periodic=False, clock_step=0, cloc
             "pending_image_power_watchdog": watchdog, "release_hil_install_once": install,
             "wait_for_identity": lambda *a: board(), "wait_for_bench_health_window": lambda *a, **k: board(),
             "wait_for_ota_image_state": lambda *a, **k: {"image_state": "valid", "rollback_pending": False},
-            "release_hil_power_cycle": power, "stress_board": lambda **k: {},
+            "release_hil_power_cycle": power, "stress_board": stress,
             "require_stack_evidence": lambda *a: {}, "HIL_HISTORY_WAIT_S": 2}
         with patch.dict(ns, replacements), patch.object(ns["time"], "monotonic", lambda: clock[0]), \
              patch.object(ns["time"], "sleep", sleep):
@@ -981,7 +996,18 @@ def run_hil(*, missing=False, cold_bad=False, periodic=False, clock_step=0, cloc
                 result = gate["run_release_hil"](manifest_path=manifest, app_path=app,
                     source_sha="a" * 40, version="2.0.1", app_sha256=sha, power_token="fake", feed_token="fake")
             except gate["GateError"] as error:
-                check(missing or cold_bad or clock_step, "valid HIL fixture refused")
+                if schema_rejection:
+                    message, writes, approvals = schema_rejection
+                    check(message in str(error), "persistence/schema fixture failed without its guard: " + str(error))
+                    check(current["installs"] == writes and events.count("approve") == approvals,
+                          "persistence/schema failure reached further firmware actions")
+                    if writes == 0:
+                        check("feed" not in events, "failed bootstrap status reached feed staging")
+                    if message == "candidate-writer bootstrap status schema changed":
+                        check(events.count("watchdog cycle") == 1,
+                              "failed writer-bootstrap schema reached its regular watchdog cycle")
+                    return
+                check(missing or cold_bad or clock_step, "valid HIL fixture refused: " + str(error))
                 if missing: check("feed" not in events and "install1" not in events, "missing prerequisites reached mutation")
                 if cold_bad: check("install3" not in events, "failed restore continued into candidate writer")
                 if clock_step:
@@ -991,6 +1017,7 @@ def run_hil(*, missing=False, cold_bad=False, periodic=False, clock_step=0, cloc
                 return
     check(not missing and not cold_bad, "HIL passed without retained history")
     check(not clock_step, "periodic clock step reached an HIL success receipt")
+    check(not schema_rejection, "invalid persistence/schema reached an HIL success receipt")
     check(events.index("history") < events.index("feed") < events.index("install1"), "history preflight was late")
     power_index, writer_index = events.index("power"), events.index("install3")
     check("history" in events[events.index("install2"):power_index], "no candidate baseline before cold cycle")
@@ -1002,6 +1029,27 @@ run_hil(cold_bad=True)
 run_hil(periodic=True, elapsed_s=600)
 run_hil(periodic=True, clock_step=600)
 run_hil(periodic=True, clock_step=600, clock_stage="candidate")
+# A reused inventory still requires legacy Weather, while schema 2 retires just that source.
+run_hil(candidate_schema=2)
+run_hil(bootstrap_schema=2, candidate_schema=2)
+run_hil(status_override=("bootstrap", {"weather_forecast": {}}),
+        schema_rejection=("does not expose persistent field weather_forecast.configured", 0, 0))
+run_hil(bootstrap_schema=2, candidate_schema=2, status_override=("bootstrap", {"env3": {}}),
+        schema_rejection=("does not expose persistent field env3.enabled", 0, 0))
+run_hil(bootstrap_schema=2, candidate_schema=2, status_override=("bootstrap", {"status_schema_version": 3}),
+        schema_rejection=("unrecognized device status schema", 0, 0))
+run_hil(bootstrap_schema=2, candidate_schema=2, status_override=("bootstrap", {"weather_forecast": {}}),
+        schema_rejection=("status schema 2 must omit the retired Weather source", 0, 0))
+run_hil(status_override=("rolled-back bootstrap", {"weather_forecast": {"configured": True}}),
+        schema_rejection=("configuration changed across pending-image rollback", 1, 0))
+run_hil(bootstrap_schema=2, candidate_schema=2,
+        status_override=("rolled-back bootstrap", {"status_schema_version": 1}),
+        schema_rejection=("bootstrap rollback status schema changed", 1, 0))
+run_hil(bootstrap_schema=2, schema_rejection=("candidate status schema regressed", 1, 0))
+run_hil(candidate_schema=2, status_override=("candidate", {"status_schema_version": 1}),
+        schema_rejection=("pending candidate status schema changed", 2, 0))
+run_hil(bootstrap_schema=2, candidate_schema=2, status_override=("writer bootstrap", {"status_schema_version": 1}),
+        schema_rejection=("candidate-writer bootstrap status schema changed", 3, 1))
 print("HIL history behavioral fixtures passed")
 `;
 const hilHistory = spawnSync("python3", [
@@ -1420,7 +1468,7 @@ def manifest(version, sha):
                 {"path": "daikin-altherma-esp32.bin", "offset": 0x20000}]}]}
 for feed in (dev, root):
  for saved in ("dev", "release"):
-  for weather_enabled, defect in [(True, defect) for defect in (
+  legacy_cases = [(True, defect) for defect in (
       None, "pending then valid", "pending forever", "unknown", "missing image", "missing pending",
       "valid armed", "pending disarmed", "reboot", "heap_restarts", "mqtt_skipped", "poll_skipped",
       "crc_err", "timeout regression", "timeout excess", "timeout boundary", "mac", "version", "elf", "channel",
@@ -1428,7 +1476,16 @@ for feed in (dev, root):
       (False, None), (False, "missing weather"), (False, "non-boolean weather"),
       (False, "weather changed during readiness"), (False, "transient weather drift during readiness"),
       (False, "weather changed before write"), (False, "weather changed after boot"),
-      (False, "transient weather drift during probation"), (False, "weather changed at final status")]:
+      (False, "transient weather drift during probation"), (False, "weather changed at final status")]
+  schema_cases = [
+      (1, 2, True, None), (1, 2, False, None), (2, 2, False, None),
+      (1, 2, True, "retired Weather still present"),
+      (1, 2, True, "schema changed during probation"),
+      (2, 2, False, "schema changed before write"),
+      (2, 1, False, "regressed schema after boot"),
+  ]
+  for writer_schema, target_schema, weather_enabled, defect in (
+      [(1, 1, enabled, defect) for enabled, defect in legacy_cases] + schema_cases):
     target = "2.0.0-dev.5" if feed == dev else "2.0.0"
     documents = {feed: json.dumps(manifest(target, app), separators=(",", ":")).encode()}
     other_feed = root if feed == dev else dev
@@ -1437,12 +1494,20 @@ for feed in (dev, root):
     events, writes, sequence, reads, readiness_samples = [], [], [], [], []
     virtual = [0.0]
     def board(version=target, image=elf, uptime=13, mac=prod_mac):
-        return {"version": version, "app_elf_sha256": image, "uptime_s": uptime,
+        status = {"version": version, "app_elf_sha256": image, "uptime_s": uptime,
             "wifi": {"mac": mac, "connected": True, "rolled_back": False}, "ota": {"channel": saved},
-            "weather_forecast": {"configured": weather_enabled, "fetching": False},
             "sys": {"free_heap": 65536, "max_alloc": 32768, "reset_reason": "sw", **counters},
             "mqtt": {"connected": True}, "hp": {"connected": True, "values": 129,
                                                  "crc_err": 0, "timeout_err": 5}}
+        schema = writer_schema if version == writer else target_schema
+        if schema == 2:
+            status["status_schema_version"] = 2
+        else:
+            status["weather_forecast"] = {"configured": weather_enabled, "fetching": False}
+        return status
+    def present_legacy_weather(status):
+        status.pop("status_schema_version")
+        status["weather_forecast"] = {"configured": False, "fetching": False}
     baseline = {**counters, "timeout_err": 5}
     stress = {"uptime": [13, 193], "counters_after": baseline}
     args = SimpleNamespace(self_test=False, release_hil=False, execute=True, confirm_release_hil=None,
@@ -1469,6 +1534,8 @@ for feed in (dev, root):
             if defect == "non-boolean weather": status["weather_forecast"]["configured"] = 0
             if defect == "weather changed before write" and "offer read" in events:
                 status["weather_forecast"]["configured"] = True
+            if defect == "schema changed before write" and "offer read" in events:
+                present_legacy_weather(status)
             if defect == "transient weather drift during readiness" and "offer read" not in events:
                 drifted = len(readiness_samples) == 1
                 readiness_samples.append(not weather_enabled if drifted else weather_enabled)
@@ -1481,9 +1548,12 @@ for feed in (dev, root):
         after_image = bool(sequence) and sequence[-1] == "image"
         transient_probation_drift = (defect == "transient weather drift during probation" and
                                      sequence == ["status", "image"])
+        transient_schema_drift = (defect == "schema changed during probation" and
+                                  sequence == ["status", "image"])
         sequence.append("status")
         status = board(uptime=206 if after_image else 194)
         if transient_probation_drift: status["weather_forecast"]["configured"] = True
+        if transient_schema_drift: present_legacy_weather(status)
         if after_image:
             if defect == "weather changed at final status": status["weather_forecast"]["configured"] = True
             if defect == "reboot": status["uptime_s"] = 3
@@ -1526,7 +1596,8 @@ for feed in (dev, root):
         check(route == "/ota/status" and method == "GET", "probation used a mutating/noncompact route")
         sequence.append("image")
         image = {"image_state": "valid", "rollback_pending": False}
-        pending_then_valid = defect in ("pending then valid", "transient weather drift during probation")
+        pending_then_valid = defect in ("pending then valid", "transient weather drift during probation",
+                                        "schema changed during probation")
         if defect == "pending forever" or (pending_then_valid and sequence.count("image") == 1):
             image = {"image_state": "pending_verify", "rollback_pending": True}
         if defect == "unknown": image["image_state"] = "unknown"
@@ -1541,10 +1612,14 @@ for feed in (dev, root):
         events.append("returned")
         status = board()
         if defect == "weather changed after boot": status["weather_forecast"]["configured"] = True
+        if defect == "retired Weather still present":
+            status["weather_forecast"] = {"configured": False, "fetching": False}
         return status
     def canary(**kwargs):
-        check(kwargs["require_x10a"] is True and kwargs["require_weather"] is weather_enabled and
-              kwargs.get("pin_weather_config") is True and kwargs["expected_app_sha256"] == app and
+        target_weather = weather_enabled and target_schema == 1
+        check(kwargs["require_x10a"] is True and kwargs["require_weather"] is target_weather and
+              kwargs.get("pin_weather_config") is True and kwargs["expected_status_schema"] == target_schema and
+              kwargs["expected_app_sha256"] == app and
               kwargs["expected_channel"] == saved and kwargs["hil_manifest_url"] == feed,
               "production canary weakened liveness/feed requirements")
         events.append("stress passed")
@@ -1585,7 +1660,7 @@ for feed in (dev, root):
             check(result == (0 if accepted else 2), "unsafe/rejected production probation: " + str(defect))
             blocked_before_write = defect in ("tag timeout", "missing weather", "non-boolean weather",
                 "weather changed during readiness", "transient weather drift during readiness",
-                "weather changed before write")
+                "weather changed before write", "schema changed before write")
             check(len(writes) == (0 if blocked_before_write else 1), "production POST count disagreed with the result")
             if accepted:
                 probation = document["production"]["probation_after"]
@@ -1596,15 +1671,17 @@ for feed in (dev, root):
                 check(document["outcome"] == "blocked" and "completed" not in ns["ACTIVE_JOURNAL"].phases,
                       "failed probation published completion")
                 check("retained" not in events, "failed probation continued to retained acceptance")
-                if defect == "weather changed after boot":
-                    check("stress passed" not in events, "post-boot Weather mismatch reached the canary")
+                if defect in ("weather changed after boot", "retired Weather still present",
+                              "regressed schema after boot"):
+                    check("stress passed" not in events, "post-boot Weather or schema mismatch reached the canary")
                 if defect == "transient weather drift during readiness":
                     check(readiness_samples == [False, True] and "offer read" not in events,
                           "transient readiness Weather drift was not rejected at its first sample")
-                if defect in ("transient weather drift during probation", "weather changed at final status"):
+                if defect in ("transient weather drift during probation", "weather changed at final status",
+                              "schema changed during probation"):
                     check(sequence == ["status", "image", "status"] and
                           "production_probation_confirmed" not in ns["ACTIVE_JOURNAL"].phases,
-                          "probation Weather drift was not rejected before acceptance")
+                          "probation Weather or schema drift was not rejected before acceptance")
                 if defect in ("tag timeout", "ack lost"):
                     check(not sequence, "source/ambiguous write failure continued probation queries")
                 if defect == "tag timeout": check(not reads, "source timeout contacted production")
@@ -1696,10 +1773,6 @@ assert.match(gate, /POST_STRESS_HEADROOM_STABLE_SAMPLES\s*=\s*2/,
   "one transient heap sample must not trigger the sole recovery attempt");
 assert.match(gate, /POST_STRESS_MIN_FREE_HEAP\s*=\s*48 \* 1024/);
 assert.match(gate, /POST_STRESS_MIN_LARGEST_BLOCK\s*=\s*20 \* 1024/);
-assert.match(weatherLogic, /WEATHER_FETCH_MIN_FREE_BYTES\s*=\s*48 \* 1024/,
-  "the measured aggregate Weather reserve must remain unchanged");
-assert.match(weatherLogic, /WEATHER_FETCH_MIN_LARGEST_BLOCK_BYTES\s*=\s*20 \* 1024/,
-  "the contiguous Weather floor must admit the measured 22 KiB production block");
 assert.doesNotMatch(gate, /WEATHER_HEADROOM_RETRY_DELAY_S/,
   "a headroom refusal must not be re-armed while the pressure workers are active");
 assert.match(stress,
@@ -1766,26 +1839,8 @@ const jsonStress = section(stress, "    def json_loop(", "\n    workers = [");
 assert.match(jsonStress,
   /time\.sleep\(min\(interval, max\(0\.0, deadline - time\.monotonic\(\)\)\)\)/,
   "the 15-second diagnostic cadence must not outlive the shared worker deadline");
-const httpTimeoutMs = Number(gate.match(/HTTP_TIMEOUT_S\s*=\s*(\d+)/)?.[1]) * 1000;
-const valuesWaitMs = Number(httpStatus.match(/kValuesTlsWait\s*=\s*pdMS_TO_TICKS\((\d+)\)/)?.[1]);
-assert.ok(httpTimeoutMs > valuesWaitMs,
-  "the full-status deadline must outlive the sole-worker bounded Weather wait");
 assert.match(stress, /busy_503\["status"\][\s\S]{0,120}?busy_503\["values"\]/);
 assert.match(stress, /disconnected \+= mqtt_recovery\.finish\(\)/);
-assert.match(stackWatch, /Modbus,[\s\S]{0,120}?Weather,[\s\S]{0,120}?Ota,/,
-  "Weather must own a boot-local high-water slot beside the other deep tasks");
-assert.ok(occurrences(weatherSource, "stack_watch_sample(StackWatch::Weather)") >= 2,
-  "Weather must sample both its loop lifecycle and the completed TLS/HTTP/JSON interval");
-assert.match(httpStatus,
-  /weather_forecast[\s\S]*?task_stack_min_free_bytes[\s\S]*?StackWatch::Weather/,
-  "Weather status must expose its task-local high-water evidence");
-assert.match(httpStatus,
-  /stack_min_free_bytes[\s\S]*?j \+= ",\\"weather\\":";[\s\S]*?StackWatch::Weather/,
-  "the always-on sys status must expose Weather stack evidence to HIL");
-assert.match(heartbeat,
-  /weather_stack_min_free_bytes[\s\S]*?append_stack_bytes\(j, f\.weather_stack_min_free_bytes\)/,
-  "fleet heartbeat telemetry must retain Weather stack headroom");
-
 const promotionSnapshot = section(
   gate, "def production_promotion_snapshot_ready(",
   "\ndef wait_for_production_promotion_readiness(",
@@ -1803,7 +1858,7 @@ assert.match(promotionSnapshot,
   "pre-write readiness must retain live X10A with positive values");
 assert.match(promotionSnapshot,
   /status\.get\("mqtt", \{\}\)\.get\("connected"\) is not True/);
-assert.match(promotionSnapshot, /weather\["fetching"\] is not False/);
+assert.match(promotionSnapshot, /legacy_weather and weather\["fetching"\] is not False/);
 const promotionWait = section(
   gate, "def wait_for_production_promotion_readiness(", "\ndef require_stress_ota_offer(",
 );
@@ -2098,96 +2153,10 @@ assert.ok(thirdWatchdog > committedColdCycle && writerInstall > thirdWatchdog &&
 assert.match(hil,
   /writer_image_state\s*=\s*wait_for_ota_image_state\([\s\S]{0,100}?writer_endpoint, rollback_pending=False/);
 
-// Firmware-side non-persistent weather trigger and rollback health proof.
-const setWeather = section(httpConfig, "static esp_err_t set_weather(", "\n// POST /set_board");
-assert.match(setWeather, /const bool refresh\s*=\s*cJSON_IsTrue\(refresh_item\)/);
-assert.match(setWeather, /const bool unchanged\s*=\s*location\.enabled\s*==\s*c\.weather_enabled[\s\S]*?location\.latitude_e6\s*==\s*c\.weather_latitude_e6[\s\S]*?location\.longitude_e6\s*==\s*c\.weather_longitude_e6/);
-const refreshBranch = section(setWeather, "if (refresh) {", "\n    if (unchanged)");
-assert.match(refreshBranch, /if \(!unchanged \|\| !location\.enabled\)/);
-assert.match(refreshBranch,
-  /!c\.diagnostics_enabled[\s\S]{0,180}?409 Conflict[\s\S]{0,260}?!weather_forecast_request_refresh\(refresh_token\)[\s\S]{0,220}?503 Service Unavailable/,
-  "refresh must refuse without diagnostics consent and without an actual Weather task");
-assert.doesNotMatch(refreshBranch, /config_save\(/);
-assert.match(refreshBranch,
-  /refresh_token = 0[\s\S]*?\\"saved\\":false,[\s\S]*?\\"refresh_requested\\":true,[\s\S]*?\\"refresh_token\\":%llu/,
-  "the non-persistent POST must return the exact accepted causal token");
-assert.match(weatherHeader,
-  /uint64_t refresh_requested_token\s*=\s*0, refresh_started_token\s*=\s*0,[\s\S]*?refresh_completed_token\s*=\s*0,[\s\S]*?refresh_success_token\s*=\s*0/);
-const refreshClaim = section(weatherSource, "uint64_t claim_refresh_request_locked()", "\n}\n\nvoid complete_refresh_request");
-assert.match(refreshClaim,
-  /weather_refresh_claim\(s_refresh_requested_token, s_refresh_completed_token,[\s\S]*?s_refresh_started_token\)/);
-const refreshComplete = section(weatherSource, "void complete_refresh_request(",
-  "\n}\n\nbool defer_refresh_request");
-assert.match(refreshComplete,
-  /weather_refresh_complete\(s_refresh_requested_token, s_refresh_started_token, token,[\s\S]*?success, s_refresh_completed_token, s_refresh_success_token\)/,
-  "firmware refresh completion must use the tested first-wins state transition");
-assert.match(weatherLogic,
-  /weather_refresh_complete\([\s\S]*?completed_token == token[\s\S]*?return false;[\s\S]*?if \(success\) success_token = token;[\s\S]*?completed_token = token/,
-  "a source-change cancellation must be final against the old attempt's late success finish");
-const refreshDefer = section(weatherSource, "bool defer_refresh_request(",
-  "\n}\n\n// Defaults to fail-closed completion");
-assert.match(refreshDefer,
-  /weather_refresh_defer\(s_refresh_requested_token, s_refresh_started_token, token,[\s\S]*?s_refresh_completed_token\)/,
-  "firmware OTA deferral must use the tested exact-token state transition");
-assert.match(weatherLogic,
-  /weather_refresh_defer\([\s\S]*?token != 0[\s\S]*?requested_token == token[\s\S]*?started_token == token[\s\S]*?completed_token != token/,
-  "OTA deferral must accept only the still-outstanding exact refresh token");
-const weatherTask = section(weatherSource, "void weather_task(void*)", "\n}\n\n} // namespace");
-const weatherCycle = section(weatherSource, "WeatherCycleWait weather_cycle(", "\n}\n\nvoid weather_task");
-const fetchAdmission = section(weatherCycle, "time_now(now, ms);", "NetworkActivity");
-const admissionLock = fetchAdmission.indexOf("Lock lk(s_mtx)");
-const admissionClaim = fetchAdmission.indexOf("claim_refresh_request_locked()", admissionLock);
-const admissionDrain = fetchAdmission.indexOf("ulTaskNotifyTake(pdTRUE, 0)", admissionClaim);
-const admissionFetching = fetchAdmission.search(/s_status\.fetching\s*=\s*true/);
-assert.ok(admissionLock >= 0 && admissionClaim > admissionLock && admissionDrain > admissionClaim &&
-          admissionFetching > admissionDrain,
-  "the task must claim a request in the same lock that starts its exact fetch attempt");
-assert.match(fetchAdmission,
-  /if \(refresh_attempt\.token != 0\) ulTaskNotifyTake\(pdTRUE, 0\);/,
-  "a natural cycle that claims the request must consume its now-redundant queued wake");
-assert.match(weatherTask,
-  /RefreshRequestAttempt refresh_attempt[\s\S]*?weather_cycle\(source_generation, refresh_attempt\)/,
-  "each cycle must retain its task-owned explicit request guard");
-assert.match(weatherCycle,
-  /s_status\.successes\+\+[\s\S]*?updated\s*=\s*true;[\s\S]*?refresh_attempt\.finish\(updated\)/,
-  "only the real forecast update commit may complete an explicit refresh successfully");
-assert.match(weatherSource,
-  /~RefreshRequestAttempt\(\) noexcept \{ finish\(false\); \}/,
-  "the attempt guard must fail-complete every path that was not explicitly deferred");
-const otaPreempted = section(weatherCycle, "if (ota_preempted) {",
-  "\n    if (poll_quiesce_failed");
-assert.match(otaPreempted,
-  /refresh_attempt\.defer\(\)[\s\S]*?return \{pdMS_TO_TICKS\(1000\), false\};/,
-  "OTA serialization must leave the exact refresh token pending for reclaim");
-assert.doesNotMatch(otaPreempted, /refresh_attempt\.finish\(false\)/,
-  "OTA serialization must not fail-complete the causal refresh token");
-assert.match(weatherSource,
-  /WeatherSourceChange::commit\(\) noexcept[\s\S]*?weather_refresh_cancel_outstanding\(s_refresh_requested_token,[\s\S]*?s_refresh_completed_token\)/,
-  "a source or consent replacement must cancel an unclaimed refresh token");
-const refreshRequest = section(weatherSource,
-  "bool weather_forecast_request_refresh(uint64_t& token) noexcept", "\n}\n\nWeatherForecastStatus");
-const refreshRequestLockStart = refreshRequest.indexOf("    {\n        Lock lk(s_mtx);");
-const refreshRequestLockEnd = refreshRequest.indexOf("\n    }\n    return true;", refreshRequestLockStart);
-const refreshRequestLock = refreshRequest.slice(refreshRequestLockStart, refreshRequestLockEnd);
-assert.ok(refreshRequestLockStart >= 0 && refreshRequestLockEnd > refreshRequestLockStart,
-  "the refresh request mutex transaction must remain identifiable");
-assert.match(refreshRequestLock,
-  /Lock lk\(s_mtx\)[\s\S]*?task\s*=\s*s_task\.load\(std::memory_order_acquire\)[\s\S]*?if \(!task[\s\S]*?s_refresh_requested_token\s*=\s*s_refresh_next_token[\s\S]*?token\s*=\s*s_refresh_requested_token[\s\S]*?xTaskNotifyGive\(task\)/,
-  "the acquire-loaded task handle, token publication and wake must share s_mtx so task-side coalescing cannot race a late Give");
-for (const field of ["requested", "started", "completed", "success"]) {
-  assert.match(httpStatus, new RegExp(`\\\\"refresh_${field}_token\\\\":`),
-    `/status must expose the ${field} token for causal HIL evidence`);
-}
-const saveWeather = section(setWeather, "if (unchanged)", "\n}");
-const weatherBegin = saveWeather.indexOf(
-  "WeatherSourceChange weather_change(location.enabled, c.diagnostics_enabled)");
-const weatherSave = saveWeather.indexOf("config_save(c)");
-const weatherInvalidate = saveWeather.indexOf("weather_change.commit()", weatherSave);
-const weatherCleanup = saveWeather.indexOf("mqtt_request_weather_cleanup()", weatherInvalidate);
-const weatherAck = saveWeather.indexOf('"saved\\":true', weatherCleanup);
-assert.ok(weatherBegin >= 0 && weatherSave > weatherBegin && weatherInvalidate > weatherSave &&
-  weatherCleanup > weatherInvalidate && weatherAck > weatherCleanup,
-  "a saved Weather source must invalidate old values and retained MQTT before acknowledging it");
+// A legacy firmware requires its weather witness. The new schema explicitly retires it.
+assert.match(httpStatus, /ufield\("\{\\"status_schema_version\\":", 2\);/);
+assert.doesNotMatch(httpStatus, /\\"weather_forecast\\":/);
+assert.match(stress, /require_weather = require_weather and schema == 1/);
 assert.match(health, /OTA_HEALTH_MIN_FREE_BYTES\s*=\s*24u\s*\*\s*1024u/);
 assert.match(health, /OTA_HEALTH_MIN_LARGEST_BLOCK_BYTES\s*=\s*16u\s*\*\s*1024u/);
 assert.match(health, /!service\.allocation_failures/);

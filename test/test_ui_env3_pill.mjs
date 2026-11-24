@@ -84,14 +84,6 @@ const S = {
     env3: { supported: true, enabled: true, fresh: true, error: "",
             temperature_c: 21.5, humidity_pct: 48, pressure_hpa: 1007 },
     ntp: { synced: true, time: "2026-08-12T10:00:00Z" },
-    weather_forecast: {
-      configured: true, available: true, fresh: true,
-      hourly: [
-        { time_unix_s: currentUnix + 3600, temperature_c: 22.0, humidity_pct: 46.0, pressure_hpa: 1008.0 },
-        { time_unix_s: currentUnix + 7200, temperature_c: 23.0, humidity_pct: 44.0, pressure_hpa: 1009.0 },
-        { time_unix_s: currentUnix + 10800, temperature_c: 22.5, humidity_pct: 45.0, pressure_hpa: 1008.5 },
-      ],
-    },
     history: { dt: 300, rows: [], modbus_rows: [], env3_rows: [
       { id: "env3_temperature", label: "ENV III temperature" },
       { id: "env3_humidity", label: "ENV III humidity" },
@@ -176,33 +168,16 @@ assert.match(elements.inspHist.innerHTML,
 assert.match(elements.inspHist.innerHTML,
   /vhist-line env-temperature[\s\S]*vhist-line env-humidity[\s\S]*vhist-line env-pressure/,
   "each ENV III area must carry the same darker line on its upper edge");
-assert.match(elements.inspHist.innerHTML,
-  /env-forecast-temperature[\s\S]*env-forecast-humidity[\s\S]*env-forecast-pressure[\s\S]*vhist-forecast-divider/,
-  "all three Open-Meteo forecasts must share the future plot with a visible now divider");
-assert.match(elements.inspHist.innerHTML,
-  /vhist-line env-forecast-temperature[\s\S]*vhist-line env-forecast-humidity[\s\S]*vhist-line env-forecast-pressure/,
-  "forecast areas must use the same darker upper-edge line as every numeric trend");
-assert.match(elements.inspHist.innerHTML, /^<div class="vhist vhist-env3 vhist-multi">/,
-  "the overlaid ENV III and forecast series must use the transparent multi-series contract");
-assert.doesNotMatch(elements.inspHist.innerHTML,
-  /<circle class="vhist-pt env-forecast-/,
-  "forecast areas must stay quiet instead of marking every provider hour with a large point");
-assert.doesNotMatch(elements.inspHist.innerHTML,
-  /<span class="vhist-source env-forecast-/,
-  "the measured-variable legend must not repeat Open-Meteo forecast entries");
+assert.doesNotMatch(elements.inspHist.innerHTML, /env-forecast|Open-Meteo/,
+  "only measured ENV III history is rendered");
 const legendHtml = elements.inspHist.innerHTML.match(/<div class="vhist-legend">([\s\S]*?)<\/div>/)?.[1] || "";
-assert.doesNotMatch(legendHtml, /Open-Meteo · Prognose/,
-  "Open-Meteo provenance belongs in the forecast tooltip, not the always-visible legend");
 assert.match(legendHtml,
   /env-temperature[^>]*><i><\/i>Temperatur<\/button>[\s\S]*env-humidity[^>]*><i><\/i>Luftfeuchte<\/button>[\s\S]*env-pressure[^>]*><i><\/i>Luftdruck<\/button>/,
   "the legend must retain only the three coloured measurement names");
 assert.doesNotMatch(legendHtml, /<small>|°C|%|hPa/,
   "units belong in the tooltip, not the always-visible legend");
-assert.match(style, /\.vhist-area\.env-forecast-temperature\s*\{[^}]*opacity:\s*\.065/);
 assert.match(style, /\.vhist-multi \.vhist-area\s*\{[^}]*opacity:\s*\.09/,
   "measured ENV III areas must use the shared multi-series transparency");
-assert.match(style, /\.vhist-line\.env-forecast-temperature\s*\{[^}]*opacity:\s*\.68/,
-  "forecast upper-edge lines must be quieter than measured upper-edge lines");
 assert.match(style, /\.vhist-tip-rows \.env-temperature\s*\{[^}]*color:\s*var\(--flow-hot\)/);
 assert.match(style, /\.vhist-tip-rows \.env-humidity\s*\{[^}]*color:\s*var\(--flow-cold\)/);
 assert.match(style, /\.vhist-tip-rows \.env-pressure\s*\{[^}]*color:\s*var\(--env-pressure\)/);
@@ -224,149 +199,6 @@ assert.equal(sandbox.__api.tooltipHtml(2),
   `<span class="env-humidity">Luftfeuchte</span><span class="env-humidity">48,0 %</span>` +
   `<span class="env-pressure">Luftdruck</span><span class="env-pressure">1.007,0 hPa</span></span>`,
   "each measured tooltip row must colour its name and value with the matching series token");
-const forecastClock = new Date((currentUnix + 3600) * 1000)
-  .toLocaleTimeString("de", { hour: "2-digit", minute: "2-digit" });
-assert.equal(sandbox.__api.tooltip(3),
-  `${forecastClock}\nOpen-Meteo · Prognose\nTemperatur  22,0 °C\nLuftfeuchte  46,0 %\nLuftdruck  1.008,0 hPa`,
-  "the same tooltip path must expose every provider-timestamped future value");
-assert.equal(sandbox.__api.tooltipHtml(99), "",
-  "a selection retired by an asynchronous history refresh must render no invented forecast");
-assert.equal(sandbox.__api.tooltipHtml(3),
-  `<span class="vhist-tip-meta">Open-Meteo · Prognose</span>` +
-  `<span class="vhist-tip-rows">` +
-  `<span class="env-temperature">Temperatur</span><span class="env-temperature">22,0 °C</span>` +
-  `<span class="env-humidity">Luftfeuchte</span><span class="env-humidity">46,0 %</span>` +
-  `<span class="env-pressure">Luftdruck</span><span class="env-pressure">1.008,0 hPa</span></span>`,
-  "forecast provenance stays neutral while all three forecast rows keep their series colours");
-
-sandbox.__api.toggle("env3_humidity");
-assert.doesNotMatch(elements.inspHist.innerHTML, /class="vhist-line env-humidity"/,
-  "the actual inspector must redraw immediately when its legend changes");
-assert.doesNotMatch(elements.inspHist.innerHTML, /class="vhist-line env-forecast-humidity"/,
-  "a climate legend controls both measured and forecast curves");
-assert.doesNotMatch(sandbox.__api.tooltipHtml(3), /Luftfeuchte/);
-assert.match(sandbox.__api.tooltipHtml(3), /env-pressure">Luftdruck/,
-  "hiding the middle reading must preserve the other measurement colours");
-sandbox.__api.toggle("env3_temperature");
-assert.match(elements.inspHist.innerHTML, /data-hist-series="env3_pressure" aria-pressed="true" disabled/);
-sandbox.__api.toggle("env3_pressure");
-assert.match(elements.inspHist.innerHTML, /class="vhist-line env-pressure"/,
-  "the final visible climate curve must remain visible even for a direct handler call");
-const pressureRing = S.hist.get("env3:env3_pressure");
-const pressureValues = pressureRing.v;
-pressureRing.v = pressureValues.map(() => null);
-assert.doesNotMatch(sandbox.__api.tooltipHtml(3), /env-temperature/,
-  "an explicitly hidden temperature forecast stays hidden even when the last visible sensor has no history");
-assert.match(sandbox.__api.tooltipHtml(3), /env-pressure">Luftdruck<\/span><span class="env-pressure">1.008,0 hPa/,
-  "source fallback must keep forecast pressure on its own colour");
-pressureRing.v = pressureValues;
-sandbox.__api.toggle("env3_humidity");
-sandbox.__api.toggle("env3_temperature");
-
-{
-  const key = "env3:env3_temperature";
-  const initial = S.hist.get(key);
-  S.hist.set(key, { ...initial, refreshFailed: true, v: [initial.v[0], null, null] });
-  sandbox.__api.render();
-  assert.match(elements.inspHist.innerHTML, /vhist-retained env-temperature[^>]*left:0\.000%/,
-    "the retained measurement is placed at its real sample before the forecast divider");
-  assert.match(elements.inspHist.innerHTML, /vhist-axis-now/);
-  assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-temperature/);
-  S.hist.set(key, initial);
-}
-
-{
-  const keys = ["env3_temperature", "env3_humidity", "env3_pressure"].map(id => "env3:" + id);
-  const rings = keys.map(key => S.hist.get(key));
-  keys.forEach((key, i) => S.hist.set(key, { ...rings[i], gen: 4, v: [] }));
-  sandbox.__api.render();
-  assert.match(elements.inspHist.innerHTML, /data-hist="env3_combined"[^>]*data-n="0"/);
-  assert.match(elements.inspHist.innerHTML, /Open-Meteo · Prognose/);
-  assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-temperature/);
-  assert.doesNotMatch(elements.inspHist.innerHTML, /vhist-line env-temperature/);
-  assert.equal(sandbox.__api.tooltip(0),
-    `${forecastClock}\nOpen-Meteo · Prognose\nTemperatur  22,0 °C\nLuftfeuchte  46,0 %\nLuftdruck  1.008,0 hPa`);
-  sandbox.__api.pin(0);
-  sandbox.__api.render();
-  assert.match(elements.inspHist.innerHTML, /vhist-pinned/);
-  sandbox.__api.pin(0);
-  keys.forEach((key, i) => S.hist.set(key, rings[i]));
-  S.hist.set(keys[2], { ...rings[2], gen: 5, err: true, v: [] });
-  sandbox.__api.render();
-  assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-pressure/,
-    "one unavailable measured ring cannot suppress its own fresh forecast");
-  assert.doesNotMatch(elements.inspHist.innerHTML, /vhist-line env-pressure/);
-  S.hist.set(keys[2], rings[2]);
-}
-
-{
-  const rings = [...S.hist.entries()];
-  for (const [id, ring] of rings) S.hist.set(id, { ...ring, gen: 6, t0: null });
-  sandbox.__api.render();
-  assert.match(elements.inspHist.innerHTML, /data-hist="env3_combined"[\s\S]*vhist-line env-temperature/);
-  assert.match(elements.inspHist.innerHTML, /data-hist="env3_forecast"[\s\S]*vhist-line env-forecast-temperature/,
-    "an undated sensor ring and a fresh forecast have independent axes");
-  S.otaCached = true;
-  sandbox.__api.render();
-  assert.doesNotMatch(elements.inspHist.innerHTML, /env-forecast-temperature/,
-    "a cached OTA status cannot supply a current forecast");
-  delete S.otaCached;
-  for (const [index, t0] of [currentUnix + 600, currentUnix - 300].entries()) {
-    for (const [id, ring] of rings) S.hist.set(id, { ...ring, gen: 7 + index, t0 });
-    sandbox.__api.render();
-    assert.match(elements.inspHist.innerHTML, /data-hist="env3_combined"[\s\S]*vhist-line env-temperature/);
-    assert.match(elements.inspHist.innerHTML, /data-hist="env3_forecast"[\s\S]*vhist-line env-forecast-temperature/,
-      "a corrected clock keeps measured points and the fresh forecast on independent axes");
-  }
-  for (const [id, ring] of rings) S.hist.set(id, ring);
-}
-
-{
-  const oldTime = S.status.ntp.time;
-  S.status.ntp.time = new Date((currentUnix + 3600) * 1000).toISOString();
-  sandbox.__api.render();
-  assert.match(elements.inspHist.innerHTML, /data-hist="env3_forecast"/,
-    "a forward clock correction also separates the stale measurement times from the forecast");
-  S.status.ntp.time = oldTime;
-
-  const plot = {
-    dataset: { hist: "env3_combined", n: "3", rev: sandbox.__api.revision() },
-    getBoundingClientRect: () => ({ left: 0, width: 100 }),
-    querySelector: () => ({ hidden: false, style: {} }),
-    querySelectorAll: () => [], closest: () => null,
-    parentElement: { querySelector: () => ({ style: { setProperty() {} } }) },
-  };
-  const events = {};
-  sandbox.__api.wireTrendScrub({ addEventListener: (event, handle) => { events[event] = handle; } });
-  const pointer = { target: plot, pointerId: 1, clientX: 68 };
-  events.pointerdown(pointer);
-  const mounted = sandbox.__api.mounted(plot);
-  assert.ok(mounted?.forecast, "the pointer owns the rendered forecast");
-  S.status.ntp.time = new Date((currentUnix + 5) * 1000).toISOString();
-  S.status.uptime_s += 5;
-  assert.equal(sandbox.__api.mounted(plot), mounted,
-    "a routine poll cannot invalidate the geometry of a captured drag");
-  events.pointermove(pointer);
-  events.pointerup({ ...pointer, type: "pointerup" });
-  assert.equal(S.histPin.get("env3_combined")?.t, currentUnix + 7200,
-    "pointerup pins the forecast hour selected on the mounted plot");
-  S.histPin.delete("env3_combined");
-  S.status.ntp.time = oldTime;
-  S.status.uptime_s -= 5;
-  plot.dataset.rev = sandbox.__api.revision();
-  const hourly = S.status.weather_forecast.hourly;
-  events.pointerdown(pointer);
-  S.status.weather_forecast.hourly = hourly.filter(hour => hour.time_unix_s !== currentUnix + 7200);
-  plot.dataset.cur = "4";
-  events.keydown({ target: plot, key: "Enter", preventDefault() {} });
-  assert.equal(S.histPin.has("env3_combined"), false,
-    "keyboard confirmation during the same drag cannot pin a replacement hour");
-  events.pointerup({ ...pointer, type: "pointerup" });
-  assert.equal(S.histPin.has("env3_combined"), false,
-    "a forecast hour removed during the gesture must not create a latent pin");
-  S.status.weather_forecast.hourly = hourly;
-}
-
 // Transport loss retires only the live status claims. The dated historical measurements remain
 // inspectable; a values-only error does not erase independent freshly obtained ENV III status.
 S.transportUnavailable = "status";
@@ -377,15 +209,13 @@ assert.equal(elements.inspNow.textContent, "— °C", "an already-open inspector
 assert.doesNotMatch(elements.inspBody.innerHTML, /21,5 °C|48 %|1\.007 hPa|Sensor: Aktuell/);
 assert.match(elements.inspHist.innerHTML, /env-temperature[\s\S]*env-humidity[\s\S]*env-pressure/,
   "dated measurements remain available when the live status transport fails");
-assert.doesNotMatch(elements.inspHist.innerHTML, /env-forecast-temperature/,
-  "forecast freshness cannot be asserted from the failed status transport");
 assert.equal(S.hist.get("env3:env3_temperature").v[2], 215);
 S.transportUnavailable = "values";
 sandbox.__api.render();
 assert.equal(elements.svEnv3Temp.textContent, "21,5 °C");
 assert.equal(elements.gEnv3.classList.contains("fresh"), true);
 assert.equal(elements.inspNow.textContent, "21,5 °C");
-assert.match(elements.inspHist.innerHTML, /env-forecast-temperature/);
+assert.match(elements.inspHist.innerHTML, /env-temperature[\s\S]*env-humidity[\s\S]*env-pressure/);
 S.transportUnavailable = null;
 sandbox.__api.render();
 assert.equal(elements.svEnv3Temp.textContent, "21,5 °C");
@@ -406,8 +236,8 @@ assert.match(elements.inspHist.innerHTML, /<div class="vhist-graph vhist-has-y">
 }
 assert.match(elements.inspHist.innerHTML, /<span class="vhist-y-label env-temperature num"[^>]*>[^<]+ °C<\/span>/,
   "default ENV III Y-scale tracks temperature in its own colour");
-assert.match(elements.inspHist.innerHTML, /class="vhist-axis vhist-axis-future"[\s\S]*<span class="vhist-time vhist-live mono num" hidden><\/span><\/div>/,
-  "ENV III forecast axis must sit inside .vhist-graph alongside .vhist-time");
+assert.match(elements.inspHist.innerHTML, /class="vhist-axis"><span>[^<]+<\/span><span>jetzt<\/span><\/div><span class="vhist-time vhist-live mono num" hidden><\/span><\/div>/,
+  "the measured time axis must sit inside .vhist-graph alongside .vhist-time");
 sandbox.__api.toggle("env3_temperature");
 assert.match(elements.inspHist.innerHTML, /<span class="vhist-y-label env-humidity num"[^>]*>[^<]+ %<\/span>/,
   "toggling temperature off switches ENV III Y-scale to humidity");
@@ -421,9 +251,9 @@ sandbox.__api.toggle("env3_temperature");
   const rings = keys.map(key => S.hist.get(key));
   keys.forEach((key, i) => S.hist.set(key, { ...rings[i], gen: 99, v: [] }));
   sandbox.__api.render();
-  assert.match(elements.inspHist.innerHTML, /<line class="vhist-grid"/);
-  assert.match(elements.inspHist.innerHTML, /<div class="vhist-graph vhist-has-y"><div class="vhist-y" aria-hidden="true"><span class="vhist-y-label env-temperature num"/,
-    "forecast-only ENV III chart still renders Y-scale gridlines and left Y-axis labels");
+  assert.match(elements.inspHist.innerHTML, /vhist-flat.*vhist-note/, "an empty ENV III history must say it has no samples");
+  assert.doesNotMatch(elements.inspHist.innerHTML, /vhist-plot|vhist-grid|vhist-y-label/,
+    "an empty ENV III history must not draw a plot or scale");
   keys.forEach((key, i) => S.hist.set(key, rings[i]));
   sandbox.__api.render();
 }

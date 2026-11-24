@@ -13,19 +13,19 @@
 // republishing nothing, and reporting no fault — for as long as the shortage lasts, which may be
 // until somebody walks to the board. The poll task allocates a value vector every cycle, the httpd
 // task copies a model-dependent /values snapshot per request (the body itself is chunk-streamed),
-// the MQTT bridge builds a grouped document per change, and OTA and the weather client each want a
+// the MQTT bridge builds a grouped document per change, and OTA needs a
 // whole TLS session; a fragmented heap starves
 // all of them at once. Each one catches, logs at most once, and tries again a second later.
 //
-// A hang is the worst failure shape available. A crash reboots in seconds and leaves a reset reason,
-// a core dump and a syslog record; a wedge looks exactly like a powered-off device, heals never, and
-// reports nothing — docs/ARCHITECTURE.md's "Memory constraints" section already explains that a
-// reboot loop stops the poll cycle and drops MQTT availability, and an unbroken wedge pays that cost
-// permanently instead of for four seconds. So: when the heap has been unusable CONTINUOUSLY for
-// long enough that no transient explains it, restart deliberately.
+// A hang is the worst failure shape available. A crash reboots in seconds and leaves a reset
+// reason, a core dump and a syslog record; a wedge looks exactly like a powered-off device, heals
+// never, and reports nothing — docs/ARCHITECTURE.md's "Memory constraints" section already explains
+// that a reboot loop stops the poll cycle and drops MQTT availability, and an unbroken wedge pays
+// that cost permanently instead of for four seconds. So: when the heap has been unusable
+// CONTINUOUSLY for long enough that no transient explains it, restart deliberately.
 //
-// WHY A RESTART AND NOT IN-PLACE RECOVERY. Rebooting is the crude answer, so it is worth stating why
-// the alternatives are worse rather than merely unchosen:
+// WHY A RESTART AND NOT IN-PLACE RECOVERY. Rebooting is the crude answer, so it is worth stating
+// why the alternatives are worse rather than merely unchosen:
 //   - Tearing down and re-initialising the subsystems (WiFi, esp-mqtt, the HTTP server) runs the
 //     failing component's OWN code at the moment it is failing, and deinit paths allocate. A throw
 //     there unwinds into a task loop and reaches std::terminate — an UNCONTROLLED restart with no
@@ -38,25 +38,25 @@
 //     happened to ask for memory, and cannot satisfy the allocation. It is a sensor, not an actor.
 //   - There is no defragmentation call to make.
 //
-// WHY IT CANNOT SIMPLY REBOOT ON THE FIRST bad_alloc. One failed allocation is exactly the transient
-// the existing guards handle correctly, and this firmware has legitimate bursts that touch the
-// largest block hard — an OTA download, several browsers polling /values and /status at once, a
-// /diag dump. All of those resolve in seconds. The trigger is therefore a LONG, UNBROKEN run below
-// the threshold, which no burst can reach.
+// WHY IT CANNOT SIMPLY REBOOT ON THE FIRST bad_alloc. One failed allocation is exactly the
+// transient the existing guards handle correctly, and this firmware has legitimate bursts that
+// touch the largest block hard — an OTA download, several browsers polling /values and /status at
+// once, a /diag dump. All of those resolve in seconds. The trigger is therefore a LONG, UNBROKEN
+// run below the threshold, which no burst can reach.
 //
 // WHY largest_block AND NOT free. The binding limit on this chip is the largest contiguous free
-// block, not the total — the reason /status.sys reports both, and the reason history.hpp carries the
-// two as a PAIR (a leak is a slope; fragmentation is the two lines separating). A fragmented heap
-// shows a perfectly survivable `free` while no single allocation of any size can be served.
+// block, not the total — the reason /status.sys reports both, and the reason history.hpp carries
+// the two as a PAIR (a leak is a slope; fragmentation is the two lines separating). A fragmented
+// heap shows a perfectly survivable `free` while no single allocation of any size can be served.
 //
 // WHY *INTERNAL* largest_block. The sample must come from MALLOC_CAP_8BIT|MALLOC_CAP_INTERNAL, not
-// MALLOC_CAP_DEFAULT: the latter reports the maximum across every heap carrying the cap, and a board
-// with PSRAM registers it there (sdkconfig.defaults documents CONFIG_SPIRAM as an uncomment-if-you-
-// have-it option). Such a board in the exact wedge — internal DRAM at 768 B — would read several
-// megabytes and never trigger, i.e. this would be a silent no-op on the one board with the extra
-// RAM. The thresholds below are internal-DRAM numbers and mean nothing against any other sample, so
-// heap_guard.hpp exposes ONE sampler (heap_largest_internal_block) and every reporting site in the
-// firmware now shares it.
+// MALLOC_CAP_DEFAULT: the latter reports the maximum across every heap carrying the cap, and a
+// board with PSRAM registers it there (sdkconfig.defaults documents CONFIG_SPIRAM as an
+// uncomment-if-you- have-it option). Such a board in the exact wedge — internal DRAM at 768 B —
+// would read several megabytes and never trigger, i.e. this would be a silent no-op on the one
+// board with the extra RAM. The thresholds below are internal-DRAM numbers and mean nothing against
+// any other sample, so heap_guard.hpp exposes ONE sampler (heap_largest_internal_block) and every
+// reporting site in the firmware now shares it.
 #include <cstdint>
 #include <cstddef>
 

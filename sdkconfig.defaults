@@ -15,10 +15,8 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# CPU clock: the S3 maximum instead of the SDK's 160 MHz default. HTTPS certificate-chain checks run
-# in software (no ECC accelerator), and Weather's TLS phase holds /values and the X10A/MQTT/Modbus
-# quiesce for its whole duration; that phase shrinks by about the clock ratio. Power management is
-# not enabled, so this is the fixed clock.
+# Run at the S3 maximum of 240 MHz for software TLS certificate verification. Power management is
+# disabled, so the CPU uses this fixed clock.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # Console over native USB-Serial/JTAG — present on esp32s3 (the XIAO
@@ -50,7 +48,7 @@ CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
 # Every received frame is copied into a dynamic RX buffer that stays allocated until lwIP's consumer
 # frees the pbuf (LWIP_L2_TO_L3_COPY is off); the bench driver used 1,700 bytes per buffer. With the
-# upstream mDNS queue of 16 and cap of 32, a bench Weather TLS handshake held up to 17 of them
+# upstream mDNS queue of 16 and cap of 32, a legacy bench TLS handshake held up to 17 of them
 # (28.2 KiB), almost all mDNS packets queued behind the starved mDNS task (see
 # CONFIG_MDNS_ACTION_QUEUE_LEN). The cap is that queue plus one full-size TCP receive window
 # (CONFIG_LWIP_TCP_WND_DEFAULT / CONFIG_LWIP_TCP_MSS = 8 segments) and at least the static RX count,
@@ -101,7 +99,7 @@ CONFIG_LWIP_TCP_SND_BUF_DEFAULT=5760
 CONFIG_LWIP_TCP_WND_DEFAULT=11520
 
 # Disable IPv6: all firmware networking paths (HTTP server/client, MQTT, HomeHub Modbus, syslog,
-# SNTP, OTA and Weather) use IPv4 (AF_INET), and espressif/mdns builds IPv4-only cleanly under
+# SNTP and OTA) use IPv4 (AF_INET), and espressif/mdns builds IPv4-only cleanly under
 # #ifdef CONFIG_LWIP_IPV6, recovering flash headroom without affecting runtime features.
 CONFIG_LWIP_IPV6=n
 
@@ -147,7 +145,7 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # Drop code paths this firmware never uses.
 # mbedTLS human-readable error-string tables — we only log numeric TLS codes (MQTTS/OTA). ~6 KB.
 CONFIG_MBEDTLS_ERROR_STRINGS=n
-# TLS client only: OTA, Weather and optional MQTTS connect out; the HTTP service is plain
+# TLS client only: OTA and optional MQTTS connect out. The HTTP service is plain
 # trusted-LAN HTTP and an HTTPS server is not adopted (ESP_IDF_MATRIX.md N07). Without the server
 # role mbedTLS drops its server handshake state machine.
 CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
@@ -183,18 +181,17 @@ CONFIG_MBEDTLS_X509_CSR_PARSE_C=n
 CONFIG_MBEDTLS_SSL_CACHE_C=n
 CONFIG_MBEDTLS_HARDWARE_RSA_DS_PERIPHERAL=n
 CONFIG_ESP_TLS_USE_DS_PERIPHERAL=n
-# Keep CA verification for MQTTS, OTA and forecasts, but use ESP-IDF's common-root subset. It
+# Keep CA verification for MQTTS and OTA with ESP-IDF's common-root subset. It
 # retains roughly 99% public-root coverage at about half the flash cost of the full Mozilla set;
 # brokers chained only to a rare excluded root need a certificate chain rooted in this subset.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
 # Disable ESP-IDF 6.1.1's default cross-signed CA callback: it allocates a temporary
 # mbedtls_x509_crt, PSA public-key slot and issuer RDN list (~1+ KiB internal heap) on every
-# bundle-verified handshake, encroaching on Weather's measured 48/20 KiB gate (800 B live trough)
-# and adding an unmodeled callback path. Keep the 6.1 in-place esp_crt_verify_callback path.
+# bundle-verified handshake and adds a callback path. Keep the 6.1 in-place verification path.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=n
 # Allocate TLS RX/TX records only when needed, size them for the actual record, and return large
-# buffers to small cache buffers after use. ESP-IDF 6.1's dynamic-buffer port applies this to OTA,
-# weather and optional MQTTS and removes the connection-long 16 KiB RX + 4 KiB TX reservation.
+# buffers to small cache buffers after use. ESP-IDF 6.1 applies this to OTA and optional MQTTS,
+# removing the connection-long 16 KiB RX plus 4 KiB TX reservation.
 # Keep config/key/CA lifetime unchanged: freeing those after a handshake would require every
 # reconnect path to register them again and is a separate, riskier optimisation.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
@@ -225,8 +222,8 @@ CONFIG_MDNS_MULTIPLE_INSTANCE=n
 CONFIG_MDNS_PREDEF_NETIF_AP=n
 # The mDNS task runs at priority 1 and keeps every received packet, together with its WiFi RX
 # buffer, in this action queue until it gets the CPU. A higher-priority task that computes for
-# seconds (Weather's TLS certificate verification takes ~2.7 s) therefore filled the default
-# 16-entry queue (26.6 KiB of RX buffers on the bench). Use the component minimum. While the queue
+# seconds can fill the default 16-entry queue (26.6 KiB of RX buffers in a legacy bench TLS run).
+# Use the component minimum. While the queue
 # is full (after such starvation, or a burst of multicast answers to one query), mDNS drops
 # received packets (queriers resend), defers timed sends to the next timer tick, and fails a
 # one-shot query or hostname change started into it; the HomeHub search retries such an attempt

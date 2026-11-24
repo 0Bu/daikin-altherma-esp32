@@ -113,7 +113,7 @@ inline FeatureCoverage feature_coverage(const ProfileView& v) {
 // counters and a compressor run-state to interpret them against; nothing else.
 inline bool uc5_supported(const FeatureCoverage& c) { return c.retry_counters && c.run_state; }
 
-// The later inference use cases (UC1 leak/anomaly, UC2 heating curve) add the hydronic working
+// Model-based inference adds the hydronic working
 // point and the refrigerant-circuit signals. Strictly stronger than uc5_supported() — a build that
 // can run a trained model can always run the rule.
 inline bool inference_supported(const FeatureCoverage& c) {

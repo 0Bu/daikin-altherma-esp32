@@ -100,6 +100,20 @@ def digest(source):
     return hashlib.sha256('\0'.join(tokens).encode()).hexdigest()
 
 
+@lru_cache(maxsize=512)
+def caller_labels(source, search):
+    # Most negative controls replace one file. A change to the file contents or
+    # monitored pattern needs a fresh scan.
+    spans = definitions(source)
+    labels = []
+    for match in search.finditer(masked(source)):
+        owners = [span for span in spans if span[0] <= match.start() < span[2]]
+        owner = min(owners, key=lambda span: span[0]) if owners else None
+        label = '<declaration>' if owner is None else '<definition>' if match.start() == owner[0] else owner[3]
+        labels.append((match[1], label))
+    return tuple(labels)
+
+
 def caller_inventory(sources, names):
     result = {name: {} for name in names}
     # Headers can introduce inline callers or callback aliases too. Include every bare
@@ -108,14 +122,9 @@ def caller_inventory(sources, names):
     for path, source in sources.items():
         if not path.endswith(('.cpp', '.hpp')):
             continue
-        code = masked(source)
-        spans = definitions(source)
-        for match in search.finditer(code):
-            owners = [span for span in spans if span[0] <= match.start() < span[2]]
-            owner = min(owners, key=lambda span: span[0]) if owners else None
-            label = '<declaration>' if owner is None else '<definition>' if match.start() == owner[0] else owner[3]
+        for name, label in caller_labels(source, search):
             key = path + ':' + label
-            counts = result[match[1]]
+            counts = result[name]
             counts[key] = counts.get(key, 0) + 1
     return result
 
@@ -461,8 +470,7 @@ def validate_sources(budgets, sources, error):
 
 def validate_inlining(disassembly, error):
     exact = {re.sub(r'\\(.)', r'\1', rule['pattern'][1:-1]) for rule in SYMBOLS.values()}
-    # history_journal_header_matches is overloaded. Monitor only the four-argument
-    # structural matcher reached from the DHW schema wrapper.
+    # Monitor the structural overload shared by the DHW and physical record checks.
     dhw_header = re.sub(r'\\(.)', r'\1', SYMBOLS['dhw_trace_header_shape']['pattern'][1:-1])
     for name in re.findall(r'^\s*[0-9a-fA-F]+\s+<(.+)>:\s*$', disassembly, re.M):
         if (re.search(r'\bdhw_loss_step_impl(?:<[^;]*>)?\(', name)

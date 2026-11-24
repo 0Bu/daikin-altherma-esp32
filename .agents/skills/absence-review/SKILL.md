@@ -1,6 +1,6 @@
 ---
 name: absence-review
-description: Review what the firmware and the web UI do when a third-party system is unconfigured, deleted, or unreachable — the MQTT broker, the HomeHub, ENV III, the MQTT room source, the circulation witness, Open-Meteo, the X10A bus, and safe mode. Runs the deterministic absence matrix and then judges what it cannot. Use after changes that add, remove, or read an optional source. Report findings by default; apply fixes only when explicitly requested.
+description: Review firmware and web UI behavior when the MQTT broker, HomeHub, ENV III, circulation witness or X10A is unconfigured, removed or unreachable, including safe mode. Run the deterministic absence matrix and review source ownership and visible states. Use after optional-source changes. Report by default. Apply fixes only when requested.
 ---
 
 # absence-review
@@ -13,8 +13,7 @@ because this skill activated. When a mutation is explicitly requested, keep it w
 report analysis, changes, and verification separately.
 
 Every source this firmware reads except the board itself is **optional**, and each can be absent
-independently of the others: the MQTT broker, the MQTT room source, the MQTT circulation witness, the
-HomeHub Modbus link, the ENV III accessory, the Open-Meteo location, and the X10A bus itself. Safe
+independently of the others: the MQTT broker, circulation witness, HomeHub Modbus, ENV III and X10A. Safe
 mode removes all of them at once. Absence is not one state — it is a **cross product**, and it is
 where this project's gates are structurally blind.
 
@@ -76,7 +75,6 @@ nothing else is:
 | retained MQTT topic | an explicit empty retained publish | every other topic |
 | HA discovery config with established ownership | an explicit retraction before any replacement | other entities |
 | a checkup verdict's evidence | `checkup_dhw_reset()` and friends | the other checks |
-| the heating-curve sample memory | disarming, saving the consent or room source, or changing the HomeHub host/port/unit | the sequence contract |
 
 Unproven discovery ownership delegates that config's retirement to the
 [operator migration](../../../docs/MQTT.md#migrations). Check that raw state still withdraws and
@@ -99,8 +97,7 @@ that looks like a reading, or a substituted second-best value. Check:
 
 ### 2.4 Does the copy name the real blocker?
 
-The rule the room-source row already follows: a row that cannot produce a value must say **which**
-thing to go and fix, and must not name a thing that is already done. Read every changed state string the diff
+A row that cannot produce a value must identify the missing prerequisite. Read every changed state string the diff
 can reach across **every shipped locale**, and ask of each: is this true when the user has
 configured everything except the one thing this names? Verify the complete locale matrix and
 report any changed translation whose meaning was not reviewed; key coverage alone cannot prove it.

@@ -95,7 +95,7 @@ skill/reviewer asserts:
 **Skills** (`.agents/skills/`):
 
 - **`$absence-review`** — verifies graceful degradation when optional sources (MQTT, HomeHub Modbus,
-  ENV III, Open-Meteo, X10A bus, safe mode) are absent or unconfigured. Verify against `main/logic/history.hpp`,
+  ENV III, the circulation witness and X10A) are absent or unconfigured, including in safe mode. Verify against `main/logic/history.hpp`,
   `main/logic/redact.hpp`, `tools/absence/selftest.sh`, `scripts/run-contract-tests.sh`, and
   `scripts/run-ui-use-case-tests.sh`. Must preserve the principle that absence renders as `—` or is omitted,
   never fabricating zero or substitute data.

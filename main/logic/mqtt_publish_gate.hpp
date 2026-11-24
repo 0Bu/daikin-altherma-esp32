@@ -113,15 +113,14 @@ inline MqttPublishGateDecision mqtt_publish_gate_step(MqttPublishGateState state
 // ordinary reconnect announce restores transport `online` and the install withdraws it
 // again; a check or failed install resumes the same way. A pause that finds the client stopped or
 // reconnecting after an earlier stop cannot withdraw anything (docs/ARCHITECTURE.md).
-// A Weather pause is never followed by a restart and keeps its short gap without availability
-// churn. Every client carries this transport LWT, and only a connected client
+// Every client carries this transport LWT, and only a connected client
 // can still put the marker on the stream ahead of the DISCONNECT.
 inline constexpr bool mqtt_pause_withdraws_online(bool ota_pause, bool publisher_client,
                                                   bool mqtt_connected) {
     return ota_pause && publisher_client && mqtt_connected;
 }
 
-// If OTA or Weather already claimed the network heap while mqtt_ha_start() was initializing,
+// If OTA already claimed the network heap while mqtt_ha_start() was initializing,
 // defer the initial esp_mqtt_client_start() to mqtt_transport_resume_step() instead of spawning
 // and immediately stopping a transport task inside the competing TLS window.
 inline constexpr bool mqtt_initial_start_deferred(bool pause_requested, bool competing_tls_active) {

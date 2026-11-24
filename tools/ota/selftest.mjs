@@ -25,14 +25,12 @@ const files = [
   "main/hp_poll.cpp",
   "main/hp_modbus.cpp",
   "main/syslog.cpp",
-  "main/weather_forecast.cpp",
   "main/mcp_server.cpp",
   "main/http_common.cpp",
   "main/http_server.cpp",
   "main/json_guard.hpp",
   "main/logic/mcp.hpp",
   "main/http_status.cpp",
-  "main/logic/http_values_wait.hpp",
   "main/logic/http_deadline.hpp",
   "main/logic/health_gate.hpp",
   "main/logic/ota_changelog_range.hpp",
@@ -184,30 +182,6 @@ try {
         'if False and b"\\\\" in manifest_bytes:')],
     ["the rollback health gate may consume the final 1 KiB reserve", () =>
       replaceBudgetMember("paths", "ota_health_gate", "max_bytes", 3072, 4096)],
-    ["the Weather download path may consume its reviewed reserve", () =>
-      replaceBudgetMember("paths", "weather_task_download", "max_bytes", 6656, 6657)],
-    ["the Weather parse path may consume its reviewed reserve", () =>
-      replaceBudgetMember("paths", "weather_task_parse", "max_bytes", 6656, 6657)],
-    ["the Weather task reserve is reduced below its reviewed floor", () =>
-      replaceBudgetMember("tasks", "weather", "reserve_bytes", 1536, 1024)],
-    ...["weather_task_tls", "weather_task_tls_headers", "weather_task_tls_body"].flatMap((name) => [
-      [`${name} consumes its reviewed reserve`, () =>
-        replaceBudgetMember("paths", name, "max_bytes", 6656, 6657)],
-      [`${name} loses the complete SDK TLS allowance`, () =>
-        replaceBudgetMember("paths", name, "base_bytes", 4608, 2048)],
-      [`${name} loses its task owner`, () => mutateBudgets((budgets) => {
-        assert.ok(budgets.tasks.weather.paths.includes(name));
-        budgets.tasks.weather.paths = budgets.tasks.weather.paths.filter((value) => value !== name);
-      })],
-    ]),
-    ["the Weather download path omits its live cycle frame", () =>
-      omitPathSymbol("weather_task_download", "weather_cycle")],
-    ["the Weather parse path omits its live cycle frame", () =>
-      omitPathSymbol("weather_task_parse", "weather_cycle")],
-    ["the Weather TLS path is no longer sampled before HIL completion", () =>
-      replaceOnce("main/weather_forecast.cpp",
-        "    stack_watch_sample(StackWatch::Weather);\n    // A location/consent save",
-        "    // Weather stack sample bypassed\n    // A location/consent save")],
     ["blank USB otadata is documented as a known unarmed state", () =>
       replaceOnce("docs/SECURITY.md", 'Status preserves', 'USB boots `UNDEFINED`; status preserves')],
     ["dynamic TLS buffers are disabled", () =>
@@ -277,14 +251,6 @@ try {
       replaceOnce("main/ota_update.cpp",
         "static_assert(sizeof(s_ota_health_task_stack) == kHealthTaskStack);",
         "/* mutation: SDK stack element width is unchecked */")],
-    ["Weather payload allocation ignores an unavailable deadline watchdog", () =>
-      replaceOnce("main/weather_forecast.cpp",
-        /(bool download_json\([\s\S]{0,220}?)if \(!http_deadline_ready\(\)\)/,
-        "$1if (false)")],
-    ["Weather task creation ignores an unavailable deadline watchdog", () =>
-      replaceOnce("main/weather_forecast.cpp",
-        /(void weather_forecast_start\(\)[\s\S]{0,500}?)if \(!http_deadline_ready\(\)\)/,
-        "$1if (false)")],
     ["the firmware TLS aggregate floor is weakened to the verifier budget", () =>
       replaceOnce("main/logic/ota_headroom.hpp",
         "OTA_TRANSFER_HEADROOM = {56 * 1024, 24 * 1024, 4}",
@@ -460,10 +426,6 @@ try {
       replaceOnce("main/ota_update.cpp",
         /(while \(transfer_ok\) \{[\s\S]{0,180}?)!set_http_timeout_to_deadline\(client, transfer_started, kFirmwareDeadline\)/,
         "$1false")],
-    ["a trickling weather response can hold the network heap forever", () =>
-      replaceOnce("main/weather_forecast.cpp",
-        "socket_deadline.arm(client, download_started, kDownloadDeadline)",
-        "socket_deadline.arm_bypassed(client, download_started, kDownloadDeadline)")],
     ["manifest deadline expiry after a blocking read is mislabeled", () =>
       replaceOnce("main/ota_update.cpp",
         /(esp_http_client_read\(c,[\s\S]{0,220}?)socket_deadline\.expired\(\)/,
@@ -495,20 +457,6 @@ try {
       replaceOnce("main/ota_update.cpp",
         /(while \(transfer_ok\)[\s\S]{0,700}?)socket_deadline\.expired\(\)/,
         "$1false")],
-    ["weather deadline expiry after a blocking read is mislabeled", () =>
-      replaceOnce("main/weather_forecast.cpp",
-        /(esp_http_client_read\(client, chunk, sizeof\(chunk\)\);[\s\S]{0,160}?)socket_deadline\.expired\(\)/,
-        "$1false")],
-    ["a truncated Weather body is accepted as fresh", () =>
-      replaceOnce("main/weather_forecast.cpp",
-        /http_body_complete\(\s*claimed,\s*out\.size\(\),\s*esp_http_client_is_complete_data_received\(client\)\)/,
-        "true")],
-    ["Weather accepts garbage after a valid JSON root", () =>
-      replaceOnce("main/weather_forecast.cpp", "!json_suffix_is_whitespace(",
-        "false && !json_suffix_is_whitespace(")],
-    ["Weather cleanup closes before joining the socket watchdog", () =>
-      replaceOnce("main/weather_forecast.cpp", "(void)deadline.disarm();",
-        "(void)deadline.disarm_bypassed();")],
     ["HTTP cleanup before validation disappears", () =>
       replaceOnce("main/ota_update.cpp",
         /(\/\/ CRITICAL ORDERING:[\s\S]{0,900}?resources.release_buffer\(\);\n    )close_http_client\(client, socket_deadline\);/,
@@ -562,10 +510,10 @@ try {
         "mqtt_transport_pause_if_requested();\n    s_publish_network_quiesced.store(true, std::memory_order_release);\n    vTaskDelay",
         "mqtt_transport_pause_if_requested();\n    s_publish_network_quiesced.store(false, std::memory_order_release);\n    vTaskDelay")],
     ["HomeHub keeps allocating during OTA", () =>
-      replaceOnce("main/hp_modbus.cpp", "if (ota_download_active() || weather_fetch_active()) {",
+      replaceOnce("main/hp_modbus.cpp", "if (ota_download_active()) {",
         "if (false) {")],
     ["Syslog keeps allocating during OTA", () =>
-      replaceOnce("main/syslog.cpp", "if (ota_download_active() || weather_fetch_active()) {",
+      replaceOnce("main/syslog.cpp", "if (ota_download_active()) {",
         "if (false) {")],
     ["HomeHub no longer acknowledges an in-flight allocation cycle", () =>
       replaceOnce("main/hp_modbus.cpp",
@@ -575,12 +523,6 @@ try {
       replaceOnce("main/syslog.cpp",
         "s_network_quiesced.store(false, std::memory_order_release);",
         "s_network_quiesced.store(true, std::memory_order_release);")],
-    ["Weather starts TLS without the HomeHub acknowledgement", () =>
-      replaceOnce("main/weather_forecast.cpp", "!mb_network_quiesced() ||",
-        "false ||")],
-    ["Weather starts TLS without the Syslog acknowledgement", () =>
-      replaceOnce("main/weather_forecast.cpp", "!syslog_network_quiesced()) &&",
-        "false) &&")],
     ["the MQTT acknowledgement ignores an asynchronous TLS reconnect", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "!s_transport_connecting.load(std::memory_order_acquire);",
@@ -614,9 +556,6 @@ try {
         "esp_mqtt_client_stop_bypassed(s_client);")],
     ["the OTA lease no longer withdraws retained online before its MQTT stop", () =>
       replaceOnce("main/ota_update.cpp", "mqtt_transport_withdraw_online_on_pause();\n", "")],
-    ["a Weather pause withdraws availability every refresh", () =>
-      replaceOnce("main/weather_forecast.cpp", "mqtt_transport_pause_for_network_heap();",
-        "mqtt_transport_withdraw_online_on_pause();\n        mqtt_transport_pause_for_network_heap();")],
     ["the availability withdrawal follows the clean DISCONNECT", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "    mqtt_ota_withdraw_online();\n    const esp_err_t stop_rc = esp_mqtt_client_stop(s_client);",
@@ -699,9 +638,6 @@ try {
     ["set_status stores its reason in the allocating MqttStatus::error", () =>
       replaceOnce("main/mqtt_ha.cpp", "if (err) s_error = err;",
         "if (err) { s_error = err; s_status.error = err; }")],
-    ["Weather no longer requests the MQTT transport pause", () =>
-      replaceOnce("main/weather_forecast.cpp", "mqtt_transport_pause_for_network_heap();",
-        "mqtt_transport_pause_bypassed();")],
     ["OTA starts without waiting for the HomeHub acknowledgement", () =>
       replaceOnce("main/ota_update.cpp", "else if (!wait_for_modbus_quiesce())",
         "else if (false)")],
@@ -739,52 +675,6 @@ try {
       replaceOnce("main/http_status.cpp",
         /(esp_err_t http_send_values_json\([\s\S]{0,420}?)if \(ota_download_active\(\)\) return network_tls_busy\(req\);/,
         "$1if (false) return network_tls_busy(req);")],
-    ["values wait ignores OTA becoming active behind Weather", () =>
-      replaceOnce("main/http_status.cpp", "const bool ota_active  = ota_download_active();",
-        "const bool ota_active  = false;")],
-    ["values wait tears the Weather-to-OTA hand-off", () =>
-      replaceOnce(
-        "main/http_status.cpp",
-        "const bool weather_tls = !weather_values_reader_enter();\n        const bool ota_active  = ota_download_active();",
-        "const bool ota_active  = ota_download_active();\n        const bool weather_tls = !weather_values_reader_enter();",
-      )],
-    ["values snapshots no longer wait behind a weather TLS owner", () =>
-      replaceOnce("main/http_status.cpp", "const bool weather_tls = !weather_values_reader_enter();",
-        "const bool weather_tls = false;")],
-    ["values snapshots wait through Weather's lead again", () =>
-      replaceOnce("main/http_status.cpp", "const bool weather_tls = !weather_values_reader_enter();",
-        "const bool weather_tls = weather_fetch_active() || !weather_values_reader_enter();")],
-    ["an admitted values reader never leaves Weather's exclusion", () =>
-      replaceOnce("main/http_status.cpp", "if (std::exchange(admitted, false)) weather_values_reader_leave();",
-        "(void)std::exchange(admitted, false);")],
-    ["a values reader reads the TLS phase before it is counted", () =>
-      replaceOnce("main/logic/http_values_wait.hpp",
-        "readers_.fetch_add(1, std::memory_order_seq_cst);\n        if (!tls_.load(std::memory_order_seq_cst)) return true;",
-        "if (!tls_.load(std::memory_order_seq_cst)) return readers_.fetch_add(1) >= 0;")],
-    ["a counted values reader refused for OTA is never released", () =>
-      replaceOnce("main/http_status.cpp", "if (!weather_tls) weather_values_reader_leave();", "")],
-    ["Weather reads the values reader count with acquire ordering only", () =>
-      replaceOnce("main/logic/http_values_wait.hpp",
-        "return readers_.load(std::memory_order_seq_cst);",
-        "return readers_.load(std::memory_order_acquire);")],
-    ["Weather starts TLS beside an admitted values snapshot", () =>
-      replaceOnce("main/weather_forecast.cpp", "values_quiesce_failed = !tls_phase.values_quiesced();",
-        "values_quiesce_failed = false;")],
-    ["the values TLS wait exceeds the live request timeout", () =>
-      replaceOnce("main/http_status.cpp", "pdMS_TO_TICKS(4000)",
-        "pdMS_TO_TICKS(6000)")],
-    ["the values snapshot bypasses its TLS-owner wait", () =>
-      replaceOnce(
-        "main/http_status.cpp",
-        /(esp_err_t http_send_values_json\([\s\S]{0,520}?)if \(!wait_for_values_tls_owner\(reader\) \|\|/,
-        "$1if (!wait_for_values_tls_owner_bypassed(reader) ||",
-      )],
-    ["the values snapshot drops its final OTA recheck", () =>
-      replaceOnce(
-        "main/http_status.cpp",
-        /(esp_err_t http_send_values_json\([\s\S]{0,520}?if \(!wait_for_values_tls_owner\(reader\) \|\| )ota_download_active\(\)/,
-        "$1false",
-      )],
     ["the X10A poll no longer enters the bounded OTA quiesce", () =>
       replaceOnce("main/hp_poll.cpp", "ota_quiesce_step(network_quiesce, network_active)",
         "ota_quiesce_bypassed(network_quiesce, network_active)")],
@@ -922,7 +812,7 @@ try {
     ["MQTT reintroduces a persistent heap-backed state JSON cache", () =>
       replaceOnce("main/mqtt_ha.cpp", "static MqttPayloadDigest s_last_modbus_digest;",
         "static std::string s_last_modbus_json;")],
-    ["boot starts pausable esp-mqtt before permanent Weather/HomeHub workers", () =>
+    ["boot starts pausable esp-mqtt before the permanent HomeHub worker", () =>
       replaceOnce("main/main.cpp",
         "        daik::mb_start();\n        daik::mqtt_ha_start();",
         "        daik::mqtt_ha_start();\n        daik::mb_start();")],
@@ -934,7 +824,7 @@ try {
       replaceOnce("main/hp_modbus.cpp",
         "logic::commit_cached_values_in_place(s_cache, fresh);",
         "s_cache.swap(fresh);")],
-    ["overlapping Weather/OTA pause lease releases MQTT pause early", () =>
+    ["overlapping pause leases release MQTT pause early", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "        if (owners == 1) next &= ~TRANSPORT_PAUSE_WITHDRAW_ARMED;",
         "        if (owners >= 1) next = 0;")],
@@ -944,13 +834,13 @@ try {
         "static std::atomic<bool> s_transport_pause_requested{false};\nstatic std::atomic<uint32_t> s_transport_pause_state{0};")],
     ["MQTT inbound queue allocates eight worst-case frame buffers instead of byte-ring descriptors", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrameQueued));",
-        "s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrame));")],
-    ["mqtt_ha_start wipes concurrent OTA/Weather transport pause leases", () =>
+        "s_inbound_queue = xQueueCreate(CIRCULATION_QUEUE_DEPTH, sizeof(CirculationMqttFrameQueued));",
+        "s_inbound_queue = xQueueCreate(CIRCULATION_QUEUE_DEPTH, sizeof(CirculationMqttFrame));")],
+    ["mqtt_ha_start wipes an acquired OTA transport pause lease", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "    s_ref_ring_produced = 0;\n    s_ref_ring_pos      = 0;",
-        "    s_transport_pause_state.store(0, std::memory_order_release);\n    s_ref_ring_produced = 0;\n    s_ref_ring_pos      = 0;")],
-    ["mqtt_task spawns initial esp-mqtt transport despite active OTA/Weather pause", () =>
+        "    s_inbound_ring_produced = 0;\n    s_inbound_ring_pos      = 0;",
+        "    s_transport_pause_state.store(0, std::memory_order_release);\n    s_inbound_ring_produced = 0;\n    s_inbound_ring_pos      = 0;")],
+    ["mqtt_task spawns initial esp-mqtt transport despite active OTA pause", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "    if (mqtt_initial_start_deferred(transport_pause_requested(), competing_tls_active())) {\n        s_transport_paused.store(true, std::memory_order_release);\n    } else if (!start_current_client()) {",
         "    if (!start_current_client()) {")],

@@ -38,7 +38,7 @@ const patterns = [
   ["Connecting", [255, 160, 0, 1, 100, 100, 0], "connecting",
     "Yellow, blinking quickly — connecting to the network.", "Gelb, schnell blinkend — Netzwerk wird verbunden.",
     "Blinking quickly — connecting to the network.", "Schnell blinkend — Netzwerk wird verbunden."],
-  // led_phase() reads the network, X10A and MQTT only: HomeHub, ENV III, syslog, NTP and weather
+  // led_phase() reads the network, X10A and MQTT only: HomeHub, ENV III, syslog and NTP
   // never change this pattern, so the legend must not promise "all configured connections".
   ["Healthy", [0, 255, 0, 1, 500, 0, 0], "healthy",
     "Green, solid — X10A and, if configured, MQTT connected.", "Grün, dauerhaft — X10A und, falls eingerichtet, MQTT verbunden.",

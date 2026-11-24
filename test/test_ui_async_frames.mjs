@@ -295,38 +295,20 @@ console.log("UI config reboot probes: shared status/image leases, serial deadlin
     vcard: (title, rows) => rows,
   });
   vm.runInContext(`
-    dynamicInfoRow = (...args) => JSON.stringify(args);
     settingsInfoRow = (...args) => JSON.stringify(args);
-    this.views = { roomSourceStatus, roomSourceDetailHtml, weatherSourceDetailHtml,
-      circulationSettingsCardHtml, outdoorAxisRow, plantOutdoorAxisRow, connLinks, renderSettings };
+    this.views = { circulationSettingsCardHtml, connLinks, renderSettings };
   `, h.context);
   const v = h.context.views;
-  const room = { configured: true, has_value: true, has_setpoint: true, fresh: true,
-    temperature_c: 21.5, setpoint_c: 22, age_s: 1, control_eligible: true };
-  const weather = { configured: true, has_value: true, fresh: true };
-  const diagnosis = { armed: true, outdoor_temperature_c: 19.5,
-    plant_outdoor_temperature_c: 18.5, plant_outdoor_source: "homehub",
-    last_sample_outdoor_temperature_c: 17.5, last_sample_plant_outdoor_temperature_c: 16.5,
-    last_sample_plant_outdoor_source: "homehub" };
-  h.S.status = frame("en", { reference_temperature: room, weather_forecast: weather,
+  h.S.status = frame("en", {
     mqtt: { configured: true, connected: true }, wifi: { connected: true, ssid: "test-wifi" },
     circulation_source: { configured: true, has_value: true, fresh: true, state: "on", power_w: 4.5, age_s: 1 } });
   const config = JSON.stringify(h.S.status);
   for (const unavailable of [null, "values", "status", null]) {
     h.S.transportUnavailable = unavailable;
     const current = unavailable !== "status";
-    const state = v.roomSourceStatus(room, h.S.status.mqtt);
-    assert.equal(state.key, current ? "measurement_valid" : "unavailable");
-    assert.equal(v.roomSourceDetailHtml(room, state, "21.5", "22", "now").includes("21.5"), current);
-    assert.equal(v.weatherSourceDetailHtml(weather, "13.5", "150").includes("13.5"), current);
     const circ = v.circulationSettingsCardHtml();
     assert.equal(circ.includes("4.5 W"), current);
     assert.equal(circ.includes("circ.running"), current);
-    for (const html of [v.outdoorAxisRow(diagnosis, { enabled: true }),
-                        v.plantOutdoorAxisRow(diagnosis, { enabled: true })]) {
-      assert.equal(html.includes("dyn.outdoor_detail_now"), current);
-      assert.ok(html.includes("dyn.outdoor_detail_sample"), "recorded events remain bounded historical evidence");
-    }
     assert.equal(v.connLinks().some(link => link.cls === "ok"), current);
     if (!current) assert.ok(v.connLinks().every(link => !link.detail && !link.value.includes("signal")),
       "a lost status frame must not invent per-service errors or retain a current radio-strength claim");

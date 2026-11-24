@@ -440,7 +440,7 @@ record = {'compiler': version.strip(), 'sanitizers': SANITIZERS, 'commands': com
           'harness_vacuity_controls': vacuity_controls,
           'negative_controls': results, 'input_sha256': manifest,
           'production_head': git_head.stdout.strip() if git_head.returncode == 0 else None,
-          'claim_limits': ['Host adapters replace RTOS scheduling, mutex implementation, UART transport, config store, diag ring, history/checkup/dwell stores, heap/watchdog samplers and OTA/weather request flags.',
+          'claim_limits': ['Host adapters replace RTOS scheduling, mutex implementation, UART transport, config store, diag ring, history/checkup/dwell stores, heap/watchdog samplers and OTA request flags.',
                            'Real complete hp_poll.cpp task, detection commit, probe submit/service and poll/readers, hp_convert.cpp, production profile tables and logic/RAII headers execute.',
                            'A joined host thread pauses the actual old probe service at its UART adapter; deterministic semaphore callbacks model timeout, a later submitter and late completion. This is not RTOS timing or a complete concurrency proof.',
                            'Consent cases exercise actual poll_once capture and forwarding across config/UART/history callbacks; checkup service is an external token-recording adapter, not the production checkup TU or proof of cross-TU physical timing.',

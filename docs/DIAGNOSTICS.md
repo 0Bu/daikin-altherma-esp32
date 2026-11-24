@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 327a42fe0270d0617f8c501a43b2c64032fdd2f1e89cfb18f67b86a8b16a077b -->
+<!-- user-docs-contract: 5d7bd100faa963e39c8df15c900df695a2761239fd77e01d22f4931855c67685 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -9,7 +9,7 @@ separate 24 h histories, while the setting selects which source the card display
 source is available, only that option and **Off** are shown). Switching between **X10A** and
 **Modbus** keeps both histories; choosing **Off** pauses recording while keeping already collected
 24 h diagnostic histories (which continue aging out normally after 24 hours), stops additional
-room, forecast and circulation collection, and hides the Diagnostics name and card (Model becomes
+circulation collection, and hides the Diagnostics name and card (Model becomes
 the default card when available). Re-enabling resumes into the preserved 24 h window without
 bridging the paused interval or carrying an unfinished run/candidate across pausing.
 In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, and passive
@@ -320,20 +320,6 @@ A controlled refrigerant test still requires the exact model's service procedure
 instruments.
 
 **Evidence and limits:** [Refrigerant circuit observation](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation)
-
-## Heating-curve evaluation freshness
-
-**In plain language:** **Not evaluated recently** means the heating-curve check has not evaluated
-its inputs recently enough to describe their current state. The last recorded event remains dated
-evidence; the independent room source may still be fresh. This status identifies no broker, sensor
-or plant fault. [PLANT.md](PLANT.md#heating-curve-diagnosis) owns its age and event rules;
-[the evidence boundary](DIAGNOSTIC_EVIDENCE.md#heating-curve-evaluation-freshness) separates this
-project rule from plant conclusions.
-
-The **Outdoor temperature ranges** detail groups recorded room errors by the outdoor reading.
-The two outdoor sensors have separate results. The count and range give context for the average.
-A small average can include readings from times when the room was too cold or too warm. [Heating-curve
-observations](PLANT.md#heating-curve-diagnosis) describes the window and when it resets.
 
 ## What the diagnosis cannot do
 

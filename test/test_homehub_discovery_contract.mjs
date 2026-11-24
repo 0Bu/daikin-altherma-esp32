@@ -20,7 +20,7 @@ assert.doesNotMatch(task, /discover_homehub\s*\(|mdns_query_(?:ptr|a)\s*\(|confi
 // Clearing the address retires the task outright. There is no restore step any more: the write path
 // was removed with dynamic LWT actuation (legacy-294), so the stack owns nothing on the hub to put back.
 const disabledIntent = task.indexOf("if (!s_target_enabled.load(std::memory_order_acquire)) break;");
-const tlsDelay = task.indexOf("if (ota_download_active() || weather_fetch_active())");
+const tlsDelay = task.indexOf("if (ota_download_active())");
 assert.ok(disabledIntent >= 0 && tlsDelay > disabledIntent,
   "clearing the address must retire the task before TLS delays or allocating Config snapshots");
 assert.doesNotMatch(task, /config_modbus_host\(config\(\)\)\.empty\(\)/,

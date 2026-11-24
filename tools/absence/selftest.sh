@@ -14,17 +14,12 @@
 #   firmware (test_source_absence_contract.mjs)
 #     1. the board's memory trends folded inside the heat pump's poll cycle
 #     2. the circulation ring labelled even with no source configured
-#     3. /status.heating_curve publishing the raw snapshot reason beside a config-derived `armed`
 #     4. an unset identifier redacted into existence
 #   browser (test_ui_absence_matrix.mjs)
-#     5. the heating-curve card telling a reader to set up their configured room source
 #     6. a configured HomeHub reported as disabled because its task is not running (safe mode) —
 #        /status.modbus.enabled is the one optional-source flag reporting a TASK, not the config
 #     7. a cleared broker left unnamed on the circulation row, the state it answered with
 #        "waiting for a message" forever
-#     8. the outdoor-axis row offering a second door into the Board Hardware modal — the one seed
-#        here that pins a CHECK rather than a shipped defect, because that guard's first version
-#        could not fire (see the seed for why the row's own shape defeated it)
 #   firmware, appended (numbers keep growing rather than being re-grouped — a seed's number is how
 #   it is referred to elsewhere, so renumbering costs more than the tidier ordering is worth)
 #     9. the heap watchdog gated behind the detect/sweep branch — seed 1's defect one feature over,
@@ -47,9 +42,6 @@
 #        recorded Modbus row disappears after a cold reboot
 #    17. immutable cache metadata copied into two owning strings per row again, restoring the
 #        contiguous-allocation failure beside TLS
-#    18. weather advertising its network interval only after the pre-TLS grace, too late for MQTT
-#        to release an already-running snapshot
-#    19. MQTT quiescing for OTA but not for the weather TLS interval that caused the live failure
 #    20. a copied HomeHub cache declared live without the snapshot's generation/liveness proof
 #    21. HomeHub output gated on a later task-status read instead of the proven snapshot
 #    22. MCP get_hp_values bypassing the shared bounded values sender
@@ -64,22 +56,7 @@
 #    31. the fixed UINT64 formatter shortened below its documented 20-digit capacity
 #    32. the refrigerant-service row surviving while no X10A profile/source exists, turning the
 #        tracker's default into a false unsupported-profile explanation in safe mode or at boot
-#    33. Weather retaining a prior source's current-value flag after consent/source removal
-#    34. diagnostics-off being mislabeled as an unconfigured Weather source
-#    35. task-side Weather invalidation no longer checking its bound generation under the mutex
-#    36. the Weather token bound after Config, reopening a complete A -> B -> A gap
-#    37. a fetch crossing the device-wide diagnostics generation
-#    38. the success commit losing its under-lock source-token recheck
-#    39. a changed Weather location acknowledged before synchronous runtime invalidation
-#    40. a changed (but still enabled) location keeping the old retained MQTT evidence
-#    41. the MQTT worker consuming an A-to-B cleanup only when Weather is disabled
-#    42. diagnostics consent removal failing to retract retained Weather evidence
-#    43. the source-change RAII destructor no longer releasing admission on save failure/throw
-#    44. the network owner dropping a pending mutation instead of handing admission to it
-#    45. a timed-out handoff cancelling the still-authoritative source generation
 #    46. link-blob allocation moved after the first durable Config write
-#    47. a successful Weather tombstone retaining the old publish-dedup cache
-#    48. a failed but age-young Weather value still advertised as fresh over MQTT
 #    49. reboot/reconnect no longer reconstructing a pending retained Weather cleanup
 #    50. reboot/reconnect no longer reconstructing a pending HomeHub cleanup
 #    51. an enabled HomeHub A-to-B change retaining predecessor evidence
@@ -91,7 +68,6 @@
 #    57. HomeHub history recomputing its fingerprint through a post-save Config copy
 #    58. the post-save HomeHub runtime cutover losing its explicit noexcept boundary
 #    59. HomeHub publish dedup advancing even when the broker rejects the state
-#    60. Weather publish dedup advancing even when the broker rejects the state
 #    61. ENV III state/sample acknowledgements advancing after a rejected publish
 #    62. partial ENV III discovery publication being reported as complete
 #    63. ENV III discovery being announced after a partial broker failure
@@ -111,20 +87,11 @@
 #    77. a successful ENV III tombstone retaining the predecessor sample acknowledgement
 #    78. the frozen HomeHub retirement ledger being recoupled to the current register count
 #    79. HomeHub ordinary publication recreating state in the same cycle as its cleanup
-#    80. Weather ordinary publication consuming a stale Config snapshot after cleanup
 #    81. HomeHub publication following retiring task lifetime instead of durable target intent
-#    82. a failed Weather source save leaving its admission-lost fetch reported active
 #    83. the five-minute retired-discovery retry moving behind X10A authority
 #    84. a historical HomeHub discovery component/object-id literal drifting
 #    85. the periodic retirement timer no longer resetting after a delete pass
 #    86. a middle historical Weather discovery component/object-id literal drifting
-#    87. a source/consent save erasing a boot-latched Weather task-start failure
-#    88. Weather publishing task availability before task creation succeeds
-#    89. intentional Weather absence leaking an unrelated worker-start error
-#    90. Safe Mode freshness retaining the skipped worker's task-unavailable reason
-#    91. a Weather start OOM writing string status without a usable mutex
-#    92. the Weather task handle becoming a post-http-start non-atomic data race
-#    93. a newly created Weather task snapshotting Config before its handle is published
 #    94. disabled ENV III history remaining directly addressable after status/UI hide the source
 #    95. an adopted dwell table resuming with its clock left at the sentinel, so the stretch from
 #        esp_timer's zero to the first fold is neither elapsed nor blind
@@ -252,20 +219,6 @@ PY
 expect_red "an unconfigured circulation witness still offered a trend" run_contract
 restore
 
-# 3. Publish the raw snapshot reason again. /status then reports armed:true beside reason:"disabled"
-#    whenever the sampler's task was never created (safe mode).
-python3 - "$TMP/main/http_status.cpp" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-seed = s.replace('logic::heating_curve_reason_name(heating_curve_reason)',
-                 'logic::heating_curve_reason_name(heating_curve.reason)')
-assert seed != s, "seed 3 did not apply — the reason field moved"
-open(p, "w").write(seed)
-PY
-expect_red "the raw sampler reason published beside a config-derived armed" run_contract
-restore
-
 # 4. Redact an unset identifier into existence again — the bug report then claims a broker, a room
 #    source and a HomeHub on a device that has none.
 python3 - "$TMP/main/http_status.cpp" <<'PY'
@@ -278,23 +231,6 @@ assert seed != s, "seed 4 did not apply — the wrapper moved"
 open(p, "w").write(seed)
 PY
 expect_red "an unset identifier redacted into existence" run_contract
-restore
-
-# 5. The browser half: drop the armed-but-inactive branch, so a safe-mode board tells its owner to
-#    set up the room source they configured. The firmware still reports the honest reason — this
-#    seeds the UI ignoring it, which is how the original defect read.
-python3 - "$TMP/main/www/js/dashboard.js" <<'PY'
-import re, sys
-p = sys.argv[1]
-s = open(p).read()
-seed = re.sub(r'  if \(d\.reason === "sampler_inactive"\) \{\n'
-              r'    return \{ key: sys\.safe_mode \? "dyn\.state_safe_mode" : "dyn\.state_inactive",\n'
-              r'             cls: "warn", help: "dyn\.state_help_inactive" \};\n'
-              r'  \}\n', "", s, count=1)
-assert seed != s, "seed 5 did not apply — the branch moved"
-open(p, "w").write(seed)
-PY
-expect_red "a safe-mode board told to set up its configured room source" run_ui
 restore
 
 # 6. Key the HomeHub Connections row's off-state on the TASK flag instead of the saved address. In
@@ -325,30 +261,6 @@ assert seed != s, "seed 7 did not apply — the broker branch moved"
 open(p, "w").write(seed)
 SEED7
 expect_red "a cleared broker unnamed on the circulation row" run_ui
-restore
-
-# 8. Give the outdoor-axis row its configuration action back. The ENV III has exactly ONE editor —
-#    the Board Hardware modal on the ESP32 card, which saves it atomically beside the board identity
-#    that decides whether the Grove port exists at all — and this row was a second door into it,
-#    offering hardware configuration from a card that reports EVIDENCE.
-#
-#    This seed is here for a sharper reason than the seven above, and it is the only one pinning a
-#    check rather than a shipped defect: the first version of that guard COULD NOT FIRE. Restoring
-#    the action turns the row from a whole-row accordion back into a SPLIT row, so a face matched up
-#    to the first </button> stops at the info toggle and never contains the `data-act` it looks for —
-#    the guard reported success on precisely the change it exists to catch. Measured, not reasoned.
-python3 - "$TMP/main/www/js/dashboard.js" <<'SEED8'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-seed = s.replace(
-    'return dynamicInfoRow("outdoor", t("dyn.outdoor"), value, cls, body);',
-    'return dynamicInfoRow("outdoor", t("dyn.outdoor"), value, cls, body, "board", t("board.title"));',
-    1)
-assert seed != s, "seed 8 did not apply — the outdoor axis row's return moved"
-open(p, "w").write(seed)
-SEED8
-expect_red "the outdoor axis offering a second door into the Board Hardware modal" run_ui
 restore
 
 # 9. Seed 1's defect, one feature over: the HEAP WATCHDOG moved behind the detect/sweep branch. It
@@ -488,37 +400,6 @@ assert seed != s, "seed 17 did not apply — the CachedValue metadata fields mov
 open(p, "w").write(seed)
 PY2
 expect_red "static cache metadata copied into owning strings" run_contract
-restore
-
-# 18. Raise the weather activity signal after the grace instead of before it. MQTT can then begin a
-#     large snapshot during the delay and still own it when the handshake starts.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY2'
-import re, sys
-p = sys.argv[1]
-s = open(p).read()
-s, count = re.subn(r'^[ \t]*vTaskDelay\(pdMS_TO_TICKS\(kNetworkQuiesceLeadMs\)\);\n',
-                   '', s, count=1, flags=re.MULTILINE)
-assert count == 1, "seed 18 did not apply — the weather grace moved"
-seed, count = re.subn(r'^([ \t]*)NetworkActivity\s+activity\(source_generation\);',
-                     r'\1vTaskDelay(pdMS_TO_TICKS(kNetworkQuiesceLeadMs));\n\g<0>',
-                     s, count=1, flags=re.MULTILINE)
-assert count == 1, "seed 18 did not apply — the weather cycle admission moved"
-open(p, "w").write(seed)
-PY2
-expect_red "weather advertising TLS activity after its grace" run_contract
-restore
-
-# 19. Quiesce only for OTA again, leaving the independently signalled weather fetch to race MQTT.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY2'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-seed = s.replace("const bool network_busy = ota_busy || weather_busy;",
-                 "const bool network_busy = ota_busy;", 1)
-assert seed != s, "seed 19 did not apply — the combined network gate moved"
-open(p, "w").write(seed)
-PY2
-expect_red "weather TLS omitted from the MQTT hold-off" run_contract
 restore
 
 # 20. Ignore the liveness result returned with the copied HomeHub cache. A stale cache can then be
@@ -703,210 +584,6 @@ PY3
 expect_red "a refrigerant-service row surviving without a detected X10A profile" run_ui
 restore
 
-# 33. Keep the bit which makes all cleared Weather scalars look current. Zero-looking values would
-#     then be presented as a fresh forecast from a source which no longer exists.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-import re
-p = sys.argv[1]
-s = open(p).read()
-seed, count = re.subn(r"^\s*replacement\.has_value\s*=\s*false;\n", "", s,
-                      count=1, flags=re.MULTILINE)
-assert count == 1, "seed 33 did not apply — Weather has_value clearing moved"
-open(p, "w").write(seed)
-PY4
-expect_red "Weather retaining a prior source's current-value flag" run_contract
-restore
-
-# 34. Collapse disabled diagnostics into not-configured. The source remains configured, so the
-#     actual missing prerequisite is consent rather than setup.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-import re
-p = sys.argv[1]
-s = open(p).read()
-seed, count = re.subn(r'(:\s*!diagnostics_enabled\s*\?\s*)"diagnostics_disabled"',
-                      r'\1"not_configured"', s, count=1)
-assert count == 1, "seed 34 did not apply — Weather inactive reason moved"
-open(p, "w").write(seed)
-PY4
-expect_red "diagnostics-off mislabeled as an unconfigured Weather source" run_contract
-restore
-
-# 35. Let an old inactive Config snapshot overwrite the authoritative status installed by a newer
-#     HTTP commit.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("bool invalidate_if_generation(")
-end = s.index("// A saved location", start)
-body = s[start:end]
-mutated = body.replace(
-    "    if (s_source_generation.load(std::memory_order_acquire) != expected_generation) return false;\n",
-    "", 1)
-assert mutated != body, "seed 35 did not apply — Weather invalidation token check moved"
-seed = s[:start] + mutated + s[end:]
-open(p, "w").write(seed)
-PY4
-expect_red "a stale inactive Weather snapshot overwriting a newer HTTP commit" run_contract
-restore
-
-# 36. Bind after the Config snapshot. A complete A -> B -> A transition in that interval then
-#     gives an old snapshot the new token and the post-fetch equality checks cannot distinguish it.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = "    const WeatherConfigSnapshot cfg = weather_config();\n"
-new = old + "    source_generation = s_source_generation.load(std::memory_order_acquire);\n"
-assert s.count(old) == 1, "seed 36 did not apply — Weather cycle source snapshot moved"
-open(p, "w").write(s.replace(old, new, 1))
-PY4
-expect_red "Weather binding its ABA token after the Config snapshot" run_contract
-restore
-
-# 37. Let an old request cross diagnostics off -> on. Booleans and coordinates can match again,
-#     but diagnostics_generation states that this is a new consent epoch.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-seed = s.replace("current.diagnostics_generation != cfg.diagnostics_generation ||", "false ||", 1)
-assert seed != s, "seed 37 did not apply — diagnostics generation comparison moved"
-open(p, "w").write(seed)
-PY4
-expect_red "a Weather fetch crossing the diagnostics consent generation" run_contract
-restore
-
-# 38. Keep the earlier unlocked check but remove the one serialized with the successful value
-#     write. HTTP invalidation can then clear between those operations and the old fetch writes last.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import re, sys
-p = sys.argv[1]
-s = open(p).read()
-pattern = (r'(if \(ok\) \{\n\s*Lock\s+lk\(s_mtx\);)\n'
-           r'\s*if \(s_source_generation\.load\(std::memory_order_acquire\) != source_generation\)'
-           r'\s*return \{\};')
-seed, count = re.subn(pattern, r'\1', s, count=1)
-assert count == 1, "seed 38 did not apply — success token check moved"
-open(p, "w").write(seed)
-PY4
-expect_red "the Weather success commit losing its serialized source-token check" run_contract
-restore
-
-# 39. Delay source invalidation until after the response boundary. A client which immediately reads
-#     /status can then combine the new Config coordinates with the previous source's values.
-python3 - "$TMP/main/http_config.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("static esp_err_t set_weather(")
-end = s.index("// POST /set_board", start)
-body = s[start:end]
-mutated = body.replace("    weather_change.commit();\n",
-                       "    weather_change.commit_after_response();\n", 1)
-assert mutated != body, "seed 39 did not apply — synchronous Weather invalidation moved"
-seed = s[:start] + mutated + s[end:]
-open(p, "w").write(seed)
-PY4
-expect_red "a Weather location save acknowledged before runtime invalidation" run_contract
-restore
-
-# 40. Tombstone only on disable again. A -> B keeps the retained A payload even though status now
-#     truthfully waits for B, so MQTT clients continue to see evidence under the old identity.
-python3 - "$TMP/main/http_config.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-seed = s.replace("    if (weather_was_enabled) mqtt_request_weather_cleanup();",
-                 "    if (!location.enabled && weather_was_enabled) mqtt_request_weather_cleanup();", 1)
-assert seed != s, "seed 40 did not apply — Weather retained cleanup moved"
-open(p, "w").write(seed)
-PY4
-expect_red "a changed enabled Weather source keeping old retained evidence" run_contract
-restore
-
-# 41. Consume the request only while disabled again. That loses an enabled A -> B tombstone and is
-#     independent of the handler-side request asserted by seed 40.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
-import re, sys
-p = sys.argv[1]
-s = open(p).read()
-pattern = (r'if \(s_weather_cleanup_requested\.exchange'
-           r'\(false, std::memory_order_acq_rel\)\)')
-seed, count = re.subn(pattern,
-                      'if (!c.weather_enabled && '
-                      's_weather_cleanup_requested.exchange(false, std::memory_order_acq_rel))',
-                      s, count=1)
-assert count == 1, "seed 41 did not apply — Weather tombstone branch moved"
-open(p, "w").write(seed)
-PY4
-expect_red "the MQTT worker discarding an enabled Weather source-change tombstone" run_contract
-restore
-
-# 42. Keep the location but remove device-wide diagnostics consent without requesting cleanup.
-python3 - "$TMP/main/http_config.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("static esp_err_t set_diagnostics(")
-end = s.index("static esp_err_t set_circulation", start)
-body = s[start:end]
-mutated = body.replace("        if (weather_was_publishable && !next_enabled) mqtt_request_weather_cleanup();\n", "", 1)
-assert mutated != body, "seed 42 did not apply — diagnostics Weather cleanup moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
-PY4
-expect_red "diagnostics-off keeping retained Weather evidence" run_contract
-restore
-
-# 43. A throwing/failed config_save must not wedge SourceChange forever.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("WeatherSourceChange::~WeatherSourceChange()")
-end = s.index("void WeatherSourceChange::commit()", start)
-body = s[start:end]
-mutated = body.replace("    release_source_change();\n", "", 1)
-assert mutated != body, "seed 43 did not apply — Weather RAII release moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
-PY4
-expect_red "a failed Weather save permanently owning source admission" run_contract
-restore
-
-# 44. Drop a pending mutation when the network owner exits instead of handing it SourceChange.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("static void release_admission()")
-end = s.index("\n    }\n};", start)
-body = s[start:end]
-mutated = body.replace("expected, SourceAdmission::SourceChange,",
-                       "expected, SourceAdmission::Idle,", 1)
-assert mutated != body, "seed 44 did not apply — Weather handoff moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
-PY4
-expect_red "the Weather network owner dropping a pending source mutation" run_contract
-restore
-
-# 45. A timed-out change returns 503 unchanged. Advancing its token would discard valid evidence.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import re, sys
-p = sys.argv[1]
-s = open(p).read()
-pattern = (r'(if \(s_source_admission\.compare_exchange_strong\('
-           r'expected, SourceAdmission::Network,[\s\S]{0,180}?\)\)\n)(\s*)return false;')
-seed, count = re.subn(pattern,
-                      r'\1\2s_source_generation.fetch_add(1, std::memory_order_acq_rel);\n'
-                      r'\2return false;', s, count=1)
-assert count == 1, "seed 45 did not apply — Weather timeout rollback moved"
-open(p, "w").write(seed)
-PY4
-expect_red "a rejected Weather mutation cancelling the still-authoritative request" run_contract
-restore
-
 # 46. Reintroduce an allocation after cfg was durably written. bad_alloc would make HTTP report a
 #     failed save even though NVS already changed. The sequence is the shared transaction that
 #     config.cpp, the host tests and the runtime harness all execute.
@@ -926,35 +603,6 @@ seed = seed.replace(needle, declaration + needle, 1)
 open(p, "w").write(seed)
 PY4
 expect_red "Config discovering an allocation failure after its first durable write" run_contract
-restore
-
-# 47. Tombstone succeeds but dedup still remembers the predecessor, so an identical-looking new
-#     source can be suppressed after the cleanup.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("static void apply_source_cleanup_completion(")
-end = s.index("static void service_source_cleanup_evidence", start)
-body = s[start:end]
-mutated = body.replace("        s_last_weather_digest.clear();\n", "", 1)
-assert mutated != body, "seed 47 did not apply — Weather cache clear moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
-PY4
-expect_red "a Weather tombstone retaining the old dedup cache" run_contract
-restore
-
-# 48. Let age alone decide freshness again. Immediately after a provider failure the retained old
-#     value is then `available:0` beside `fresh:1`, contradicting the same atomic status snapshot.
-python3 - "$TMP/main/logic/weather_mqtt.hpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-seed = s.replace("if (!s.available)", "if (false && !s.available)", 1)
-assert seed != s, "seed 48 did not apply — Weather MQTT availability gate moved"
-open(p, "w").write(seed)
-PY4
-expect_red "a failed age-young Weather value still advertised as fresh over MQTT" run_contract
 restore
 
 # 49. Drop Weather from clean-client reconstruction. A reset between the durable source/consent
@@ -1116,22 +764,6 @@ assert seed != s, "seed 59 did not apply — HomeHub publish acknowledgement mov
 open(p, "w").write(seed)
 PY4
 expect_red "HomeHub dedup advancing after broker rejection" run_contract
-restore
-
-# 60. Make the same acknowledgement error for Weather state.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = ('    if (!s_last_weather_digest.matches(js) &&\n'
-       '        mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1)) {\n')
-new = ('    if (!s_last_weather_digest.matches(js)) {\n'
-       '        mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1);\n')
-seed = s.replace(old, new, 1)
-assert seed != s, "seed 60 did not apply — Weather publish acknowledgement moved"
-open(p, "w").write(seed)
-PY4
-expect_red "Weather dedup advancing after broker rejection" run_contract
 restore
 
 # 61. Keep ENV III's dedup/sample counters even when mqtt_publish rejects the document.
@@ -1332,7 +964,7 @@ p = sys.argv[1]
 s = open(p).read()
 match = re.search(
     r"^\s*const RetainedCleanupCycle\s+cleanup_cycle\s*=\s*"
-    r"service_requested_topic_cleanup\(ref_config\);\n",
+    r"service_requested_topic_cleanup\(cycle_config\);\n",
     s,
     flags=re.MULTILINE,
 )
@@ -1427,22 +1059,6 @@ PY4
 expect_red "HomeHub state recreated in its cleanup cycle" run_contract
 restore
 
-# 80. Diagnostics-off can commit after mqtt_task snapshots Config but before it consumes cleanup.
-#     Without this witness the stale true snapshot publishes a synthetic disabled document after the
-#     tombstone, briefly resurrecting the source for downstream consumers.
-python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = "                if (!cleanup_cycle.weather)\n"
-new = "                if (true)\n"
-seed = s.replace(old, new, 1)
-assert seed != s, "seed 80 did not apply — Weather cleanup-cycle gate moved"
-open(p, "w").write(seed)
-PY4
-expect_red "Weather stale snapshot published in its cleanup cycle" run_contract
-restore
-
 # 81. The worker remains alive until its next loop after Off. Its task-status flag is therefore stale
 #     publication authority; only the atomic intent installed after the durable save is current.
 python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
@@ -1458,26 +1074,6 @@ PY4
 expect_red "HomeHub publication authorized by retiring task lifetime" run_contract
 restore
 
-# 82. HTTP can win source admission after the task marks fetching but before NetworkActivity starts.
-#     If config_save then fails, the old source remains valid and this abandoned attempt must be
-#     settled before an OTA hold-off can prolong a false fetching:true status.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import re, sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("    if (source_preempted) {")
-end = s.index(
-    "\n    if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};",
-    start)
-body = s[start:end]
-mutated, count = re.subn(r'^[ \t]*s_status\.fetching\s*=\s*false;\n', '', body,
-                        count=1, flags=re.MULTILINE)
-assert count == 1, "seed 82 did not apply — preempted Weather finalization moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
-PY4
-expect_red "failed Weather source save retaining fetching true" run_contract
-restore
-
 # 83. Keep connect-time/source cleanup intact but move only the five-minute HA convergence retry
 #     back under the ordinary X10A gate. A permanently silent bus would then strand an entity when
 #     HA was offline for the first tombstone.
@@ -1486,7 +1082,7 @@ import sys
 p = sys.argv[1]
 s = open(p).read()
 start = s.index('            // HA may have been offline for the connect-time tombstones.')
-end = s.index('            publish_stage = "heating_curve";', start)
+end = s.index('\n\n            if (s_connected) {\n                publish_stage = "announce";', start) + 2
 block = s[start:end]
 seed = s[:start] + s[end:]
 gate = '                if (gate.publish_cycle) {\n'
@@ -1530,7 +1126,7 @@ restore
 
 # 86. Pin all four short-lived Weather discovery topics, not just the first and last. A drift in a
 #     middle literal sends the recurring tombstone to the wrong topic and strands the real entity.
-python3 - "$TMP/main/logic/weather_mqtt.hpp" <<'PY4'
+python3 - "$TMP/main/logic/mqtt_weather_retirement.hpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
@@ -1541,123 +1137,6 @@ assert seed != s, "seed 86 did not apply — retired Weather literal moved"
 open(p, "w").write(seed)
 PY4
 expect_red "retired Weather literal drift" run_contract
-restore
-
-# 87. A configured and consented source cannot become waiting when no Weather worker exists for the
-#     boot. Bypassing the final-state selection recreates both races: Available -> create failure ->
-#     later commit, and NotStarted staging -> deadline failure -> later commit.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = "if (configured_ && diagnostics_enabled_)"
-new = "if (false && configured_ && diagnostics_enabled_)"
-seed = s.replace(old, new, 1)
-assert seed != s, "seed 87 did not apply — final Weather task-state selection moved"
-open(p, "w").write(seed)
-PY4
-expect_red "Weather source save erasing its boot-latched task failure" run_contract
-restore
-
-# 88. A provisional Available state opens the exact race the task-state overlay closes: an HTTP
-#     source transaction can stage waiting, task creation can then fail, and its later commit can
-#     overwrite the final failure forever. Availability begins only after xTaskCreate succeeds.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("void weather_forecast_start()")
-end = s.index("void weather_forecast_reconfigure()", start)
-body = s[start:end]
-create = body.index("    if (xTaskCreate(")
-available = body.index("    s_task_start_state.store(WeatherTaskStartState::Available", create)
-available_end = body.index(";\n", available) + 2
-block = body[available:available_end]
-mutated = body[:create] + block + body[create:available] + body[available_end:]
-assert mutated != body, "seed 88 did not apply — successful Weather task availability moved"
-open(p, "w").write(s[:start] + mutated + s[end:])
-PY4
-expect_red "Weather task availability published before task creation succeeds" run_contract
-restore
-
-# 89. Worker-start errors describe an active source that cannot be serviced. Emitting the same error
-#     while Weather is unconfigured or intentionally skipped in Safe Mode contradicts visible state.
-python3 - "$TMP/main/http_status.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = "if (weather_source_active && !wf.error.empty())"
-new = "if (!wf.error.empty())"
-seed = s.replace(old, new, 1)
-assert seed != s, "seed 89 did not apply — Weather error authority moved"
-open(p, "w").write(seed)
-PY4
-expect_red "intentional Weather absence leaking a worker error" run_contract
-restore
-
-# 90. Safe Mode deliberately skips the Weather task. Its freshness reason must name that deliberate
-#     absence, not inherit task_unavailable from a config save performed during recovery.
-python3 - "$TMP/main/http_status.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = 'weather.reason = "safe_mode";'
-new = 'weather.reason = wf.reason.empty() ? "unavailable" : wf.reason.c_str();'
-seed = s.replace(old, new, 1)
-assert seed != s, "seed 90 did not apply — Weather Safe Mode freshness overlay moved"
-open(p, "w").write(seed)
-PY4
-expect_red "Safe Mode Weather freshness reporting task unavailable" run_contract
-restore
-
-# 91. If the boot-static Weather mutex allocation failed, no task/source transaction can write the
-#     default snapshot. Reintroducing the old string assignment both races HTTP/MQTT readers and may
-#     throw another allocation failure from the infrastructure-OOM path.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("    if (!s_mtx) {")
-state = s.index("WeatherTaskStartState::TaskStartFailed", start)
-insert = s.index("\n", s.index(";", state)) + 1
-seed = s[:insert] + '        s_status.error = "out_of_memory";\n' + s[insert:]
-assert seed != s, "seed 91 did not apply — Weather mutex-OOM branch moved"
-open(p, "w").write(seed)
-PY4
-expect_red "Weather mutex OOM writing unlocked allocating status" run_contract
-restore
-
-# 92. HTTP starts before Weather on an ordinary boot, so the handle write can overlap a reconfigure
-#     or refresh read. A raw pointer is a C++ data race even when aligned machine loads look atomic.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-import re
-p = sys.argv[1]
-s = open(p).read()
-seed, count = re.subn(r"std::atomic<TaskHandle_t>\s+s_task\{nullptr\};",
-                      "TaskHandle_t s_task = nullptr;", s, count=1)
-assert count == 1, "seed 92 did not apply — Weather task-handle declaration moved"
-open(p, "w").write(seed)
-PY4
-expect_red "non-atomic Weather task publication after HTTP start" run_contract
-restore
-
-# 93. The scheduler may run the worker before xTaskCreate returns. Without its short publication
-#     gate it can sleep on stale Config while an HTTP save sees no published handle and loses wakeup.
-python3 - "$TMP/main/weather_forecast.cpp" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index("void weather_task(void*)")
-loop = s.index("    for (;;) {", start)
-gate = s[start:loop]
-begin = gate.index("    while (s_task_start_state.load")
-end = gate.index("        vTaskDelay(1);", begin) + len("        vTaskDelay(1);\n")
-mutated = gate[:begin] + gate[end:]
-assert mutated != gate, "seed 93 did not apply — Weather publication gate moved"
-open(p, "w").write(s[:start] + mutated + s[loop:])
-PY4
-expect_red "Weather worker reading Config before task publication" run_contract
 restore
 
 # 94. Hiding ENV III rows from /status is not enough: the direct history route must refuse retained
@@ -1956,17 +1435,6 @@ PY4
 expect_red "flash seed discarded the wall-clock milliseconds" run_contract
 restore
 
-# 115. A configured independent room source is omitted from its own history offer.
-python3 - "$TMP/main/www/js/history.js" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = 'function hasRoomHist(id) { return !!id && roomHistRows().some((r) => r && r.id === id); }'
-assert s.count(old) == 1, "seed 115 did not apply - the room history offer moved"
-open(p, "w").write(s.replace(old, 'function hasRoomHist(id) { return false; }', 1))
-PY4
-expect_red "configured independent room history omitted" run_ui
-restore
 
 if [ "$fail" -ne 0 ]; then
   echo

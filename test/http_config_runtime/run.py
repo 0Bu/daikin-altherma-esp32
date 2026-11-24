@@ -102,15 +102,9 @@ command([CXX, *FLAGS, '-MM', '-MF', OUT / 'preflight.d',
 before = inputs([OUT / 'preflight.d', OUT / 'cjson.d'])
 source_text, ota_text = SOURCE.read_text(), OTA_SOURCE.read_text()
 binary = compile(SOURCE, 'production')
-legacy = command([binary, 'legacy_cases'])
-if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
-    raise RuntimeError('the original thirteen behavioral groups changed their assertion inventory\n'
-                       + legacy.stdout)
-print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=19 assertions=5688\n' not in baseline.stdout:
-    raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
-                       + baseline.stdout)
+if 'PASS total=18 assertions=4549\n' not in baseline.stdout:
+    raise RuntimeError('the current behavioral group inventory changed\n' + baseline.stdout)
 print(baseline.stdout, end='')
 
 sanitizer_control = None
@@ -138,24 +132,8 @@ if args.sanitizer == 'undefined':
         'source_sha256': hashlib.sha256(tripwire_text.encode()).hexdigest()}
     print('SANITIZER CONTROL signed overflow terminated the setter before its passing oracle')
 
-# The original production TU must pass real positive setters before failing the two named
-# regression oracles. Compiling failures, arbitrary signals and timeouts never count as controls.
-original_commit = 'e99da78f38901cfc1421cec7f74e44dbbb632486'
-original_text = command(['git', '-c', 'core.fsmonitor=false', '-C', ROOT, 'show',
-                         original_commit + ':main/http_config.cpp']).stdout
-# The original predates the two-argument consent-generation helper in the current headers. Entropy
-# 1 reproduces its one-argument result for every generation (0 -> 1, n -> n + 1, max -> 1), so the
-# adapted call changes no behavior that its positive setters or two named regressions observe.
-original = replace_once(
-    original_text, 'diagnostics_next_generation(c.diagnostics_generation)',
-    'diagnostics_next_generation(c.diagnostics_generation, 1u)', 'original-generation-signature')
-original_path = OUT / 'original.cpp'
-original_path.write_text(original)
-original_binary = compile(original_path, 'original')
-original_positive = command([original_binary, 'valid_setters'])
-print('ORIGINAL POSITIVE CONTROL ' + original_positive.stdout.strip())
-controls = [rejected(original_binary, 'wrong_types', 'original-present-type'),
-            rejected(original_binary, 'integer_fields', 'original-fractional-integer')]
+# Compiling mutations exercise the current complete production translation unit.
+controls = []
 
 # Mutant headers bind explicitly at their one quoted include; the entire HTTP TU still compiles.
 mutations = [
@@ -183,9 +161,9 @@ mutations = [
      'if (actual == HttpConfigFieldType::Missing) return false;', 'missing_and_disabled'),
     ('ignore_wifi_save_failure', 'wifi', 'if (!config_save(c)) {',
      'if ((static_cast<void>(config_save(c)), false)) {', 'persistence_failure'),
-    ('early_reference_runtime', 'source',
-     'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");\n    history_room_reset(room_identity);\n    mqtt_reference_reconfigure();',
-     'mqtt_reference_reconfigure();\n    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");\n    history_room_reset(room_identity);',
+    ('early_circulation_runtime', 'circulation',
+     'if (!config_save(c)) return send_write_failed(req);\n    if (evidence_mapping_changed) mqtt_circulation_reconfigure(!c.circulation_topic.empty());',
+     'if (evidence_mapping_changed) mqtt_circulation_reconfigure(!c.circulation_topic.empty());\n    if (!config_save(c)) return send_write_failed(req);',
      'persistence_failure'),
     ('ignore_env_preflight', 'env', 'if (!env_allowed) return env_result;',
      'static_cast<void>(env_allowed); static_cast<void>(env_result);', 'preflight_failures'),
@@ -236,25 +214,14 @@ mutations = [
     ('generation_redrawn_each_transition', 'source',
      'if (next_enabled && c.diagnostics_generation == 0)',
      'if (next_enabled)', 'diagnostics_generation'),
-    ('room_generation_omitted', 'room',
-     'if (logic::history_room_identity(c) != previous_room_identity)',
-     'if (logic::history_room_identity(c) != previous_room_identity && false)',
-     'room_history_lifetime'),
-    ('room_history_reset_omitted', 'room',
-     'history_room_reset(room_identity);', 'static_cast<void>(room_identity);',
-     'room_history_lifetime'),
-    ('room_history_reset_before_save', 'room',
-     'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");\n    history_room_reset(room_identity);',
-     'history_room_reset(room_identity);\n    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");',
-     'room_history_lifetime'),
 ]
 for tag, target, old, new, case in mutations:
     config_source, ota_source = SOURCE, OTA_SOURCE
-    if target in ('source', 'wifi', 'env', 'board', 'pins', 'room'):
+    if target in ('source', 'wifi', 'env', 'board', 'pins', 'circulation'):
         text = source_text
-        if target in ('wifi', 'env', 'board', 'pins', 'room'):
+        if target in ('wifi', 'env', 'board', 'pins', 'circulation'):
             function = {'wifi': 'set_wifi', 'env': 'set_env3', 'board': 'set_board',
-                        'pins': 'send_local_pins_save_failure', 'room': 'set_ref_temp'}[target]
+                        'pins': 'send_local_pins_save_failure', 'circulation': 'set_circulation'}[target]
             start = text.index('static esp_err_t ' + function + '(')
             end = text.index('\nstatic ', start + 1) if target != 'wifi' else text.index('\n// ── /set_mqtt', start)
             scope = replace_once(text[start:end], old, new, tag)
@@ -301,16 +268,12 @@ for tag, target, old, new, case in mutations:
 after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     raise RuntimeError('compile inputs changed during the run')
-if len(controls) != 31:
+if len(controls) != 26:
     raise RuntimeError('the complete compiling negative-control inventory changed')
 record = {'compiler': compiler, 'c_compiler': c_compiler,
           'compiler_commands': {'c': CC, 'cxx': CXX},
           'sanitizer': args.sanitizer, 'sanitizer_control': sanitizer_control, 'commands': commands,
-          'baseline_stdout': baseline.stdout, 'preserved_original_case_stdout': legacy.stdout,
-          'original_commit': original_commit,
-          'original_sha256': hashlib.sha256(original_text.encode()).hexdigest(),
-          'original_adapted_sha256': hashlib.sha256(original.encode()).hexdigest(),
-          'original_positive_stdout': original_positive.stdout,
+          'baseline_stdout': baseline.stdout,
           'negative_controls': controls, 'input_sha256': after,
           'claim_limits': ['Complete production http_config.cpp and http_ota.cpp compile; actual setter handlers and ota_do execute.',
                            'Real resolved cJSON, JsonGuard, shared ingress, pure validators, config_save_transaction and config_commit_detected_link_transaction execute.',

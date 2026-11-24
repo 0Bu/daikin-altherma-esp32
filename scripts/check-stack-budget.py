@@ -310,8 +310,7 @@ SDK_RECURSION_SYMBOLS = {
 HTTP_STACK_RE = re.compile(r"\bcfg\.stack_size\s*=\s*([0-9]+)\s*;")
 ENTRY_RE = re.compile(r"\bentry\s+a1,\s*(0x[0-9a-fA-F]+|[0-9]+)\b")
 RULE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-TO_XSTRING_RE = re.compile(r"^[^\n]+ __gnu_cxx::__to_xstring<[^\n]+>\(")
-DOUBLE_STRING_SYMBOL = "std::__cxx11::to_string(double)"
+RETIRED_DOUBLE_FORMATTERS = ("__gnu_cxx::__to_xstring<", "std::__cxx11::to_string(double)")
 INTEGER_APPEND_SYMBOL = (
     "daik::json_append_integer_field_impl(std::__cxx11::basic_string<char, std::char_traits<char>, "
     "std::allocator<char> >&, std::basic_string_view<char, std::char_traits<char> >, "
@@ -322,9 +321,9 @@ INTEGER_DIGITS_SYMBOL = (
     "void std::__detail::__to_chars_10_impl<unsigned long long>(char*, unsigned int, unsigned long long)")
 INTEGER_TO_CHARS_SYMBOL = (
     "std::to_chars_result std::__detail::__to_chars_10<unsigned long long>(char*, char*, unsigned long long)")
+INTEGER_FUSED_FRAME = 240
 INTEGER_BUILDERS = {
     "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&, unsigned int)": 41,
-    "daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)": 21,
 }
 STATUS_HEALTH_NUMBER_SYMBOL = (
     "daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >"
@@ -347,7 +346,6 @@ TASK_ALLOCATIONS = {
     "wifi": ("main/wifi.cpp", r'xTaskCreate\s*\(\s*wifi_watchdog_task,\s*"wifi_wd",\s*([0-9]+)\s*,'),
     "eth": ("main/net.cpp", r'xTaskCreate\s*\(\s*eth_fallback_task,\s*"eth_fb",\s*([0-9]+)\s*,'),
     "dns": ("main/captive_dns.cpp", r'xTaskCreate\s*\(\s*dns_task,\s*"captive_dns",\s*([0-9]+)\s*,'),
-    "weather": ("main/weather_forecast.cpp", r'xTaskCreate\s*\(\s*weather_task,\s*"weather",\s*(kTaskStack)\s*,'),
     "ota": ("main/ota_update.cpp", r'xTaskCreateStatic\s*\(\s*ota_task,\s*"ota",\s*(kTaskStack)\s*,'),
     "ota_health": ("main/ota_update.cpp", r'xTaskCreateStatic\s*\(\s*health_gate_task,\s*"ota_health",\s*(kHealthTaskStack)\s*,'),
     "deadline": ("main/http_deadline.cpp", r'xTaskCreateStatic\s*\(\s*socket_deadline_watchdog_task,\s*"http_abs_dl",\s*(kWatchdogStackBytes)\s*,'),
@@ -492,7 +490,6 @@ INLINED_MQTT_HELPERS = (
     "publish_modbus_state", "publish_env3_state", "publish_env3_discovery",
     "service_periodic_discovery_retirement",
     "mqtt_retirement_record_make",
-    "unsubscribe_reference_topic_if_unused",
 )
 INLINED_DISCOVERY_HELPERS = (
     r"^daik::mqtt_discovery_payload_owned\(",
@@ -567,13 +564,15 @@ def function_instructions(disassembly: str) -> dict[str, list[str]]:
 
 def validate_dynamic_stack(disassembly: str, frames: dict[str, int],
                            required: tuple[re.Pattern[str], ...]) -> None:
-    """Bind libstdc++'s one reviewed alloca caller; never treat ENTRY as its whole frame."""
+    """Bind the SDK I2C alloca caller; never treat ENTRY as its whole frame."""
     blocks = function_instructions(disassembly)
+    if any(any(symbol in name for symbol in RETIRED_DOUBLE_FORMATTERS) for name in blocks):
+        raise BudgetError("double formatter: retired dynamic conversion is linked")
     dynamic = [name for name, instructions in blocks.items()
                if any(STACK_MOVSP_RE.match(text) for text in instructions)
                and any(pattern.search(name) for pattern in required)]
     for name in dynamic:
-        if name != "s_i2c_start_end_command" and not TO_XSTRING_RE.search(name):
+        if name != "s_i2c_start_end_command":
             raise BudgetError(f"symbol {name}: unreviewed dynamic stack adjustment")
     if "s_i2c_start_end_command" in frames:
         body = "\n".join(blocks["s_i2c_start_end_command"])
@@ -587,40 +586,6 @@ def validate_dynamic_stack(disassembly: str, frames: dict[str, int],
                 or len(re.findall(r"\bmovsp\s+a1,", body)) != 2 or not re.search(sequence, body)):
             raise BudgetError("I2C address formatter: ENTRY64 / 0..2 bytes / two align16 allocations changed")
         frames["s_i2c_start_end_command"] += 32
-    matches = [name for name in blocks if TO_XSTRING_RE.search(name)]
-    if not any(TO_XSTRING_RE.search(name) for name in frames
-               if any(pattern.search(name) for pattern in required)):
-        return
-    if len(matches) != 1:
-        raise BudgetError("double formatter: exactly one reviewed __to_xstring body is required")
-    name = matches[0]
-    body = blocks[name]
-    alignment = [
-        r"addi\.n\s+a8,\s*a4,\s*15", r"srli\s+a8,\s*a8,\s*4",
-        r"slli\s+a8,\s*a8,\s*4", r"sub\s+a8,\s*a1,\s*a8",
-        r"movsp\s+a1,\s*a8",
-    ]
-    sequence = "\n".join(body)
-    if (frames.get(name) != 80 or len(re.findall(r"\bmovsp\b", sequence)) != 1
-            or not re.search("\n".join(alignment), sequence)):
-        raise BudgetError("double formatter: reviewed ENTRY80 / align16 / movsp contract changed")
-    callers: list[tuple[str, int]] = []
-    for caller, instructions in blocks.items():
-        for index, instruction in enumerate(instructions):
-            if f"<{name}>" not in instruction:
-                continue
-            if not re.match(r"call8\s", instruction):
-                raise BudgetError("double formatter: unreviewed indirect __to_xstring reference")
-            callers.append((caller, index))
-    if len(callers) != 1 or callers[0][0] != DOUBLE_STRING_SYMBOL:
-        raise BudgetError("double formatter: sole to_string(double) caller contract changed")
-    caller, index = callers[0]
-    prefix = blocks[caller][max(0, index - 2):index]
-    if (frames.get(caller) != 32 or len(prefix) != 2
-            or not re.fullmatch(r"movi\s+a12,\s*(?:0x148|328)", prefix[0])
-            or not re.fullmatch(r"or\s+a10,\s*a2,\s*a2", prefix[1])):
-        raise BudgetError("double formatter: immediate bounded 328-byte argument changed")
-    frames[name] += 336  # round 328 up to the exact 16-byte alignment above
 
 
 def exact_symbol_name(pattern: str) -> str:
@@ -628,7 +593,7 @@ def exact_symbol_name(pattern: str) -> str:
     return re.sub(r"\\(.)", r"\1", pattern[1:-1].replace(r"\x23", "#"))
 
 
-def validate_integer_formatter(disassembly: str) -> None:
+def validate_integer_formatter(disassembly: str, frames: dict[str, int]) -> None:
     """Keep the uint64 decimal conversion and its two callers in the reviewed fixed paths."""
     blocks = function_instructions(disassembly)
     for name in blocks:
@@ -646,7 +611,7 @@ def validate_integer_formatter(disassembly: str) -> None:
                 raise BudgetError("integer formatter: indirect helper reference requires review")
             callers[caller] = callers.get(caller, 0) + 1
     if callers != INTEGER_BUILDERS:
-        raise BudgetError("integer formatter: the two reviewed builder caller counts changed")
+        raise BudgetError("integer formatter: reviewed builder caller counts changed")
 
     def calls(name: str) -> list[str]:
         result = []
@@ -668,6 +633,8 @@ def validate_integer_formatter(disassembly: str) -> None:
         return result
 
     string = "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+    digits_inlined = INTEGER_DIGITS_SYMBOL not in blocks
+    digit_calls = ["memcpy", "__umoddi3", "__udivdi3"]
     expected = {
         INTEGER_APPEND_SYMBOL: [
             string + "::append(char const*, unsigned int)",
@@ -675,16 +642,23 @@ def validate_integer_formatter(disassembly: str) -> None:
             string + "::push_back(char)", string + "::append(char const*, unsigned int)",
             INTEGER_TO_CHARS_SYMBOL,
         ],
-        INTEGER_TO_CHARS_SYMBOL: [INTEGER_LENGTH_SYMBOL, INTEGER_DIGITS_SYMBOL],
+        INTEGER_TO_CHARS_SYMBOL: [INTEGER_LENGTH_SYMBOL] + (
+            digit_calls if digits_inlined else [INTEGER_DIGITS_SYMBOL]),
         INTEGER_LENGTH_SYMBOL: ["__udivdi3"],
-        INTEGER_DIGITS_SYMBOL: ["memcpy", "__umoddi3", "__udivdi3"],
+        INTEGER_DIGITS_SYMBOL: digit_calls,
     }
     for name, targets in expected.items():
         if name in blocks and calls(name) != targets:
             raise BudgetError(f"integer formatter: decimal/append/ROM continuation changed in {name}")
     helper = "\n".join(blocks[INTEGER_APPEND_SYMBOL])
     wrapper = "\n".join(blocks.get(INTEGER_TO_CHARS_SYMBOL, []))
-    if (not re.search(r"movi(?:\.n)?\s+a12,\s*10\n[^\n]+\ncall8\s+[0-9a-f]+\s+<"
+    if digits_inlined and (frames.get(INTEGER_TO_CHARS_SYMBOL) != INTEGER_FUSED_FRAME
+            or not re.search(r"movi\s+a12,\s*201\nmov\.n\s+a10,\s*a1\nadd\.n\s+a3,\s*a2,\s*a6\n"
+                             r"l32r\s+a8,[^\n]+\(400011f4 <memcpy>\)\ncallx8\s+a8\b", wrapper)):
+        raise BudgetError("integer formatter: inlined digits need the reviewed 240-byte frame and 201-byte copy")
+    length_args = (r"or\s+a10,\s*a4,\s*a4\nor\s+a11,\s*a5,\s*a5\n"
+                   if digits_inlined else r"[^\n]+\n")
+    if (not re.search(r"movi(?:\.n)?\s+a12,\s*10\n" + length_args + r"call8\s+[0-9a-f]+\s+<"
                       + re.escape(INTEGER_LENGTH_SYMBOL) + r">", wrapper)
             or not re.search(r"addi\s+a11,\s*a1,\s*20\nor\s+a10,\s*a1,\s*a1\ncall8\s+[0-9a-f]+\s+<"
                              + re.escape(INTEGER_TO_CHARS_SYMBOL) + r">", helper)):
@@ -907,7 +881,7 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
     if undecodable:
         raise BudgetError("; ".join(undecodable))
     validate_dynamic_stack(disassembly, frames, required)
-    validate_integer_formatter(disassembly)
+    validate_integer_formatter(disassembly, frames)
     return frames
 
 
@@ -969,11 +943,14 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         for name, tail in report_tails.items()
         for transport, prefix in (("direct", []), ("mcp", ["mcp_post"]))
     }
+    # ENV III and circulation format one number at a time. Charge the nested decimal
+    # conversion once, through the multiply/shift helper and its 128-bit multiply.
+    status_decimal = ["http_send_status_json", "status_serializer", "status_fixed_double",
+                      "sdk_snprintf", "sdk_vfprintf", "sdk_dtoa", "sdk_dtoa_mul_shift",
+                      "sdk_dtoa_mul"]
     expected = {
-        "httpd_mcp_status": ["mcp_post", "http_send_status_json", "status_serializer",
-                             "double_string", "dynamic_double_string"],
-        "httpd_direct_status": ["http_send_status_json", "status_serializer",
-                                "double_string", "dynamic_double_string"],
+        "httpd_mcp_status": ["mcp_post", *status_decimal],
+        "httpd_direct_status": status_decimal,
         **report_paths,
         "httpd_mcp_health_number": ["mcp_post", "http_send_status_json", "status_serializer",
                                     "status_health_number", "status_unsigned_number"],
@@ -1001,40 +978,6 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                                      "status_rfc3339", "rfc3339_utc", "sdk_snprintf", "sdk_vfprintf"],
         "httpd_direct_status_rfc3339": ["http_send_status_json", "status_serializer",
                                         "status_rfc3339", "rfc3339_utc", "sdk_snprintf", "sdk_vfprintf"],
-        "httpd_mcp_curve_snapshot": ["mcp_post", "http_send_status_json", "status_serializer",
-                                     "curve_status_json", "curve_status", "curve_bins_snapshot",
-                                     "curve_bin_summary", "room_time_now",
-                                     "mqtt_input_lock", "mqtt_input_unlock",
-                                     "modbus_active_profile"],
-        "httpd_direct_curve_snapshot": ["http_send_status_json", "status_serializer",
-                                        "curve_status_json", "curve_status", "curve_bins_snapshot",
-                                        "curve_bin_summary", "room_time_now",
-                                        "mqtt_input_lock", "mqtt_input_unlock",
-                                        "modbus_active_profile"],
-        "httpd_mcp_curve_expire": ["mcp_post", "http_send_status_json", "status_serializer",
-                                   "curve_status_json", "curve_status", "curve_bins_snapshot",
-                                   "curve_bin_clock", "curve_bin_clear",
-                                   "mqtt_input_lock", "mqtt_input_unlock",
-                                   "modbus_active_profile"],
-        "httpd_direct_curve_expire": ["http_send_status_json", "status_serializer",
-                                      "curve_status_json", "curve_status", "curve_bins_snapshot",
-                                      "curve_bin_clock", "curve_bin_clear",
-                                      "mqtt_input_lock", "mqtt_input_unlock",
-                                      "modbus_active_profile"],
-        "httpd_mcp_curve_format_bin": ["mcp_post", "http_send_status_json", "status_serializer",
-                                       "curve_status_json", "curve_bins_json", "status_fixed_double",
-                                       "sdk_snprintf", "sdk_vfprintf", "sdk_dtoa",
-                                       "sdk_dtoa_mul_shift", "sdk_dtoa_mul"],
-        "httpd_direct_curve_format_bin": ["http_send_status_json", "status_serializer",
-                                          "curve_status_json", "curve_bins_json", "status_fixed_double",
-                                          "sdk_snprintf", "sdk_vfprintf", "sdk_dtoa",
-                                          "sdk_dtoa_mul_shift", "sdk_dtoa_mul"],
-        "httpd_mcp_curve_axis_number": ["mcp_post", "http_send_status_json", "status_serializer",
-                                        "curve_status_json", "curve_bins_json", "curve_axis_json",
-                                        "curve_number_json", "status_unsigned_number"],
-        "httpd_direct_curve_axis_number": ["http_send_status_json", "status_serializer",
-                                           "curve_status_json", "curve_bins_json", "curve_axis_json",
-                                           "curve_number_json", "status_unsigned_number"],
         "httpd_mcp_status_redacted": ["mcp_post", "http_send_status_json", "status_serializer",
                                       "status_redacted_append", "status_quoted_string",
                                       "status_escaped_string", "status_utf8_sequence_length"],
@@ -1065,18 +1008,6 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                                           "status_service_meta", "status_unsigned_number"],
         "httpd_direct_status_service_meta": ["http_send_status_json", "status_serializer",
                                              "status_service_meta", "status_unsigned_number"],
-        "httpd_mcp_curve_scalar_fields": ["mcp_post", "http_send_status_json", "status_serializer",
-                                          "curve_status_json", "curve_json_bool", "curve_json_uint",
-                                          "curve_json_quoted", "curve_json_source",
-                                          "status_opt_uint", "status_opt_int",
-                                          "status_quoted_string", "status_escaped_string",
-                                          "status_utf8_sequence_length", "status_unsigned_number"],
-        "httpd_direct_curve_scalar_fields": ["http_send_status_json", "status_serializer",
-                                             "curve_status_json", "curve_json_bool", "curve_json_uint",
-                                             "curve_json_quoted", "curve_json_source",
-                                             "status_opt_uint", "status_opt_int",
-                                             "status_quoted_string", "status_escaped_string",
-                                             "status_utf8_sequence_length", "status_unsigned_number"],
         "httpd_mcp_fault_timeline": ["mcp_post", "http_send_status_json", "status_serializer",
                                      "fault_status_json", "fault_timeline_snapshot",
                                      "fault_snapshot_locked", "fault_walk_pair", "fault_walk_feed",
@@ -1153,18 +1084,27 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
     code = {name: re.sub(r"/\*.*?\*/|//[^\n]*", "", sources[name], flags=re.S)
             for name in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp")}
     status = code["main/http_status.cpp"]
+    formatter = stack_function_body(stack_source_code(sources["main/http_status.cpp"]),
+                                    "append_status_fmt_double")
+    if not re.search(r"char\s+buf\[48\];\s*const int n\s*=\s*"
+                     r"std::snprintf\(buf,\s*sizeof\(buf\),\s*fmt,\s*value\);", formatter):
+        raise BudgetError("diagnosis status source: fixed 48-byte floating-point buffer changed")
+    # Other printf conversions may take a different libc branch.
+    formats = re.findall(r'\bappend_status_fmt_double\s*\(\s*j\s*,\s*"(?:[^"\\]|\\.)*"\s*,\s*"([^"]+)"',
+                         status)
+    if (formats != ["%.2f", "%.2f", "%.2f", "%.6g"]
+            or len(re.findall(r"\bappend_status_fmt_double\s*\(", status)) != len(formats) + 1):
+        raise BudgetError("diagnosis status source: reviewed decimal formatter call sites changed")
     if (len(re.findall(r"\bcheckup_report\s*\(", status)) != 1
             or not re.search(r"logic::CheckupCyclingHours\s+hrs\{\};\s*"
-                             r"ValuesTlsReader trace_reader;\s*"
-                             r"trace_reader.admitted\s*=\s*!redact && c\.diagnostics_enabled && "
-                             r"weather_values_reader_enter\(\);\s*"
+                             r"const bool trace_admitted\s*=\s*!redact && c\.diagnostics_enabled;\s*"
                              r"using Trace\s*=\s*logic::CheckupCyclingTrace;\s*"
-                             r"void\* trace_storage\s*=\s*trace_reader.admitted\s*\?\s*"
+                             r"void\* trace_storage\s*=\s*trace_admitted\s*\?\s*"
                              r"heap_caps_malloc\(sizeof\(Trace\), MALLOC_CAP_8BIT\)\s*: nullptr;\s*"
                              r"std::unique_ptr<Trace, decltype\(&std::free\)> trace\(\s*"
                              r"trace_storage \? new \(trace_storage\) Trace : nullptr, std::free\);\s*"
                              r"using DhwTrace\s*=\s*logic::DhwLossTimeline;\s*"
-                             r"void\* dhw_storage\s*=\s*trace_reader.admitted\s*\?\s*"
+                             r"void\* dhw_storage\s*=\s*trace_admitted\s*\?\s*"
                              r"heap_caps_malloc\(sizeof\(DhwTrace\), MALLOC_CAP_8BIT\)\s*: nullptr;\s*"
                              r"std::unique_ptr<DhwTrace, decltype\(&std::free\)> dhw_trace\(\s*"
                              r"dhw_storage \? new \(dhw_storage\) DhwTrace : nullptr, std::free\);\s*"
@@ -1715,32 +1655,6 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
         raise BudgetError("shutdown source: factory-reset journal exclusion changed")
 
 
-def validate_weather_tls_path(budgets: dict[str, Any]) -> None:
-    # The SDK envelope includes the larger WSS prefix. Adding the complete HTTP prefix again
-    # deliberately overcounts shared transport/TLS frames, rather than assuming spare task space.
-    callers = ["weather_task", "weather_cycle", "weather_fetch", "weather_download"]
-    read = ["tls_esp_transport_read", "tls_ssl_read", "tls_esp_tls_conn_read",
-            "tls_esp_mbedtls_read"]
-    paths = {
-        "weather_task_tls": callers + ["sdk_http_client_open", "sdk_http_client_connect",
-            "tls_esp_transport_connect", "tls_ssl_connect", "tls_esp_tls_conn_new_sync",
-            "tls_esp_tls_low_level_conn", "tls_esp_mbedtls_handshake"],
-        "weather_task_tls_headers": callers + ["sdk_http_client_fetch_headers"] + read,
-        "weather_task_tls_body": callers + ["sdk_http_client_read"] + read,
-    }
-    owned = budgets["tasks"]["weather"]
-    for name, members in paths.items():
-        rule = budgets["paths"].get(name)
-        if (rule is None or name not in owned["paths"] or owned["reserve_bytes"] < 1536
-                or rule["symbols"] != members or rule["multipliers"] != {}
-                or rule["base_bytes"] != SDK_TLS_LIMIT
-                or rule["max_bytes"] != owned["stack_bytes"] - owned["reserve_bytes"]):
-            raise BudgetError(f"Weather TLS path {name}: complete caller/HTTP prefix/TLS envelope required")
-    for name in ("weather_task_download", "weather_task_parse"):
-        if budgets["paths"][name]["base_bytes"] != 2048:
-            raise BudgetError("Weather TLS path: separate error/parse allowances must remain")
-
-
 def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> None:
     """Check ceilings against the allocation actually passed to each application task."""
     tasks = budgets["tasks"]
@@ -1905,13 +1819,12 @@ def validate_json_recursion(budgets: dict[str, Any], json_source: str,
         r"JSON_MAX_DEPTH\s*\);\s*\}")
     if not re.search(adapter, adapter_source):
         raise BudgetError("bounded cJSON adapter must bind JSON_MAX_DEPTH as its fourth argument")
-    for owner in ("hp", "mqtt", "board", "env3", "weather", "diagnostics", "circulation"):
+    for owner in ("hp", "mqtt", "board", "env3", "diagnostics", "circulation"):
         name = f"httpd_config_{owner}"
         rule = budgets["paths"].get(name)
         if rule is None or rule["multipliers"] != {"cjson_parse_value": 17, "cjson_delete": 17}:
             raise BudgetError(f"path {name}: cJSON parse and simultaneous cleanup need depth + root")
-    for name in ("mqtt_reference_parse", "mqtt_circulation_parse",
-                 "mqtt_circulation_probe_parse", "weather_task_parse"):
+    for name in ("mqtt_circulation_parse", "mqtt_circulation_probe_parse"):
         rule = budgets["paths"].get(name)
         if rule is None or rule["multipliers"] != {"cjson_parse_value": 17, "cjson_delete": 17}:
             raise BudgetError(f"path {name}: bounded shared cJSON recursion and cleanup need depth + root")
@@ -1950,7 +1863,7 @@ json_append_integer_field(std::string& out, std::string_view prefix, Integer val
             or len(re.findall(r"\bjson_append_integer_field_impl\s*\(", source)) != 2
             or len(re.findall(r"\bjson_append_integer_field\s*\(", source)) != 1):
         raise BudgetError("integer formatter source: fixed uint64/20-byte/inline magnitude contract changed")
-    expected = {"main/logic/heartbeat.hpp": 33, "main/logic/heating_curve_mqtt.hpp": 21}
+    expected = {"main/logic/heartbeat.hpp": 33}
     if (set(callers) != set(expected)
             or any(len(re.findall(r"\bjson_append_integer_field\s*\(", callers[path])) != count
                    for path, count in expected.items())):
@@ -2164,10 +2077,10 @@ def validate_mqtt_discovery_paths(budgets: dict[str, Any], mqtt_source: str,
             raise BudgetError(f"MQTT discovery path {name}: caller/owner/recursion/envelope changed")
     mqtt = stack_source_code(mqtt_source)
     for parent, child in (("on_mqtt", "capture_discovery_owner_frame"),
-                          ("on_mqtt", "capture_reference_frame"),
+                          ("on_mqtt", "capture_circulation_frame"),
                           ("capture_discovery_owner_frame", "mqtt_discovery_payload_owned"),
-                          ("capture_reference_frame", "discovery_topic_is_current_input"),
-                          ("capture_reference_frame", "mqtt_discovery_namespace_topic"),
+                          ("capture_circulation_frame", "discovery_topic_is_current_input"),
+                          ("capture_circulation_frame", "mqtt_discovery_namespace_topic"),
                           ("mqtt_task", "service_discovery_owner_guard"),
                           ("service_discovery_owner_guard", "esp_mqtt_client_subscribe")):
         if len(re.findall(r"\b" + child + r"\s*\(", stack_function_body(mqtt, parent))) != 1:
@@ -2175,7 +2088,7 @@ def validate_mqtt_discovery_paths(budgets: dict[str, Any], mqtt_source: str,
     callback = stack_function_body(mqtt, "on_mqtt")
     data = re.split(r"\bcase\s+MQTT_EVENT_DATA\s*:", callback)
     if (len(data) != 2 or "capture_discovery_owner_frame" in data[0]
-            or not re.search(r"capture_discovery_owner_frame\(e\);\s*capture_reference_frame\(e\);", data[1])):
+            or not re.search(r"capture_discovery_owner_frame\(e\);\s*capture_circulation_frame\(e\);", data[1])):
         raise BudgetError("MQTT discovery source: parser/input callbacks must remain DATA-only siblings")
     if len(re.findall(r"esp_mqtt_client_register_event\([^;]+\bon_mqtt\s*,\s*nullptr\)", mqtt)) != 1:
         raise BudgetError("MQTT discovery source: SDK event registration changed")
@@ -2193,18 +2106,18 @@ def validate_mqtt_discovery_paths(budgets: dict[str, Any], mqtt_source: str,
 
 
 CONFIG_DOCUMENT_OWNERS = frozenset({
-    "config_hp", "config_mqtt", "config_board", "config_env3", "config_weather",
-    "config_diagnostics", "config_circulation", "config_ref_temp", "circulation_parser", "hp_query_probe",
+    "config_hp", "config_mqtt", "config_board", "config_env3",
+    "config_diagnostics", "config_circulation", "circulation_parser", "hp_query_probe",
     "config_wifi", "config_syslog", "config_ntp",
 })
 CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_config_hp", "httpd_config_mqtt", "httpd_config_board", "httpd_config_env3",
-    "httpd_config_weather", "httpd_config_diagnostics", "httpd_config_circulation",
+    "httpd_config_diagnostics", "httpd_config_circulation",
     "httpd_hp_query_probe", "httpd_config_save", "httpd_config_save_link", "httpd_config_board_save",
     "httpd_mqtt_tls",
     "httpd_i2c_read", "httpd_i2c_write", "httpd_i2c_receive",
     "httpd_board_i2c_read", "httpd_board_i2c_write", "httpd_board_i2c_receive",
-    "httpd_checkup_schema", "httpd_curve_homehub_reset", "httpd_ref_temp_reset",
+    "httpd_checkup_schema",
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
       for phase in ("journal", "checkup",
                     "checkup_fault_handoff", "checkup_fault_handoff_clock",
@@ -2221,8 +2134,8 @@ CONFIG_DOCUMENT_PATHS |= frozenset(
 STAGED_STACK_LIMITS = {"config_document": 48, "http_values_snapshot": 208,
                        "mqtt_modbus_count": 80, "mqtt_modbus_emit": 48}
 CONFIG_DOCUMENT_CALLS = {
-    "set_wifi": 512, "set_mqtt": 512, "parse_ref_temp_request": 8192,
-    "parse_circulation_request": 1280, "set_diagnostics": 128, "set_weather": 256,
+    "set_wifi": 512, "set_mqtt": 512,
+    "parse_circulation_request": 1280, "set_diagnostics": 128,
     "set_hp": 2048, "set_syslog": 512, "set_ntp": 256, "set_board": 512,
     "set_env3": 256, "set_ota": 128, "set_lang": 128, "hp_query_probe": 192,
 }
@@ -2295,57 +2208,6 @@ def validate_staged_stack_paths(budgets: dict[str, Any], sources: dict[str, str]
         raise BudgetError("staged stack: shared Modbus count/emission encoder changed")
 
 
-# Independently measured room-source phases. Sequential helpers are conservatively summed; the
-# existing publisher allocation, SDK continuation and 5 KiB path ceilings remain unchanged.
-ROOM_HISTORY_FRAMES = {
-    'mqtt_room_history': ('daik::record_room_history(daik::Config const&, unsigned long)', 256),
-    'room_history_record': ('daik::history_record_room(bool, double, unsigned long)', 64),
-    'room_request_current': ('daik::reference_request_current_locked(unsigned long, daik::Config const&)', 192),
-    'room_config_binding': ('daik::reference_config_binding(daik::Config const&)', 160),
-    'room_applied_binding': ('daik::reference_applied_binding_locked()', 32),
-    'room_binding_matches': ('daik::reference_binding_matches(daik::ReferenceSourceBinding const&, daik::ReferenceSourceBinding const&, bool, bool)', 176),
-    'room_freshness': ('daik::reference_room_freshness(bool, bool, bool, bool, long long, unsigned long long, long long, unsigned long long, unsigned long)', 64),
-    'room_base_freshness': ('daik::reference_freshness(bool, bool, bool, long long, unsigned long long, long long, unsigned long long, unsigned long)', 32),
-    'room_sample': ('daik::reference_room_sample(daik::ReferenceRoomRaw const&, daik::ReferenceFreshness const&)', 96),
-    'room_sample_reason': ('daik::reference_room_freshness_reason(std::basic_string_view<char, std::char_traits<char> >)', 64),
-    'room_sample_reject': ('_ZZN4daik21reference_room_sampleERKNS_16ReferenceRoomRawERKNS_18ReferenceFreshnessEENKUlNS_19ReferenceRoomReasonEE_clES6_$isra$0', 32),
-    'room_time_now': ('daik::time_now(long long&, long&)', 48),
-    'room_history_seal': ('daik::(anonymous namespace)::room_seal_locked()', 32),
-    'room_history_crc': ('daik::(anonymous namespace)::room_crc()', 32),
-    'history_crc_ring': ('daik::(anonymous namespace)::persist_crc_ring(unsigned long, daik::logic::TrendRing const&)', 32),
-    'history_config_crc': ('daik::config_crc32_update(unsigned long, unsigned char const*, unsigned int)', 32),
-    'room_liveness_touch': ('daik::logic::history_liveness_touch(daik::logic::HistoryLiveness&, long long)', 32),
-    'room_liveness_commit': ('daik::logic::history_liveness_commit(daik::logic::HistoryLiveness&, daik::logic::HistoryJournalSource, long long)', 32),
-    'room_liveness_seal': ('daik::logic::history_liveness_seal(daik::logic::HistoryLiveness&)', 32),
-    'room_liveness_crc': ('daik::logic::history_liveness_crc(daik::logic::HistoryLiveness const&)', 80),
-    'room_ring_commit': ('daik::logic::TrendRing::commit(unsigned long)', 32),
-    'room_ring_reset': ('daik::logic::TrendRing::reset_with_gaps(unsigned int)', 32),
-}
-ROOM_HISTORY_PATHS = {
-    'mqtt_room_history_validate': ['mqtt_task', 'mqtt_room_history', 'room_request_current', 'room_config_binding', 'room_applied_binding', 'room_binding_matches', 'room_freshness', 'room_base_freshness', 'room_sample', 'room_sample_reason', 'room_sample_reject', 'room_time_now', 'mqtt_input_lock', 'mqtt_input_unlock'],
-    'mqtt_room_history_commit': ['mqtt_task', 'mqtt_room_history', 'room_history_record', 'room_history_seal', 'room_history_crc', 'history_crc_ring', 'history_config_crc', 'room_liveness_touch', 'room_liveness_commit', 'room_liveness_seal', 'room_liveness_crc', 'room_ring_commit', 'room_ring_reset', 'mqtt_input_lock', 'mqtt_input_unlock'],
-}
-
-
-def validate_room_history_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
-    for key, (name, maximum) in ROOM_HISTORY_FRAMES.items():
-        expected = {"pattern": "^" + re.escape(name) + "$", "max_bytes": maximum}
-        if budgets["symbols"].get(key) != expected:
-            raise BudgetError(f"room history: reviewed frame {key}/{maximum} changed")
-    for key, members in ROOM_HISTORY_PATHS.items():
-        expected = {"symbols": members, "multipliers": {}, "base_bytes": 1536, "max_bytes": 5120}
-        if budgets["paths"].get(key) != expected or key not in budgets["tasks"]["mqtt"]["paths"]:
-            raise BudgetError(f"room history: complete publisher path {key} changed")
-    mqtt = stack_source_code(sources["main/mqtt_ha.cpp"])
-    if not re.search(r"static\s+__attribute__\(\(noinline\)\)\s+void\s+record_room_history\s*\(", mqtt):
-        raise BudgetError("room history: independently measured recorder boundary changed")
-    task = stack_function_body(mqtt, "mqtt_task")
-    room = stack_function_body(mqtt, "record_room_history")
-    if (len(re.findall(r"\brecord_room_history\s*\(", task)) != 1
-            or len(re.findall(r"\bhistory_record_room\s*\(", room)) != 1):
-        raise BudgetError("room history: publisher/recorder caller inventory changed")
-
-
 CHECKUP_SCHEMA_CHAIN = [
     "checkup_detect_schema", "checkup_schema", "checkup_schema_row", "checkup_schema_consumer",
     "checkup_schema_adjudicated_view", "checkup_schema_adjudicated_row",
@@ -2396,7 +2258,6 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_mqtt_tls_client(sources["main/mqtt_ha.cpp"])
     validate_env_i2c(sources["main/env3.cpp"])
     validate_task_stacks(budgets, sources)
-    validate_weather_tls_path(budgets)
     validate_discovery_builder_paths(budgets)
     validate_mqtt_retirement_paths(budgets)
     validate_mqtt_discovery_paths(
@@ -2408,7 +2269,6 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_checkup_schema_paths(budgets, sources)
     validate_staged_stack_paths(budgets, sources,
                                 (REPO / "main/logic/mqtt_group.hpp").read_text(encoding="utf-8"))
-    validate_room_history_paths(budgets, sources)
     validate_shutdown_paths(budgets, sources)
     validate_cycling_flash_paths(budgets, sources)
     validate_fault_flash_paths(budgets, sources)
@@ -2420,8 +2280,8 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_integer_source(
         (REPO / "main/logic/json_integer.hpp").read_text(encoding="utf-8"),
         {path: (REPO / path).read_text(encoding="utf-8")
-         for path in ("main/logic/heartbeat.hpp", "main/logic/heating_curve_mqtt.hpp")})
-    for owner in ("heartbeat", "curve"):
+         for path in ("main/logic/heartbeat.hpp",)})
+    for owner in ("heartbeat",):
         path = budgets["paths"].get(f"mqtt_{owner}_build", {})
         if (path.get("symbols") != ["mqtt_task", f"mqtt_{owner}_builder", f"mqtt_{owner}_payload",
                                     "json_integer_append", "json_integer_to_chars", "json_integer_length", "json_integer_digits"]
@@ -2432,13 +2292,11 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
             "pattern": "^" + re.escape(INTEGER_TO_CHARS_SYMBOL) + "$", "max_bytes": 48}:
         raise BudgetError("integer formatter path: exact ENTRY48 charconv wrapper rule changed")
     mqtt_depth = r"json_payload_depth_ok\(std::string_view\(frame\.payload,\s*frame\.payload_len\)\)"
-    if (len(re.findall(mqtt_depth, sources["main/mqtt_ha.cpp"])) != 2
-            or len(re.findall(r"\bjson_payload_depth_ok\s*\(", sources["main/mqtt_ha.cpp"])) != 2
-            or len(re.findall(r"\bcJSON_ParseWithLengthOpts\s*\(", sources["main/mqtt_ha.cpp"])) != 2
-            or len(re.findall(r"\bcJSON_ParseWithLengthOpts\s*\(", sources["main/weather_forecast.cpp"])) != 1
-            or not re.search(r"json_payload_depth_ok\(payload,\s*JSON_MAX_DEPTH\)",
-                             sources["main/weather_forecast.cpp"])):
-        raise BudgetError("MQTT/Weather cJSON source depth checks require review")
+    mqtt_source = sources["main/mqtt_ha.cpp"]
+    if (len(re.findall(mqtt_depth, mqtt_source)) != 1
+            or len(re.findall(r"\bjson_payload_depth_ok\s*\(", mqtt_source)) != 1
+            or len(re.findall(r"\bcJSON_ParseWithLengthOpts\s*\(", mqtt_source)) != 1):
+        raise BudgetError("MQTT cJSON source depth checks require review")
 
 
 def validate_stop_observation_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
@@ -2642,8 +2500,9 @@ def load_budgets(path: Path) -> dict[str, Any]:
     return document
 
 
-def evaluate(frames: dict[str, int], budgets: dict[str, Any]) -> dict[str, int]:
-    return _evaluate_matched(frames, budgets, _matching_frame_names(frames, budgets))
+def evaluate(frames: dict[str, int], budgets: dict[str, Any], *, integer_digits_inlined: bool = False) -> dict[str, int]:
+    return _evaluate_matched(frames, budgets, _matching_frame_names(frames, budgets),
+                             integer_digits_inlined=integer_digits_inlined)
 
 
 def _matching_frame_names(
@@ -2660,16 +2519,23 @@ def _matching_frame_names(
 
 def _evaluate_matched(
     frames: dict[str, int], budgets: dict[str, Any], matching: dict[str, tuple[str, ...]],
+    *, integer_digits_inlined: bool = False,
 ) -> dict[str, int]:
     selected: dict[str, int] = {}
     errors: list[str] = []
     for key, rule in budgets["symbols"].items():
         maximum = rule["max_bytes"]
-        matches = [name for name in matching[key] if name in frames]
+        if integer_digits_inlined and key == "json_integer_digits":
+            # The reviewed combined frame occupies the digits budget even on paths whose
+            # original model did not include a separate wrapper frame.
+            matches = [name for name in matching["json_integer_to_chars"] if name in frames]
+        else:
+            matches = [name for name in matching[key] if name in frames]
         if not matches:
             errors.append(f"symbol {key}: required pattern {rule['pattern']!r} is absent")
             continue
-        selected[key] = max(frames[name] for name in matches)
+        selected[key] = (0 if integer_digits_inlined and key == "json_integer_to_chars"
+                         else max(frames[name] for name in matches))
         if selected[key] > maximum:
             names = ", ".join(matches)
             errors.append(
@@ -2779,12 +2645,14 @@ def raw_detect_code(data: bytes, nm_text: str, expected_address: int) -> tuple[i
     return address, code
 
 
-def raw_detect_body(decoded: str, address: int, code: bytes) -> str:
+def raw_detect_body(decoded: str, address: int, code: bytes, *, allow_alignment: bool = False) -> str:
     """Require byte-for-byte, gap-free decoding of the entire body, including movsp."""
     cursor = address
     headers = 0
     sections = 0
     instructions = []
+    padding: int | None = None
+    decoded_instructions: dict[int, str] = {}
     for line in decoded.splitlines():
         if SECTION_RE.match(line):
             sections += 1
@@ -2797,21 +2665,47 @@ def raw_detect_body(decoded: str, address: int, code: bytes) -> str:
                 raise BudgetError("raw hp_detect_run: wrong or duplicate raw function entry")
         elif instruction := INSTRUCTION_RE.match(line):
             raw, mnemonic = instruction.group(2), (instruction.group(3) or "").strip()
+            alignment = allow_alignment and raw == "000000" and mnemonic == "ill"
             if (headers != 1 or int(instruction.group(1), 16) != cursor
                     or len(raw) not in (4, 6, 8, 16) or not mnemonic
                     or not re.fullmatch(r"[a-z][a-z0-9_.]*(?:\s+.*)?", mnemonic)
-                    or mnemonic.split()[0] in ("ill", "ill.n", "unknown")):
+                    or (not alignment and mnemonic.split()[0] in ("ill", "ill.n", "unknown"))):
                 raise BudgetError("raw hp_detect_run: incomplete or invalid raw instruction decoding")
             raw_bytes = bytes.fromhex(raw)
             offset = cursor - address
             if raw_bytes != code[offset:offset + len(raw_bytes)]:
                 raise BudgetError("raw hp_detect_run: decoded instruction bytes disagree with ELF")
+            if alignment:
+                # The fault-unit serializer has one in-body zero word after an unconditional
+                # jump. It counts towards byte coverage and must have no incoming control flow.
+                if padding is not None or not decoded_instructions or not re.match(
+                        r"j\s", next(reversed(decoded_instructions.values()))):
+                    raise BudgetError("raw body: zero alignment must follow an unconditional jump")
+                padding = cursor
+            else:
+                decoded_instructions[cursor] = mnemonic
             cursor += len(raw_bytes)
-            instructions.append(line)
+            if not alignment:
+                instructions.append(line)
         elif re.match(r"^\s*[0-9a-fA-F]+:", line):
             raise BudgetError("raw hp_detect_run: truncated raw instruction line")
     if sections != 1 or headers != 1 or not instructions or cursor != address + len(code):
         raise BudgetError("raw hp_detect_run: decoder did not cover the complete function")
+    if padding is not None:
+        if padding + 3 not in decoded_instructions:
+            raise BudgetError("raw body: zero alignment must be inside the function")
+        for mnemonic in decoded_instructions.values():
+            opcode = mnemonic.split()[0]
+            if opcode == "jx" or opcode.startswith("loop"):
+                raise BudgetError("raw body: unreviewed control flow around zero alignment")
+            branch = opcode == "j" or opcode.startswith("b")
+            if branch or opcode in ("call0", "call4", "call8", "call12"):
+                target = re.search(r"(?:^|[\s,])0x([0-9a-f]+)$", mnemonic)
+                if target is None:
+                    raise BudgetError("raw body: missing control target around zero alignment")
+                destination = int(target.group(1), 16)
+                if (branch or address <= destination < cursor) and destination not in decoded_instructions:
+                    raise BudgetError("raw body: control target lacks a decoded instruction")
     first = INSTRUCTION_RE.match(instructions[0])
     entry = ENTRY_RE.fullmatch((first.group(3) or "").strip())
     frame = (int.from_bytes(code[:3], "little") >> 12) * 8
@@ -3208,46 +3102,6 @@ def staged_stack_self_test(budgets: dict[str, Any]) -> int:
     return controls
 
 
-def room_history_stack_self_test(budgets: dict[str, Any]) -> int:
-    sources = {"main/mqtt_ha.cpp": (REPO / "main/mqtt_ha.cpp").read_text(encoding="utf-8")}
-    validate_room_history_paths(budgets, sources)
-    controls = 0
-
-    def reject(changed: dict[str, Any], changed_source: str | None = None) -> None:
-        nonlocal controls
-        try:
-            validate_room_history_paths(changed, sources if changed_source is None else
-                                        {"main/mqtt_ha.cpp": changed_source})
-        except BudgetError as exc:
-            assert "room history:" in str(exc)
-        else:
-            raise AssertionError("room history stack accepted an omitted caller/boundary")
-        controls += 1
-
-    for key, members in ROOM_HISTORY_PATHS.items():
-        for member in members:
-            changed = json.loads(json.dumps(budgets))
-            changed["paths"][key]["symbols"].remove(member)
-            reject(changed)
-        for field, value in (("base_bytes", 1520), ("max_bytes", 5136)):
-            changed = json.loads(json.dumps(budgets))
-            changed["paths"][key][field] = value
-            reject(changed)
-        changed = json.loads(json.dumps(budgets))
-        changed["tasks"]["mqtt"]["paths"].remove(key)
-        reject(changed)
-    for key in ROOM_HISTORY_FRAMES:
-        changed = json.loads(json.dumps(budgets))
-        changed["symbols"][key]["max_bytes"] += 16
-        reject(changed)
-    source = sources["main/mqtt_ha.cpp"]
-    before = "static __attribute__((noinline)) void record_room_history"
-    assert source.count(before) == 1
-    reject(budgets, source.replace(before, "static void record_room_history"))
-    before = "history_record_room(room.temperature_valid, room.temperature_c, generation);"
-    assert source.count(before) == 1
-    reject(budgets, source.replace(before, "(void)generation;"))
-    return controls
 
 
 def self_test() -> None:
@@ -3282,16 +3136,6 @@ def self_test() -> None:
    d: 004136          entry a1, 512
 0000000e <daik::(anonymous namespace)::health_gate_task(void*)>:
    e: 004136          entry a1, 80
-0000000f <daik::(anonymous namespace)::weather_task(void*)>:
-   f: 004136          entry a1, 48
-00000010 <daik::(anonymous namespace)::fetch_forecast(daik::Config const&, daik::WeatherForecastSample&, std::string&, bool&, daik::HttpClientProbe&)>:
-  10: 004136          entry a1, 160
-00000011 <daik::(anonymous namespace)::download_json(daik::Config const&, std::string&, std::string&, bool&, daik::HttpClientProbe&)>:
-  11: 004136          entry a1, 432
-00000012 <daik::(anonymous namespace)::parse_forecast(std::string const&, long long, daik::WeatherForecastSample&, std::string&)>:
-  12: 004136          entry a1, 512
-00000040 <_ZN4daik12_GLOBAL__N_1L13weather_cycleEmRNS0_21RefreshRequestAttemptE$constprop$0>:
-  40: 004136          entry a1, 736
 """
     fixture += """
 00000013 <daik::set_hp(httpd_req*)>:
@@ -3304,8 +3148,6 @@ def self_test() -> None:
  384: 004136          entry a1, 112
 00000016 <daik::set_env3(httpd_req*)>:
   16: 004136          entry a1, 1792
-00000017 <daik::set_weather(httpd_req*)>:
-  17: 004136          entry a1, 1776
 00000018 <daik::set_diagnostics(httpd_req*)>:
   18: 004136          entry a1, 1536
 00000019 <daik::set_circulation(httpd_req*)>:
@@ -3352,12 +3194,6 @@ def self_test() -> None:
         'daik::rfc3339_utc[abi:cxx11](long long, long)': 128,
         'void daik::append_status_rfc3339<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, long long)': 144,
         'void daik::append_status_fmt_double<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, char const*, bool, double)': 112,
-        'void daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)': 608,
-        'void daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&)': 48,
-        'auto daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&)::{lambda(auto:1 const&)\x231}::operator()<std::array<daik::logic::HeatingCurveBinSummary, 4u> >(std::array<daik::logic::HeatingCurveBinSummary, 4u> const&) const': 32,
-        'daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&)::{lambda(char const*, long long)\x231}::operator()(char const*, long long) const': 32,
-        'daik::heating_curve_status(daik::HeatingCurveBinsReport*)': 48,
-        'daik::fill_heating_curve_bins_locked(daik::HeatingCurveBinsReport&, daik::ModbusProfile)': 176,
         'daik::logic::HeatingCurveBins::summary(daik::logic::OutdoorSource, unsigned int, long long) const': 80,
         'daik::logic::HeatingCurveBins::observe_clock(long long)': 32,
         'daik::logic::HeatingCurveBins::forget()': 32,
@@ -3367,9 +3203,6 @@ def self_test() -> None:
         'daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::evaluate(daik::logic::HeatingCurveInputs const&)': 112,
         'daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::forget_samples()': 32,
         'daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::reset_samples()': 32,
-        'daik::mqtt_reference_reconfigure()': 208,
-        'daik::mqtt_heating_curve_homehub_reset()': 48,
-        'daik::set_ref_temp(httpd_req*)': 1104,
         'daik::mb_active_profile()': 48,
         '_ZN4daikpLINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_NS_12RedactedJsonE$isra$0': 64,
         'void daik::append_status_opt_uint<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, unsigned long long)': 48,
@@ -3381,10 +3214,6 @@ def self_test() -> None:
         'void daik::append_status_outdoor_context<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::logic::CheckupOutdoorReport const&)': 64,
         'void daik::append_status_service_metric<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, daik::logic::RefrigerantServiceMetricSnapshot const&)': 32,
         'void daik::append_status_service_meta<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, daik::logic::RefrigerantServiceMetricSnapshot const&, daik::logic::RefrigerantServiceSource const&)': 32,
-        'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, bool)\x231}::operator()(char const*, bool) const': 32,
-        'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, unsigned long long)\x231}::operator()(char const*, unsigned long long) const': 32,
-        'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, std::basic_string_view<char, std::char_traits<char> >)\x231}::operator()(char const*, std::basic_string_view<char, std::char_traits<char> >) const': 48,
-        'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, bool, daik::logic::OutdoorSource)\x231}::operator()(char const*, bool, daik::logic::OutdoorSource) const': 48,
         'daik::(anonymous namespace)::flash_cycling_owned(daik::logic::HistoryJournalHeader const&)': 32,
         'daik::(anonymous namespace)::flash_record_valid(daik::(anonymous namespace)::FlashJournalRecord const&)': 32,
         'daik::checkup_cycling_checkpoint_appended(unsigned long, daik::DiagnosticsSource)': 32,
@@ -3464,14 +3293,11 @@ def self_test() -> None:
         'daik::(anonymous namespace)::fold_checkup_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupSample const&, long long)': 48,
         'daik::logic::checkup_step(daik::logic::CheckupState&, daik::logic::CheckupBucket&, daik::logic::CheckupSample const&, long long, daik::logic::CheckupRing*, daik::logic::CheckupCyclingTrace*, daik::logic::OutdoorSource)': 112,
         'daik::logic::dhw_loss_step(daik::logic::DhwLossState&, daik::logic::DhwLossBucket&, daik::logic::CheckupSample const&, long long)': 48,
-        'daik::service_reference_frames(daik::Config const&)': 48,
      'daik::json_append_literal_string_member(std::string&, char const*, std::string const&, char const*)': 48,
      'daik::ha_discovery_identity(std::string&, std::string const&, char const*, char const*)': 32,
-     '_ZN4daikL22decode_reference_frameERKNS_18ReferenceMqttFrameERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_SA_SA_SA_SA_SA_SA_$constprop$0': 64,
      '_ZN4daikL25service_circulation_frameERKNS_18ReferenceMqttFrameERKNS_6ConfigE$constprop$0': 64,
      '_ZN4daikL31service_circulation_probe_frameERKNS_18ReferenceMqttFrameE$constprop$0': 64,
      '_ZN4daikL24decode_circulation_frameERKNS_18ReferenceMqttFrameERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_$constprop$0': 64,
-     'daik::service_reference_subscription(daik::Config const&, unsigned long)': 64,
      'daik::service_circulation_subscription(daik::Config const&, unsigned long)': 64,
      'daik::build_client()': 64,
      'daik::mqtt_ha_start()': 64,
@@ -3479,13 +3305,9 @@ def self_test() -> None:
      'daik::service_retained_cleanup_probe(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::atomic<bool>&, bool&, long long)': 32,
      'daik::publish_x10a_discovery()': 64,
      'daik::discovery_config(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, daik::ValueDef const&)': 64,
-     'daik::publish_weather_state(bool)': 64,
-     'daik::build_weather_mqtt_json[abi:cxx11](daik::WeatherMqttSnapshot const&, long long)': 64,
      'daik::publish_heartbeat()': 64,
      'daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&, unsigned int)': 64,
      'daik::publish_crash()': 64,
-     'daik::publish_heating_curve_telemetry(daik::Config const&)': 64,
-     '_ZN4daikL22evaluate_heating_curveERKNS_6ConfigERKNS_7HpStatsE$isra$0': 64,
      'daik::poll_task(void*)': 64,
      'daik::hp_detect_run()': 64,
      'daik::hp_query_detailed(unsigned char, daik::Protocol, unsigned char*, unsigned int, daik::HpQueryLogPolicy)': 64,
@@ -3594,8 +3416,6 @@ def self_test() -> None:
      'xPortEnterCriticalTimeout': 32,
      'esp_cpu_compare_and_set': 32,
      'vPortTaskWrapper': 32,
-     'daik::service_reference_frame(daik::ReferenceMqttFrame const&, daik::Config const&)': 64,
-     'daik::apply_reference_frame(daik::ReferenceMqttFrame const&, daik::Config const&)': 64,
      'daik::JsonGuard::reset(cJSON*)': 32,
      'daik::JsonGuard::~JsonGuard()': 32,
      'daik::wifi_init_sta_driver(bool&)': 64,
@@ -3629,13 +3449,9 @@ def self_test() -> None:
      'lock_acquire_generic': 48,
      'xQueueSemaphoreTake': 64,
      'daik::build_heartbeat_payload()': 64,
-     'daik::build_heating_curve_payload(daik::Config const&)': 64,
      'daik::mqtt_cycle_gate(daik::MqttPublishGateState, bool&)': 64,
      'daik::crash_publication_changed()': 64,
-     'daik::build_weather_payload(bool)': 64,
      'esp_mqtt_task': 96,
-     'daik::apply_reference_binding(daik::Config const&, unsigned long, bool&)': 64,
-     'daik::retire_reference_topics(std::array<std::string,3> const&)': 32,
      'daik::service_circulation_probe_subscription(daik::Config const&)': 64,
      'daik::start_retained_cleanup_probe(std::string const&, std::atomic<bool>&, bool&, long long&, char const*)': 32,
      'daik::mqtt_publish(std::string const&, char const*, int, int, int)': 32,
@@ -3647,7 +3463,6 @@ def self_test() -> None:
      'daik::retract_legacy_fixed()': 64,
      'daik::history_record_circulation()': 48,
      'daik::history_record_board()': 48,
-     'daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)': 64,
      'daik::(anonymous namespace)::fold_circulation_locked(daik::CirculationPumpSample const&)': 32,
      'daik::(anonymous namespace)::advance_raster_locked(long long, unsigned long)': 48,
      'daik::build_flat_json[abi:cxx11](std::vector<daik::GroupedValue> const&)': 64,
@@ -3866,6 +3681,12 @@ def self_test() -> None:
     # a packed-prologue mutation can also replace an unrelated first instruction at 0x220.
     # Exact current MQTT/journal continuation fixture; omission and growth are rejected below.
     extra_frames.update({
+        'daik::time_now(long long&, long&)': 48,
+        'daik::(anonymous namespace)::persist_crc_ring(unsigned long, daik::logic::TrendRing const&)': 32,
+        'daik::config_crc32_update(unsigned long, unsigned char const*, unsigned int)': 32,
+        'daik::logic::history_liveness_seal(daik::logic::HistoryLiveness&)': 32,
+        'daik::logic::history_liveness_crc(daik::logic::HistoryLiveness const&)': 80,
+        'daik::service_circulation_frames(daik::Config const&)': 48,
         'esp_http_client_open': 48,
         'esp_http_client_connect': 48,
         'esp_http_client_fetch_headers': 32,
@@ -3891,7 +3712,7 @@ def self_test() -> None:
         'daik::detail::skip_ws(char const*, unsigned int, unsigned int&)': 32,
         'std::basic_string_view<char, std::char_traits<char> >::substr(unsigned int, unsigned int) const': 48,
         'bool std::operator==<char, std::char_traits<char> >(std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)': 48,
-        'daik::capture_reference_frame(esp_mqtt_event_t*)': 80,
+        'daik::capture_circulation_frame(esp_mqtt_event_t*)': 80,
         'daik::discovery_topic_is_current_input(std::basic_string_view<char, std::char_traits<char> >)': 64,
         'daik::discovery_topic_is_current_input(std::basic_string_view<char, std::char_traits<char> >)::{lambda(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)\x231}::operator()(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) const': 48,
         'daik::SemGuard::SemGuard(QueueDefinition*)': 32,
@@ -4008,7 +3829,6 @@ def self_test() -> None:
         'esp_core_dump_image_erase': 48,
         'daik::wifi_forget_persisted_config()': 192,
     })
-    extra_frames.update({name: maximum for name, maximum in ROOM_HISTORY_FRAMES.values()})
     # Minimal positive ENTRY fixtures exercise the new exact inventory without combining the
     # old artificial maximum-size HTTP fixture with a different ELF's stop-body frames. Actual
     # stop frames and the complete caller sums are checked against the real ELF, not these bytes.
@@ -4110,7 +3930,7 @@ def self_test() -> None:
 71f: 250c movi.n a5, 2
 """
     double_body = 'std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > __gnu_cxx::__to_xstring<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, char>(int (*)(char*, unsigned int, char const*, __va_list_tag), unsigned int, char const*, ...)'
-    fixture += f"""
+    retired_double_fixture = f"""
 00000200 <{double_body}>:
 200: 00a136 entry a1, 80
 203: 84fb addi.n a8, a4, 15
@@ -4157,7 +3977,6 @@ def self_test() -> None:
     stop_sources.update({path: (REPO / path).read_text(encoding="utf-8") for path in stop_stack.EXTRA_SOURCES})
     stop_controls = stop_stack.self_test(budgets, stop_sources, BudgetError)
     staged_stack_controls = staged_stack_self_test(budgets)
-    room_history_controls = room_history_stack_self_test(budgets)
     validate_source_contract(budgets)
     schema_sources = {path: (REPO / path).read_text(encoding="utf-8")
                       for path in ("main/hp_poll.cpp", "main/http_config.cpp", "main/checkup.cpp")}
@@ -4187,8 +4006,8 @@ def self_test() -> None:
     validate_shutdown_inlining(fixture, budgets)
     validate_status_numeric_calls(fixture, budgets)
     assert selected["status_serializer"] == 2976
-    assert selected["path:httpd_mcp_status"] == 6320
-    assert selected["path:httpd_direct_status"] == 5088
+    assert selected["path:httpd_mcp_status"] == 6496
+    assert selected["path:httpd_direct_status"] == 5264
     assert selected["path:httpd_mcp_checkup"] == 6080
     assert selected["path:httpd_direct_checkup"] == 4848
     assert selected["path:httpd_mcp_checkup_expire_fingerprint"] == 6112
@@ -4220,69 +4039,11 @@ def self_test() -> None:
     assert selected["path:httpd_direct_int_field"] == 4736
     assert selected["path:httpd_mcp_quoted_field"] == 6080
     assert selected["path:httpd_direct_quoted_field"] == 4848
-    assert selected["path:httpd_mcp_curve_format_bin"] <= 8192
-    assert selected["path:mqtt_curve_expire"] <= 5120
-    unoutlined_status = fixture.replace("   3: 004136          entry a1, 2976",
-                                        "   3: 004136          entry a1, 4848")
-    relaxed_serializer = json.loads(json.dumps(budgets))
-    relaxed_serializer["symbols"]["status_serializer"]["max_bytes"] = 5120
-    try:
-        evaluate(parse_frames(unoutlined_status), relaxed_serializer)
-    except BudgetError as exc:
-        assert "httpd_mcp_curve_format_bin" in str(exc)
-    else:
-        raise AssertionError("self-test accepted unoutlined status_serializer + curve_format_bin stack")
     assert selected["ota_task"] == 2608
     assert selected["path:httpd_ota_status"] == 6624
     assert selected["path:ota_task_manifest_fetch"] == 4672
     assert selected["path:httpd_ota_check"] == 3376
     assert selected["path:http_deadline_watchdog"] == 1536
-    assert selected["weather_task"] == 48
-    assert selected["weather_cycle"] == 736
-    assert selected["path:weather_task_download"] == 3424
-    assert selected["path:weather_task_tls"] == 6320
-    assert selected["path:weather_task_tls_headers"] == 6176
-    assert selected["path:weather_task_tls_body"] == 6208
-    assert selected["path:weather_task_parse"] == 5248
-    # Restoring the former 1 KiB read buffer adds 768 bytes to the enclosing download frame.
-    # The separate error path still fits; only the complete caller + HTTP + TLS composition
-    # catches the lost task reserve.
-    old_chunk = fixture.replace("  11: 004136          entry a1, 432",
-                                "  11: 004136          entry a1, 1200")
-    assert old_chunk != fixture
-    try:
-        evaluate(parse_frames(old_chunk), budgets)
-    except BudgetError as exc:
-        assert "weather_task_tls" in str(exc)
-    else:
-        raise AssertionError("self-test accepted the former Weather read-buffer footprint")
-    for name in ("weather_task_tls", "weather_task_tls_headers", "weather_task_tls_body"):
-        for member in budgets["paths"][name]["symbols"]:
-            changed = json.loads(json.dumps(budgets))
-            changed["paths"][name]["symbols"].remove(member)
-            try:
-                validate_weather_tls_path(changed)
-            except BudgetError:
-                pass
-            else:
-                raise AssertionError(f"self-test accepted missing {name} caller {member}")
-    for field, value in (("base_bytes", SDK_TLS_LIMIT - 16), ("max_bytes", 7168)):
-        changed = json.loads(json.dumps(budgets))
-        changed["paths"]["weather_task_tls"][field] = value
-        try:
-            validate_weather_tls_path(changed)
-        except BudgetError:
-            pass
-        else:
-            raise AssertionError(f"self-test accepted changed Weather TLS {field}")
-    changed = json.loads(json.dumps(budgets))
-    changed["tasks"]["weather"]["reserve_bytes"] = 1024
-    try:
-        validate_weather_tls_path(changed)
-    except BudgetError:
-        pass
-    else:
-        raise AssertionError("self-test accepted a smaller Weather task reserve")
     assert selected["ota_health_task"] == 80
     assert selected["path:ota_health_gate"] == 2128
     assert selected["path:httpd_config_hp"] == 6528
@@ -4440,6 +4201,15 @@ def self_test() -> None:
                          ("httpd_mcp_cycling_hours_builder", "checkup_cycling_hours_locked"),
                          ("httpd_mcp_checkup", "http_send_status_json"),
                          ("httpd_mcp_status", "http_send_status_json"),
+                         ("httpd_direct_status", "status_fixed_double"),
+                         ("httpd_mcp_status", "sdk_snprintf"),
+                         ("httpd_mcp_status", "sdk_vfprintf"),
+                         ("httpd_mcp_status", "sdk_dtoa"),
+                         ("httpd_mcp_status", "sdk_dtoa_mul_shift"),
+                         ("httpd_mcp_status", "sdk_dtoa_mul"),
+                         ("httpd_direct_status", "sdk_dtoa"),
+                         ("httpd_direct_status", "sdk_dtoa_mul_shift"),
+                         ("httpd_direct_status", "sdk_dtoa_mul"),
                          ("httpd_mcp_health_number", "status_health_number"),
                          ("httpd_mcp_health_number", "status_unsigned_number"),
                          ("httpd_direct_health_number", "status_health_number"),
@@ -4508,14 +4278,14 @@ def self_test() -> None:
     diagnosis_controls += 1
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
+        ("main/http_status.cpp", '"%.2f", env_fresh, env.temperature_c', '"%a", env_fresh, env.temperature_c'),
         ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist, diag_effective,",
          "other_report(&hrs, trace.get(), &persist, diag_effective,"),
         ("main/http_status.cpp", "&defrost_start, dhw_trace.get())", "&defrost_start, nullptr)"),
-        ("main/http_status.cpp", "trace_reader.admitted ? heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT) : nullptr",
+        ("main/http_status.cpp", "trace_admitted ? heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT) : nullptr",
          "heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT)"),
         ("main/http_status.cpp", "using DhwTrace = logic::DhwLossTimeline;",
          "logic::DhwLossTimeline dhw_stack{}; using DhwTrace = logic::DhwLossTimeline;"),
-        ("main/http_status.cpp", "void* dhw_storage =", "weather_values_reader_enter(); void* dhw_storage ="),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
         ("main/mqtt_ha.cpp", "publish_heartbeat();", "other_heartbeat();"),
         ("main/checkup.cpp", "p.layout_fp              = logic::checkup_layout_fingerprint();",
@@ -4962,9 +4732,38 @@ def self_test() -> None:
         assert altered != fixture
         reject_disassembly(f"integer formatter {name}", altered, expected)
         integer_disassembly_controls += 1
+    fused = re.sub(r"\n[0-9a-f]+ <" + re.escape(INTEGER_DIGITS_SYMBOL)
+                   + r">:\n(?:[0-9a-f]+: [^\n]+\n)*", "\n", fixture, count=1)
+    fused = re.sub(r"(<" + re.escape(INTEGER_TO_CHARS_SYMBOL)
+                   + r">:\n[0-9a-f]+:) 004136 entry a1, 48\n", r"\1 01e136 entry a1, 240\n", fused, count=1)
+    fused = fused.replace("b04: 00000c mov.n a10, a3\n",
+                          "b04: 20a440 or a10, a4, a4\nb06: 20b550 or a11, a5, a5\n")
+    fused = fused.replace(f"b0a: fff7a5 call8 a00 <{INTEGER_DIGITS_SYMBOL}>\n",
+                          "b0b: c9a0c2 movi a12, 201\nb0e: 01ad mov.n a10, a1\n"
+                          "b10: 326a add.n a3, a2, a6\n"
+                          "b12: b44f81 l32r a8, 1 <literal> (400011f4 <memcpy>)\n"
+                          "b15: 0008e0 callx8 a8\n"
+                          "b18: b44381 l32r a8, 2 <literal> (40002574 <__umoddi3>)\n"
+                          "b1b: 0008e0 callx8 a8\n"
+                          "b1e: b43e81 l32r a8, 3 <literal> (40002544 <__udivdi3>)\n"
+                          "b21: 0008e0 callx8 a8\n")
+    fused_frames = parse_frames(fused, budgets)
+    assert INTEGER_DIGITS_SYMBOL not in fused_frames
+    assert fused_frames[INTEGER_TO_CHARS_SYMBOL] == INTEGER_FUSED_FRAME
+    fused_selected = evaluate(fused_frames, budgets, integer_digits_inlined=True)
+    for path in ("httpd_stop_json_http", "httpd_stop_json_mcp", "mqtt_stop_json_mqtt", "mqtt_heartbeat_build"):
+        assert fused_selected["path:" + path] <= selected["path:" + path]
+    for name, altered in (
+        ("fused frame growth", fused.replace("01e136 entry a1, 240", "020136 entry a1, 256")),
+        ("fused copy growth", fused.replace("movi a12, 201", "movi a12, 257")),
+        ("fused copy destination", fused.replace("b0e: 01ad mov.n a10, a1", "b0e: 02ad mov.n a10, a2")),
+    ):
+        assert altered != fused
+        reject_disassembly(f"integer formatter {name}", altered, "inlined digits need the reviewed")
+        integer_disassembly_controls += 1
     integer_source = (REPO / "main/logic/json_integer.hpp").read_text(encoding="utf-8")
     integer_callers = {path: (REPO / path).read_text(encoding="utf-8")
-                       for path in ("main/logic/heartbeat.hpp", "main/logic/heating_curve_mqtt.hpp")}
+                       for path in ("main/logic/heartbeat.hpp",)}
     validate_integer_source(integer_source, integer_callers)
     validate_integer_source(re.sub(r"\s+", " \n ", integer_source), integer_callers)
     integer_source_controls = 0
@@ -4994,7 +4793,7 @@ def self_test() -> None:
     else:
         raise AssertionError("self-test accepted an additional integer builder source caller")
     integer_source_controls += 1
-    for owner in ("heartbeat", "curve"):
+    for owner in ("heartbeat",):
         for member in ("json_integer_append", "json_integer_to_chars", "json_integer_length", "json_integer_digits"):
             altered_budget = json.loads(json.dumps(budgets))
             altered_budget["paths"][f"mqtt_{owner}_build"]["symbols"].remove(member)
@@ -5005,20 +4804,11 @@ def self_test() -> None:
             else:
                 raise AssertionError(f"self-test accepted omitted {member} from {owner}")
             integer_source_controls += 1
-    reject_disassembly("double buffer argument growth", fixture.replace("movi a12, 0x148",
-                       "movi a12, 0x158"), "328-byte argument")
-    reject_disassembly("double dynamic alignment growth", fixture.replace("addi.n a8, a4, 15",
-                       "addi.n a8, a4, 31"), "align16")
-    reject_disassembly("double dynamic rounding change", fixture.replace("srli a8, a8, 4",
-                       "srli a8, a8, 3"), "align16")
-    reject_disassembly("double dynamic destination change", fixture.replace("20e: 001810 movsp a1, a8",
-                       "20e: 001810 movsp a1, a7"), "movsp contract")
-    reject_disassembly("new double formatter caller", fixture +
-                       f"\n00000240 <unreviewed_caller()>:\n240: 004136 entry a1, 32\n"
-                       f"243: fff7a5 call8 200 <{double_body}>\n", "sole to_string(double)")
-    reject_disassembly("new indirect double formatter reference", fixture +
-                       f"\n00000240 <unreviewed_caller()>:\n240: 004136 entry a1, 32\n"
-                       f"243: 000081 l32r a8, 200 <{double_body}>\n", "indirect")
+    reject_disassembly("reintroduced libstdc++ double formatter", fixture + retired_double_fixture,
+                       "retired dynamic conversion is linked")
+    for name in RETIRED_DOUBLE_FORMATTERS:
+        reject_disassembly("reintroduced formatter symbol", fixture + f"\n240 <{name}>:\n",
+                           "retired dynamic conversion is linked")
     reject_disassembly("unknown dynamic application stack", fixture.replace(
                        "1: 004136          entry a1, 1232",
                        "1: 004136          entry a1, 1232\n2: 001810 movsp a1, a8"),
@@ -5144,25 +4934,6 @@ def self_test() -> None:
             raise AssertionError(f"self-test accepted consumed reserve in {task}")
         inventory_controls += 2
 
-    evaluate(parse_frames(fixture.replace(
-        "_ZN4daik12_GLOBAL__N_1L13weather_cycleEmRNS0_21RefreshRequestAttemptE$constprop$0",
-        "daik::(anonymous namespace)::weather_cycle(unsigned long, daik::RefreshRequestAttempt&)")),
-        budgets)
-    reject_disassembly("missing Weather cycle", fixture.replace(
-        "_ZN4daik12_GLOBAL__N_1L13weather_cycle", "_ZN4daik12_GLOBAL__N_1L13renamed_cycle"),
-        "weather_cycle")
-    reject_disassembly("Weather cycle frame growth", fixture.replace(
-        "40: 004136          entry a1, 736", "40: 004136          entry a1, 4112"),
-        "weather_cycle")
-    cloned_download = fixture.replace(
-        "daik::(anonymous namespace)::download_json(daik::Config const&, std::string&, std::string&, bool&, daik::HttpClientProbe&)",
-        "_ZN4daik12_GLOBAL__N_1L13download_jsonERKNS_21WeatherConfigSnapshotERNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_RbRNS_15HttpClientProbeE$constprop$0")
-    evaluate(parse_frames(cloned_download), budgets)
-    reject_disassembly("missing Weather download with lambda present", cloned_download.replace(
-        "_ZN4daik12_GLOBAL__N_1L13download_json", "_ZN4daik12_GLOBAL__N_1L13renamed_fetch") +
-        "\n00000041 <daik::(anonymous namespace)::download_json(daik::Config const&, std::string&)::{lambda()}::operator()() const>:\n  41: 004136 entry a1, 32\n",
-        "weather_download")
-
     reject_disassembly("wrong first blank opcode", fixture.replace(
         "1f: 16008136 \t", "1f: 16008135 \t"), "first prologue")
     reject_disassembly("later ENTRY rescue", fixture.replace(
@@ -5239,8 +5010,7 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError(f"self-test accepted {name}")
-    for path in ("mqtt_reference_parse", "mqtt_circulation_parse",
-                 "mqtt_circulation_probe_parse", "weather_task_parse"):
+    for path in ("mqtt_circulation_parse", "mqtt_circulation_probe_parse"):
         changed_budgets = json.loads(json.dumps(budgets))
         changed_budgets["paths"][path]["multipliers"]["cjson_delete"] = 16
         try:
@@ -5267,8 +5037,6 @@ def self_test() -> None:
     else:
         raise AssertionError("self-test accepted a larger cJSON adapter depth override")
     assert budgets["paths"]["ota_task_manifest_fetch"]["max_bytes"] == 6144
-    assert budgets["paths"]["weather_task_download"]["max_bytes"] == 6656
-    assert budgets["paths"]["weather_task_parse"]["max_bytes"] == 6656
     assert budgets["paths"]["ota_health_gate"]["max_bytes"] == 3072
 
     too_large = fixture.replace("entry a1, 1120", "entry a1, 2304")
@@ -5301,31 +5069,6 @@ def self_test() -> None:
         assert "ota_task_manifest_fetch" in str(exc)
     else:
         raise AssertionError("self-test failed to protect the OTA task path reserve")
-
-    weather_path_too_large = (
-        fixture.replace("entry a1, 736", "entry a1, 6144")
-        .replace("entry a1, 160", "entry a1, 2048")
-        .replace("entry a1, 432", "entry a1, 3072")
-    )
-    try:
-        evaluate(parse_frames(weather_path_too_large), budgets)
-    except BudgetError as exc:
-        assert "weather_task_download" in str(exc)
-    else:
-        raise AssertionError("self-test failed to protect the Weather task reserve")
-
-    weather_parse_path_too_large = (
-        fixture.replace("entry a1, 736", "entry a1, 6144")
-        .replace("entry a1, 160", "entry a1, 2048")
-        .replace("  12: 004136          entry a1, 512",
-                 "  12: 004136          entry a1, 3072")
-    )
-    try:
-        evaluate(parse_frames(weather_parse_path_too_large), budgets)
-    except BudgetError as exc:
-        assert "weather_task_parse" in str(exc)
-    else:
-        raise AssertionError("self-test failed to protect the Weather parse reserve")
 
     missing = fixture.replace("daik::mcp_post", "daik::renamed_post")
     try:
@@ -5654,14 +5397,13 @@ def self_test() -> None:
           f"{stop_controls} stop-source/path/callback/shortcut, {packed_config_controls} complete packed-config controls, "
           f"{packed_inventory_controls} exact-config/ELF-only controls, "
           f"{inventory_controls} inventory/growth/allocation/reserve controls, "
-          f"9 dynamic/first-prologue, {packed_controls} packed SDK, {raw_detect_controls} raw-app controls, "
+          f"6 dynamic/first-prologue, {packed_controls} packed SDK, {raw_detect_controls} raw-app controls, "
           f"{queue_controls} queue-source, {diagnostic_controls} diagnostic-source, "
           f"{tls_source_controls} TLS-client-source, {sdk_recursion_controls} SDK-recursion, "
           f"{integer_disassembly_controls} integer-disassembly, {integer_source_controls} integer-source/path, "
           f"{retirement_controls} MQTT-retirement/SDK/codec path, "
           f"{discovery_controls} MQTT-discovery/source/depth path, "
           f"{staged_stack_controls} staged-source/path, "
-          f"{room_history_controls} room-history-source/path, "
           f"{diagnosis_controls} diagnosis-source/path, "
           f"{numeric_disassembly_controls} diagnosis-numeric-calls, "
           f"{upload_stack_controls} OTA-upload-source/path, "
@@ -5711,7 +5453,9 @@ def main(argv: list[str]) -> int:
     validate_packed_config_inventory(text)
     validate_shutdown_inlining(text, budgets)
     validate_status_numeric_calls(text, budgets)
-    result = evaluate(parse_frames(text, budgets), budgets)
+    frames = parse_frames(text, budgets)
+    result = evaluate(frames, budgets, integer_digits_inlined=(
+        INTEGER_DIGITS_SYMBOL not in frames and frames.get(INTEGER_TO_CHARS_SYMBOL) == INTEGER_FUSED_FRAME))
     reserves = {task: rule["stack_bytes"] - max(result[f"path:{path}"] for path in rule["paths"])
                 for task, rule in budgets["tasks"].items()}
     tightest = min(reserves, key=reserves.get)

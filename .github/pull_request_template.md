@@ -47,7 +47,7 @@ Follow [AGENTS.md](https://github.com/0Bu/daikin-altherma-esp32/blob/main/AGENTS
 - [ ] `$domain-review` clean — merge gate @ <short-sha> (required on every ordinary or local/manual merge: values verified physically right, sensible and authentic; a PR that cannot reach a value clears quickly, but say what you checked)
 - [ ] `$schematic-review` clean — merge gate @ <short-sha> (required if the dashboard schematic changed: the drawing still tells the truth about the plant, and every reading is on the part that measures it)
 - [ ] `$ui-use-case-review` clean — merge gate @ <short-sha> (required if UI behavior changed)
-- [ ] `$absence-review` clean — merge gate @ <short-sha> (required if an OPTIONAL SOURCE changed: the broker, the room source, the circulation witness, the HomeHub, ENV III, the weather location, the X10A bus, safe mode, or anything that reports one)
+- [ ] `$absence-review` clean — merge gate @ <short-sha> (required for changes to the broker, circulation witness, HomeHub, ENV III, X10A, safe mode, or anything that reports their availability)
 - [ ] `$diagnostic-evidence-review` clean — merge gate @ <short-sha> (required when diagnostic inputs, persistence, thresholds, conclusions or cited evidence change)
 - [ ] `$user-docs-review` clean — merge gate @ <short-sha> (required when an owner-visible status, diagnosis, action or help surface changes)
 - [ ] `$ui-gif` clean — merge gate @ <short-sha> (required when this PR re-made `docs/media/dashboard.gif` or its stamp; a red `scripts/run-ui-gif-audit.sh` is a hard block that only a real re-record can clear)

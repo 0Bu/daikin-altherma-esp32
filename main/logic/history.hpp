@@ -87,17 +87,6 @@ constexpr bool history_is_absent(HistorySample s) {
     return s == HISTORY_NO_READING || s == HISTORY_HELD_OVER;
 }
 
-// Independent MQTT room observations use the same deci-degree wire format. Validity/freshness is
-// established by the canonical room-source evaluator; reject non-finite values and sentinel
-// collisions here before rounding and narrowing, even when a caller supplies a bad validity flag.
-inline HistorySample history_room_sample(bool valid, double temperature_c) {
-    if (!valid || !std::isfinite(temperature_c)) return HISTORY_NO_READING;
-    const double tenths = std::round(temperature_c * 10.0);
-    if (tenths <= static_cast<double>(HISTORY_HELD_OVER) || tenths > INT16_MAX)
-        return HISTORY_NO_READING;
-    return static_cast<HistorySample>(tenths);
-}
-
 // The whole point of the memory analysis, stated where a future trend addition will see it: one
 // int16 trend costs 576 bytes, a 1-byte enum timeline 288 bytes, and a 2-bit binary timeline
 // 72 bytes. Put the buffers in static storage, never on the heap — free heap is not the binding

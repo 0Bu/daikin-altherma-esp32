@@ -79,18 +79,7 @@ if (cd "$tmp" && node test/test_ui_status_truth.mjs >/dev/null 2>&1); then
   echo "ui selftest: disabled config warning renderer escaped status-truth checks" >&2; exit 1
 fi
 cp "$proj/main/www/js/app_state.js" "$tmp/main/www/js/app_state.js"
-sed 's/d.reason === "evaluation_stale"/d.reason === "evaluation_stale_disabled"/' \
-  "$proj/main/www/js/dashboard.js" > "$tmp/main/www/js/dashboard.js"
-if (cd "$tmp" && node test/test_ui_status_truth.mjs >/dev/null 2>&1); then
-  echo "ui selftest: stale evaluation state escaped status-truth checks" >&2; exit 1
-fi
-sed 's/\["sampler_inactive", "evaluation_stale"\]/["sampler_inactive"]/' \
-  "$proj/main/www/js/dashboard.js" > "$tmp/main/www/js/dashboard.js"
-if (cd "$tmp" && node test/test_ui_status_truth.mjs >/dev/null 2>&1); then
-  echo "ui selftest: stale evaluation blaming outdoor sensors escaped status-truth checks" >&2; exit 1
-fi
-cp "$proj/main/www/js/dashboard.js" "$tmp/main/www/js/dashboard.js"
-echo "ui selftest: config warning and both stale-evaluation render failures are detected"
+echo "ui selftest: missing config warning is detected"
 
 # Re-seed the historical ENV III failure on its new owning Board Hardware dialog: Cancel and an
 # accepted atomic Save route through an undefined close helper. The behavioral matrix must fail on

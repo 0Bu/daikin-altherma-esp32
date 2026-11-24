@@ -91,7 +91,7 @@ cp -R "$ROOT/main/logic/redact.hpp" "$TMP/main/logic/redact.hpp"
 
 # 4. The /status half, in the direction that LEAKS: a field stops being wrapped. This is not a
 #    hypothetical — it is the shipped shape of the same defect one layer up, where the declared count
-#    sat at 10 while the builder wrapped 12 and nothing compared them. Un-wrapping the room topic
+#    sat at 10 while the builder wrapped 12 and nothing compared them. Un-wrapping the circulation topic
 #    (a path through the reporter's own broker, usually carrying a room or device name) drops the
 #    derived count below the declaration, which is the only signal available: the JSON still parses,
 #    the key is still there, and the value is simply real.
@@ -99,8 +99,8 @@ python3 - "$TMP/main/http_status.cpp" <<'PY'
 import sys, re
 p = sys.argv[1]
 s = open(p).read()
-s2 = re.sub(r"jstr_r\(c\.ref_temp_topic,\s*redact\)", "jstr(c.ref_temp_topic)", s, count=1)
-assert s2 != s, "seed 4 did not apply — the reference-topic call site moved"
+s2 = re.sub(r"jstr_r\(c\.circulation_topic,\s*redact\)", "jstr(c.circulation_topic)", s, count=1)
+assert s2 != s, "seed 4 did not apply — the circulation-topic call site moved"
 open(p, "w").write(s2)
 PY
 expect_red "a /status field that stopped being redacted"
@@ -121,23 +121,18 @@ expect_red "a stale REDACTED_STATUS_FIELDS declaration"
 
 cp -R "$ROOT/main/logic/redact.hpp" "$TMP/main/logic/redact.hpp"
 
-# 6. The heuristic's own coverage, on the four fields it was MISSING until this list was widened:
-#    the room source's name and topic and the house coordinates were redacted in /status while
-#    nothing in SENSITIVE matched them, so a log line naming the reporter's living room was
-#    invisible to the check that exists to see exactly that. Seeded on the room topic, since it is
-#    the one whose value is a path through the reporter's own broker and normally carries a room or
-#    a device name. Without the widening this case is silently green.
+# 6. A user-entered MQTT topic is also sensitive when passed directly to a diagnostic log call.
 python3 - "$TMP/main/http_config.cpp" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
 needle = "static esp_err_t set_syslog"
 i = s.index(needle)
-s = s[:i] + ('static void seeded_ref() { diag_printf("mqtt: reference source %s\\n",'
-             ' c.ref_temp_topic.c_str()); }\n\n') + s[i:]
+s = s[:i] + ('static void seeded_ref() { diag_printf("mqtt: external meter %s\\n",'
+             ' c.circulation_topic.c_str()); }\n\n') + s[i:]
 open(p, "w").write(s)
 PY
-expect_red "a diag line printing the room source's topic with no rule"
+expect_red "a diag line printing the circulation source's topic with no rule"
 
 cp -R "$ROOT/main/http_config.cpp" "$TMP/main/http_config.cpp"
 
@@ -148,9 +143,9 @@ python3 - "$TMP/main/http_status.cpp" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-needle = 'j += "\\\"reference_temperature\\\":{\\\"configured\\\":";'
+needle = 'j += "\\\"circulation_source\\\":{\\\"configured\\\":";'
 i = s.index(needle)
-seed = 'j += "\\\"seeded_identifier\\\":"; j += jstr(c.ref_temp_topic);\n    '
+seed = 'j += "\\\"seeded_identifier\\\":"; j += jstr(c.circulation_topic);\n    '
 s = s[:i] + seed + s[i:]
 open(p, "w").write(s)
 PY
@@ -165,7 +160,7 @@ python3 - "$TMP/docs/SECURITY.md" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-needle = '| `reference_temperature.temperature_path` |'
+needle = '| `circulation_source.power_path` |'
 lines = s.splitlines(True)
 s2 = ''.join(line for line in lines if needle not in line)
 assert s2 != s, "seed 8 did not apply — SECURITY field row moved"
@@ -254,14 +249,5 @@ open(p, "w").write(s)
 PY
 expect_red "a new effective-feed alias bypassing log redaction"
 cp -R "$ROOT/main/ota_update.cpp" "$TMP/main/ota_update.cpp"
-
-python3 - "$TMP/main/http_status.cpp" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read().replace('jstr_r(rt.hvac_mode, redact && !report_hvac_mode_public(rt.hvac_mode))',
-                          'jstr(rt.hvac_mode)', 1)
-open(p, "w").write(s)
-PY
-expect_red "unknown MQTT HVAC text bypassing conditional source redaction"
 
 exit "$fail"

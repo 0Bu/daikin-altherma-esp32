@@ -12,7 +12,7 @@ const modbus = fs.readFileSync(new URL("../main/hp_modbus.cpp", import.meta.url)
 const modbusHeader = fs.readFileSync(new URL("../main/hp_modbus.hpp", import.meta.url), "utf8");
 const discovery = fs.readFileSync(new URL("../main/logic/discovery.hpp", import.meta.url), "utf8");
 const weatherMqtt = fs.readFileSync(
-  new URL("../main/logic/weather_mqtt.hpp", import.meta.url), "utf8");
+  new URL("../main/logic/mqtt_weather_retirement.hpp", import.meta.url), "utf8");
 const publishGate = fs.readFileSync(
   new URL("../main/logic/mqtt_publish_gate.hpp", import.meta.url), "utf8");
 const sdkconfigDefaults = fs.readFileSync(
@@ -87,7 +87,7 @@ assert.match(cleanupLogic,
 
 const cleanupStart = mqtt.indexOf(
   "static RetainedCleanupCycle service_requested_topic_cleanup(const Config& c)");
-const cleanupEnd = mqtt.indexOf("std::string build_weather_payload", cleanupStart);
+const cleanupEnd = mqtt.indexOf("static void publish_env3_state", cleanupStart);
 assert.ok(cleanupStart >= 0 && cleanupEnd > cleanupStart,
   "the source-cleanup runtime boundary must remain identifiable");
 const cleanup = mqtt.slice(cleanupStart, cleanupEnd);
@@ -105,7 +105,7 @@ assert.ok(weatherRequest >= 0 && modbusRequest > weatherRequest && env3Request >
 "all request bits must be admitted before one tracked tombstone, with ACK evidence drained on both sides");
 assert.match(cleanup,
   /if \(s_weather_cleanup_requested\.exchange\(false, std::memory_order_acq_rel\)\)\s*s_source_cleanup\.request\(MqttCleanupSource::Weather\)/,
-  "an enabled Weather source replacement must enter cleanup without a current-config guard");
+  "the retired forecast must enter cleanup without a current-config guard");
 assert.match(cleanup,
   /if \(s_modbus_cleanup_requested\.exchange\(false, std::memory_order_acq_rel\)\)\s*s_source_cleanup\.request\(MqttCleanupSource::Modbus\)/,
   "an enabled HomeHub source replacement must enter cleanup without a current-config guard");
@@ -233,8 +233,8 @@ assert.match(periodic, /work < 8/,
 const taskStart = mqtt.indexOf("static void mqtt_task(void*)");
 const taskEnd = mqtt.indexOf("static bool build_client(", taskStart);
 const task = mqtt.slice(taskStart, taskEnd);
-const refs = task.indexOf("service_reference_frames(ref_config)");
-const requestedCleanup = task.indexOf("service_requested_topic_cleanup(ref_config)");
+const refs = task.indexOf("service_circulation_frames(cycle_config)");
+const requestedCleanup = task.indexOf("service_requested_topic_cleanup(cycle_config)");
 const periodicRetirement = task.indexOf('publish_stage = "retire"', requestedCleanup);
 const ordinaryGate = task.indexOf("if (gate.publish_cycle)", requestedCleanup);
 assert.ok(refs >= 0 && requestedCleanup > refs && periodicRetirement > requestedCleanup &&
@@ -245,8 +245,6 @@ assert.match(retirementBody,
   /if \(ha_retire_elapsed_s >= HA_RETIRE_INTERVAL_S\)[\s\S]*?if \(!s_periodic_discovery_pending\) request_periodic_discovery_retirement\(\);\s*ha_retire_elapsed_s = 0/,
   "periodic convergence must queue one retryable pass and reset its interval");
 const publishCycleBody = task.slice(ordinaryGate);
-assert.match(publishCycleBody, /if \(!cleanup_cycle\.weather\)[\s\S]*?publish_weather_state/,
-  "requested Weather cleanup must suppress stale-snapshot publication");
 assert.match(publishCycleBody,
   /if \(!cleanup_cycle\.modbus\)[\s\S]*?retained_source_action\(mb_target_enabled\(\), s_modbus_disabled_cleaned\)/,
   "requested HomeHub cleanup must suppress stale-snapshot publication");
@@ -259,9 +257,6 @@ assert.doesNotMatch(publishCycleBody,
 const completionStart = mqtt.indexOf("static void apply_source_cleanup_completion(");
 const completionEnd = mqtt.indexOf("static void service_source_cleanup_evidence", completionStart);
 const completion = mqtt.slice(completionStart, completionEnd);
-assert.match(completion,
-  /case MqttCleanupSource::Weather:[\s\S]*?s_last_weather_digest\.clear\(\)/,
-  "completed Weather cleanup must invalidate predecessor publish deduplication");
 assert.match(completion,
   /case MqttCleanupSource::Modbus:[\s\S]*?s_last_modbus_digest\.clear\(\)/,
   "completed HomeHub cleanup must invalidate predecessor publish deduplication");
@@ -284,18 +279,10 @@ const hpReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled)", hpSave);
 const hpRequest = setHp.indexOf("mqtt_request_modbus_cleanup()", hpReconfigure);
 assert.ok(hpSave >= 0 && hpReconfigure > hpSave && hpRequest > hpReconfigure,
   "HomeHub cleanup admission must follow persistence and synchronous cutover");
-const setWeatherStart = http.indexOf("static esp_err_t set_weather(");
-const setWeatherEnd = http.indexOf("static esp_err_t set_board", setWeatherStart);
-const setWeather = http.slice(setWeatherStart, setWeatherEnd);
-assert.ok(setWeather.indexOf("mqtt_request_weather_cleanup()") > setWeather.indexOf("config_save(c)"),
-  "Weather cleanup admission must follow persistence");
-const setDiagnosticsStart = http.indexOf("static esp_err_t set_diagnostics(");
-const setDiagnosticsEnd = http.indexOf("static esp_err_t set_circulation", setDiagnosticsStart);
-const setDiagnostics = http.slice(setDiagnosticsStart, setDiagnosticsEnd);
-assert.ok(setDiagnostics.indexOf("mqtt_request_weather_cleanup()") >
-  setDiagnostics.indexOf("config_save(c)"),
-"diagnostics-consent cleanup admission must follow persistence");
-assert.equal((http.match(/mqtt_request_weather_cleanup\(\)/g) || []).length, 2,
-  "only Weather source and diagnostics consent routes may request Weather cleanup");
 
+assert.match(mqtt, /s_weather_cleanup_requested\{true\}/,
+  "boot must schedule cleanup even after saving neutral defaults over retired settings");
+assert.match(mqtt, /case MqttCleanupSource::Weather:\s*return s_retired_forecast;/);
+assert.match(mqtt, /"\/weather\/openmeteo\/forecast"/);
+assert.doesNotMatch(mqtt, /publish_weather_state|build_weather_payload/);
 console.log("MQTT source cleanup: 37 tombstones are PUBACK-serialized and source-suppressing");

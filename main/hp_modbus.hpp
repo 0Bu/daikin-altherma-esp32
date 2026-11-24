@@ -54,12 +54,11 @@ struct ModbusStatus {
     std::string last_error;
     int         last_error_detail   = -1;
     int         last_error_register = 0;
-    // HomeHub input register 53 says SPACE HEATING OR COOLING is in normal operation. It cannot by
-    // itself license a heating-curve sample. Input 37 must report space routing and input 38 must
-    // report Heating before the diagnosis records a room-error sample. `known`
-    // is false whenever the register did not answer this cycle, answered a sentinel or its own
-    // successful reply is older than the seven-second project bound — an unknown gate must never
-    // read as "inactive", which would look like an ordinary quiet plant.
+    // HomeHub input register 53 says SPACE HEATING OR COOLING is in normal operation. Input 37
+    // independently reports the valve route, while input 38 distinguishes heating from cooling.
+    // `known` is false whenever the register did not answer this cycle, answered a sentinel or its
+    // own successful reply is older than the seven-second project bound — an unknown gate must
+    // never read as "inactive", which would look like an ordinary quiet plant.
     bool        plant_gate_known  = false;
     bool        plant_gate_active = false;
     bool        heating_mode_known  = false;
@@ -89,7 +88,7 @@ void mb_reconfigure(bool enabled) noexcept;
 // authority.
 bool mb_target_enabled() noexcept;
 
-// Lock-free acknowledgement for OTA/Weather heap ownership. True means no HomeHub cycle is inside
+// Lock-free acknowledgement for OTA heap ownership. True means no HomeHub cycle is inside
 // its Config/DNS/socket/vector allocation region; a disabled/non-started task is quiescent too.
 bool mb_network_quiesced();
 
