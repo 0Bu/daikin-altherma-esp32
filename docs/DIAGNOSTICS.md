@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 7236899308f600826bcd91556fff74ebc8107655e04f4366a48d433a5d54ea0d -->
+<!-- user-docs-contract: 3eb27c8a5e46402cfee9fb30369e5ada729b8dd3773bca16a93e021a308dcf73 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -89,23 +89,21 @@ fixed. No generic normal target is shown for faults.
 <!-- user-docs: health_dhw_loss -->
 ### Domestic-hot-water tank cooling
 
-**In plain language:** After at least one completed one-hour window, the board shows the largest
-net temperature drop at tank sensor R5T in **K/h** (one kelvin of cooling equals one degree
-Celsius). When timed detail is available, the expanded row plots windows completed in the last
-24 hours and after the most recent restart or reset. Tap a window for its time range, rate, readable
-time and markers.
-Separate lanes mark the presence of internal water-pump activity and a draw-like temperature
-pattern. The optional external hot-water circulation uses a separate witness.
+**In plain language:** The expanded row shows the largest measured hourly drop at tank sensor
+R5T in **°C per hour**, equivalent to the **K/h** shown in the row and chart. If an exact
+measurement has the same rate, the card shows the most recent matching hour and its circumstances.
+Internal pump activity and a rapid drop can occur in the same hour. The cause remains open.
 
-Blank intervals mean no completed timed record is available, not zero cooling or a known reason.
-A completed zero-rate window still has a bar. The chart selects the newest retained window when an
-earlier selection expires. It uses relative times if a reliable clock reading is unavailable.
-Bars do not return after a restart, although saved hourly evidence can still inform the maximum
-and totals. Bar counts and hourly totals can differ because they expire differently. If diagnosis
-updates stop or the tank-cooling inputs become stale, the last bars can remain visible as historical.
-A fresh diagnosis update can restore the chart's live state while the current readings panel is
-unavailable. An update without timeline data removes earlier bars. **Data details** explains the
-measurement basis and what the markers count.
+Open **24-hour history** and tap an hour for its time range, rate, readable time, and circumstances.
+Separate lanes mark internal pump activity and drops that resemble hot-water use. The optional
+external circulation uses a separate witness. Hatching shows time without a completed timed
+record. A measured zero has a short bar at the baseline.
+
+Saved bars can return after a restart once the clock synchronizes and the board confirms the
+same source and circulation configuration. Bar counts and diagnosis totals can differ because
+they use separate stores and expiry rules. The chart uses relative times when a reliable clock
+reading is unavailable. Historical bars do not establish that current inputs are fresh.
+**Data details** explains the measurement basis and marker limits.
 
 **Meaning:** **NOTE** needs at least one window at or above the project's **0.8 K/h** threshold
 without either marker. Other completed windows are **MEASURED**, including marked high rates.
@@ -157,13 +155,14 @@ the chart can stay at the last successful update. The list then shows the stop a
 unknown for any run that was still open.
 
 Tap an hourly block, Shift-click, or drag across blocks to select an hour or contiguous multi-hour
-period. When per-run X10A context from the current boot is available, the latest short-cycling
+period. When per-run X10A details are available, the latest short-cycling
 episode (or the latest recorded hour with start/stop details when no episode is present)
-auto-selects when opened and the list shows Start, Duration and why the run stopped alongside
-a one-sentence period summary; tapping a row expands its observed start and stop temperatures, target
-changes and flow rate. When per-run context is unavailable (for example before or right after a
-restart or on Modbus), the list falls back to Start, Stop and Duration, and notes on X10A runs from
-before the restart that start and stop details are recorded only from the last restart onward.
+auto-selects when opened. The list shows **Start**, **Duration** and **Why it stopped**, with a short
+summary of the period. The stop column describes observed clues. Tap a row with details to see
+the recorded temperatures, target changes and flow rate. The board can
+recover saved details for completed runs after a restart. When those details are missing, the
+chart can still show times and durations. Older time records can lack details, and a sudden power
+loss can leave recent runs unsaved.
 If a recent reading still shows the run in progress, the list gives the elapsed time through
 that reading. A brief single-poll interruption within the same boot (up to 15 seconds) keeps the
 run continuous, whereas a longer gap or restart interrupts it and leaves its stop and total duration

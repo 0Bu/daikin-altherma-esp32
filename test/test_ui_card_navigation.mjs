@@ -15,11 +15,18 @@ class Element {
     this.dataset = {};
     this.attributes = new Map();
     this.children = [];
-    this.hidden = false;
+    this._hidden = false;
+    this.attributeWrites = 0;
     this.writes = 0;
     this._html = "";
   }
+  set hidden(value) {
+    this.attributeWrites++;
+    this._hidden = value;
+  }
+  get hidden() { return this._hidden; }
   setAttribute(name, value) {
+    this.attributeWrites++;
     this.attributes.set(name, String(value));
     if (name === "id") this.id = String(value);
     if (name.startsWith("data-")) this.dataset[name.slice(5).replace(/-([a-z])/g,
@@ -123,6 +130,11 @@ ui.S.status = { diagnostics: { enabled: true }, hp: { connected: true } };
 ui.render(card("diagnosis"), card("model"), card("group:Operation") + card("modbus"));
 expectSelection("diagnosis", "initial available diagnosis");
 assert.deepEqual(keys(), ["diagnosis", "model", "group:Operation", "modbus"]);
+const stableElements = [browser, nav, host, ...host.children, ...nav.children];
+const attributeWrites = stableElements.map(element => element.attributeWrites);
+ui.sync();
+assert.deepEqual(stableElements.map(element => element.attributeWrites), attributeWrites,
+  "an unchanged navigation must not rewrite attributes");
 assert.ok(nav.children.every(button => button.getAttribute("type") === "button" &&
   button.getAttribute("aria-controls") === "valueGroups"), "navigation uses native content-control buttons");
 for (const className of ["dashboard-card-icon", "dashboard-card-label"])

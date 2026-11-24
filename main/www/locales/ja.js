@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -182,8 +182,16 @@ I18N.ja = localeValues([
   /* check.status.experimental */ "試験的",
   /* check.status.unavailable */ "利用不可",
   /* check.status.no_window */ "測定窓なし",
-  /* check.dhw.maximum */ "記録した最大値",
-  /* check.dhw.measurement */ "タンクセンサー R5T における1時間の正味の温度低下。",
+  /* check.dhw.maximum */ "タンクセンサーでの最大の温度低下率",
+  /* check.dhw.hour_unit */ "°C/時",
+  /* check.dhw.timeline */ "24時間の履歴",
+  /* check.dhw.context_title */ "原因は不明",
+  /* check.dhw.context_hour */ "同じ低下率を記録した時間帯",
+  /* check.dhw.context_missing */ "この値の時刻と測定時の状況は分かりません。",
+  /* check.dhw.context_pump */ "この時間帯にヒートポンプ内部の水ポンプが作動しました。",
+  /* check.dhw.context_draw */ "急な温度低下は、お湯の使用や急速な冷却で生じることがあります。",
+  /* check.dhw.context_quiet */ "ポンプの作動やお湯を使ったときに見られる温度低下は検出されませんでした。ただし、お湯が使われた可能性はあります。",
+  /* check.dhw.context_selected */ "この温度低下の原因は分かりません。",
   /* check.dhw.hint */ "ポンプ・取湯マーカーを記録しなかった時間窓が、本プロジェクトの参考しきい値に達しました。",
   /* check.dhw.before_snapshot */ (d) => `スナップショットの ${d} 前`,
   /* check.dhw.marker_yes */ "記録あり",
@@ -195,8 +203,8 @@ I18N.ja = localeValues([
   /* check.dhw.timeline_unavailable */ "時刻付きの時間窓は利用できません。合計から履歴を推定しません。",
   /* check.dhw.timeline_empty */ "この24時間表示には、完了した時刻付き時間窓がありません。",
   /* check.dhw.chart_title */ "完了した時間窓ごとの温度低下",
-  /* check.dhw.timed_scope */ (n) => `再起動・リセット後の時刻付き時間窓：${n}、最大24 h。最大値と件数は、描画された時間窓だけでなく、保存済みの1時間ごとのデータに基づく場合もあります。`,
-  /* check.dhw.blank */ "空白は利用可能な完了済みの時刻付き時間窓がないことを示し、温度低下ゼロではありません。マーカーは存在を示し、継続時間ではありません。",
+  /* check.dhw.timed_scope */ (n) => `グラフの測定時間帯：${n}（過去24時間）。最大値と件数は、描画された時間窓だけでなく、保存済みの1時間ごとのデータに基づく場合もあります。`,
+  /* check.dhw.blank */ "斜線部分は利用可能な完了済みの時刻付き時間窓がないことを示し、温度低下ゼロではありません。マーカーは存在を示し、継続時間ではありません。",
   /* check.dhw.snapshot */ "取得時点",
   /* check.dhw.stale */ "給湯タンクの温度低下を判定する現在の測定値が欠けているか古くなっています。完了した時間窓は過去の観測です。",
   /* check.dhw.limit */ "R5T は成層タンクの1点を測り、タンクの熱量を測るものではありません。ポンプ・取湯に似たマーカーは、原因も実際の取湯も証明しません。",
@@ -297,7 +305,7 @@ I18N.ja = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `終了 ${to}${vals}。`,
   /* check.cycling.e_ongoing */ "最新測定時も運転中。",
   /* check.cycling.cause_unavailable */ "詳細なし",
-  /* check.cycling.cause_since_boot */ "起動・停止の理由は前回の再起動以降のみ記録されます。",
+  /* check.cycling.cause_older_unavailable */ "これらの過去の運転については、保存された起動・停止の詳細がありません。",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m}分`,

@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from functools import lru_cache
 
 from stop_observation_rules import SYMBOLS, UPDATED_LIMITS, PATHS, BODIES, HEADERS, CALLERS
 
@@ -19,9 +20,20 @@ INLINED_INDEX_HELPERS = (
     'history_journal_reserve_sequence',
 )
 INLINED_SUPPRESSION_HELPERS = ('stop_context_unavailable_report',)
+INLINED_APPEND_HELPERS = ('flash_append_record_at', 'flash_prepare_next_slot',
+                          'flash_note_append_failure', 'flash_note_append_success')
 DHW_TRACE_HELPERS = ('copy_dhw_trace_locked', 'dhw_loss_step_traced', 'dhw_loss_step',
                      'apply_dhw_reset_locked', 'slot_start', 'slot_set_diagnostics',
-                     'checkup_cycling_end_unix_s', 'dhw_loss_wall_anchor_s', 'mb_record_poll_gap')
+                     'checkup_cycling_end_unix_s', 'dhw_loss_wall_anchor_s', 'mb_record_poll_gap',
+                     'dhw_trace_wall_s', 'dhw_trace_wall_locked', 'arm_dhw_trace_barrier_locked',
+                     'retire_dhw_trace_locked', 'checkup_dhw_trace_checkpoint',
+                     'checkup_dhw_trace_restore', 'checkup_dhw_trace_restore_ready',
+                     'checkup_dhw_trace_forget',
+                     'checkup_dhw_trace_reset_pending', 'checkup_dhw_trace_checkpoint_appended',
+                     'flash_build_next_dhw', 'history_restore_dhw_flash', 'flash_index_dhw_page',
+                     'flash_dhw_owned', 'flash_dhw_appended', 'flash_note_barrier_fence',
+                     'flash_region_erased', 'flash_record_physically_valid', 'time_synced',
+                     'checkup_modbus_reset')
 INDEX_POST_VALIDATION_FENCE = (
     '    if (s_forgotten.load(std::memory_order_acquire)) return;\n'
     '    observation_index_add('
@@ -37,6 +49,7 @@ DEFINITION = re.compile(r'\b([A-Za-z_]\w*)\s*\([^;{}]*?\)\s*(?:const\s*)?(?:noex
 KEYWORDS = {'if', 'for', 'while', 'switch', 'catch', 'sizeof', 'alignof', 'decltype', 'static_assert'}
 
 
+@lru_cache(maxsize=512)
 def masked(source):
     source = TOKEN.sub(lambda m: ' ' * len(m[0]), source)
     return re.sub(r'__attribute__\s*\(\([^()]*\)\)', lambda m: ' ' * len(m[0]), source)
@@ -54,6 +67,7 @@ def normalized(source):
     return ''.join(parts)
 
 
+@lru_cache(maxsize=512)
 def definitions(source):
     code = masked(source)
     spans = []
@@ -67,7 +81,7 @@ def definitions(source):
         if depth:
             raise ValueError('unclosed source function ' + match[1])
         spans.append((match.start(1), match.end(), end, match[1]))
-    return spans
+    return tuple(spans)
 
 
 def body(source, name, error=ValueError):
@@ -116,16 +130,20 @@ def validate_paths(budgets, error):
     if 'history_append_at' in budgets['symbols'] or any(
             'history_append_at' in path['symbols'] for path in budgets['paths'].values()):
         raise error('stop observation inlining: append_at cannot retain an invented outlined frame')
+    tracked_symbols = set(SYMBOLS)
     monitored = {name for name, path in budgets['paths'].items()
                  if name in PATHS or '_stop_' in name or '_dhw_trace_' in name
-                 or set(path['symbols']) & set(SYMBOLS)}
+                 or not tracked_symbols.isdisjoint(path['symbols'])}
     if monitored != set(PATHS):
         raise error('stop observation paths: exact caller/branch inventory changed')
+    owners_by_path = {}
+    for task, spec in budgets['tasks'].items():
+        for name in set(spec['paths']):
+            owners_by_path.setdefault(name, []).append(task)
     for name, (owner, rule) in PATHS.items():
         if budgets['paths'].get(name) != rule:
             raise error('stop observation path: exact members/allowance/cap changed: ' + name)
-        owners = [task for task, spec in budgets['tasks'].items() if name in spec['paths']]
-        if owners != [owner]:
+        if owners_by_path.get(name) != [owner]:
             raise error('stop observation path: exactly one reviewed task owner required: ' + name)
 
 
@@ -247,7 +265,13 @@ def validate_dhw_trace_sources(sources, error):
     compact = normalized(checkup)
     report = normalized(body(checkup, 'checkup_report', error))
     copy = normalized(body(checkup, 'copy_dhw_trace_locked', error))
+    clock = normalized(body(checkup, 'dhw_trace_wall_s', error))
+    anchor = normalized(body(checkup, 'dhw_trace_wall_locked', error))
     if ('logic::DhwLossTracedhw_trace{};std::atomic<bool>dhw_trace_forgotten{false};'
+            'booldhw_trace_restore_allowed=false;uint32_tdhw_trace_clock_anchor_s=0;'
+            'std::atomic<uint32_t>dhw_trace_barrier{0};'
+            'std::atomic<uint32_t>dhw_trace_barrier_acked{0};'
+            'std::atomic<uint32_t>dhw_trace_saved_end_s{0};'
             'CheckupSlot(' not in compact):
         raise error('stop observation DHW detail: appended slot storage/offset contract changed')
     signature = ('static__attribute__((noinline))voidcopy_dhw_trace_locked('
@@ -270,19 +294,42 @@ def validate_dhw_trace_sources(sources, error):
         raise error('stop observation DHW detail: one post-clock pending reset must fence all DHW fields')
     admission = ('if(dhw_trace&&slot.source_confirmed&&!slot.dhw_reset_requested.load()&&'
                  '!slot.dhw_trace_forgotten.load(std::memory_order_acquire)&&slot.cov.r5t&&'
-                 'slot.cov.valve&&slot.cov.pump&&slot.cov.bsh&&'
-                 'slot.dhw_trace.snapshot(*dhw_trace,now_us,logic::CHECKUP_MAX_GAP_S)){')
-    clock = ('dhw_trace->live=dhw_trace->live&&source_fresh;int64_tunix_s=-1;int32_tms=0;'
-             'constint64_tbefore_us=esp_timer_get_time();time_now(unix_s,ms);'
-             'constint64_tafter_us=esp_timer_get_time();'
-             'dhw_trace->unix_s=logic::dhw_loss_wall_anchor_s('
-             'dhw_trace->window_end_s,before_us,after_us,unix_s,ms);')
+                 'slot.cov.valve&&slot.cov.pump&&slot.cov.bsh&&slot.dhw_trace.begun){'
+                 'constuint32_tunix_s=dhw_trace_wall_locked(slot,static_cast<uint32_t>(now_us/1000000));'
+                 'if(slot.dhw_trace.snapshot(*dhw_trace,now_us,logic::CHECKUP_MAX_GAP_S)){'
+                 'dhw_trace->live=dhw_trace->live&&source_fresh;dhw_trace->unix_s=unix_s;}}')
+    bracket = ('constint64_tbefore_us=esp_timer_get_time();int64_tunix_s=-1;int32_tms=0;'
+               'time_now(unix_s,ms);returnlogic::dhw_loss_wall_anchor_s('
+               'uptime_s,before_us,esp_timer_get_time(),unix_s,ms);')
+    roll = ('slot.dhw_trace.discard_restored();slot.dhw_trace_clock_anchor_s=0;'
+            'arm_dhw_trace_barrier_locked(slot);returnnow;')
     withdrawn = ('if(dhw_trace&&slot.dhw_trace_forgotten.load(std::memory_order_acquire))'
                  'dhw_trace->clear();')
-    if (not copy.startswith(admission) or clock not in copy or not copy.endswith(withdrawn)
-            or copy.count('time_now(') != 1 or copy.count('esp_timer_get_time(') != 2
-            or copy.count('slot.dhw_trace.snapshot(') != 1):
-        raise error('stop observation DHW detail: admission/sibling clocks/post-clock withdrawal changed')
+    if (copy != admission + withdrawn or clock != bracket or not anchor.endswith(roll)
+            or '[[gnu::noinline]]staticuint32_tdhw_trace_wall_s(uint32_tuptime_s)' not in compact
+            or '[[gnu::noinline]]staticuint32_tdhw_trace_wall_locked(CheckupSlot&slot,uint32_tuptime_s)'
+            not in compact):
+        raise error('stop observation DHW detail: admission/clock bracket/post-clock withdrawal changed')
+    checkpoint = normalized(body(checkup, 'checkup_dhw_trace_checkpoint', error))
+    if not checkpoint.endswith(
+            'if(slot.dhw_trace_forgotten.load(std::memory_order_acquire)||'
+            'slot.dhw_reset_requested.load())returnfalse;'
+            'if(!slot.dhw_trace_clock_anchor_s&&unix_s>=uptime_s)'
+            'slot.dhw_trace_clock_anchor_s=unix_s-uptime_s;returntrue;'):
+        raise error('stop observation DHW checkpoint: fresh data must latch its clock anchor')
+    restore = normalized(body(sources['main/history.cpp'], 'history_restore_dhw_flash', error))
+    ready = normalized(body(checkup, 'checkup_dhw_trace_restore_ready', error))
+    if ('[[gnu::noinline]]boolcheckup_dhw_trace_restore_ready(DiagnosticsSourcesource)' not in compact
+            or ready != 'if(!s_mtx)returnfalse;Locklk(s_mtx,0);'
+                        'returnlk.acquired()&&slot_for(source).source_confirmed;'
+            or not restore.startswith('constexprint64_tretry_us=10*1000000;')
+            or 'if(!wait_ticks&&(esp_timer_get_time()<ds.restore_retry_us||'
+               '!checkup_dhw_trace_restore_ready(source)))continue;'
+               'auto&r=*new(s_flash_sector)FlashJournalRecord;'
+               'constesp_err_te=flash_read_record(ds.newest.slot,r);' not in restore
+            or not restore.endswith('!=CheckupFlashRestoreResult::Deferred;'
+                                    'if(!ds.restore_done)ds.restore_retry_us=esp_timer_get_time()+retry_us;}')):
+        raise error('stop observation DHW restore: poll reads require readiness and deferred backoff')
     logic = normalized(sources['main/logic/checkup.hpp'])
     pure = ('[[gnu::noinline]]inlinevoiddhw_loss_step(DhwLossState&st,DhwLossBucket&b,'
             'constCheckupSample&s,int64_tnow_us)')
@@ -334,7 +381,6 @@ def validate_sources(budgets, sources, error):
     if actual != CALLERS:
         changed = [name for name in CALLERS if actual[name] != CALLERS[name]]
         raise error('stop observation caller inventory changed: ' + ', '.join(changed))
-    code = {path: re.sub(r'\s+', ' ', masked(text)) for path, text in sources.items()}
     history = sources['main/history.cpp']
     store = sources['main/stop_observation_store.cpp']
     validate_suppression(sources, error)
@@ -359,6 +405,7 @@ def validate_sources(budgets, sources, error):
                                              'stop_observation_forget();'
                                              'hydronic_observation_forget();'
                                              'checkup_cycling_forget();'
+                                             'checkup_dhw_trace_forget();'
                                              'bump_history_epoch();'
                                              'if(!s_flash_forget_ready.load(std::memory_order_acquire))returnfalse;')
             or 's_flash_scan_ok=flash_journal_scan();' not in flash_start
@@ -414,6 +461,9 @@ def validate_sources(budgets, sources, error):
 
 def validate_inlining(disassembly, error):
     exact = {re.sub(r'\\(.)', r'\1', rule['pattern'][1:-1]) for rule in SYMBOLS.values()}
+    # history_journal_header_matches is overloaded. Monitor only the four-argument
+    # structural matcher reached from the DHW schema wrapper.
+    dhw_header = re.sub(r'\\(.)', r'\1', SYMBOLS['dhw_trace_header_shape']['pattern'][1:-1])
     for name in re.findall(r'^\s*[0-9a-fA-F]+\s+<(.+)>:\s*$', disassembly, re.M):
         if (re.search(r'\bdhw_loss_step_impl(?:<[^;]*>)?\(', name)
                 or re.match(r'^_Z.*18dhw_loss_step_impl', name)):
@@ -422,6 +472,8 @@ def validate_inlining(disassembly, error):
                or re.match(r'^_ZNK?4daik5logic(?:12DhwLossTrace|15DhwLossTimeline)', name)
                or re.match(r'^daik::logic::dhw_loss_trace_', name)
                or re.match(r'^_Z.*\d+dhw_loss_trace_', name)
+               or name.startswith(dhw_header)
+               or re.match(r'^_ZN4daik5logic30history_journal_header_matchesERKNS0_20HistoryJournalHeaderEmtm', name)
                or re.match(r'^_Z.*12persist_wipeERNS0_11CheckupSlotE', name)
                or 'persist_wipe(daik::(anonymous namespace)::CheckupSlot&' in name
                or any(re.search(r'\b' + helper + r'\(', name) or
@@ -429,9 +481,10 @@ def validate_inlining(disassembly, error):
                       for helper in DHW_TRACE_HELPERS))
         if dhw and name not in exact:
             raise error('stop observation DHW detail: unmeasured outlined helper/clone needs frame/path review: ' + name)
-        if ('flash_append_record_at(' in name or
-                re.match(r'^_Z.*22flash_append_record_at', name)):
-            raise error('stop observation inlining: newly outlined append_at requires frame/path review')
+        if any(re.search(r'\b' + helper + r'\(', name) or
+               re.match(r'^_Z.*' + str(len(helper)) + helper, name)
+               for helper in INLINED_APPEND_HELPERS):
+            raise error('stop observation inlining: newly outlined append helper requires frame/path review')
         if any(re.search(r'\b' + helper + r'\(', name) or
                re.match(r'^_Z.*' + str(len(helper)) + helper, name)
                for helper in INLINED_INDEX_HELPERS + INLINED_SUPPRESSION_HELPERS):
@@ -462,6 +515,7 @@ def self_test(budgets, sources, error):
     if 'main/http_handlers.hpp' not in sources:
         raise AssertionError('existing-header caller controls need the real loaded HTTP header')
     count = 0
+    encoded_budget = json.dumps(budgets)
     def reject(changed_budget=budgets, changed_source=sources):
         nonlocal count
         try:
@@ -473,17 +527,17 @@ def self_test(budgets, sources, error):
         else:
             raise AssertionError('accepted stop observation source/path regression')
     for key in SYMBOLS:
-        altered = json.loads(json.dumps(budgets))
+        altered = json.loads(encoded_budget)
         del altered['symbols'][key]
         reject(altered)
         if key.startswith('dhw_trace_') or key in ('dhw_loss_step', 'checkup_cycling_anchor'):
             for field in ('pattern', 'max_bytes'):
-                altered = json.loads(json.dumps(budgets))
+                altered = json.loads(encoded_budget)
                 altered['symbols'][key][field] += '|unreviewed' if field == 'pattern' else 16
                 reject(altered)
     for name, (owner, _) in PATHS.items():
         for field in ('symbols', 'base_bytes', 'max_bytes', 'multipliers', 'owner'):
-            altered = json.loads(json.dumps(budgets))
+            altered = json.loads(encoded_budget)
             rule = altered['paths'][name]
             if field == 'symbols': rule[field] = rule[field][:-1]
             elif field == 'multipliers': rule[field] = {rule['symbols'][0]: 2}
@@ -491,10 +545,10 @@ def self_test(budgets, sources, error):
             else: rule[field] += 16
             reject(altered)
         if '_dhw_trace_' in name:
-            altered = json.loads(json.dumps(budgets))
+            altered = json.loads(encoded_budget)
             del altered['paths'][name]
             reject(altered)
-    altered = json.loads(json.dumps(budgets))
+    altered = json.loads(encoded_budget)
     altered['paths']['poll_dhw_trace_unreviewed'] = {
         'symbols': ['poll_task'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}
     reject(altered)
@@ -580,8 +634,7 @@ def self_test(budgets, sources, error):
     mutations.extend([
         ('main/checkup.cpp', 'static __attribute__((noinline)) void copy_dhw_trace_locked',
          'static void copy_dhw_trace_locked'),
-        ('main/checkup.cpp', 'logic::DhwLossTrace dhw_trace{};',
-         'logic::DhwLossTrace dhw_trace[2]{};'),
+        ('main/checkup.cpp', 'dhw_trace{};', 'dhw_trace[2]{};'),
         ('main/logic/checkup.hpp', '[[gnu::always_inline]] inline void dhw_loss_step_impl',
          'inline void dhw_loss_step_impl'),
         ('main/logic/checkup.hpp', '[[gnu::noinline]] inline void dhw_loss_step(',
@@ -644,10 +697,26 @@ def self_test(budgets, sources, error):
          'slot.cov.valve && slot.cov.pump && slot.cov.bsh', 'true'),
         ('main/checkup.cpp', 'copy_dhw_trace_locked',
          'dhw_trace->live && source_fresh', 'dhw_trace->live'),
-        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'time_now(unix_s, ms);', ''),
-        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'esp_timer_get_time()', 'now_us'),
-        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'before_us, after_us', 'before_us, before_us'),
-        ('main/checkup.cpp', 'copy_dhw_trace_locked', 'logic::dhw_loss_wall_anchor_s(', 'other_anchor('),
+        ('main/checkup.cpp', 'dhw_trace_wall_s', 'time_now(unix_s, ms);', ''),
+        ('main/checkup.cpp', 'dhw_trace_wall_s', '= esp_timer_get_time()', '= uptime_s'),
+        ('main/checkup.cpp', 'dhw_trace_wall_s',
+         'before_us, esp_timer_get_time()', 'before_us, before_us'),
+        ('main/checkup.cpp', 'dhw_trace_wall_s', 'logic::dhw_loss_wall_anchor_s(', 'other_anchor('),
+        ('main/checkup.cpp', 'dhw_trace_wall_locked', 'slot.dhw_trace.discard_restored();', ''),
+        ('main/checkup.cpp', 'dhw_trace_wall_locked', 'arm_dhw_trace_barrier_locked(slot);', ''),
+        ('main/checkup.cpp', 'checkup_dhw_trace_checkpoint',
+         'slot.dhw_trace_clock_anchor_s = unix_s - uptime_s;', '(void)unix_s;'),
+        ('main/history.cpp', 'history_restore_dhw_flash',
+         '*new (s_flash_sector + sizeof(r)) logic::DhwLossTracePage', 'unreviewed_page'),
+        ('main/history.cpp', 'history_restore_dhw_flash',
+         '!checkup_dhw_trace_restore_ready(source)', 'false'),
+        ('main/history.cpp', 'history_restore_dhw_flash',
+         'esp_timer_get_time() < ds.restore_retry_us', 'false'),
+        ('main/history.cpp', 'history_restore_dhw_flash',
+         'if (!ds.restore_done) ds.restore_retry_us = esp_timer_get_time() + retry_us;', ''),
+        ('main/checkup.cpp', 'checkup_dhw_trace_restore_ready',
+         'Lock lk(s_mtx, 0);', 'Lock lk(s_mtx);'),
+        ('main/history.cpp', 'history_flash_forget', 'checkup_dhw_trace_forget();', ''),
         ('main/checkup.cpp', 'copy_dhw_trace_locked',
          'if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire))', 'if (dhw_trace)'),
         ('main/hp_modbus.cpp', 'mb_task',
@@ -674,6 +743,7 @@ def self_test(budgets, sources, error):
     # convenient semantic anchors above. Existing leases and their mutation controls stay intact.
     for path, names in (
         ('main/hp_modbus.cpp', ('mb_record_poll_gap',)),
+        ('main/history.cpp', ('flash_insert_ranked_slot',)),
         ('main/checkup.cpp', ('copy_dhw_trace_locked', 'commit_and_fold_locked', 'apply_dhw_reset_locked',
                               'persist_wipe', 'slot_start', 'slot_set_diagnostics')),
         ('main/logic/checkup.hpp', ('dhw_loss_step_impl', 'dhw_loss_step_traced',
@@ -694,7 +764,7 @@ def self_test(budgets, sources, error):
         else:
             raise AssertionError('accepted newly outlined append_at')
     for name in [
-            candidate for helper in INLINED_INDEX_HELPERS + INLINED_SUPPRESSION_HELPERS
+            candidate for helper in INLINED_INDEX_HELPERS + INLINED_SUPPRESSION_HELPERS + INLINED_APPEND_HELPERS
             for candidate in ('daik::logic::' + helper + '(x)', '_Z' + str(len(helper)) + helper + 'Eclone')
     ] + [
             'daik::logic::ObservationIndexEntry::' + method + '() const'

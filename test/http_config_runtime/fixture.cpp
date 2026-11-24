@@ -36,8 +36,8 @@ namespace fixture {
 daik::Config         current;
 std::vector<uint8_t> service, link, gas;
 const char*          oracle = "initial";
-unsigned checks = 0, saves = 0, service_writes = 0, link_writes = 0, gas_writes = 0,
-         config_reads = 0;
+unsigned             checks = 0, saves = 0, service_writes = 0, link_writes = 0, gas_writes = 0,
+         config_reads        = 0;
 unsigned             reboots = 0, delays = 0, runtime_changes = 0, env_probes = 0, body_reads = 0;
 unsigned mqtt_inits = 0, mqtt_starts = 0, mqtt_stops = 0, mqtt_destroys = 0, semaphore_deletes = 0;
 unsigned dns_calls = 0, socket_calls = 0, socket_closes = 0, weather_commits = 0;
@@ -165,7 +165,7 @@ void reset() {
     service.reserve(16384);
     link.reserve(128);
     saves = service_writes = link_writes = gas_writes = config_reads = reboots = delays =
-        runtime_changes = 0;
+        runtime_changes                                                        = 0;
     env_probes = body_reads = mqtt_inits = mqtt_starts = mqtt_stops = mqtt_destroys = 0;
     semaphore_deletes = dns_calls = socket_calls = socket_closes = weather_commits = 0;
     post_write_allocations = stale_attempts = save_fault = 0;
@@ -492,6 +492,7 @@ esp_err_t http_send_json(httpd_req_t* request, const char* body) {
     request->response                   = body;
     return ESP_OK;
 }
+void http_set_nodelay(httpd_req_t*, bool) noexcept {}
 int http_read_body(httpd_req_t* request, char* buffer, size_t capacity) {
     ++fixture::body_reads;
     fixture::body_capacity = capacity;
@@ -1452,7 +1453,7 @@ void gas_comparison() {
     const auto initial_link    = link;
     const auto send            = [](Handler handler, const std::string& body) {
         saves = service_writes = link_writes = gas_writes = runtime_changes = weather_commits = 0;
-        durable_started                                                       = false;
+        durable_started = false;
         return invoke(handler, body);
     };
     const auto persisted = [] {
@@ -1466,7 +1467,8 @@ void gas_comparison() {
         return blob;
     };
 
-    // Valid save normalizes currency case, ignores legacy gas_efficiency_pct, and leaves cfg/link intact.
+    // Valid save normalizes currency case, ignores legacy gas_efficiency_pct, and leaves cfg/link
+    // intact.
     const auto first =
         send(daik::set_gas_comparison,
              R"({"elec_price":0.32,"gas_price":0.105,"currency":"chf","gas_efficiency_pct":50})");

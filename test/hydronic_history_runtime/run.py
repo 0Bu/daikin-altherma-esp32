@@ -160,8 +160,8 @@ mutation("trust_write_error_instead_of_readback",
          "    const bool committed = e == ESP_OK;",
          "commit_error_after_accept", "readback_decides_commit_success")
 mutation("skip_hydronic_round_robin_source",
-         "constexpr size_t kJournalServiceSources     = kJournalSources + 7;",
-         "constexpr size_t kJournalServiceSources     = kJournalSources + 6;",
+         "if (src_i == kHydronicObservationSource) return flash_build_next_hydronic_observation(r);",
+         "if (src_i == kHydronicObservationSource) return false;",
          "shutdown_drain", "shutdown_round_robin_drains_both_independent_sources")
 mutation("omit_hydronic_history_forget",
          "    hydronic_observation_forget();\n", "",

@@ -12,17 +12,20 @@ assert.match(style,
   /\.vhist-graph\s*\{[^}]*touch-action:\s*pan-y;/,
   "the tooltip strip must accept horizontal touch scrubbing while preserving vertical page scroll");
 assert.match(style,
-  /\.vhist-tip\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--card\)\s+60%,\s*transparent\);/,
-  "tooltip surfaces must be translucent without fading their text");
+  /\.vhist-tip\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--card\)\s+92%,\s*transparent\);/,
+  "pinned tooltip surfaces must use a frosted near-opaque backing without fading their text");
 assert.match(style,
-  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
-  "one readout row and a shared lower time axis keep the chart compact");
+  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto auto;/,
+  "one plot row and one shared lower time axis keep the chart compact");
+assert.match(style,
+  /\.vhist-tips\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(100% \+ 8px\);/,
+  "tooltip bubbles must float above the plot without reserving idle space");
 assert.match(style, /\.vhist-tip\.vhist-live\s*\{[^}]*z-index:\s*4;[^}]*background:\s*var\(--card\);/,
   "the moving bubble must cover the pinned bubble without ghost text");
-assert.match(style, /\.vhist-time\.vhist-live\s*\{[^}]*z-index:\s*4;[^}]*background:\s*var\(--brand-tint\);/,
+assert.match(style, /\.vhist-time\.vhist-live\s*\{[^}]*z-index:\s*4;[^}]*background:\s*var\(--vhist-surface\);/,
   "the moving time must cover the pinned time on the shared lower axis");
 assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
-  "the readout remains in normal layout above the chart");
+  "the readout anchors inside the floating tooltip grid above the chart");
 assert.match(style, /\.vhist-tip\s*\{[^}]*translateX\(calc\(var\(--tip-p\) \* -1%\)\)/,
   "proportional anchoring keeps the tooltip inside both card edges");
 assert.doesNotMatch(style, /\.vhist-tip\s*\{[^}]*\bopacity\s*:/,

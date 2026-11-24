@@ -1,5 +1,7 @@
 """Exact reviewed stop-observation frame/path/source inventory; no inferred owners."""
 
+import re
+
 SYMBOLS = {
     'dhw_trace_modbus_gap': {'pattern': '^daik::mb_record_poll_gap\\(unsigned\\ long,\\ unsigned\\ long\\)$', 'max_bytes': 64},
     'dhw_trace_copy': {'pattern': '^daik::copy_dhw_trace_locked\\(daik::\\(anonymous\\ namespace\\)::CheckupSlot\\&,\\ daik::logic::DhwLossTimeline\\*,\\ long\\ long,\\ bool\\)$', 'max_bytes': 80},
@@ -189,6 +191,7 @@ PATHS = {
     'httpd_cycling_run_detect': ['httpd', {'symbols': ['config_hp', 'config_document', 'checkup_detect_schema', 'cycling_run_rwt_locator', 'stop_instrument_', 'stop_profileview_const__', 'checkup_schema_adjudicated_view'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 8192}],
     'poll_cycling_run_expire': ['poll', {'symbols': ['poll_task', 'history_board', 'history_flash_restore', 'stop_checkup_stop_context_expire', 'cycling_run_expire'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}],
     'poll_cycling_run_gap': ['poll', {'symbols': ['poll_task', 'stop_checkup_record_poll_gap', 'cycling_run_checkup_record', 'cycling_run_record_locked', 'cycling_run_step'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}],
+    'poll_cycling_gap_finalize': ['poll', {'symbols': ['poll_task', 'stop_checkup_record_poll_gap', 'cycling_run_checkup_record', 'cycling_run_record_locked', 'cycling_run_finalize', 'cycling_run_typical_flow', 'cycling_run_restored_window'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}],
     'button_stop_forget_preflight': ['button', {'symbols': ['button_task', 'stop_forget_ready', 'stop_atomic_bool_load', 'runtime_task_entry'], 'multipliers': {}, 'base_bytes': 192, 'max_bytes': 2048}],
     'main_stop_pending_latch': ['main', {'symbols': ['main_task', 'boot_sequence', 'stop_checkup_start', 'stop_pending', 'stop_atomic_bool_load'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 6144}],
     'main_stop_pending_take': ['main', {'symbols': ['main_task', 'boot_sequence', 'stop_checkup_start', 'stop_pending', 'stop_try_lock_guard', 'sdk_queue_sem_take', 'sdk_queue_remove_event', 'sdk_queue_yield_required', 'sdk_queue_yield_other', 'sdk_queue_crosscore_yield', 'sdk_queue_crosscore_send', 'sdk_queue_critical', 'sdk_queue_compare_swap'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 6144}],
@@ -459,12 +462,219 @@ PATHS = {
     'ota_health_shutdown_journal_stop_append_failure_release': ['ota_health', {'symbols': ['ota_health_task', 'sdk_restart', 'history_shutdown', 'history_journal', 'history_append', 'stop_stop_observation_flash_failed', 'sem_guard_release', 'sdk_queue_send'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 3072}],
 }
 
+# These frames were measured on the ESP32-S3 ELF with ESP-IDF v6.1.1. The journal payload
+# aliases flash-owner scratch and the timed rings stay in their source slots.
+_DHW_FRAMES = {
+    'barrier': ('daik::(anonymous namespace)::arm_dhw_trace_barrier_locked(daik::(anonymous namespace)::CheckupSlot&)', 32),
+    'retire': ('daik::(anonymous namespace)::retire_dhw_trace_locked(daik::(anonymous namespace)::CheckupSlot&)', 32),
+    'wall': ('daik::dhw_trace_wall_s(unsigned long)', 64),
+    'wall_locked': ('daik::dhw_trace_wall_locked(daik::(anonymous namespace)::CheckupSlot&, unsigned long)', 32),
+    'checkpoint': ('daik::checkup_dhw_trace_checkpoint(daik::logic::DhwLossTracePage&, unsigned long&, unsigned long, daik::DiagnosticsSource)', 96),
+    'ready': ('daik::checkup_dhw_trace_restore_ready(daik::DiagnosticsSource)', 48),
+    'adopt': ('daik::checkup_dhw_trace_restore(daik::logic::DhwLossTracePage const&, unsigned long, daik::DiagnosticsSource)', 64),
+    'forget': ('daik::checkup_dhw_trace_forget()', 32),
+    'pending': ('daik::checkup_dhw_trace_reset_pending(daik::DiagnosticsSource)', 32),
+    'ack': ('daik::checkup_dhw_trace_checkpoint_appended(unsigned long, daik::DiagnosticsSource)', 32),
+    'build': ('daik::(anonymous namespace)::flash_build_next_dhw(daik::(anonymous namespace)::FlashJournalRecord&, unsigned long, bool)', 112),
+    'restore': ('daik::history_restore_dhw_flash(unsigned long)', 64),
+    'fence': ('daik::(anonymous namespace)::flash_note_barrier_fence(daik::logic::HistoryJournalHeader const&, unsigned long, unsigned long long&)', 32),
+    'region_erased': ('daik::(anonymous namespace)::flash_region_erased(unsigned int, unsigned int, bool&)', 32),
+    'physical': ('daik::(anonymous namespace)::flash_record_physically_valid(daik::(anonymous namespace)::FlashJournalRecord const&)', 128),
+    'header_shape': ('daik::logic::history_journal_header_matches(daik::logic::HistoryJournalHeader const&, unsigned long, unsigned short, unsigned long)', 32),
+    'header': ('daik::logic::dhw_loss_trace_header_matches(daik::logic::HistoryJournalHeader const&, bool)', 32),
+    'page': ('daik::logic::dhw_loss_trace_page_valid(daik::logic::DhwLossTracePage const&, bool)', 48),
+    'unpack': ('daik::logic::dhw_loss_trace_unpack(unsigned char const (&) [6], unsigned long, daik::logic::DhwLossTraceWindow&)', 32),
+    'decode': ('daik::logic::dhw_loss_trace_restore(daik::logic::DhwLossTrace&, daik::logic::DhwLossTracePage const&, unsigned long, unsigned long)', 64),
+    'synced': ('daik::time_synced()', 32),
+    'modbus_reset': ('daik::checkup_modbus_reset()', 48),
+}
+SYMBOLS.update({'dhw_trace_' + key: {'pattern': '^' + re.escape(symbol) + '$', 'max_bytes': size}
+                for key, (symbol, size) in _DHW_FRAMES.items()})
+
+
+def _dhw_path(name, owner, symbols, base=1536):
+    maximum = {'httpd': 8192, 'main': 5120, 'poll': 7168, 'modbus': 5120,
+               'eth': 3072, 'ota': 10752, 'ota_health': 3072, 'button': 2048}[owner]
+    PATHS[name] = [owner, {'symbols': symbols, 'multipliers': {}, 'base_bytes': base,
+                           'max_bytes': maximum}]
+
+
+# The two clock reads bracket time_now. Clock/monotonic branches retain both distinct helpers,
+# whereas the clock-step barrier is called only by the anchor helper after the bracket returns.
+for _transport in ('direct', 'mcp'):
+    _prefix = 'httpd_' + _transport + '_dhw_trace_'
+    for _phase in ('clock', 'monotonic'):
+        _symbols = PATHS[_prefix + _phase][1]['symbols']
+        _symbols[-1:-1] = ['dhw_trace_wall_locked', 'dhw_trace_wall']
+    _dhw_path(_prefix + 'wall_step', 'httpd',
+              PATHS[_prefix + 'clock'][1]['symbols'][:-2] + ['dhw_trace_barrier'])
+
+for _name, (_owner, _path) in list(PATHS.items()):
+    _symbols = _path['symbols']
+    if '_dhw_trace_' in _name and 'dhw_trace_dhw_reset' in _symbols:
+        _symbols.insert(_symbols.index('dhw_trace_dhw_reset') + 1, 'dhw_trace_retire')
+        _dhw_path(_name + '_barrier', _owner,
+                  ['dhw_trace_barrier' if key == 'dhw_trace_reset' else key for key in _symbols],
+                  _path['base_bytes'])
+
+_DHW_WRITE = {
+    'build_sync': ['dhw_trace_build', 'dhw_trace_synced'],
+    'build_pending': ['dhw_trace_build', 'dhw_trace_pending', 'stop_atomic_bool_load'],
+    # Charge the unpack frame beneath page validation even when the linker inlines that call.
+    'shape': ['dhw_trace_build', 'dhw_trace_page', 'dhw_trace_unpack'],
+    'build_crc': ['dhw_trace_build', 'cycling_flash_crc', 'history_config_crc'],
+    'checkpoint_clock': ['dhw_trace_build', 'dhw_trace_checkpoint', 'dhw_trace_wall_locked',
+                         'dhw_trace_wall', 'room_time_now'],
+    'checkpoint_monotonic': ['dhw_trace_build', 'dhw_trace_checkpoint', 'dhw_trace_wall_locked',
+                             'dhw_trace_wall', 'dhw_trace_monotonic'],
+    'checkpoint_clock_step': ['dhw_trace_build', 'dhw_trace_checkpoint', 'dhw_trace_wall_locked',
+                              'dhw_trace_barrier'],
+    'checkpoint_reset': ['dhw_trace_build', 'dhw_trace_checkpoint', 'dhw_trace_dhw_reset',
+                         'dhw_trace_retire', 'dhw_trace_reset'],
+    'checkpoint_reset_barrier': ['dhw_trace_build', 'dhw_trace_checkpoint', 'dhw_trace_dhw_reset',
+                                 'dhw_trace_retire', 'dhw_trace_barrier'],
+    'checkpoint_expire': ['dhw_trace_build', 'dhw_trace_checkpoint', 'dhw_trace_expire'],
+    'checkpoint_seal': ['dhw_trace_build', 'dhw_trace_checkpoint', 'dhw_trace_dhw_reset',
+                        'cycling_seal', 'cycling_crc', 'history_config_crc'],
+    'checkpoint_mutex_take': ['dhw_trace_build', 'dhw_trace_checkpoint', 'stop_try_lock_guard',
+                              'sdk_queue_sem_take'],
+    'checkpoint_mutex_release': ['dhw_trace_build', 'dhw_trace_checkpoint', 'sem_guard_release',
+                                 'sdk_queue_send'],
+    # Slot preparation and append-at are inlined in history_append. The program and commit
+    # writes are sequential, as are the subsequent readback and envelope/CRC checks.
+    'append_prepare_read': ['history_append', 'dhw_trace_region_erased', 'sdk_partition_read'],
+    'append_prepare_erase': ['history_append', 'sdk_partition_erase'],
+    'append_program': ['history_append', 'sdk_partition_write'],
+    'append_readback': ['history_append', 'cycling_flash_record_read', 'sdk_partition_read'],
+    'append_verify_header': ['history_append', 'dhw_trace_physical', 'dhw_trace_header_shape'],
+    'append_verify_crc': ['history_append', 'dhw_trace_physical', 'cycling_flash_crc',
+                          'history_config_crc'],
+    'append_diagnostic': ['history_append', 'stop_callee_60', 'diag_log', 'diag_syslog'],
+    'append_ack': ['history_append', 'dhw_trace_ack'],
+    'append_fence': ['history_append', 'dhw_trace_fence'],
+}
+_DHW_RESTORE = {
+    'restore_retry_clock': ['dhw_trace_restore', 'dhw_trace_monotonic'],
+    'restore_read': ['dhw_trace_restore', 'cycling_flash_record_read', 'sdk_partition_read'],
+    'restore_diagnostic': ['dhw_trace_restore', 'diag_log', 'diag_syslog'],
+    'restore_header': ['dhw_trace_restore', 'dhw_trace_header', 'dhw_trace_header_shape'],
+    'restore_crc': ['dhw_trace_restore', 'dhw_trace_physical', 'cycling_flash_crc',
+                    'history_config_crc'],
+    'restore_page': ['dhw_trace_restore', 'dhw_trace_page', 'dhw_trace_unpack'],
+    'restore_adopt_clock': ['dhw_trace_restore', 'dhw_trace_adopt', 'dhw_trace_wall', 'room_time_now'],
+    'restore_adopt_monotonic': ['dhw_trace_restore', 'dhw_trace_adopt', 'dhw_trace_wall',
+                                'dhw_trace_monotonic'],
+    'restore_adopt_shape': ['dhw_trace_restore', 'dhw_trace_adopt', 'dhw_trace_decode',
+                            'dhw_trace_page', 'dhw_trace_unpack'],
+    'restore_adopt_unpack': ['dhw_trace_restore', 'dhw_trace_adopt', 'dhw_trace_decode',
+                             'dhw_trace_unpack'],
+    'restore_adopt_expire': ['dhw_trace_restore', 'dhw_trace_adopt', 'dhw_trace_decode',
+                             'dhw_trace_expire'],
+    'restore_adopt_mutex_take': ['dhw_trace_restore', 'dhw_trace_adopt', 'stop_try_lock_guard',
+                                 'sdk_queue_sem_take'],
+    'restore_adopt_mutex_release': ['dhw_trace_restore', 'dhw_trace_adopt', 'sem_guard_release',
+                                    'sdk_queue_send'],
+}
+
+# Flash read and append diagnostics reach the ring, syslog and ESP-IDF console as sibling
+# calls. Expand console allocation and USB output through their measured ABI frames.
+_DHW_CONSOLE = {
+    'diagnostic_format': [
+        'sdk_snprintf', 'sdk_vfprintf', 'sdk_int_format', 'sdk_string_write', 'runtime_task_entry',
+    ],
+    'console_buffer': [
+        'sdk_log', 'sdk_vprintf', 'sdk_vfprintf', 'sdk_bufio_put', 'sdk_bufio_allocate',
+        'sdk_malloc', 'sdk_malloc_default', 'sdk_malloc_caps', 'sdk_malloc_base',
+        'sdk_malloc_aligned', 'sdk_multi_aligned_offset', 'sdk_multi_aligned_impl',
+        'sdk_multi_lock', 'sdk_queue_critical', 'sdk_queue_compare_swap', 'runtime_task_entry',
+    ],
+    'console_write': [
+        'sdk_log', 'sdk_vprintf', 'sdk_vfprintf', 'sdk_bufio_put', 'sdk_bufio_flush', 'sdk_write',
+        'sdk_write_r', 'sdk_console_write', 'sdk_usb_write', 'sdk_usb_character', 'sdk_recursive_lock',
+        'sdk_lock_acquire', 'sdk_queue_sem_take', 'sdk_queue_critical', 'sdk_queue_compare_swap',
+        'runtime_task_entry',
+    ],
+}
+_DHW_RESTORE.update({'restore_' + _phase: ['dhw_trace_restore', 'diag_log'] + _tail
+                     for _phase, _tail in _DHW_CONSOLE.items()})
+_DHW_WRITE.update({'append_' + _phase: ['history_append', 'stop_callee_60', 'diag_log'] + _tail
+                   for _phase, _tail in _DHW_CONSOLE.items()})
+_DHW_CONSOLE_PHASES = {f'{prefix}_{phase}' for prefix in ('restore', 'append') for phase in _DHW_CONSOLE}
+
+for _phase, _tail in _DHW_WRITE.items():
+    _dhw_path('poll_dhw_trace_' + _phase, 'poll', ['poll_task', 'history_board', 'history_journal'] + _tail,
+              192 if _phase in _DHW_CONSOLE_PHASES else 1536)
+for _phase, _tail in _DHW_RESTORE.items():
+    _dhw_path('poll_dhw_trace_' + _phase, 'poll',
+              ['poll_task', 'history_board', 'history_flash_restore'] + _tail,
+              192 if _phase in _DHW_CONSOLE_PHASES else 1536)
+
+# Only poll checks readiness before reading. Shutdown retains its bounded adoption wait.
+_poll_dhw_ready = ['poll_task', 'history_board', 'history_flash_restore', 'dhw_trace_restore',
+                   'dhw_trace_ready']
+_dhw_path('poll_dhw_trace_restore_ready_take', 'poll',
+          _poll_dhw_ready + ['stop_try_lock_guard', 'sdk_queue_sem_take'])
+_dhw_path('poll_dhw_trace_restore_ready_release', 'poll',
+          _poll_dhw_ready + ['sem_guard_release', 'sdk_queue_send'])
+
+# Every existing restart route reaches the same write/restore drain. Its SDK allowance and
+# reserve are those already reviewed for that route. Factory reset bypasses the journal.
+for _name, (_owner, _path) in list(PATHS.items()):
+    _suffix = '_journal_stop_cpu'
+    if '_shutdown_' not in _name or not _name.endswith(_suffix):
+        continue
+    _symbols = _path['symbols']
+    _root = _symbols[:_symbols.index('history_journal') + 1]
+    for _phase, _tail in {**_DHW_WRITE, **_DHW_RESTORE}.items():
+        _dhw_path(_name[:-len(_suffix)] + '_dhw_trace_' + _phase, _owner, _root + _tail,
+                  192 if _phase in _DHW_CONSOLE_PHASES else 1536)
+    _dhw_path(_name[:-len(_suffix)] + '_dhw_trace_unsynced_reset', _owner,
+              _root + ['dhw_trace_pending', 'stop_atomic_bool_load'])
+
+for _phase, _tail in {
+    'header': ['dhw_trace_header', 'dhw_trace_header_shape'],
+    'fence': ['dhw_trace_fence'],
+    'crc': ['dhw_trace_physical', 'cycling_flash_crc', 'history_config_crc'],
+    'damaged_barrier_crc': ['history_config_crc'],
+}.items():
+    _dhw_path('main_dhw_trace_scan_' + _phase, 'main', ['main_task', 'boot_sequence', 'history_start'] + _tail)
+
+_dhw_path('button_dhw_trace_forget', 'button',
+          ['button_task', 'history_forget', 'dhw_trace_forget', 'runtime_task_entry'], 192)
+for _name, _owner, _root in (
+    ('httpd_diagnostics', 'httpd', ['config_diagnostics', 'config_document', 'stop_checkup_set_diagnostics',
+                                  'dhw_trace_slot_config']),
+    ('httpd_hp', 'httpd', ['config_hp', 'config_document', 'stop_checkup_reset']),
+    ('httpd_detect', 'httpd', ['stop_http_detect', 'stop_checkup_reset']),
+    ('httpd_profile', 'httpd', ['config_hp', 'config_document', 'checkup_detect_schema']),
+    ('poll_profile', 'poll', ['poll_task', 'checkup_detect_schema']),
+    ('httpd_modbus', 'httpd', ['config_hp', 'config_document', 'dhw_trace_modbus_reset']),
+    ('modbus_target', 'modbus', ['modbus_task', 'modbus_poll', 'dhw_trace_modbus_reset']),
+    ('modbus_profile', 'modbus', ['modbus_task', 'modbus_poll', 'modbus_checkup_confirm']),
+):
+    for _leaf in ('reset', 'barrier'):
+        _dhw_path(_name + '_dhw_trace_' + _leaf, _owner,
+                  _root + ['dhw_trace_retire', 'dhw_trace_' + _leaf])
+
+
 BODIES = {
     'main/hp_modbus.cpp': {'mb_record_poll_gap': 'a5e1a5d49eafe388351690d41b21bb28544910530a5bdb4c136a248965348b55'},
     'main/logic/checkup.hpp': {'dhw_loss_step_impl': '5fa8b17ea39149e2d93adafbb402f8a55506417a7b3d5a80714ee49bce5f1fba', 'dhw_loss_step_traced': 'bdefa9868b8e844422e065772259d85e33cd95cc5cd7bb80e3f9ec7ee305f0a6', 'dhw_loss_step': '9ac61287dba7d694e31cf79c265fd78ae127f17f4f50bb14bfec027644629da4', 'checkup_cycling_end_unix_s': 'bbc239b103f9ba9b545e99adde3101a3b0b67a9ef2f5980bad106497d944383f'},
     'main/sntp_time.cpp': {'time_now': '0c34e6931da52c91d8eae17fc00cf4a5dc18088445987b60f32a246a474ac847'},
     'main/stop_observation_store.cpp': {'wall_now': '10ef9e1fa6b2226e0dd0b27f13d8c93ecfffd80db8428e62ed559a28a3ce4e31', 'date_clock': '4a748a1fc03bdb54d6965fe8739ff9ae21f73e2f5a3e136e811a534650a1221a', 'dated': 'e97c87b6bfad5e1934a4b307ac9e0d3214b526d7e654b63b4b26b44426083f96', 'lose': '2993b4d113855743c0598b134ee3f9e93f9647d97bccbfc0ca1c27eea57b6f25', 'clear_live': '11491870313843750a50f1bf690e021b3350f3866a2e74e269900b59612edda5', 'invalidate_clock': '2958442a6db91f492a1ed64b56214face02745d5690ae65136895b8f5774784c', 'enqueue': '9cd787a789f88fa4592b064469da7abddd8b9d7b15808a6d40ea433fc952980b', 'close_open': '558d1061a390f33644067b6a2276fd6aebf5380b1e4f3be9fbd162b24e774a06', 'expire_live': '438e79a235c531c898ae8b0d99eb550caeecf5d1954c882a65397a4db94bad23', 'add_report': '301e58c53f992b630ad7c1c876ba01f81b62d1921b04fbce41274c23b32d0086', 'read_entry': '52470992b190e6f06a0422f73b211aa3f18f76dda90fcfd8bdf4f107e32830a1', 'apply_receipt': '196c0343893cdfe53f26bcfc1b961971f0e13f18bc25cfd4505f7edeb1038594', 'stop_observation_start': 'e6f7e997f9e1415108d994d2d7774f25d07d880a96c450705442c9fecd25281a', 'stop_observation_bind': '93a612c0ed99586723403da993256f16d1a9cee148af02c01fa803d034db2598', 'stop_observation_set_diagnostics': 'ba879b5f056f1eb9ceaabb8515313cde03c6f5743261368d3e628187e7b67b63', 'stop_observation_reset': 'a7da91758d4f329af3cc8a26ab71358b5d7b7a879f1e4e8f82c4af90698caec9', 'stop_observation_record': '2a058cc70832826ccae99924e9569f7198bf48406998df8159c59063c3dc65cd', 'stop_observation_seal': '0bf9b4ccc4b0751ee132ad4462f44593f53a0fb9c36be9519313a7d231f3d185', 'stop_observation_report': '80bc51912ee8596a7d164aa3ba7769dd0fba6e9fdc3ef0fa7000d23ad624cfe8', 'stop_observation_flash_index_reset': '2b3a701dfe4bc41fb1be0ce2d888ec1e4062aa6e9773e81029de27bea3de01bf', 'stop_observation_flash_index': '19bf2873e945a874b1fcd0cc29dba78a6077dbce124e53c7301ee4b6a7a1265c', 'stop_observation_flash_service': '701b48858606bede637df589861b3ab49ae303cf1769627e98935b79919cbf90', 'stop_observation_flash_next': 'ada5a2ff2ab5fd807cf44d709c6b57c8a9b4d6bf86d6c82dfb239a82cc226664', 'stop_observation_flash_appended': 'daf859b7dce22929d9ec9b3fb88e8c6db626f5a202588d720098e2d8ae9b366d', 'stop_observation_flash_failed': 'cf81b7e9509fbf2de6c295a0a84f84a5dce574b37bca1cf204d7eb94eaa9a887', 'stop_observation_forget': 'c33a2023d01f7c3858a9be9c379eca105e87541969d7a856b406610cf0328734', 'stop_observation_flash_index_incomplete': '89a486e610106d17a10bc3258dd0046d386831fcfe36a0a64d34c138174fc0bb', 'stop_observation_suppressed': 'c4df1de66f2fcc34e9bc9d5812f8ceeee5f9e60fa87b52e5c22f2c38be5140de'},
     'main/checkup.cpp': {
+        'checkup_dhw_trace_restore_ready': 'ad10b18d3795838c486b2c157ad33a2c1f8f9e6a36de25a0a5964b98eab9c705',
+        'arm_dhw_trace_barrier_locked': '18fba84c11e743abe4a666574bcfef7e4c6d3d413a858599d1d958940428f4c8',
+        'retire_dhw_trace_locked': '05165d7d154dbe74cf51162f8c056ba03283c054e751ef1a07a8ee5d36621bbf',
+        'dhw_trace_wall_s': 'f3d131de9489fbe972287f7008952c138d63c290990b928dbbec8ae28c57f624',
+        'dhw_trace_wall_locked': 'ec44cc7e71ab9e8b095238204962174465abd8b2aaab58040e6389b5da767d8c',
+        'checkup_dhw_trace_checkpoint': 'd979106ecea4c3bb5a124032f25ca2c8005aeb793da2b80b250483a147a9ad87',
+        'checkup_dhw_trace_restore': '352ca569a580ae36ad718c9325f32aec66eefaaa257ed8fca9f5d8584b7caed8',
+        'checkup_dhw_trace_forget': 'bf10f2b5dc08c24bed8fa59a54a36649b6094deb5585fc9a9c4e3789618f012a',
+        'checkup_dhw_trace_reset_pending': '18b46c0777e737857b5c22cde9f1cd4c28704869e3c978462c1a8702890b1646',
+        'checkup_dhw_trace_checkpoint_appended': 'a2b05089141f1a00c3d1acc1e118f183371ca5bc2811d464ebcfc0a71d936b82',
+        'checkup_modbus_reset': 'ed2cd4fffdbdd1df82194f9e866731b1cac09be5024f2a31b0926d98de809ad7',
+        'checkup_modbus_confirm_source': '874928d0c0ecb2a11b81c93c9cf51d2726fd3430afbf5a3515a7187d6db9009a',
         'checkup_report': 'f6e7a3e069e91b1798356ea25bb90f7b235d71b4553d961ac8dc40286298930e',
         'defrost_air_supported': 'a70faa32cd54120caa21949635baa7b8ff2c2f153e0193c91d6addc3d149265d',
         'copy_defrost_start_locked': '4654ac927c066ee0ea7722bbd8e39d961477fdca172a77ec81b5ae682e197033',
@@ -472,26 +682,34 @@ BODIES = {
         'checkup_reboot_save': 'cd6656eb0752d4221170e4c5c2450cb6b5750242ffadcbf24b867c40f37ace44',
         'checkup_start': '36df6bdb05d92a62ccc6761a71f507c27a3710d678ed3206bd95daf355616007',
         'checkup_set_diagnostics': 'b298af9affc9dcca5517b71289ccf71d81c6af558d0de7163d13ab1fb930fd31',
-        'checkup_reset': '90d2055eaa0cdc43e43d6ce8e10d0c6e0726fdc42da6e45cc4e1cf9fe0f7030b',
-        'checkup_reset_on_detect': 'aadab2fe42871dee9cdb7e96e9500d2c4fc36055eb3b0e670f60bf6187712cb1',
+        'checkup_reset': '35ce55e60a0df87ba53e8e63892e5c7b2a1bde9bc2cbd385daf64a270d7c760e',
+        'checkup_reset_on_detect': '2a5a0f4bd7468749e803d7d94ddb1e847d56195797d1d4c2f62a18f9ca800d25',
         'checkup_record': '35574ea65355e4d6864acc2b13bb44a275953d33d4f8abbe04c19fad1ac69a54',
         'checkup_stop_context_expire': '2119e01f6a5d471b0897dfc5784d4284f41342e9e1d0e49c37ee8211cdb0e5ba',
         'checkup_stop_context_report': '33976014f139e509c64e0a81653210c792ecb36d74dbb6df80b9dae83288b331',
         'stop_context_suppressed_locked': '640816c7c20c5f8d56acd7a39b104624a728ccb9bc77bd8fd70ed08c608e9c8f',
-        'copy_dhw_trace_locked': 'afda1f8036c75b0a061d1943bc405f178cbbc97a52c889ed9ed787a9b24f61ea',
+        'copy_dhw_trace_locked': '7637347ceb42203a6fd7f5cea5dd57a72a6391375278ef22848bff84ab5fab94',
         'commit_and_fold_locked': 'ecc01bc20aa0dc889214086b89f97951c6416e4c018e85d9374857d34bfa0c36',
-        'apply_dhw_reset_locked': '53e1272185a441d27d15e9f7e43b76e6bf35759ac0cfc9f35983d1ddfdf6ea1e',
-        'persist_wipe': '378aad6cd1f1aff4a0db552a4b02ec7cf7c9186d727c20ae9182c841793f9b27',
-        'slot_start': 'b861739f2c85dad0b87238f9d3b8ddc912d4c5450a9cfbad5cb684aa195b3d06',
-        'slot_set_diagnostics': 'e45354e85d9eaa291a538d882e57e56cc83f267a145b504a2ba50b8b59d74ff1',
+        'apply_dhw_reset_locked': 'ccdcc14d0b58f201ca67dba53dbd4c96c503dcb16ecc15fbf40e238d6fefd380',
+        'persist_wipe': 'e4d1409d4d7cd141ffea62bb98a2b6d3fd40aec0774f058f1c8805859d5d86ed',
+        'slot_start': '769b0e63f1719c9a8e7f2882cd374462e089250d05ccda6c2f73e7a47d98554a',
+        'slot_set_diagnostics': 'c79e655816b49f9d02a2b8b2833d7d53894fe5f35ab8928568a147084c86d487',
     },
-    'main/history.cpp': {'history_flash_forget_ready': '2e5cd836850c755bdb7e35e2e2f05a09eecacfcd7973af03266f548d08133a96', 'history_persist_state': 'd06271f4418ca5cc11c6f1c073a8d2b87eef13b13684c6903d17c85967aaa32e', 'history_checkup_flash_pending': 'f5c12808e894a7183bc10f7f74271282fab5558baa14cb1ee98c0630ece0f8d4', 'persist_wipe': '0544c57474097ef244cefafa9f09b37069720cedfd4db6c6536fee62a6022450', 'persist_seal_locked': '27f95c2faaf3b7d1711e76af89a7bb381277ae02092b63bc965226de272266df', 'history_persist_crc': '4b65e3b908302595cb6674ce14706bf1a6b7bb402b9beb4f95c0717ec3928e94', 'room_wipe_locked': '2c8ffda9b4bf50aff913225d2384a3f87bdc0b95f5da55e351d02df5bcc15ad8', 'room_seal_locked': 'd74305d77fc7cff40166fa05efee9ecda565c0534a0ba50e10ef71f95b63a88c', 'room_crc': '3100b765bf0e51aa216e883eaf2f1a9a6f572626ff07b55d712200b9c7eef6c4', 'flash_manifest_cache_reset': 'd741678b58fb33a6e086ba270d825d82512d86c12d1634086cd76c473555d786', 'forget_adopt_floor': 'b6cfa9296eaf5bf71f95ee18a4fffbb2b5fb2e5341f9669ecf53fcc800872b87', 'flash_read_stop_observation': '75cbf90d8d9f10327834e195f85009b608ecbb226898664b79b8cde7dc25e429', 'flash_journal_scan': '4433683994fe49bf54aabaa052dd531efcbd4a6fa2145bc29829bf9efc836a20', 'flash_build_next_stop_observation': 'f6cab877495c59fa36f4327f839117ad58994dd5753688da0a4a628c2776936b', 'flash_append_record_at': '93811700aea760f8f03631f24c1ce998832a5aa1ebe144847e1398e8553a049d', 'flash_append_record': '4eabb161d388a7f87745a6dae259da96ddf2fbbc7e7d59eed58b63b31434b3c3', 'history_service_flash_restore': 'bec5966ed1d61523bda6d6a426fd1e022b996574cdbbb72f14385c23ba092ea6', 'history_flash_service_journal': 'ace33cc3d198cc018c9945b34008d4eb81e1a585d2d5fee87aa47122553d9ca9', 'history_flash_save': 'c4bebd63b2e41e471139a1c13098df9a36c91afab49b81d7192edf7ce0f42514', 'history_flash_forget': '7e7c6a8e089cac23aa3008f0c1c5047bbe2257527be4b1a140a983bb07db305c', 'history_flash_start': 'd7956a1b227c03a14ff2e89aadd6dc4a6e0b81bfd26bc94b3399e25a64c85729', 'flash_region_erased': 'bd569d6c919373f96e471df99996084f7df6ab8a5841da5d644a14f707383712', 'history_restore_checkup_flash': '3f75cf1423737969ffc77a2f62d8ba603d966a99d231c0b08655302333eb20d2', 'flash_build_for_service': 'bb0fbcae259530845a4f00b3f27206a45f86ec01cf09b76cea83edac526fc162', 'history_start': '37821bff957d7f8c4f877139bab143d2d30c2ed67b7e4a86cfbc574ead1aa9ac', 'history_record_board': '3e0fed45d656ff87f7369741316b87793f79cab29f042d79137e4656d126de66', 'flash_index_stop_observation_record': 'a4f77b892db7f0883e4fbec0ede6080e571ed2299c5aaabe159ca6e013eda1d8'},
+    'main/history.cpp': {'history_flash_forget_ready': '2e5cd836850c755bdb7e35e2e2f05a09eecacfcd7973af03266f548d08133a96', 'history_persist_state': 'd06271f4418ca5cc11c6f1c073a8d2b87eef13b13684c6903d17c85967aaa32e', 'history_checkup_flash_pending': 'f5c12808e894a7183bc10f7f74271282fab5558baa14cb1ee98c0630ece0f8d4', 'persist_wipe': '0544c57474097ef244cefafa9f09b37069720cedfd4db6c6536fee62a6022450', 'persist_seal_locked': '27f95c2faaf3b7d1711e76af89a7bb381277ae02092b63bc965226de272266df', 'history_persist_crc': '4b65e3b908302595cb6674ce14706bf1a6b7bb402b9beb4f95c0717ec3928e94', 'room_wipe_locked': '2c8ffda9b4bf50aff913225d2384a3f87bdc0b95f5da55e351d02df5bcc15ad8', 'room_seal_locked': 'd74305d77fc7cff40166fa05efee9ecda565c0534a0ba50e10ef71f95b63a88c', 'room_crc': '3100b765bf0e51aa216e883eaf2f1a9a6f572626ff07b55d712200b9c7eef6c4', 'flash_manifest_cache_reset': 'd741678b58fb33a6e086ba270d825d82512d86c12d1634086cd76c473555d786', 'forget_adopt_floor': 'b6cfa9296eaf5bf71f95ee18a4fffbb2b5fb2e5341f9669ecf53fcc800872b87', 'flash_read_stop_observation': '75cbf90d8d9f10327834e195f85009b608ecbb226898664b79b8cde7dc25e429', 'flash_journal_scan': '0c2a6cffac3464680a11e0a4621d107b8bb7db260005c6b9220509539b61022a', 'flash_build_next_stop_observation': 'f6cab877495c59fa36f4327f839117ad58994dd5753688da0a4a628c2776936b', 'flash_append_record_at': '5af1df18814946ef4c7dd5ded6c239a06619dcf031f85e2d4b87e62028fb95b8', 'flash_append_record': 'c38a51dd9924abd0f2ac3ec799658ee1723bef40b7ee2d11c7f16e82bf2a7663', 'history_service_flash_restore': '3dcd8665d163fdb3b91b22e0e8a3829c5e208577505f9fd42f65224a38d71397', 'history_flash_service_journal': 'bc9ff2b8c0f7d96ead9b7601be05a587dec9c7614d7c8aa0f5940894ad9af477', 'history_flash_save': 'c4bebd63b2e41e471139a1c13098df9a36c91afab49b81d7192edf7ce0f42514', 'history_flash_forget': 'dfa0ba8c25a933e3d0d2fcadc70a0b2d9b5e2d33c5629db4a6744e37f2701fa8', 'history_flash_start': 'd7956a1b227c03a14ff2e89aadd6dc4a6e0b81bfd26bc94b3399e25a64c85729', 'flash_region_erased': 'bd569d6c919373f96e471df99996084f7df6ab8a5841da5d644a14f707383712', 'history_restore_checkup_flash': '3f75cf1423737969ffc77a2f62d8ba603d966a99d231c0b08655302333eb20d2', 'flash_build_for_service': 'd04acb06ef855d8699a6e3193dfd2f4e4c88c95b5b92fe398bb442c75d95bd81', 'history_start': '37821bff957d7f8c4f877139bab143d2d30c2ed67b7e4a86cfbc574ead1aa9ac', 'history_record_board': '3e0fed45d656ff87f7369741316b87793f79cab29f042d79137e4656d126de66', 'flash_index_stop_observation_record': 'a4f77b892db7f0883e4fbec0ede6080e571ed2299c5aaabe159ca6e013eda1d8', 'flash_dhw_owned': '1dd9b06d8a8bb7d1986969d6a07bd33ea161cadc4385d275a79c01b290204cc0', 'flash_index_dhw_page': 'ae43cfd0f878288c21a674175837ea85dc3c9663bd6ebfa3a890690b7f749b48', 'flash_build_next_dhw': '1e21d86dfea545b9e3c687ee8a24832cf5022486c0a80f45d05123f383673425', 'flash_dhw_appended': '866361455e911d687f040161bf509fd922111c5c16b435804a01ab5e124803b1', 'history_restore_dhw_flash': '7039e65876b516f293cb752a284bd35f372195e335678e9afb40fc9785399f57', 'flash_record_valid': '7aba5d28624ec3cdd554833e9beb4e28ec4360a11d696fb91a5b7dd8a587ea80',
+        'flash_read_record': '60d252b831d6c27d071c22f3b7431880ee97ca192bb361aaf3e3994ca7a62e7c',
+        'flash_insert_ranked_slot': '0a08bd6577694065cc1ffe1a5065cbf2dbceea3287308c0f8ce09f2fcb7a536a',
+        'flash_prepare_next_slot': '0e95fcde2d497919df4ca42c226aedfa1705dee50ecba485679e7a9c39543b08',
+        'flash_record_physically_valid': 'f015edf230e1b23aca3e34d684a07db6f9c9e46a6456f5abad45190039c27999',
+        'flash_count_abandoned_sector': 'c0b3c14fc6fa6285364548252b3fbcc60cc1bcd8ff0ac4c1a720ad2e1823db09',
+        'flash_note_append_failure': '05214dc4a3d0dad8ad177bc32be5a678669560abd1f86e0b3019dac2175cb143',
+        'flash_note_append_success': 'e987d33a608d4564de0a4c91a19205e42a948bbc5378128603ac545f1e94704b',
+    },
     'main/logic/history_persist.hpp': {'history_journal_reserve_sequence': '08fe5a8a10a103d6aacb29bb2f1ebfacb898b1e5688326db4af5cb76bdeefedb'},
     'main/recovery_button.cpp': {'factory_reset': '2576aecad49c3d9a4515e6e0d8fef1697aebc5675c57a60b9ca4389936072d32', 'button_task': 'cbf986209f566a3f6eae80b8be629ef18911f8fa319084dd7959a4e76a7cf460'},
     'main/mqtt_ha.cpp': {'publish_heartbeat': '193884b38de1045f3380f313d487224c6ed28df9095cd516faff71db1c88f920', 'build_heartbeat_payload': '4b9fb23c33cd080384276b92f070799a46de433e00538c8e852e87f3c8c1af65', 'mqtt_task': '450a0371a23d6e579c8f646a29c10873f53da3a05b95c68e85f69fa8b95fcb73'},
     'main/hp_poll.cpp': {'checkup_record_poll_gap': '5fb1fd43670b4b4daffd1b4a1cddd3864e7cae719cdcfc11f8d3dddeb9e4ef88', 'poll_task': '6b62392ac706f8b567314ec445351f53176d555843b62169a445ef072a2284e3', 'poll_once': '03bf95f969a8f56d14a2a4a042430d85752020ea37c3b4c2c9c07835c02f9e86', 'poll_detect': 'ffcdce0117bf432880af0af2f443d531ed82371213f96620e0d5a05be7b56ab6'},
     'main/http_config.cpp': {'read_config_document': '9b8505b7d63f7b8fc63f184a6f5311c77c0e7f56616c4669cc0008069c05a9ca', 'set_wifi': '8f7046c55714e87950573a89dd5ee9fee386b8fba832d667537fe04f3aef8ca9', 'parse_circulation_request': 'f62d40518fdda281234d009179430717ac4c0472c17f2678ac7d67088ec86092', 'set_weather': 'b7bcbccdb1c8f33bbcab2a400ac9aaf65e08c03ab4a681bbf523ab231073ec6c', 'set_board': '8602519fd7bbb0d74d54a5174cf9e89cd5c499aed46cb5bb3ff84595ed1a60e9', 'set_env3': '7adc71d21d348db03da175593d4a0823de6e70f69b670786054eb10dbe171816', 'set_hp': '37c87ccd750fc04e5f8e38890687105eb29569d2c4dcedb77d1b017144fbb6bc', 'set_diagnostics': '3a82b52ebb6e79effc9055fbd2e78f5a299c91391b1d904e43e22087d24823cc', 'do_detect': '22fd9b4a0da0665105a0dad61692cd77c29d2de6e42df36869d0c4e20ebe6b9c'},
-    'main/http_status.cpp': {'http_boot_id': '36ff733fcbab1b90e741d95d0cd9fc8018ab407e48b4c0fe0a9f05f36f9d7ae1', 'append_status_json': '62c1f106e1018e5a815e1cfd9900a327c4d8eaf0366c0aadaaebc4d2742adf9a', 'h_status': 'd06d3dc6e1be37c7bfa372a10f9e01f6b592ebe2fab4d0b9b74894d5c15c51b3', 'http_send_status_json': 'bd305a86cfd4ac55f17680e2c8e2c1fd0138ea46c58d726cc5a9815fe8d68b5c'},
+    'main/http_status.cpp': {'http_boot_id': '36ff733fcbab1b90e741d95d0cd9fc8018ab407e48b4c0fe0a9f05f36f9d7ae1', 'append_status_json': '23b6c37c6131aa6a7a640d20171ac35516289158a0c8a271d97894757cd88a8f', 'h_status': 'd06d3dc6e1be37c7bfa372a10f9e01f6b592ebe2fab4d0b9b74894d5c15c51b3', 'http_send_status_json': 'bd305a86cfd4ac55f17680e2c8e2c1fd0138ea46c58d726cc5a9815fe8d68b5c'},
     'main/main.cpp': {'boot_sequence': 'aa41bfc816a6bc300ebd6c4c8275aa0d3b148a61cb9a15fec1d141634db6388f'},
     'main/mcp_server.cpp': {'mcp_post': '619f17e24a6be7f967676f27ac84c5441502958638b9fc1d96afc6b3d7d9ef84'},
     'main/logic/stop_context.hpp': {'stop_context_seal': '9a48078c736ae0ae40ffba75e832a62bb86fa7831b6bbff802145d35adef4cc2', 'stop_context_expire': '0c9ac2546bedbcfbb950421742594ac5b6d4813a27fc6a234fc7c5a547f0312a', 'stop_context_step': '1dcf7320eabb145af25dc8b04e307351d45f9ecfc161fda808227fc1e4a3c044'},
@@ -500,7 +718,8 @@ BODIES = {
 }
 
 HEADERS = {
-    'main/logic/dhw_loss_trace.hpp': '0898696000ac32b1719b07ac6c28ab11d8e11d76801d8e3b447c80c594573e68',
+    'main/logic/dhw_loss_persist.hpp': '9c828e46543339a7efbc107a3f72a53988076cd14f8fa1de1e4a6c1c7d06f2ab',
+    'main/logic/dhw_loss_trace.hpp': '8a5a30646cb51affb43e46031f04a02050349327b8df8a5dcd1817cd092dbeb1',
     'main/logic/defrost_start.hpp': 'c08424fec579d0dcdbfceaf14bb5fee36ab59711c272f2b77a3328651e153b9f',
     'main/rtos_guard.hpp': '53a064d451e42c43f2b883e113db9cc7877b1f1f4814a4431af8b102ee63d5d7',
     'main/logic/stop_context.hpp': '67728d0cea632b4bbccec96db83af51b5d5079d19391c4144c5cf4cdb1856b5a',
@@ -509,10 +728,38 @@ HEADERS = {
     'main/logic/heartbeat.hpp': '8283f44e4e59226bba77cdc5711d378ad68dc46c05847a65b27d12c1fa429a77',
     'main/logic/instrument.hpp': '88f6033a073102cc29094fd46767bff74ee1c5289bf20695af34e7c6687ad7b8',
     'main/stop_observation_store.hpp': 'fbf3232aa5aa6e219464d0cbb0c7d4fba6a9246fcecf79e924298733c3f46af0',
-    'main/logic/history_persist.hpp': 'bcd9ac811618f1b9689cbaa5bf50e598caf70d8519ab13100f9e07431d5050ee',
+    'main/logic/history_persist.hpp': 'fe466fd0b91ce1f6f9b1bbdc94735cec409d5879d02299ae8a136f59a3879838',
 }
 
 CALLERS = {
+    'flash_read_record': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_decode_cycling_group': 2, 'main/history.cpp:flash_decode_fault_page': 1, 'main/history.cpp:flash_read_stop_observation': 1, 'main/history.cpp:flash_read_hydronic_observation': 1, 'main/history.cpp:flash_journal_scan': 1, 'main/history.cpp:flash_append_record_at': 1, 'main/history.cpp:history_restore_checkup_flash': 1, 'main/history.cpp:history_restore_dhw_flash': 1, 'main/history.cpp:history_restore_cycling_runs_flash': 1, 'main/history.cpp:history_service_flash_restore': 1},
+    'flash_insert_ranked_slot': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_index_cycling_page': 1, 'main/history.cpp:flash_index_fault_page': 1, 'main/history.cpp:flash_journal_scan': 1},
+    'flash_region_erased': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_prepare_next_slot': 3},
+    'flash_prepare_next_slot': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_append_record_at': 1},
+    'flash_record_physically_valid': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_record_valid': 1, 'main/history.cpp:flash_journal_scan': 2, 'main/history.cpp:flash_append_record_at': 1, 'main/history.cpp:history_restore_checkup_flash': 1, 'main/history.cpp:history_restore_dhw_flash': 1, 'main/history.cpp:history_restore_cycling_runs_flash': 1},
+    'flash_count_abandoned_sector': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_note_append_failure': 2},
+    'flash_note_append_failure': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_append_record': 1},
+    'flash_note_append_success': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_append_record': 1},
+    'checkup_dhw_trace_restore_ready': {'main/history.cpp:history_restore_dhw_flash': 1, 'main/checkup.cpp:<definition>': 1, 'main/checkup.hpp:<declaration>': 1},
+    'arm_dhw_trace_barrier_locked': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:retire_dhw_trace_locked': 1, 'main/checkup.cpp:dhw_trace_wall_locked': 1},
+    'checkup_dhw_trace_checkpoint': {'main/checkup.hpp:<declaration>': 1, 'main/history.cpp:flash_build_next_dhw': 1, 'main/checkup.cpp:<definition>': 1},
+    'checkup_dhw_trace_checkpoint_appended': {'main/checkup.hpp:<declaration>': 1, 'main/history.cpp:flash_dhw_appended': 1, 'main/checkup.cpp:<definition>': 1},
+    'checkup_dhw_trace_forget': {'main/checkup.hpp:<declaration>': 1, 'main/history.cpp:history_flash_forget': 1, 'main/checkup.cpp:<definition>': 1},
+    'checkup_dhw_trace_reset_pending': {'main/checkup.hpp:<declaration>': 1, 'main/history.cpp:flash_build_next_dhw': 1, 'main/history.cpp:history_flash_service_journal': 2, 'main/checkup.cpp:<definition>': 1},
+    'checkup_dhw_trace_restore': {'main/checkup.hpp:<declaration>': 1, 'main/history.cpp:history_restore_dhw_flash': 1, 'main/checkup.cpp:<definition>': 1},
+    'dhw_loss_trace_header_matches': {'main/logic/dhw_loss_persist.hpp:<definition>': 1, 'main/history.cpp:flash_index_dhw_page': 1, 'main/history.cpp:history_restore_dhw_flash': 1},
+    'dhw_loss_trace_pack': {'main/logic/dhw_loss_persist.hpp:<definition>': 1, 'main/checkup.cpp:checkup_dhw_trace_checkpoint': 1},
+    'dhw_loss_trace_page_valid': {'main/logic/dhw_loss_persist.hpp:<definition>': 1, 'main/logic/dhw_loss_persist.hpp:dhw_loss_trace_restore': 1, 'main/history.cpp:flash_build_next_dhw': 1, 'main/history.cpp:history_restore_dhw_flash': 1},
+    'dhw_loss_trace_restore': {'main/logic/dhw_loss_persist.hpp:<definition>': 1, 'main/checkup.cpp:checkup_dhw_trace_restore': 1},
+    'dhw_loss_trace_unpack': {'main/logic/dhw_loss_persist.hpp:<definition>': 1, 'main/logic/dhw_loss_persist.hpp:dhw_loss_trace_page_valid': 1, 'main/logic/dhw_loss_persist.hpp:dhw_loss_trace_restore': 1},
+    'dhw_trace_wall_locked': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:copy_dhw_trace_locked': 1, 'main/checkup.cpp:checkup_dhw_trace_checkpoint': 1},
+    'dhw_trace_wall_s': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:dhw_trace_wall_locked': 1, 'main/checkup.cpp:checkup_dhw_trace_restore': 1},
+    'flash_build_next_dhw': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_build_for_service': 1},
+    'flash_dhw_appended': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_append_record_at': 1},
+    'flash_dhw_owned': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_record_valid': 2, 'main/history.cpp:flash_index_dhw_page': 2, 'main/history.cpp:flash_append_record_at': 3, 'main/history.cpp:flash_append_record': 2},
+    'flash_index_dhw_page': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_journal_scan': 1},
+    'history_restore_dhw_flash': {'main/history.cpp:<definition>': 1, 'main/history.cpp:history_service_flash_restore': 1, 'main/history.cpp:history_flash_service_journal': 1},
+    'retire_dhw_trace_locked': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:apply_dhw_reset_locked': 1, 'main/checkup.cpp:slot_set_diagnostics': 1, 'main/checkup.cpp:checkup_reset': 1, 'main/checkup.cpp:checkup_modbus_reset': 1, 'main/checkup.cpp:checkup_reset_on_detect': 1, 'main/checkup.cpp:checkup_modbus_confirm_source': 1},
     'mb_record_poll_gap': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:mb_task': 2},
     'checkup_report': {'main/checkup.cpp:<definition>': 1, 'main/http_status.cpp:append_status_json': 1, 'main/checkup.hpp:<declaration>': 1},
     'copy_dhw_trace_locked': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:checkup_report': 1},
@@ -520,7 +767,7 @@ CALLERS = {
     'dhw_loss_step': {'main/logic/checkup.hpp:<definition>': 1, 'main/logic/checkup.hpp:dhw_loss_step_traced': 1},
     'dhw_loss_step_impl': {'main/logic/checkup.hpp:<definition>': 1, 'main/logic/checkup.hpp:dhw_loss_step': 1, 'main/logic/checkup.hpp:dhw_loss_step_traced': 1},
     'commit_and_fold_locked': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:checkup_record': 1, 'main/checkup.cpp:checkup_record_modbus': 1},
-    'apply_dhw_reset_locked': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:checkup_reboot_save': 2, 'main/checkup.cpp:checkup_record': 1, 'main/checkup.cpp:checkup_record_modbus': 1},
+    'apply_dhw_reset_locked': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:checkup_reboot_save': 2, 'main/checkup.cpp:checkup_record': 1, 'main/checkup.cpp:checkup_record_modbus': 1, 'main/checkup.cpp:checkup_dhw_trace_checkpoint': 1},
     'persist_wipe': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:apply_reset_locked': 1, 'main/checkup.cpp:slot_start': 1, 'main/checkup.cpp:slot_set_diagnostics': 1, 'main/history.cpp:<definition>': 1, 'main/history.cpp:history_start': 1, 'main/history.cpp:history_flash_forget': 1, 'main/state_dwell.cpp:<definition>': 1, 'main/state_dwell.cpp:apply_reset_locked': 1, 'main/state_dwell.cpp:dwell_start': 1, 'main/state_dwell.cpp:dwell_forget': 1},
     'slot_start': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:checkup_start': 2},
     'slot_set_diagnostics': {'main/checkup.cpp:<definition>': 1, 'main/checkup.cpp:checkup_set_diagnostics': 2},
@@ -555,12 +802,12 @@ CALLERS = {
     'stop_context_payload_fields': {'main/mqtt_ha.cpp:build_heartbeat_payload': 1, 'main/http_status.cpp:append_status_json': 1, 'main/logic/heartbeat.hpp:<definition>': 1},
     'flash_append_record_at': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_append_record': 1},
     'history_journal_reserve_sequence': {'main/history.cpp:flash_append_record_at': 1, 'main/logic/history_persist.hpp:<definition>': 1},
-    'flash_append_record': {'main/history.cpp:<definition>': 1, 'main/history.cpp:history_flash_service_journal': 4},
+    'flash_append_record': {'main/history.cpp:<definition>': 1, 'main/history.cpp:history_flash_service_journal': 6},
     'flash_build_next_stop_observation': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_build_for_service': 1},
     'read_entry': {'main/stop_observation_store.cpp:<definition>': 1, 'main/stop_observation_store.cpp:stop_observation_flash_service': 1, 'main/stop_observation_store.cpp:stop_observation_flash_next': 1},
     'flash_read_stop_observation': {'main/history.cpp:<definition>': 1, 'main/history.cpp:flash_build_next_stop_observation': 1, 'main/history.cpp:history_service_flash_restore': 1, 'main/history.cpp:history_flash_service_journal': 2},
     's_flash_payload': {'main/stop_observation_store.cpp:<declaration>': 1, 'main/stop_observation_store.cpp:stop_observation_flash_service': 1, 'main/stop_observation_store.cpp:stop_observation_flash_next': 1},
-    's_flash_sector': {'main/history.cpp:<declaration>': 2, 'main/history.cpp:splice_locked': 1, 'main/history.cpp:flash_decode_cycling_group': 1, 'main/history.cpp:flash_decode_fault_page': 1, 'main/history.cpp:flash_read_stop_observation': 1, 'main/history.cpp:flash_read_hydronic_observation': 1, 'main/history.cpp:flash_journal_scan': 3, 'main/history.cpp:flash_region_erased': 3, 'main/history.cpp:flash_append_record_at': 1, 'main/history.cpp:history_restore_checkup_flash': 2, 'main/history.cpp:history_service_flash_restore': 1},
+    's_flash_sector': {'main/history.cpp:<declaration>': 2, 'main/history.cpp:splice_locked': 1, 'main/history.cpp:flash_decode_cycling_group': 1, 'main/history.cpp:flash_decode_fault_page': 1, 'main/history.cpp:flash_read_stop_observation': 1, 'main/history.cpp:flash_read_hydronic_observation': 1, 'main/history.cpp:flash_journal_scan': 3, 'main/history.cpp:flash_region_erased': 3, 'main/history.cpp:flash_append_record_at': 1, 'main/history.cpp:history_restore_checkup_flash': 2, 'main/history.cpp:history_restore_dhw_flash': 2, 'main/history.cpp:history_restore_cycling_runs_flash': 2, 'main/history.cpp:history_service_flash_restore': 1},
     'checkup_start': {'main/checkup.cpp:<definition>': 1, 'main/main.cpp:boot_sequence': 1, 'main/checkup.hpp:<declaration>': 1},
     'checkup_record': {'main/checkup.cpp:<definition>': 1, 'main/hp_poll.cpp:checkup_record_poll_gap': 1, 'main/hp_poll.cpp:poll_once': 2, 'main/checkup.hpp:<declaration>': 1},
     'checkup_reset_on_detect': {'main/checkup.cpp:<definition>': 1, 'main/http_config.cpp:set_hp': 1, 'main/hp_poll.cpp:poll_detect': 1, 'main/checkup.hpp:<declaration>': 1},

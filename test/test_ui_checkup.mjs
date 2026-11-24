@@ -51,6 +51,7 @@ for (const key of [
   "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
   "latest", "base_code", "subcode", "ongoing", "stop_unknown", "start_unix_s", "secondary_code",
   "secondary_state", "timeline", "unix_s", "window_end_s", "observed_end_s", "boot_s", "live",
+  "run_contexts", "flow_reference_fixed", "flow_typical_l_min",
   "segments",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
   "draw_windows", "pump_windows", "quiet_high_windows",
@@ -439,12 +440,12 @@ assert.doesNotMatch(evictedRunHtml.split("83600")[0], /Normal stop/);
     ],
   };
   const x10aPreBootNoCtx = ui.periodDetails(preBootTrace, {}, 22, 22, "x10a");
-  assert.match(x10aPreBootNoCtx, /Start and stop details are recorded from the last restart onward\./);
-  assert.doesNotMatch(ui.periodDetails(preBootTrace, {}, 22, 22, "modbus"), /last restart onward/);
+  assert.match(x10aPreBootNoCtx, /No saved start or stop details are available for these older runs\./);
+  assert.doesNotMatch(ui.periodDetails(preBootTrace, {}, 22, 22, "modbus"), /saved start or stop details/);
   const withCtxPreBoot22 = ui.periodDetails(preBootTrace, {
     run_contexts: [{ at: 86000, stop: 86120, mode: "space", start_kind: "request_on", stop_kind: "normal" }],
   }, 22, 22, "x10a");
-  assert.match(withCtxPreBoot22, /Start and stop details are recorded from the last restart onward\./);
+  assert.match(withCtxPreBoot22, /No saved start or stop details are available for these older runs\./);
   assert.match(withCtxPreBoot22, /No cause details/);
   assert.match(withCtxPreBoot22, /Stop unknown/);
   assert.doesNotMatch(withCtxPreBoot22, /data-run-row/);
@@ -456,6 +457,51 @@ assert.doesNotMatch(evictedRunHtml.split("83600")[0], /Normal stop/);
   assert.equal(ui.shortRuns({
     timeline: preBootTrace,
   }), 1, "<=15s intra-boot gap bridges short run while >15s gap stays censored");
+}
+
+// Restored explanations must match both edges and keep the comparison recorded for each run.
+{
+  const timeline = {
+    unix_s: 1794582660, window_end_s: 86400, observed_end_s: 86400,
+    boot_s: 2000, live: true, run_edges: true,
+    records: [
+      [1, 1],
+      [79500, 5], [79500, 3], [79680, 1], [79680, 6],
+      [79800, 5], [79800, 3], [79980, 1], [79980, 6],
+      [80000, 5], [80000, 3], [80180, 1], [80180, 6],
+      [81000, 5], [81000, 3], [81060, 0], [84400, 1],
+    ].map(([at, kind]) => at * 8 + kind),
+  };
+  const ctx = {
+    restored: true, flow_reference_fixed: true, mode: "space",
+    start_kind: "request_on", stop_kind: "low_rps_above_target", min_rps: 18,
+  };
+  const hasReference = { ...ctx, at: 79500, stop: 79680, flow_l_min: 10, flow_typical_l_min: 20 };
+  const lacksReference = { ...ctx, at: 79800, stop: 79980, flow_l_min: 1 };
+  const mismatch = { ...ctx, at: 80000, stop: 80190, stop_kind: "request_withdrawal" };
+  const missingStop = { ...ctx, at: 81000, stop: 81180, stop_kind: "request_withdrawal" };
+  const html = ui.periodDetails(timeline, {
+    flow_typical_l_min: 30, run_contexts: [hasReference, lacksReference, mismatch, missingStop],
+  }, 22, 22, "x10a");
+  assert.match(html, /Short runs, low flow:<\/span>.*10\.0 L\/min.*typ\. ~20\.0 L\/min/);
+  assert.match(html, /Flow temp above target · low flow/);
+  assert.match(html, /Flow temp above target · low speed/);
+  assert.match(html, /No cause details/);
+  assert.match(html, /Stop unknown/);
+  assert.equal([...html.matchAll(/data-run-row=/g)].length, 2, "only matching restored runs are expandable");
+  assert.doesNotMatch(html, /30\.0 L\/min/);
+  const withoutFixedReference = ui.periodDetails(timeline, {
+    flow_typical_l_min: 30,
+    run_contexts: [{ ...hasReference, flow_typical_l_min: undefined }, lacksReference],
+  }, 22, 22, "x10a");
+  assert.match(withoutFixedReference, /Short runs, low speed/);
+  assert.doesNotMatch(withoutFixedReference, /Short runs, low flow|typ\. ~30\.0 L\/min/);
+  const zeroAtStop = ui.periodDetails(timeline, {
+    flow_typical_l_min: 30,
+    run_contexts: [{ ...hasReference, flow_l_min: 0 }, lacksReference],
+  }, 22, 22, "x10a");
+  assert.match(zeroAtStop, /Short runs, low speed/);
+  assert.doesNotMatch(zeroAtStop, /Short runs, low flow|Flow temp above target · low flow/);
 }
 
 const makeRollingCheck = (shift) => ({
@@ -1281,15 +1327,16 @@ for (const lang of locales) {
         assert.ok(body.indexOf("checkup-cycling-assessment") < body.indexOf("data-checkup-hours"));
         assert.doesNotMatch(diagnosis, /checkup-stop-box|checkup-cycling-chart/);
       } else if (id === "health_dhw_loss") {
-        assert.ok(body.startsWith('<div class="checkup-dhw-detail" inert><div class="checkup-dhw-hero">'),
-          `${lang}/${id}: dedicated hero leads the lazily mounted timeline`);
+        assert.ok(body.startsWith('<div class="checkup-dhw-detail" inert><div class="checkup-dhw-value num">'),
+          `${lang}/${id}: without a rate the status leads the lazily mounted timeline`);
         assert.match(body, /data-checkup-dhw/);
         assert.doesNotMatch(body, /data-dhw-window=/, `${lang}/${id}: collapsed rows build no chart`);
         assert.ok(body.indexOf("checkup-dhw-value") < body.indexOf("checkup-dhw-assessment"));
         assert.ok(body.indexOf("checkup-dhw-assessment") < body.indexOf("data-checkup-dhw"));
-        assert.match(body, /<details class="checkup-dhw-disclosure" data-dhw-disclosure="basis"><summary>/,
-          `${lang}/${id}: detailed evidence starts collapsed`);
-        assert.ok(body.includes(ui.text(lang, "check.dhw.limit")), `${lang}/${id}: primary claim limit stays visible`);
+        assert.match(body, /<details class="checkup-dhw-disclosure" data-dhw-disclosure="timeline"><summary>/,
+          `${lang}/${id}: the named history starts collapsed`);
+        const basis = body.slice(body.indexOf('data-dhw-disclosure="basis"'));
+        assert.ok(basis.includes(ui.text(lang, "check.dhw.limit")), `${lang}/${id}: the sensor limit stays in the data details`);
         assert.doesNotMatch(body, /check\.dhw\./, `${lang}/${id}: complete dedicated copy`);
       } else {
         assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/${id}/${verdict}`);
@@ -1536,6 +1583,37 @@ assert.equal(ui.ready({
   const cleanupOnly = new Error("parent focus");
   await assert.rejects(withCyclingCleanup(async () => {}, async () => { throw cleanupOnly; }),
     error => error === cleanupOnly, "a lone cleanup failure must not be hidden");
+}
+
+{
+  ui.setLang("en");
+  const timelineHtml = ui.chart({
+    id: "cycling",
+    starts: 5,
+    timeline: {
+      unix_s: 1791900000, window_end_s: 86400, observed_end_s: 86400, boot_s: 86400, live: true,
+      records: [
+        [0, 1], [3600, 5], [3900, 6], [7200, 5], [7500, 6],
+        [10800, 5], [11100, 6], [14400, 5], [14700, 6], [18000, 5], [18300, 6],
+      ].map(([at, kind]) => at * 8 + kind),
+    },
+  });
+  assert.match(timelineHtml, /<line class="vhist-grid"/,
+    "cycling timeline with starts must render dotted integer Y gridlines");
+  assert.match(timelineHtml, /<div class="checkup-chart-body vhist-has-y"><div class="vhist-y checkup-chart-y" aria-hidden="true">/,
+    "cycling timeline with starts must place Y-axis labels in .vhist-y.checkup-chart-y to the left of the graph");
+  assert.match(timelineHtml, /<span class="vhist-y-label num"[^>]*>\d+<\/span>/,
+    "cycling timeline with starts must render integer Y-scale labels");
+  const zeroHtml = ui.chart({
+    id: "cycling",
+    starts: 0,
+    timeline: {
+      unix_s: 1791900000, window_end_s: 86400, observed_end_s: 86400, boot_s: 86400, live: true,
+      records: [0 * 8 + 1],
+    },
+  });
+  assert.doesNotMatch(zeroHtml, /vhist-has-y|vhist-y|vhist-grid|vhist-y-label/,
+    "cycling timeline with zero starts must omit Y gridlines and left Y-axis column");
 }
 
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

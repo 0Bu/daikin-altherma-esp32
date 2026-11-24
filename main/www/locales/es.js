@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -182,8 +182,16 @@ I18N.es = localeValues([
   /* check.status.experimental */ "EN PRUEBA",
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "SIN INTERVALO",
-  /* check.dhw.maximum */ "Máximo registrado",
-  /* check.dhw.measurement */ "Enfriamiento neto durante una hora en el sensor R5T del depósito.",
+  /* check.dhw.maximum */ "Mayor descenso por hora en la sonda del depósito",
+  /* check.dhw.hour_unit */ "°C por hora",
+  /* check.dhw.timeline */ "Historial de 24 horas",
+  /* check.dhw.context_title */ "Causa sin determinar",
+  /* check.dhw.context_hour */ "Hora registrada con este valor",
+  /* check.dhw.context_missing */ "La hora y las circunstancias de esta lectura no están disponibles.",
+  /* check.dhw.context_pump */ "Se detectó actividad de la bomba de agua interna de la unidad en esa hora.",
+  /* check.dhw.context_draw */ "El descenso rápido de temperatura puede deberse al consumo de agua caliente o a un enfriamiento rápido.",
+  /* check.dhw.context_quiet */ "No se detectó actividad de la bomba ni un descenso típico del uso de agua caliente. Aun así, se pudo usar agua caliente.",
+  /* check.dhw.context_selected */ "La causa de este descenso sigue sin determinarse.",
   /* check.dhw.hint */ "Una hora sin señales registradas de bomba o consumo alcanzó el umbral orientativo del proyecto.",
   /* check.dhw.before_snapshot */ (d) => `${d} antes de la instantánea`,
   /* check.dhw.marker_yes */ "registrada",
@@ -195,8 +203,8 @@ I18N.es = localeValues([
   /* check.dhw.timeline_unavailable */ "No hay ventanas con tiempos disponibles. No se deduce un historial de los totales.",
   /* check.dhw.timeline_empty */ "No hay ventanas completas con tiempos disponibles en esta vista de 24 h.",
   /* check.dhw.chart_title */ "Enfriamiento por ventana completa",
-  /* check.dhw.timed_scope */ (n) => `Ventanas con tiempos desde reinicio/restablecimiento: ${n}, hasta 24 h. El máximo y los recuentos pueden basarse también en datos horarios guardados, no solo en las ventanas del gráfico.`,
-  /* check.dhw.blank */ "Vacío: ninguna ventana completa con tiempos disponible, no enfriamiento cero. Las marcas indican presencia, no duración.",
+  /* check.dhw.timed_scope */ (n) => `Horas medidas en el gráfico: ${n} (últimas 24 h). El máximo y los recuentos pueden basarse también en datos horarios guardados, no solo en las ventanas del gráfico.`,
+  /* check.dhw.blank */ "Tramado: ninguna ventana completa con tiempos disponible, no enfriamiento cero. Las marcas indican presencia, no duración.",
   /* check.dhw.snapshot */ "Instantánea",
   /* check.dhw.stale */ "Faltan datos actuales del enfriamiento del depósito de ACS o están desactualizados; las ventanas completadas siguen siendo observaciones históricas.",
   /* check.dhw.limit */ "R5T mide un punto del depósito estratificado, no su energía. Las señales de bomba y caída similar a consumo no prueban la causa ni la extracción de agua.",
@@ -297,7 +305,7 @@ I18N.es = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Fin ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Activo en última lectura.",
   /* check.cycling.cause_unavailable */ "Sin detalles",
-  /* check.cycling.cause_since_boot */ "Los motivos de arranque y parada se registran a partir del último reinicio.",
+  /* check.cycling.cause_older_unavailable */ "No hay detalles guardados sobre el arranque y la parada de estos ciclos anteriores.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} mín. ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

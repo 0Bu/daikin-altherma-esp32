@@ -1055,20 +1055,4 @@ checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw, CheckupJournalSlotT
     ring.head = dhw.head = energy.head = static_cast<uint8_t>(n % kSlots);
     return dhw_retired;
 }
-
-inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
-                                    CheckupJournalSlotTimes&      times,
-                                    const CheckupJournalLiveSpan& live,
-                                    const CheckupJournalRecord* stored, size_t stored_count,
-                                    int64_t earliest, int64_t latest, int64_t now_unix_s,
-                                    int64_t now_us, bool confirmed, uint32_t model_fp,
-                                    uint32_t source_fp, uint32_t generation, bool reset_requested,
-                                    uint32_t dhw_source_fp, bool dhw_reset_requested) {
-    EnergyRing energy;
-    bool       energy_retired = false;
-    return checkup_journal_rebuild(ring, dhw, times, live, stored, stored_count, earliest, latest,
-                                   now_unix_s, now_us, confirmed, model_fp, source_fp, generation,
-                                   reset_requested, dhw_source_fp, dhw_reset_requested, energy, 0,
-                                   true, energy_retired);
-}
 } // namespace daik::logic

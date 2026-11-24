@@ -317,8 +317,34 @@ async function settleHistoryRevision(page, selectors) {
 async function openInspector(page, key, id, context, { freshOpening = true } = {}) {
   await page.evaluate("showStage('dashboard'); true");
   if (freshOpening) await expireOpeningHistory(page, id, key);
-  await click(page, '#schem [data-insp="' + key + '"]', key);
-  await page.waitFor("S.insp === " + JSON.stringify(key) + " && !S.histBusy.size");
+  await evaluate(page, () => {
+    window.__motionInspectorClick = null;
+    window.__motionInspectorListener = event => {
+      window.__motionInspectorClick = {
+        inspector: event.target.closest?.("[data-insp]")?.dataset.insp,
+        trusted: event.isTrusted, x: event.clientX, y: event.clientY,
+      };
+    };
+    document.addEventListener("click", window.__motionInspectorListener, true);
+    return true;
+  });
+  let point;
+  try {
+    point = await click(page, '#schem [data-insp="' + key + '"]', key);
+    await page.waitFor("S.insp === " + JSON.stringify(key) + " && !S.histBusy.size");
+  } catch (error) {
+    const state = await evaluate(page, ({ point }) => ({
+      inspector: S.insp, busy: [...S.histBusy], clickHold: S.clickHold, pollBusy: _pollBusy,
+      scroll: { x: scrollX, y: scrollY, schematic: document.querySelector(".schem-scroll")?.scrollLeft },
+      click: window.__motionInspectorClick, point,
+      hit: point && document.elementFromPoint(point.x, point.y)?.closest("[data-insp]")?.dataset.insp,
+    }), { point });
+    throw new Error(context + ": native inspector did not settle; state=" + JSON.stringify(state),
+      { cause: error });
+  } finally {
+    await page.evaluate("document.removeEventListener('click', window.__motionInspectorListener, true);" +
+      "delete window.__motionInspectorListener; delete window.__motionInspectorClick; true");
+  }
   await settleHistoryRevision(page, ["#inspHist .vhist-plot"]);
   const chart = await evaluate(page, () => {
     const plot = document.querySelector("#inspHist [data-hist]");
@@ -340,7 +366,7 @@ async function boardHeapReading(page) {
   });
 }
 
-async function settleHistoryOpening(page, selectors) {
+async function settleHistoryAnimation(page, selectors) {
   await page.waitFor("(" + ((selectors) => selectors.every(selector => {
     const plot = document.querySelector(selector);
     if (!plot) return false;
@@ -409,7 +435,7 @@ async function toggleDisclosure(page, selector, id, open, context) {
 }
 
 async function prepareObservationViewport(page, selector, animationIds) {
-  await settleHistoryOpening(page, [selector]);
+  await settleHistoryAnimation(page, [selector]);
   const unionFits = await evaluate(page, ({ selector, animationIds }) => {
     const plot = document.querySelector(selector), rect = plot.getBoundingClientRect();
     const header = document.getElementById(S.stage === "dashboard" ? "hdrDash" : "hdrBack");
@@ -457,13 +483,13 @@ async function prepareObservationViewport(page, selector, animationIds) {
 
 async function observe(page, server, context, selectors, { inspector = false, status = false,
   fixture = null, animationIds = ["fSup1", "rfHot", "scFan", "scPump"],
-  inactiveAnimationIds = [] } = {}) {
+  inactiveAnimationIds = [], cachedMarkup = false } = {}) {
   await page.bringToFront();
   await page.waitFor("document.visibilityState === 'visible' && !document.hidden");
   // Opening/disclosure transitions may legitimately finish. Persistent flow CSSAnimation objects
   // are the continuity witness; finite CSSTransition completion is not a stopped pipe animation.
   await page.waitFor("!S.clickHold && !S.histBusy.size && !_pollBusy");
-  await settleHistoryOpening(page, selectors);
+  await settleHistoryAnimation(page, selectors);
   await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
   await assertTouchReadout(page, selectors[0], context);
   const observationViewport = await prepareObservationViewport(page, selectors[0], animationIds);
@@ -650,8 +676,10 @@ async function observe(page, server, context, selectors, { inspector = false, st
   assert.equal(motion.holds, 0, context + ": polling must not be hidden behind interaction holds");
   assert.equal(motion.closedBuilds, 0, context + ": polls must not rebuild cached charts in closed rows");
   assert.equal(motion.hiddenCharts, 0, context + ": closed rows must not retain duplicate history SVGs");
-  if (inspector) assert.equal(motion.builds, 0, context +
-    ": unchanged inspector must not rebuild history; revisions=" + JSON.stringify(motion.revisions));
+  if (inspector || cachedMarkup) assert.equal(motion.builds, 0, context +
+    (inspector ? ": unchanged inspector must not rebuild history" :
+      ": unchanged numeric disclosure must reuse its history markup") +
+    "; revisions=" + JSON.stringify(motion.revisions));
   const retainedPlots = new Set(motion.plots.filter(plot => plot.same).map(plot => plot.selector));
   const detachedRetained = motion.detachedAncestors.filter(row =>
     row.selectors.some(selector => retainedPlots.has(selector)));
@@ -717,9 +745,13 @@ async function observe(page, server, context, selectors, { inspector = false, st
 
 async function closeInspector(page) {
   await page.frame();
-  await page.waitFor("document.getElementById('inspect').getAnimations({subtree:true}).every(animation => !Number.isFinite(animation.effect?.getTiming().iterations) || animation.playState !== 'running')");
+  await settleHistoryAnimation(page, ["#inspect"]);
   await click(page, "#inspClose");
   await page.waitFor("S.insp === null");
+  // Native coordinates for the next schematic target need the closed layout. The model clears
+  // synchronously, while the collapse can still shift the viewport through scroll anchoring.
+  await page.frame();
+  await settleHistoryAnimation(page, ["#inspect"]);
 }
 
 async function assertForecastRevision(page, server, fixture, context) {
@@ -806,7 +838,7 @@ async function assertFlowTtlTransition(page, server, context) {
   const selector = "#inspHist .vhist-plot";
   await page.bringToFront();
   await page.waitFor("document.visibilityState === 'visible' && !document.hidden");
-  await settleHistoryOpening(page, [selector]);
+  await settleHistoryAnimation(page, [selector]);
   await prepareObservationViewport(page, selector, ["fSup1", "rfHot", "scFan", "scPump"]);
   await evaluate(page, ({ selector }) => {
     document.querySelector(selector).focus({ preventScroll: true }); return true;
@@ -1348,7 +1380,7 @@ export async function assertHistoryMotion(page, server, context) {
       if (variant === "modbus-numeric") {
         await disclosure(page, server, frame, label,
           ['#valueGroups [data-dashboard-card="modbus"] [data-trend="flow"]'], ["flow"], false,
-          { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"] });
+          { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"], cachedMarkup: true });
       } else {
         const key = variant === "env3-no-forecast" ? "env3" : "room";
         const chart = await openInspector(page, key, INSPECTOR_TRENDS[key], label);

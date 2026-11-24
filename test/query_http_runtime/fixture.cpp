@@ -114,6 +114,7 @@ esp_err_t http_send_json(httpd_req_t* req, const char* json) {
     req->response     = json;
     return ESP_OK;
 }
+void http_set_nodelay(httpd_req_t*, bool) noexcept {}
 } // namespace daik
 
 int main(int argc, char** argv) {

@@ -458,9 +458,12 @@ export async function assertCyclingChart(page, server, context) {
         await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left",
           buttons: 0, clickCount: 1, ...beforeClose });
       }
-      // Wait for .vdesc's 220 ms collapse transition to finish so bottom-of-page scroll clamping
-      // cannot shift ROW between point() hit-testing and nativeClick().
+      // Let the collapse and .vdesc's 220 ms height transition settle before tap calculates a hit
+      // point so bottom-of-page scroll clamping cannot shift ROW between press and release.
+      await page.waitFor("!S.clickHold");
       await page.waitFor(`(() => { const h = document.querySelector(${JSON.stringify(ROW)})?.closest(".vitem")?.querySelector(".vdesc-inner")?.getBoundingClientRect().height; return typeof h === "number" && h < 1; })()`);
+      assert.equal(await evaluate(page, sel => document.querySelector(sel).getAttribute("aria-expanded"), ROW),
+        "false", context + ": releasing the old pointer cannot reopen the collapsed disclosure");
       await tap(page, ROW);
       await page.waitFor(`document.querySelector('${CHART}') && !S.clickHold`);
       assert.deepEqual(await pinned(), [], context + ": the old release cannot pin a collapsed chart");
@@ -612,6 +615,21 @@ export async function assertCyclingChart(page, server, context) {
         unknown: chart.querySelector('[data-bucket="8"] s').dataset.modes,
         legend: [...chart.querySelectorAll('.checkup-chart-key')].map(node => node.textContent),
         span: chart.querySelector('[data-bucket="22"]').dataset.span,
+        gridCount: chart.querySelectorAll(".vhist-grid").length,
+        yLabels: (() => {
+          const p = chart.querySelector(".checkup-chart-plot").getBoundingClientRect();
+          const ax = chart.querySelector(".checkup-chart-axis").getBoundingClientRect();
+          const ys = [...chart.querySelectorAll(".vhist-y .vhist-y-label")].map(el => el.getBoundingClientRect())
+            .sort((a, b) => a.top - b.top);
+          return {
+            count: ys.length,
+            graphHasNone: chart.querySelectorAll(".checkup-chart-graph .vhist-y-label").length === 0,
+            leftOfPlot: ys.every(r => r.right <= p.left - 2),
+            alignedVert: ys.every(r => r.top >= p.top - 1 && r.bottom <= p.bottom + 1),
+            overlap: ys.some((r, k) => k > 0 && r.top < ys[k - 1].bottom - 0.5),
+            axisAligned: Math.abs(ax.left - p.left) < 1.5 && Math.abs(ax.right - p.right) < 1.5,
+          };
+        })(),
       };
     })()`);
     const jumps = [...timed.line.matchAll(/H ([\d.]+) V/g)].map(match => Number(match[1]));
@@ -626,6 +644,13 @@ export async function assertCyclingChart(page, server, context) {
     assert.doesNotMatch(await label(22), /No data/, context + ": an observed mode is available in that hour");
     assert.match(await label(8), /No data/, context + ": the fully unread hour exposes missing data");
     await assertFill(12, [], "readable off-time remains uncolored in the timed chart");
+    assert.ok(timed.gridCount >= 1 && timed.yLabels.count === timed.gridCount,
+      context + ": cycling timeline with starts must render dotted Y gridlines with matching labels");
+    assert.equal(timed.yLabels.graphHasNone, true, context + ": cycling Y-scale labels must sit outside .checkup-chart-graph");
+    assert.equal(timed.yLabels.leftOfPlot, true, context + ": cycling Y-scale labels must sit cleanly left of the plot");
+    assert.equal(timed.yLabels.alignedVert, true, context + ": cycling Y-scale labels must stay vertically within plot bounds");
+    assert.equal(timed.yLabels.overlap, false, context + ": cycling Y-scale labels must not overlap");
+    assert.equal(timed.yLabels.axisAligned, true, context + ": cycling lower time axis must align with plot bounds");
     // Prove that the geometry check rejects the old miniature-strip layout, rather than just
     // checking a class name. The control changes only real CSS and must fail for its height.
     await page.evaluate(`(() => {
@@ -896,6 +921,9 @@ export async function assertCyclingChart(page, server, context) {
     await poll("2026-11-13T15:14:03Z");
     assert.equal(await page.evaluate(`document.querySelector(".checkup-chart-total").textContent`),
       "0 starts with recorded times", context + ": a partial trace qualifies zero as a timed result");
+    assert.equal(await page.evaluate(
+      `document.querySelectorAll(".checkup-cycling-timeline .vhist-grid, .checkup-cycling-timeline .vhist-y-label, .checkup-cycling-timeline .vhist-y, .checkup-cycling-timeline .vhist-has-y").length`),
+      0, context + ": cycling timeline with zero starts must omit Y gridlines, labels, and left Y-axis column");
     if (mouse) {
       zero.unix_s = Date.parse("2026-10-25T01:30:00Z") / 1000;
       await poll("2026-10-25T01:30:00Z");
@@ -1018,6 +1046,26 @@ export async function assertCyclingChart(page, server, context) {
       context + ": the cached dated trace retains both boots without shifting any recorded clock time");
     assert.equal(await evaluate(page, selector => document.querySelector(selector + " s").dataset.modes.includes("other"), hour(23)), true,
       context + ": the dated trace cannot extend measured data into a temporarily omitted span");
+
+    const restoredOffset = 126;
+    cycling.flow_typical_l_min = 40;
+    cycling.run_contexts = [{
+      at: 86400 - 3630 - restoredOffset, stop: 86400 - 3540 - restoredOffset,
+      restored: true, flow_reference_fixed: true, flow_typical_l_min: 17.6, flow_l_min: 8.2,
+      mode: "space", start_kind: "request_on", stop_kind: "low_rps_above_target",
+      lwt_c: 35.1, target_c: 32.0,
+    }];
+    await datedPoll(restoredOffset, restoredOffset, true, 53, [...secondBoot, [49, 1], [50, 6]]);
+    if (!(await pinned()).includes(22)) await tap(page, hour(22));
+    await page.waitFor("!S.clickHold");
+    await tap(page, ".checkup-run-row[data-run-row]");
+    const savedExplain = await evaluate(page, () =>
+      document.querySelector(".checkup-run-sub:not([hidden]) .checkup-run-explain")?.textContent);
+    assert.match(savedExplain, /flow 35\.1 °C above target 32\.0 °C at 8\.2 L\/min, typ\. ~17\.6 L\/min/,
+      context + ": a restored explanation expands with its saved flow comparison after restart");
+    assert.doesNotMatch(savedExplain, /40\.0 L\/min/,
+      context + ": rolling measurements cannot reinterpret the restored run");
+    await page.waitFor("!S.clickHold");
 
     // Cause-analysis UI: proportional fills, episode auto-selection, 3-col table, expandable explanations.
     status.boot_id = "cycling-cause-analysis";

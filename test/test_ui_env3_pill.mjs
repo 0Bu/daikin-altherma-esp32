@@ -206,8 +206,8 @@ assert.match(style, /\.vhist-line\.env-forecast-temperature\s*\{[^}]*opacity:\s*
 assert.match(style, /\.vhist-tip-rows \.env-temperature\s*\{[^}]*color:\s*var\(--flow-hot\)/);
 assert.match(style, /\.vhist-tip-rows \.env-humidity\s*\{[^}]*color:\s*var\(--flow-cold\)/);
 assert.match(style, /\.vhist-tip-rows \.env-pressure\s*\{[^}]*color:\s*var\(--env-pressure\)/);
-assert.match(style, /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
-  "climate readouts share the compact row above the curve and times share the lower axis");
+assert.match(style, /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto auto;/,
+  "climate readouts float above the compact curve while times share the lower axis");
 assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
   "climate tooltip height must not alter graph layout");
 assert.match(style,
@@ -390,6 +390,43 @@ S.transportUnavailable = null;
 sandbox.__api.render();
 assert.equal(elements.svEnv3Temp.textContent, "21,5 °C");
 assert.equal(elements.gEnv3.classList.contains("fresh"), true);
+
+// Y-scale follows the first visible ENV III series in its own colour and shares the lower time axis.
+if (S.histHidden.get("env3_combined")?.has("env3_temperature")) sandbox.__api.toggle("env3_temperature");
+if (S.histHidden.get("env3_combined")?.has("env3_humidity")) sandbox.__api.toggle("env3_humidity");
+if (S.histHidden.get("env3_combined")?.has("env3_pressure")) sandbox.__api.toggle("env3_pressure");
+sandbox.__api.render();
+assert.match(elements.inspHist.innerHTML, /<line class="vhist-grid"/);
+assert.match(elements.inspHist.innerHTML, /<div class="vhist-graph vhist-has-y"><div class="vhist-y" aria-hidden="true">[\s\S]*?<\/div><div class="vhist-tips">/,
+  "ENV III chart must place the left Y-axis column outside .vhist-plot");
+{
+  const html = elements.inspHist.innerHTML;
+  const plotSub = html.slice(html.indexOf('<div class="vhist-plot"'), html.indexOf('<div class="vhist-axis'));
+  assert.doesNotMatch(plotSub, /vhist-y-label/, "ENV III Y-scale labels must sit outside .vhist-plot");
+}
+assert.match(elements.inspHist.innerHTML, /<span class="vhist-y-label env-temperature num"[^>]*>[^<]+ °C<\/span>/,
+  "default ENV III Y-scale tracks temperature in its own colour");
+assert.match(elements.inspHist.innerHTML, /class="vhist-axis vhist-axis-future"[\s\S]*<span class="vhist-time vhist-live mono num" hidden><\/span><\/div>/,
+  "ENV III forecast axis must sit inside .vhist-graph alongside .vhist-time");
+sandbox.__api.toggle("env3_temperature");
+assert.match(elements.inspHist.innerHTML, /<span class="vhist-y-label env-humidity num"[^>]*>[^<]+ %<\/span>/,
+  "toggling temperature off switches ENV III Y-scale to humidity");
+sandbox.__api.toggle("env3_humidity");
+assert.match(elements.inspHist.innerHTML, /<span class="vhist-y-label env-pressure num"[^>]*>[^<]+ hPa<\/span>/,
+  "toggling humidity off too switches ENV III Y-scale to pressure");
+sandbox.__api.toggle("env3_humidity");
+sandbox.__api.toggle("env3_temperature");
+{
+  const keys = ["env3_temperature", "env3_humidity", "env3_pressure"].map(id => "env3:" + id);
+  const rings = keys.map(key => S.hist.get(key));
+  keys.forEach((key, i) => S.hist.set(key, { ...rings[i], gen: 99, v: [] }));
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /<line class="vhist-grid"/);
+  assert.match(elements.inspHist.innerHTML, /<div class="vhist-graph vhist-has-y"><div class="vhist-y" aria-hidden="true"><span class="vhist-y-label env-temperature num"/,
+    "forecast-only ENV III chart still renders Y-scale gridlines and left Y-axis labels");
+  keys.forEach((key, i) => S.hist.set(key, rings[i]));
+  sandbox.__api.render();
+}
 
 S.status.env3 = { ...S.status.env3, fresh: false, error: "collecting" };
 S.inspSig = "";

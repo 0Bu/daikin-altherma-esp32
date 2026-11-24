@@ -2299,6 +2299,22 @@
     },
     {
       "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "GCC 13 in pinned ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "GCC 15.2.0 in pinned release-coverage Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "GCC 15.2.0 in Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 Ubuntu result was measured in the local release-coverage image.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin and matching g++ and gcov commands in the three Linux containers.",
+      "scope": "Exercise the clipped X10A checkpoint with observations before and after the corrected clock. The tests also reject a trace whose oldest observation is still in the future. Clang measures 1316/1387 after 1312/1383. GCC measures 1496/1581 after 1502/1601, raising the ratio from 93.82% to 94.62%. The x86-64 baseline was reproduced from the protected base.",
+      "sources": {
+        "main/logic/checkup.hpp": "05ba94f98a628df562e4d2be301c7aa31a0d1edb5687395aa64f63c8381fa5c8"
+      },
+      "test_source_sha256": "4553161cbfa3f7a3aad2a7b93e8794920fce595c6c0d963cc08f8012e6693809",
+      "validation_boundary": "Coverage measures synthetic host inputs. Device restart and rendered UI evidence are separate."
+    },
+    {
+      "compilers": {
         "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
         "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, aarch64",
         "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, x86_64",
@@ -2383,6 +2399,67 @@
       },
       "test_source_sha256": "92ff30d5f5f6424bfaa50fa0a0bbee8a9a1cef35f7db23449ee6a0abc7a78103",
       "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 CI confirmation remains separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, x86_64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
+      },
+      "runner": "scripts/run-mock-tests.sh --coverage compiler flags and gcov invocation, with isolated outputs",
+      "scope": "Exercise exact DHW flash page encoding and validation, monotonic restore, overlap and expiry, and retirement of restored windows under clock correction.",
+      "sources": {
+        "main/logic/dhw_loss_persist.hpp": "350a101f64801311ecbeeb20482bb3abb2d451a77bcf9c5b35dfe8851cb76894",
+        "main/logic/dhw_loss_trace.hpp": "85364cfcd7827b122cde4fbf04d69813d67149823d6d8015d4db984776dc28f2",
+        "main/logic/history_persist.hpp": "94c9a36c4f22d4a53a31fdbbdd2e1f9a325f03047ac3cd883c889f312b68c555"
+      },
+      "test_source_sha256": "c40442d421b0b6e47bb6e7040f9af3a959e905523b760ddab1dc2a82fe6e4aee",
+      "measurement_limits": [
+        "The optional GCC 15 aarch64 full-profile check reports the previously pending MQTT inventory mismatch. mqtt_publish_gate.hpp measured 39/40 against 35/36."
+      ],
+      "validation_boundary": "Four local compiler-profile measurements, including the Ubuntu 26.04 x86-64 release-coverage container as the hosted candidate. Hosted confirmation and physical restart acceptance remain separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3.0, ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2.0, release-coverage Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 release-coverage Docker result is the hosted candidate. Authoritative GitHub CI confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin; equivalent test/test_logic.cpp build and gcov in Docker",
+      "scope": "Versioned X10A completed-run journal pages, fixed per-run flow comparison, preboot restored timestamps, expiry floor, and malformed page rejection.",
+      "sources": {
+        "main/logic/cycling_run_context.hpp": "55462695770b18f46d1224073e1f4a6158c8442660fbd8ef46bb2f3badc3e40e",
+        "main/logic/cycling_run_persist.hpp": "5c0920e7deb85178d86307d2621bc9dd0eed9cfa2e3430fffbf8b77cabb4e8ef"
+      },
+      "test_source_sha256": "9a6d2b1d12e49d3d9aa28eb16163648696c1e813d8faea0a3983404a005e2bc1",
+      "validation_boundary": "Locally measured Apple Clang 17 arm64, Linux GCC 13 aarch64, and Linux GCC 15 on x86-64 and aarch64. No change to the checker or line threshold."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 release-coverage Docker, x86_64"
+      },
+      "measurement_limits": [
+        "gcc-15-linux-ubuntu26 (aarch64) remains unchanged pending an arm64 Ubuntu 26.04 GCC 15 container run."
+      ],
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin; matching g++ --coverage and gcov -n -b -c inside ESP-IDF v6.1.1 and Ubuntu 26.04 release-coverage containers",
+      "scope": "24 h working figure and standalone NVS gas blob (CheckupPersist v5 energy ring/buckets, gas_comparison.hpp, config_store/config_transaction gas blob, and reference_temperature / checkup integration) after removing the unused 17-parameter checkup_journal_rebuild overload.",
+      "sources": {
+        "main/logic/checkup.hpp": "05ba94f98a628df562e4d2be301c7aa31a0d1edb5687395aa64f63c8381fa5c8",
+        "main/logic/checkup_persist.hpp": "4c3180c45708a636950b013a682a6bcc437b13d97808fc44e9e9a959959e4775",
+        "main/logic/config_model.hpp": "c27d0c6f9e32f1b91eac0ec18404811065698da8daf85c865b4a9d4f8cf1a904",
+        "main/logic/config_store.hpp": "0cee473d5f3ce4417e1bdb0853806cd3098bf33b09f61f89f825629e4a0f1627",
+        "main/logic/config_transaction.hpp": "6df6ec213f19e0641f661a05a1970cf7221eb7fcf43755f576f716f6f5cff94f",
+        "main/logic/gas_comparison.hpp": "7db97d61238d8216ef01a24186445b4d326884b24ac1d2d62e565d9f88551729",
+        "main/logic/reference_temperature.hpp": "0bfbbf34ae06cf796a21b8049a54a2179b53c651e6b1a8bf8e622351e0c87b86",
+        "main/logic/working_figure.hpp": "7e8b4316f8f2c4c67f66125157577b7909448dca9f1ae13192460aac3dba7db5"
+      },
+      "test_source_sha256": "991c18717a41282ef84d5fe7cc0474903fe0de1b28c7d4befeec699f4e72e0c9",
+      "validation_boundary": "Measured locally on Darwin Clang 17 arm64, ESP-IDF v6.1.1 Docker GCC 13 aarch64, and Ubuntu 26.04 x86-64 release-coverage Docker GCC 15; authoritative hosted GitHub CI and arm64 gcc-15-linux-ubuntu26 remain separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2421,8 +2498,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1383,
-        "taken": 1313
+        "outcomes": 1387,
+        "taken": 1317
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 361,
@@ -2473,8 +2550,12 @@
         "taken": 60
       },
       "main/logic/cycling_run_context.hpp": {
-        "outcomes": 435,
-        "taken": 368
+        "outcomes": 473,
+        "taken": 403
+      },
+      "main/logic/cycling_run_persist.hpp": {
+        "outcomes": 50,
+        "taken": 50
       },
       "main/logic/defrost_start.hpp": {
         "outcomes": 28,
@@ -2492,9 +2573,13 @@
         "outcomes": 30,
         "taken": 29
       },
+      "main/logic/dhw_loss_persist.hpp": {
+        "outcomes": 90,
+        "taken": 77
+      },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 76,
-        "taken": 76
+        "outcomes": 96,
+        "taken": 96
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 184,
@@ -2915,12 +3000,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1601,
-        "taken": 1502
+        "outcomes": 1581,
+        "taken": 1497
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 415,
-        "taken": 415
+        "outcomes": 443,
+        "taken": 443
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -2931,16 +3016,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 350,
-        "taken": 306
+        "outcomes": 356,
+        "taken": 328
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 474,
-        "taken": 332
+        "outcomes": 516,
+        "taken": 379
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 114,
-        "taken": 81
+        "outcomes": 160,
+        "taken": 115
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -2967,8 +3052,12 @@
         "taken": 72
       },
       "main/logic/cycling_run_context.hpp": {
-        "outcomes": 477,
-        "taken": 401
+        "outcomes": 519,
+        "taken": 439
+      },
+      "main/logic/cycling_run_persist.hpp": {
+        "outcomes": 56,
+        "taken": 56
       },
       "main/logic/defrost_start.hpp": {
         "outcomes": 48,
@@ -2986,9 +3075,13 @@
         "outcomes": 32,
         "taken": 31
       },
+      "main/logic/dhw_loss_persist.hpp": {
+        "outcomes": 106,
+        "taken": 89
+      },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 78,
-        "taken": 78
+        "outcomes": 98,
+        "taken": 98
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,
@@ -3025,6 +3118,10 @@
       "main/logic/fixed_text.hpp": {
         "outcomes": 14,
         "taken": 11
+      },
+      "main/logic/gas_comparison.hpp": {
+        "outcomes": 16,
+        "taken": 16
       },
       "main/logic/ha_device.hpp": {
         "outcomes": 180,
@@ -3292,7 +3389,7 @@
       },
       "main/logic/reference_temperature.hpp": {
         "outcomes": 366,
-        "taken": 252
+        "taken": 254
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 310,
@@ -3362,6 +3459,10 @@
         "outcomes": 16,
         "taken": 16
       },
+      "main/logic/working_figure.hpp": {
+        "outcomes": 503,
+        "taken": 429
+      },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,
         "taken": 54
@@ -3401,12 +3502,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1601,
-        "taken": 1502
+        "outcomes": 1581,
+        "taken": 1497
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 415,
-        "taken": 415
+        "outcomes": 443,
+        "taken": 443
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -3417,16 +3518,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 350,
-        "taken": 306
+        "outcomes": 356,
+        "taken": 328
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 474,
-        "taken": 332
+        "outcomes": 516,
+        "taken": 379
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 114,
-        "taken": 81
+        "outcomes": 160,
+        "taken": 115
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -3453,8 +3554,12 @@
         "taken": 72
       },
       "main/logic/cycling_run_context.hpp": {
-        "outcomes": 477,
-        "taken": 401
+        "outcomes": 519,
+        "taken": 439
+      },
+      "main/logic/cycling_run_persist.hpp": {
+        "outcomes": 56,
+        "taken": 56
       },
       "main/logic/defrost_start.hpp": {
         "outcomes": 48,
@@ -3472,9 +3577,13 @@
         "outcomes": 32,
         "taken": 31
       },
+      "main/logic/dhw_loss_persist.hpp": {
+        "outcomes": 106,
+        "taken": 89
+      },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 78,
-        "taken": 78
+        "outcomes": 98,
+        "taken": 98
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,
@@ -3511,6 +3620,10 @@
       "main/logic/fixed_text.hpp": {
         "outcomes": 14,
         "taken": 11
+      },
+      "main/logic/gas_comparison.hpp": {
+        "outcomes": 16,
+        "taken": 16
       },
       "main/logic/ha_device.hpp": {
         "outcomes": 180,
@@ -3778,7 +3891,7 @@
       },
       "main/logic/reference_temperature.hpp": {
         "outcomes": 366,
-        "taken": 252
+        "taken": 254
       },
       "main/logic/refrigerant_service.hpp": {
         "outcomes": 310,
@@ -3848,6 +3961,10 @@
         "outcomes": 16,
         "taken": 16
       },
+      "main/logic/working_figure.hpp": {
+        "outcomes": 503,
+        "taken": 429
+      },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,
         "taken": 54
@@ -3887,8 +4004,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1601,
-        "taken": 1502
+        "outcomes": 1581,
+        "taken": 1496
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,
@@ -3939,8 +4056,12 @@
         "taken": 72
       },
       "main/logic/cycling_run_context.hpp": {
-        "outcomes": 477,
-        "taken": 401
+        "outcomes": 519,
+        "taken": 439
+      },
+      "main/logic/cycling_run_persist.hpp": {
+        "outcomes": 56,
+        "taken": 56
       },
       "main/logic/defrost_start.hpp": {
         "outcomes": 48,
@@ -3958,9 +4079,13 @@
         "outcomes": 32,
         "taken": 31
       },
+      "main/logic/dhw_loss_persist.hpp": {
+        "outcomes": 106,
+        "taken": 89
+      },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 78,
-        "taken": 78
+        "outcomes": 98,
+        "taken": 98
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,

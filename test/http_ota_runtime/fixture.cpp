@@ -44,6 +44,7 @@ bool      ota_changelog_chunk(uint32_t, size_t, char*, size_t, size_t&, size_t&)
 bool      ota_changelog_release(uint32_t) { return true; }
 void      http_register_on(httpd_handle_t, HttpSurface, const char*, httpd_method_t,
                            esp_err_t (*)(httpd_req_t*)) {}
+void      http_set_nodelay(httpd_req_t*, bool) noexcept {}
 } // namespace daik
 
 int main() {

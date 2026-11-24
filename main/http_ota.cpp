@@ -315,12 +315,14 @@ static esp_err_t ota_changelog(httpd_req_t* req) {
     }
 
     char chunk[128];
+    http_set_nodelay(req, false);
     for (size_t offset = 0; offset < total; offset += copied) {
         if (!ota_changelog_chunk(generation, offset, chunk, sizeof(chunk), total, copied) ||
             copied == 0)
             return ESP_FAIL;
         if (httpd_resp_send_chunk(req, chunk, copied) != ESP_OK) return ESP_FAIL;
     }
+    http_set_nodelay(req, true);
     return httpd_resp_send_chunk(req, nullptr, 0);
 }
 

@@ -85,6 +85,8 @@ checkouts. The compiler and Docker host checks run in sequence within their grou
 container contention. Coverage includes the native test and the Ubuntu GCC 15 x86-64 branch
 profile. For UI-relevant changes, headless Linux Chromium and WebKit start after all three groups
 finish so their work cannot affect the UI timing measurements.
+Set `DAIKIN_RELEASE_BROWSER_DOCKER_CONTEXT` to a context on a separate, trusted Linux Docker
+engine when other workloads share the default engine. Only the browser phase uses that engine.
 See [host tooling and checks](../test/README.md).
 
 To run the gate manually, use
@@ -333,11 +335,14 @@ MQTT reconnect window and requires at least 24 KiB free heap and a 16 KiB larges
 window. Pressure must still start within 120 seconds of boot with unchanged uptime/counter guards;
 a paused or unsafe-heap baseline is not accepted as a healthy start.
 
-Configured production Weather additionally needs an exact non-zero requested/started/completed/
-success token and a success-counter advance. OTA serialization may defer the same outstanding
-attempt, but unrelated scheduled fetches cannot satisfy it. Only a completed `waiting/heap_headroom`
-refusal may wait until all pressure workers stop, then passively await two stable 48/20-KiB samples
-for at most 420 seconds and issue one different token under a 120-second bound. That retry must
+The gate binds the production board's explicit Weather `configured` flag and checks it through
+pre-write readiness, reboot, pressure and probation. The production canary always exercises
+manifest TLS, HTTP, MQTT and X10A. Configured Weather additionally needs an exact non-zero
+requested/started/completed/success token and a success-counter advance. OTA serialization may
+defer the same outstanding attempt, but unrelated scheduled fetches cannot satisfy it. Only a
+completed `waiting/heap_headroom` refusal may wait until all pressure workers stop, then passively
+await two stable 48/20-KiB samples for at most 420 seconds and issue one different token under a
+120-second bound. That retry must
 succeed with MQTT/X10A recovered and invariant uptime/counters/heap. A second refusal or another
 failure blocks. Successful idle fetch afterward must not be described as Weather TLS success under
 load. Cross-subsystem streamed snapshots require later owner evidence, never assumed simultaneity.

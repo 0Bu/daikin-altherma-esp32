@@ -14,10 +14,15 @@ const mqtt = fs.readFileSync(new URL("../main/mqtt_ha.cpp", import.meta.url), "u
 assert.match(style, /\.vhist-state-graph \.vhist-tip \{[^}]*white-space:\s*pre-wrap;/,
   "state tooltips must honor deliberate breaks");
 assert.match(style,
-  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
-  "one readout row and one reserved time axis keep the curve stable");
+  /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto auto;/,
+  "one plot row and one shared lower time axis keep the chart compact");
+assert.match(style,
+  /\.vhist-tips\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(100% \+ 8px\);/,
+  "tooltip bubbles must float above the plot without reserving empty space");
 assert.match(style, /\.vhist-tip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*3;/,
-  "the translucent tooltip must participate in the reserved readout layout");
+  "the tooltip anchors inside the floating strip above the chart");
+assert.doesNotMatch(style, /\.vhist-reserve/,
+  "no hidden reservation strip may inflate idle chart height");
 assert.doesNotMatch(style, /--vhist-tip-space/,
   "tooltip height must never feed back into graph layout");
 assert.doesNotMatch(style, /\.vhist-state-graph\s*\{[^}]*padding-top:/,
@@ -229,7 +234,7 @@ vm.createContext(context);
 const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
-  "\nthis.__api = { t, hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, env3HistHtml, scrubText, histReadout, histVisibleSeries," +
+  "\nthis.__api = { t, hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, modbusHistoryHtml, env3HistHtml, scrubText, histReadout, histVisibleSeries," +
   " histTipsHtml, scrubMove, scrubIndex, histPinToggle, histPinIndex, expireLiveHistoryPins, expiredHistSlots, readHistoryJson, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
@@ -1886,8 +1891,8 @@ h.syncHistSources();
 assert.equal(S.hist.size, 0, "deleting a room mapping retires its cached readings");
 assert.equal(h.histHtml("room_temp", "°C", "Raumtemperatur"), "");
 
-// Reserving tooltip shapes must scan the auxiliary day once, not once per sample. A later render
-// reads changed auxiliary data from the next view. A mounted view keeps its own phase evidence.
+// Floating tooltips omit reserved shape scans; rendering a chart or pinned readout still scans
+// auxiliary phases at most once per view, and refreshed views update phase evidence cleanly.
 S.status.history = { rows: ["dhw_tank", "smart_grid_mode", "bsh_state"].map(id => ({id, label:id})),
   modbus_rows: [] };
 S.hist.clear();
@@ -1899,26 +1904,29 @@ vm.runInContext("this.originalAuxScan = dhwAuxPhases; this.auxScans = 0; " +
   "dhwAuxPhases = (...args) => { auxScans++; return originalAuxScan(...args); };", context);
 try {
   const view = h.historyView("dhw_tank");
-  const first = h.histTipsHtml(view, -1, 0);
-  assert.equal(context.auxScans, 1, "288 tooltip readouts must share one auxiliary scan");
+  const unpinned = h.histTipsHtml(view, -1, 0);
+  assert.doesNotMatch(unpinned, /vhist-reserve/);
+  const first = h.histTipsHtml(view, 0, 0);
   assert.match(first, /Empfehlung ein/);
   assert.match(first, /Heizstab aktiv/);
+  context.auxScans = 0;
+  h.histPinToggle("dhw_tank", 0);
+  const fullHtml = h.histHtml("dhw_tank", "°C", "Warmwasserspeicher");
+  assert.equal(context.auxScans, 1, "rendering the full DHW chart must share one auxiliary scan");
+  assert.match(fullHtml, /Empfehlung ein/);
+  assert.match(fullHtml, /Heizstab aktiv/);
+  h.histPinToggle("dhw_tank", 0);
   S.hist.set("smart_grid_mode", { ...fullRing(0), gen: 2 });
   const refreshed = h.historyView("dhw_tank");
   assert.notEqual(h.histViewRevision(view), h.histViewRevision(refreshed));
   assert.equal(h.scrubIndex({ dataset: { hist: "dhw_tank", rev: h.histViewRevision(view) } }, 4), -1);
-  const second = h.histTipsHtml(refreshed, -1, 0);
-  assert.equal(context.auxScans, 2, "the next rendered view must refresh its auxiliary snapshot");
+  context.auxScans = 0;
+  const second = h.histTipsHtml(refreshed, 0, 0);
+  assert.equal(context.auxScans, 1, "the next rendered view must refresh its auxiliary snapshot once");
   assert.doesNotMatch(second, /Empfehlung ein/);
   assert.match(second, /Heizstab aktiv/);
-  // Re-seed the previous per-readout work: the same measured operation budget must reject it.
-  vm.runInContext("this.originalReadout = histReadout; auxScans = 0; " +
-    "histReadout = (view, index) => originalReadout(view, index, dhwAuxPhases(view));", context);
-  h.histTipsHtml(refreshed, -1, 0);
-  assert.ok(context.auxScans >= 289, "the old per-sample scan must exceed the one-scan budget");
 } finally {
-  vm.runInContext("dhwAuxPhases = originalAuxScan; " +
-    "if (this.originalReadout) histReadout = originalReadout;", context);
+  vm.runInContext("dhwAuxPhases = originalAuxScan;", context);
 }
 
 // Paket 1 Modbus state timelines + phase count and strictly source-isolated Modbus dt / pth derived trends.
@@ -2215,12 +2223,78 @@ try {
     const unverifiedFlowHtml = h.histHtml("flow", "L/min", "Volumenstrom", "modbus");
     assert.ok(unverifiedFlowHtml.includes(h.t("hist.modbus_flow_unverified")),
       "unverified Modbus flow 24h chart includes explicit scaling caveat");
+    const cachedFlow = () => h.modbusHistoryHtml("flow", "L/min", "Volumenstrom");
+    const renderFlow = () => h.histHtml("flow", "L/min", "Volumenstrom");
+    assert.equal(cachedFlow(), renderFlow(), "cached chart initially matches the ordinary renderer");
 
     S.status.modbus = { enabled: true, connected: true, profile: "homehub", profile_basis: "affirmative" };
     S._modbus = [{ off: 49, concept: "flow", history: "flow", value: "12.3", unit: "L/min" }];
     const verifiedFlowHtml = h.histHtml("flow", "L/min", "Volumenstrom", "modbus");
     assert.ok(!verifiedFlowHtml.includes(h.t("hist.modbus_flow_unverified")),
       "verified EKRHH Modbus flow 24h chart omits unverified scaling caveat");
+    const cachedVerified = cachedFlow();
+    assert.equal(cachedVerified, renderFlow(), "a scaling change refreshes the cached chart");
+    assert.ok(!cachedVerified.includes(h.t("hist.modbus_flow_unverified")));
+
+    S.hist.set(h.histCacheKey("flow", "modbus"),
+      { at: Date.now(), gen: 2, dt: 300, unit: "L/min", b0: 10, held: [], v: [130, 123] });
+    assert.equal(cachedFlow(), renderFlow(), "a new history ring refreshes the markup");
+    assert.notEqual(cachedFlow(), cachedVerified, "the previous graph is retired with its ring");
+    const unpinnedFlow = cachedFlow();
+    h.histPinToggle("flow", 0);
+    assert.equal(cachedFlow(), renderFlow(), "pinning refreshes the cached chart");
+    assert.notEqual(cachedFlow(), unpinnedFlow, "the pin is visible");
+    h.histPinToggle("flow", 0);
+    assert.equal(cachedFlow(), unpinnedFlow, "unpinning removes the saved readout");
+
+    // Compact floating tooltips, shared lower time axis, and dotted Y-scale gridlines/labels.
+    assert.doesNotMatch(pairedPumpHtml, /vhist-reserve/,
+      "categorical charts must not reserve empty tooltip space");
+    S.status.history.rows = [...prevRows, { id: "dhw_tank", label: "DHW" },
+      { id: "leaving_water", label: "Leaving" }, { id: "water_pressure", label: "Pressure" }];
+    S.hist.set("dhw_tank", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768720000, b0: 200,
+      held: [], v: [420, 445, 480, 515] });
+    const dhwHtml = h.histHtml("dhw_tank", "°C", "Warmwasserspeicher", "x10a");
+    assert.doesNotMatch(dhwHtml, /vhist-reserve/,
+      "numeric charts must not reserve empty tooltip space");
+    assert.match(dhwHtml, /<div class="vhist-graph vhist-has-y"><div class="vhist-y" aria-hidden="true">[\s\S]*?<\/div><div class="vhist-tips">/,
+      "numeric charts must place the Y-axis column inside .vhist-graph before .vhist-tips/.vhist-plot");
+    const dhwPlotHtml = dhwHtml.slice(dhwHtml.indexOf('<div class="vhist-plot"'), dhwHtml.indexOf('<div class="vhist-axis">'));
+    assert.doesNotMatch(dhwPlotHtml, /vhist-y-label/,
+      "Y-scale labels must sit outside .vhist-plot in the dedicated left Y-axis column");
+    assert.match(dhwHtml, /<div class="vhist-axis"><span>[^<]+<\/span><span>[^<]+<\/span><\/div><span class="vhist-time vhist-live mono num" hidden><\/span><\/div>/,
+      "numeric charts must share the lower time-axis row inside .vhist-graph");
+    assert.match(dhwHtml, /<line class="vhist-grid"/, "numeric charts must emit dotted Y gridlines");
+    assert.match(dhwHtml, /<span class="vhist-y-label num"[^>]*>\d+ °C<\/span>/,
+      "numeric charts must emit localized Y-scale labels with units");
+
+    // Negative, flat, and decimal Y ranges produce clean localized ticks.
+    S.hist.set("leaving_water", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768720000, b0: 200,
+      held: [], v: [-45, -10, 20, 65] });
+    const negHtml = h.histHtml("leaving_water", "°C", "Vorlauf", "x10a");
+    assert.match(negHtml, /<line class="vhist-grid"/);
+    assert.match(negHtml, /<span class="vhist-y-label num"[^>]*>-?\d+(?:,\d)? °C<\/span>/);
+
+    S.hist.set("leaving_water", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768720000, b0: 200,
+      held: [], v: [200, 200, 200] });
+    const flatHtml = h.histHtml("leaving_water", "°C", "Vorlauf", "x10a");
+    assert.ok((flatHtml.match(/<line class="vhist-grid"/g) || []).length >= 2,
+      "a flat series still displays dotted reference lines");
+
+    // Water pressure suppresses regular Y-ticks near the 0.5 bar / 1.0 bar severity lines.
+    S.hist.set("water_pressure", { at: 1, gen: 1, dt: 300, unit: "bar", t0: 1768720000, b0: 200,
+      held: [], v: [14, 15, 16, 15] });
+    const pressureHtml = h.histHtml("water_pressure", "bar", "Wasserdruck", "x10a");
+    const pressureLabels = [...pressureHtml.matchAll(/<span class="vhist-y-label num"[^>]*>([^<]+)<\/span>/g)]
+      .map((m) => m[1]);
+    assert.ok(pressureLabels.length >= 1, "water_pressure retains non-colliding Y-scale ticks");
+    assert.equal(pressureLabels.includes("1,0 bar"), false,
+      "water_pressure suppresses regular ticks colliding with the 1,0 bar threshold");
+    assert.equal(pressureLabels.includes("0,5 bar"), false,
+      "water_pressure suppresses regular ticks colliding with the 0,5 bar threshold");
+    S.hist.delete("dhw_tank");
+    S.hist.delete("leaving_water");
+    S.hist.delete("water_pressure");
 
     S.status.history.rows = prevRows;
     S.status.history.modbus_rows = prevMbRows;

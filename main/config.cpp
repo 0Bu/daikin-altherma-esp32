@@ -516,13 +516,13 @@ void config_load() {
         // firmware keeps reading "cfg" on downgrade or rollback.
         std::vector<uint8_t> gas_raw;
         GasComparisonBlob    gb;
-        const NvsBlobRead    gas_read        = nvs_read_blob("gas", gas_raw);
+        const NvsBlobRead    gas_read = nvs_read_blob("gas", gas_raw);
         const bool           gas_blob_loaded =
             gas_read == NvsBlobRead::Ok &&
             gas_comparison_blob_deserialize(gas_raw.data(), gas_raw.size(), gb);
         log_blob_load_issue(config_load_verdict(stored_entry_read(gas_read), gas_blob_loaded),
-                            gas_raw, "stored gas comparison", GAS_BLOB_MAGIC_TEXT,
-                            GAS_BLOB_VERSION, GAS_BLOB_VERSION, "defaults in use");
+                            gas_raw, "stored gas comparison", GAS_BLOB_MAGIC_TEXT, GAS_BLOB_VERSION,
+                            GAS_BLOB_VERSION, "defaults in use");
         if (gas_blob_loaded) {
             const char* gas_why = nullptr;
             if (gas_comparison_config_valid(gb.elec_price_tenth_mill, gb.gas_price_tenth_mill,

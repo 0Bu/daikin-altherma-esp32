@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -182,8 +182,16 @@ I18N.zh = localeValues([
   /* check.status.experimental */ "实验性",
   /* check.status.unavailable */ "不可用",
   /* check.status.no_window */ "无测量窗口",
-  /* check.dhw.maximum */ "已记录最大值",
-  /* check.dhw.measurement */ "水箱传感器 R5T 测得的一小时净降温。",
+  /* check.dhw.maximum */ "水箱传感器测得的最大每小时降温",
+  /* check.dhw.hour_unit */ "°C/小时",
+  /* check.dhw.timeline */ "24 小时历史",
+  /* check.dhw.context_title */ "原因未明",
+  /* check.dhw.context_hour */ "记录到此降温速率的时段",
+  /* check.dhw.context_missing */ "此读数的时间和当时情况未知。",
+  /* check.dhw.context_pump */ "这一小时内，热泵内部的水泵曾运行。",
+  /* check.dhw.context_draw */ "温度迅速下降可能与使用热水或快速冷却有关。",
+  /* check.dhw.context_quiet */ "未检测到水泵运行或类似取用热水时的温度下降。仍有可能用过热水。",
+  /* check.dhw.context_selected */ "此次温度下降的原因仍不明确。",
   /* check.dhw.hint */ "某个未记录到水泵或类似取水标记的小时窗口达到了本项目的提示阈值。",
   /* check.dhw.before_snapshot */ (d) => `快照前 ${d}`,
   /* check.dhw.marker_yes */ "已记录",
@@ -195,8 +203,8 @@ I18N.zh = localeValues([
   /* check.dhw.timeline_unavailable */ "带时间的窗口不可用。不会根据汇总值推算历史。",
   /* check.dhw.timeline_empty */ "此24小时视图中没有可用的带时间的完整窗口。",
   /* check.dhw.chart_title */ "每个完整窗口的降温",
-  /* check.dhw.timed_scope */ (n) => `重启或重置后带时间的窗口：${n}，最多 24 h。最大值和计数也可能来自保存的小时数据，而非仅来自图中窗口。`,
-  /* check.dhw.blank */ "空白表示没有可用的已完成窗口时间记录，并非零降温。标记只表示曾出现，不表示持续时间。",
+  /* check.dhw.timed_scope */ (n) => `图中的测量时段：${n}（最近 24 小时）。最大值和计数也可能来自保存的小时数据，而非仅来自图中窗口。`,
+  /* check.dhw.blank */ "斜线区域表示没有可用的已完成窗口时间记录，并非零降温。标记只表示曾出现，不表示持续时间。",
   /* check.dhw.snapshot */ "快照",
   /* check.dhw.stale */ "热水箱降温诊断的当前读数缺失或已过时；已完成的窗口仍是历史观测。",
   /* check.dhw.limit */ "R5T 只测量分层水箱中的一个点，并非水箱能量。水泵及类似取水的标记既不能证明原因，也不能证明实际取水。",
@@ -297,7 +305,7 @@ I18N.zh = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `结束 ${to}${vals}。`,
   /* check.cycling.e_ongoing */ "最近读数时仍在运行。",
   /* check.cycling.cause_unavailable */ "无详情",
-  /* check.cycling.cause_since_boot */ "启停原因仅从上次重启后开始记录。",
+  /* check.cycling.cause_older_unavailable */ "这些较早的运行没有可用的已保存启停详情。",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m} 分钟`,

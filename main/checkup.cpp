@@ -147,7 +147,9 @@ struct CheckupSlot {
     logic::CheckupJournalSlotTimes slot_times{};
     logic::CheckupCyclingTrace     cycling_trace{};
     logic::CheckupCyclingTrace     cycling_restored{};
-    uint32_t                       cycling_restore_anchor = 0;
+    uint32_t                       cycling_restore_anchor    = 0;
+    uint32_t                       cycling_checkpoint_anchor = 0;
+    uint32_t                       cycling_checkpoint_end    = 0; // last offered monotonic end
     std::atomic<bool>              cycling_forgotten{false};
     bool                           cycling_restore_allowed = false;
     std::atomic<uint32_t>          cycling_reset_token{0};
@@ -199,9 +201,14 @@ struct CheckupSlot {
     bool                          flash_pending        = false;
 
     // Append optional runtime detail so existing field offsets and stack budgets stay unchanged.
-    // Exact windows never enter PersistedCheckup or its journal layout/fingerprint.
-    logic::DhwLossTrace dhw_trace{};
-    std::atomic<bool>   dhw_trace_forgotten{false};
+    // Exact windows use their own flash page, separate from hourly aggregates.
+    logic::DhwLossTrace   dhw_trace{};
+    std::atomic<bool>     dhw_trace_forgotten{false};
+    bool                  dhw_trace_restore_allowed = false;
+    uint32_t              dhw_trace_clock_anchor_s  = 0;
+    std::atomic<uint32_t> dhw_trace_barrier{0};
+    std::atomic<uint32_t> dhw_trace_barrier_acked{0};
+    std::atomic<uint32_t> dhw_trace_saved_end_s{0};
 
     CheckupSlot(PersistStore* st, uint32_t magic, bool mb)
         : store(st), persist_magic(magic), is_modbus(mb) {}
@@ -302,6 +309,21 @@ void retire_fault_locked(CheckupSlot& slot) {
     slot.fault_reset_token.store(next ? next : 1u, std::memory_order_release);
 }
 
+constexpr uint32_t kDhwTraceBarrierToken = uint32_t{1} << 31;
+
+void arm_dhw_trace_barrier_locked(CheckupSlot& slot) {
+    const uint32_t next = (slot.dhw_trace_barrier.load(std::memory_order_relaxed) + 1u) &
+                          (kDhwTraceBarrierToken - 1u);
+    slot.dhw_trace_barrier.store(kDhwTraceBarrierToken | next, std::memory_order_release);
+}
+
+void retire_dhw_trace_locked(CheckupSlot& slot) {
+    slot.dhw_trace_restore_allowed = false;
+    slot.dhw_trace_clock_anchor_s  = 0;
+    slot.dhw_trace.reset();
+    arm_dhw_trace_barrier_locked(slot);
+}
+
 [[gnu::noinline]] bool fault_snapshot_locked(CheckupSlot& slot, logic::CheckupFaultTrace& out,
                                              int64_t now_us, bool require_wall_clock) {
     if (slot.fault_forgotten.load(std::memory_order_acquire) || !slot.source_confirmed ||
@@ -350,26 +372,88 @@ void retire_fault_locked(CheckupSlot& slot) {
                                                    oldest_saved_unix, slot.fault_warm_gap_s);
 }
 
+uint32_t cycling_wall_time(int64_t now_us) {
+    int64_t unix_s = -1;
+    int32_t ms     = 0;
+    time_now(unix_s, ms);
+    return logic::checkup_cycling_end_unix_s(now_us - now_us % 1000000, now_us, unix_s, ms);
+}
+
+uint32_t cycling_restore_floor(const CheckupSlot& slot, uint32_t boot_s) {
+    const int64_t floor =
+        static_cast<int64_t>(slot.cycling_restore_anchor) + boot_s - logic::CHECKUP_WINDOW_S;
+    return static_cast<uint32_t>(std::clamp<int64_t>(floor, 0, UINT32_MAX));
+}
+
+// The first stop after this start must be the same sample as the diagnostic stop. Treat only
+// short unreadable intervals that return to a running state as continuous, as the chart does.
+bool cycling_trace_has_run(const logic::CheckupCyclingTrace& trace, int64_t shift, uint32_t start_s,
+                           uint32_t stop_s) {
+    using Trace     = logic::CheckupCyclingTrace;
+    bool    started = false;
+    int64_t gap_at  = -1;
+    for (size_t i = 0; i < trace.count; ++i) {
+        const uint32_t record = trace.at(i);
+        const int64_t  at     = shift + Trace::second(record);
+        if (at < start_s) continue;
+        if (at > stop_s) break;
+        const auto kind = Trace::kind(record);
+        if (kind == Trace::Start) {
+            if (started || at != start_s) return false;
+            started = true;
+        } else if (started) {
+            if (kind == Trace::Stop) return at == stop_s && gap_at < 0;
+            if (kind == Trace::Gap) {
+                if (gap_at < 0) gap_at = at;
+            } else if (gap_at >= 0) {
+                if (kind == Trace::Off || at - gap_at > logic::CHECKUP_CYCLING_GAP_S) return false;
+                gap_at = -1;
+            }
+        }
+    }
+    return false;
+}
+
 [[gnu::noinline]] bool cycling_snapshot_locked(CheckupSlot& slot, logic::CheckupCyclingTrace& out,
-                                               int64_t now_us) {
+                                               int64_t now_us, bool checkpoint = false) {
     if (slot.cycling_forgotten.load(std::memory_order_acquire) || !slot.source_confirmed ||
         (!slot.cycling_trace.count && !slot.cycling_restored.count) || now_us < 0 ||
         now_us / 1000000 > logic::CheckupCyclingTrace::max_second)
         return false;
-    int64_t unix_s = -1;
-    int32_t ms     = 0;
-    time_now(unix_s, ms);
     const auto     boot_s = static_cast<uint32_t>(now_us / 1000000);
-    const uint32_t wall =
-        logic::checkup_cycling_end_unix_s(now_us - now_us % 1000000, now_us, unix_s, ms);
+    const uint32_t wall   = cycling_wall_time(now_us);
     if (wall <= boot_s) return false;
     // Keep a monotonic age floor for restored data, even if the wall clock moves backwards.
     slot.cycling_restore_anchor = std::max(slot.cycling_restore_anchor, wall - boot_s);
-    const int64_t oldest_saved_unix =
-        static_cast<int64_t>(slot.cycling_restore_anchor) + boot_s - logic::CHECKUP_WINDOW_S;
-    logic::checkup_cycling_snapshot(out, slot.cycling_restored, slot.cycling_trace, wall, boot_s,
-                                    oldest_saved_unix);
-    return out.unix_s != 0 && !slot.cycling_forgotten.load(std::memory_order_acquire);
+    const bool journal_x10a     = checkpoint && !slot.is_modbus;
+    uint32_t   frame_boot_s     = boot_s;
+    uint32_t   frame_unix_s     = wall;
+    if (journal_x10a) {
+        // One date mapping for the X10A journal and its run details. Later corrections can
+        // move the live chart, but must not re-date edges already used by a durable run record.
+        const uint32_t observed_anchor = wall - boot_s;
+        const int64_t step = static_cast<int64_t>(observed_anchor) - slot.cycling_checkpoint_anchor;
+        if (!slot.cycling_checkpoint_anchor || step >= logic::CHECKUP_WINDOW_S ||
+            step <= -static_cast<int64_t>(logic::CHECKUP_WINDOW_S)) {
+            // The two date frames no longer span the same rolling day.
+            slot.cycling_checkpoint_anchor = observed_anchor;
+            slot.cycling_checkpoint_end    = 0;
+        }
+        if (wall < slot.cycling_checkpoint_anchor) return false;
+        frame_boot_s = std::min(slot.cycling_trace.end_s, wall - slot.cycling_checkpoint_anchor);
+        frame_unix_s = slot.cycling_checkpoint_anchor + frame_boot_s;
+        // Clip future observations after a backward step, keeping the previous checkpoint if
+        // the trim would drop data from a group we have already offered to flash.
+        if (frame_boot_s < slot.cycling_checkpoint_end) return false;
+    }
+    logic::checkup_cycling_snapshot(out, slot.cycling_restored, slot.cycling_trace, frame_unix_s,
+                                    frame_boot_s, cycling_restore_floor(slot, boot_s),
+                                    journal_x10a);
+    if (!out.unix_s || (journal_x10a && !out.live) ||
+        slot.cycling_forgotten.load(std::memory_order_acquire))
+        return false;
+    if (journal_x10a) slot.cycling_checkpoint_end = frame_boot_s;
+    return true;
 }
 
 uint32_t circulation_identity() {
@@ -522,7 +606,9 @@ void persist_wipe(CheckupSlot& slot, bool keep_handoff = false) {
         s_defrost_start = {};
         reset_run_ctx_locked();
     }
-    slot.cycling_restore_anchor = 0;
+    slot.cycling_restore_anchor    = 0;
+    slot.cycling_checkpoint_anchor = 0;
+    slot.cycling_checkpoint_end    = 0;
     slot.fault_trace.reset();
     slot.fault_restored.reset();
     slot.fault_restore_anchor = 0;
@@ -587,7 +673,7 @@ bool apply_dhw_reset_locked(CheckupSlot& slot) {
     if (!slot.dhw_reset_requested.exchange(false)) return false;
     slot.boot_handoff_valid = false;
     slot.P().dhw.reset();
-    slot.dhw_trace.reset();
+    retire_dhw_trace_locked(slot);
     // The independent reset retires values, not the shared hourly geometry. Losing head/count
     // would suppress even unrelated journal writes until both rings saturated again.
     slot.P().dhw.head          = slot.P().ring.head;
@@ -925,15 +1011,16 @@ void slot_start(CheckupSlot& slot, bool diagnostics_enabled, uint32_t diagnostic
     slot.last_commit_us          = kNoCommitUs;
     slot.live_commit_count       = 0;
     slot.dhw_source_fp           = dhw_fp;
-    slot.modbus_profile          = ModbusProfile::Auto;
-    slot.energy_cov              = kEmptyEnergyCoverage;
-    slot.energy_acc              = kEmptyEnergyAccumulator;
-    slot.pel_source_fp           = effective_pel_source_fp_locked(slot);
-    slot.energy_carried_span_us  = 0;
-    slot.energy_restart_armed    = false;
-    slot.energy_restart_bucket   = 0;
+    slot.modbus_profile            = ModbusProfile::Auto;
+    slot.energy_cov                = kEmptyEnergyCoverage;
+    slot.energy_acc                = kEmptyEnergyAccumulator;
+    slot.pel_source_fp             = effective_pel_source_fp_locked(slot);
+    slot.energy_carried_span_us    = 0;
+    slot.energy_restart_armed      = false;
+    slot.energy_restart_bucket     = 0;
     slot.cycling_restore_allowed = !safe_mode_active();
     slot.fault_restore_allowed   = !safe_mode_active();
+    slot.dhw_trace_restore_allowed = !safe_mode_active();
     const uint32_t want_fp       = logic::checkup_layout_fingerprint();
     const uint32_t reason        = static_cast<uint32_t>(esp_reset_reason());
     slot.persist_verdict         = logic::checkup_restore_verdict(
@@ -989,6 +1076,7 @@ void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_chang
     if (generation_changed) {
         retire_cycling_locked(slot);
         retire_fault_locked(slot);
+        retire_dhw_trace_locked(slot);
         slot.reset_requested.store(false);
         slot.dhw_reset_requested.store(false);
         slot.energy_reset_requested.store(false);
@@ -1059,6 +1147,14 @@ record_cycling_run_context_locked(const logic::StopContextSample& stop_sample, c
     run_sample.outdoor_tenths = out_ok ? static_cast<int16_t>(outdoor_tenths) : 0;
     logic::cycling_run_context_step(s_run_ctx_tracker, s_run_ctx_trace, run_sample, now,
                                     source_generation);
+    if (now >= 0 && now / 1000000 <= logic::CheckupCyclingTrace::max_second) {
+        const auto uptime_s = static_cast<uint32_t>(now / 1000000);
+        if (s.unix_s > uptime_s)
+            s_x10a.cycling_restore_anchor =
+                std::max(s_x10a.cycling_restore_anchor, s.unix_s - uptime_s);
+        logic::cycling_run_context_finalize(s_run_ctx_trace, now, s.unix_s,
+                                            cycling_restore_floor(s_x10a, uptime_s));
+    }
 }
 
 } // namespace
@@ -1151,6 +1247,7 @@ void checkup_reset() {
     if (!lk.acquired()) return;
     retire_cycling_locked(s_x10a);
     retire_fault_locked(s_x10a);
+    retire_dhw_trace_locked(s_x10a);
     s_x10a.boot_handoff_valid       = false;
     s_x10a.fault_boot_handoff_valid = false;
     // An explicit /detect or automatic-profile rewiring withdraws the old confirmation immediately.
@@ -1183,6 +1280,7 @@ void checkup_modbus_reset() {
     if (!lk.acquired()) return;
     retire_cycling_locked(s_modbus);
     retire_fault_locked(s_modbus);
+    retire_dhw_trace_locked(s_modbus);
     s_modbus.boot_handoff_valid       = false;
     s_modbus.fault_boot_handoff_valid = false;
     s_modbus.source_confirmed         = false;
@@ -1304,6 +1402,7 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_x10a.persist_verdict          = logic::CheckupRestore::ModelChanged;
     retire_cycling_locked(s_x10a);
     retire_fault_locked(s_x10a);
+    retire_dhw_trace_locked(s_x10a);
     s_x10a.reset_requested.store(true);
 }
 
@@ -1371,6 +1470,7 @@ void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp) {
     s_modbus.persist_verdict          = logic::CheckupRestore::ModelChanged;
     retire_cycling_locked(s_modbus);
     retire_fault_locked(s_modbus);
+    retire_dhw_trace_locked(s_modbus);
     s_modbus.reset_requested.store(true);
 }
 
@@ -2123,22 +2223,43 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source)
         out = s_defrost_start.snapshot(now_us, hp_poll_generation());
 }
 
-// Keep optional wall-clock locals out of the common report frame. The caller owns the lock/output.
+// Keep the clock bracket out of the common report frame.
+[[gnu::noinline]] static uint32_t dhw_trace_wall_s(uint32_t uptime_s) {
+    const int64_t before_us = esp_timer_get_time();
+    int64_t       unix_s    = -1;
+    int32_t       ms        = 0;
+    time_now(unix_s, ms);
+    return logic::dhw_loss_wall_anchor_s(uptime_s, before_us, esp_timer_get_time(), unix_s, ms);
+}
+
+[[gnu::noinline]] static uint32_t dhw_trace_wall_locked(CheckupSlot& slot, uint32_t uptime_s) {
+    const uint32_t now = dhw_trace_wall_s(uptime_s);
+    if (!now || !slot.dhw_trace_clock_anchor_s) return now;
+    const uint64_t anchored = uint64_t{slot.dhw_trace_clock_anchor_s} + uptime_s;
+    if (anchored <= UINT32_MAX && now <= anchored + 1 && anchored <= uint64_t{now} + 1)
+        return static_cast<uint32_t>(anchored);
+
+    // A clock step must not re-date saved evidence or extend its lifetime on a later reboot.
+    // Withdraw the pre-boot prefix, preserving this boot's measurements and monotonic frame.
+    slot.dhw_trace.discard_restored();
+    slot.dhw_trace_clock_anchor_s = 0;
+    arm_dhw_trace_barrier_locked(slot);
+    return now;
+}
+
+// The caller owns the lock and the optional output.
 static __attribute__((noinline)) void copy_dhw_trace_locked(CheckupSlot&            slot,
                                                             logic::DhwLossTimeline* dhw_trace,
                                                             int64_t now_us, bool source_fresh) {
     if (dhw_trace && slot.source_confirmed && !slot.dhw_reset_requested.load() &&
         !slot.dhw_trace_forgotten.load(std::memory_order_acquire) && slot.cov.r5t &&
-        slot.cov.valve && slot.cov.pump && slot.cov.bsh &&
-        slot.dhw_trace.snapshot(*dhw_trace, now_us, logic::CHECKUP_MAX_GAP_S)) {
-        dhw_trace->live         = dhw_trace->live && source_fresh;
-        int64_t       unix_s    = -1;
-        int32_t       ms        = 0;
-        const int64_t before_us = esp_timer_get_time();
-        time_now(unix_s, ms);
-        const int64_t after_us = esp_timer_get_time();
-        dhw_trace->unix_s =
-            logic::dhw_loss_wall_anchor_s(dhw_trace->window_end_s, before_us, after_us, unix_s, ms);
+        slot.cov.valve && slot.cov.pump && slot.cov.bsh && slot.dhw_trace.begun) {
+        const uint32_t unix_s =
+            dhw_trace_wall_locked(slot, static_cast<uint32_t>(now_us / 1000000));
+        if (slot.dhw_trace.snapshot(*dhw_trace, now_us, logic::CHECKUP_MAX_GAP_S)) {
+            dhw_trace->live   = dhw_trace->live && source_fresh;
+            dhw_trace->unix_s = unix_s;
+        }
     }
     // Forget can latch without this mutex while the clock read is in flight.
     if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire)) dhw_trace->clear();
@@ -2484,7 +2605,7 @@ bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
                                   s_reboot_saved_this_boot.load(std::memory_order_acquire);
     if (!allow_data || !allow_checkpoint || s_diagnostics_generation == 0 ||
         slot.reset_requested.load() || !slot.cycling_trace.count ||
-        !cycling_snapshot_locked(slot, trace, esp_timer_get_time()))
+        !cycling_snapshot_locked(slot, trace, esp_timer_get_time(), true))
         return false;
     identity = {slot.model_fp, slot.source_fp, s_diagnostics_generation};
     return true;
@@ -2518,35 +2639,264 @@ CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTra
     const int64_t observed_unix_s =
         static_cast<int64_t>(trace.unix_s) + trace.end_s - trace.window_end_s;
     if (slot.model_fp != identity.model_fp || slot.source_fp != identity.source_fp ||
-        s_diagnostics_generation != identity.diagnostics_generation || trace.unix_s > now_unix_s ||
-        observed_unix_s <= now_unix_s - logic::CHECKUP_WINDOW_S)
+        s_diagnostics_generation != identity.diagnostics_generation)
         return Result::Ignored;
+    if (!slot.is_modbus) {
+        // Use the same boot-relative wall second as the live chart and run archive. The wall
+        // sample captured before reading the flash group can round to a different boot second.
+        const int64_t  now_us = esp_timer_get_time();
+        const uint32_t wall   = cycling_wall_time(now_us);
+        const int64_t  boot_s = now_us / 1000000;
+        if (wall <= boot_s) return Result::Deferred;
+        if (observed_unix_s > wall - boot_s) return Result::TryOlder;
+        now_unix_s = wall;
+    }
+    if (trace.unix_s > now_unix_s || observed_unix_s <= now_unix_s - logic::CHECKUP_WINDOW_S)
+        return slot.is_modbus ? Result::Ignored : Result::TryOlder;
     slot.cycling_restored = trace;
     return Result::Restored;
+}
+
+bool checkup_cycling_runs_checkpoint(logic::CyclingRunJournalPage& page, uint32_t after_boot_stop_s,
+                                     uint32_t& last_boot_stop_s, TickType_t wait_ticks,
+                                     uint32_t trace_through_boot_s, uint32_t trace_boot_unix_s) {
+    if (!trace_through_boot_s || !trace_boot_unix_s || !s_mtx ||
+        s_x10a.cycling_forgotten.load(std::memory_order_acquire))
+        return false;
+    Lock lk(s_mtx, wait_ticks);
+    if (!lk.acquired() || s_x10a.cycling_forgotten.load(std::memory_order_acquire) ||
+        !s_x10a.source_confirmed || trace_boot_unix_s != s_x10a.cycling_checkpoint_anchor ||
+        s_x10a.reset_requested.load() || checkup_cycling_reset_pending() ||
+        !s_diagnostics_generation ||
+        (!s_diagnostics_enabled.load(std::memory_order_acquire) &&
+         !s_reboot_saved_this_boot.load(std::memory_order_acquire)))
+        return false;
+
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us < 0 || now_us / 1000000 > logic::CheckupCyclingTrace::max_second) return false;
+    const auto     uptime_s = static_cast<uint32_t>(now_us / 1000000);
+    const uint32_t wall     = cycling_wall_time(now_us);
+    if (wall <= uptime_s) return false;
+    const uint32_t boot_unix_s = trace_boot_unix_s;
+    if (wall < boot_unix_s) return false;
+    s_x10a.cycling_restore_anchor = std::max(s_x10a.cycling_restore_anchor, wall - uptime_s);
+    const uint32_t floor = wall > logic::CHECKUP_WINDOW_S ? wall - logic::CHECKUP_WINDOW_S : 0;
+    logic::cycling_run_context_finalize(s_run_ctx_trace, now_us, wall,
+                                        cycling_restore_floor(s_x10a, uptime_s));
+    page          = {};
+    page.identity = {s_x10a.model_fp, s_x10a.source_fp, s_diagnostics_generation};
+    size_t count  = 0;
+    for (size_t i = 0; i < s_run_ctx_trace.count && count < logic::CYCLING_RUN_JOURNAL_CAPACITY;
+         ++i) {
+        const auto& entry = s_run_ctx_trace.at(i);
+        if (!(entry.flags & logic::RUN_CTX_F_FINALIZED) ||
+            (entry.flags & logic::RUN_CTX_F_RESTORED) || entry.stop_s <= after_boot_stop_s ||
+            entry.stop_s > trace_through_boot_s || entry.stop_s > uptime_s ||
+            entry.stop_s > wall - boot_unix_s || entry.start_s > entry.stop_s ||
+            boot_unix_s + entry.start_s < floor ||
+            !cycling_trace_has_run(s_x10a.cycling_trace, 0, entry.start_s, entry.stop_s))
+            continue;
+        auto saved = entry;
+        saved.start_s += boot_unix_s;
+        saved.stop_s += boot_unix_s;
+        if (!logic::cycling_run_journal_entry_valid(saved)) continue;
+        page.entries[count++] = saved;
+        last_boot_stop_s      = entry.stop_s;
+    }
+    return count > 0 && !s_x10a.cycling_forgotten.load(std::memory_order_acquire);
+}
+
+CheckupFlashRestoreResult checkup_cycling_runs_restore(const logic::CyclingRunJournalPage& page,
+                                                       uint32_t now_unix_s, TickType_t wait_ticks) {
+    using Result = CheckupFlashRestoreResult;
+    if (s_x10a.cycling_forgotten.load(std::memory_order_acquire)) return Result::Ignored;
+    if (!s_mtx) return Result::Deferred;
+    Lock lk(s_mtx, wait_ticks);
+    if (!lk.acquired()) return Result::Deferred;
+    if (!s_x10a.cycling_restore_allowed || !s_diagnostics_generation ||
+        s_x10a.reset_requested.load() || s_x10a.cycling_forgotten.load(std::memory_order_acquire))
+        return Result::Ignored;
+    if (!s_x10a.source_confirmed || !now_unix_s) return Result::Deferred;
+    const auto& trace = s_x10a.cycling_restored;
+    if (!trace.count || page.identity.model_fp != s_x10a.model_fp ||
+        page.identity.source_fp != s_x10a.source_fp ||
+        page.identity.diagnostics_generation != s_diagnostics_generation)
+        return Result::Ignored;
+
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us < 0 || now_us / 1000000 > logic::CheckupCyclingTrace::max_second)
+        return Result::Deferred;
+    const auto     uptime_s = static_cast<uint32_t>(now_us / 1000000);
+    const uint32_t wall     = cycling_wall_time(now_us);
+    if (wall <= uptime_s) return Result::Deferred;
+    if (trace.unix_s > wall) return Result::Ignored;
+    const uint32_t boot_unix_s    = wall - uptime_s;
+    s_x10a.cycling_restore_anchor = std::max(s_x10a.cycling_restore_anchor, boot_unix_s);
+    const uint32_t floor          = cycling_restore_floor(s_x10a, uptime_s);
+    const int64_t  shift          = static_cast<int64_t>(trace.unix_s) - trace.window_end_s;
+    if (shift + trace.end_s > boot_unix_s) return Result::Ignored;
+
+    bool added = false;
+    for (size_t i = logic::cycling_run_journal_count(page); i > 0; --i) {
+        auto entry = page.entries[i - 1];
+        if (entry.start_s < floor || entry.stop_s >= boot_unix_s ||
+            !cycling_trace_has_run(trace, shift, entry.start_s, entry.stop_s))
+            continue;
+        if (s_run_ctx_trace.count) {
+            const auto& oldest = s_run_ctx_trace.at(0);
+            if ((oldest.flags & logic::RUN_CTX_F_RESTORED) && entry.stop_s > oldest.start_s)
+                continue;
+        }
+        entry.flags |= logic::RUN_CTX_F_RESTORED;
+        if (!s_run_ctx_trace.prepend(entry)) break;
+        added = true;
+    }
+    // A confirmed profile can restore before its first usable sample. Protect the restored
+    // prefix from the tracker's normal first-sample initialization.
+    if (added && !s_run_ctx_tracker.have_generation)
+        s_run_ctx_tracker.reset(s_stop_generation, true);
+    return added ? Result::Restored : Result::Ignored;
 }
 
 void checkup_cycling_forget() {
     s_x10a.cycling_forgotten.store(true, std::memory_order_release);
     s_modbus.cycling_forgotten.store(true, std::memory_order_release);
-    // Factory forgetting also withdraws ordinary-RAM DHW detail immediately, without requiring
-    // the producer mutex or allowing the next poll to repopulate it before the scheduled reboot.
-    s_x10a.dhw_trace_forgotten.store(true, std::memory_order_release);
-    s_modbus.dhw_trace_forgotten.store(true, std::memory_order_release);
     checkup_fault_forget();
 }
 
-bool checkup_has_cycling_run_contexts(DiagnosticsSource source) {
+bool checkup_dhw_trace_reset_pending(DiagnosticsSource source) {
+    const CheckupSlot& slot = slot_for(source);
+    return slot.dhw_reset_requested.load() ||
+           slot.dhw_trace_barrier.load(std::memory_order_acquire) !=
+               slot.dhw_trace_barrier_acked.load(std::memory_order_acquire);
+}
+
+void checkup_dhw_trace_checkpoint_appended(uint32_t token, DiagnosticsSource source) {
+    CheckupSlot& slot = slot_for(source);
+    if (token & kDhwTraceBarrierToken) {
+        // The journal serializes writes and acknowledgments. Clear the watermark when the fence
+        // commits so an older in-flight data append cannot reinstate it after a clock step.
+        slot.dhw_trace_saved_end_s.store(0, std::memory_order_relaxed);
+        slot.dhw_trace_barrier_acked.store(token, std::memory_order_release);
+    } else {
+        slot.dhw_trace_saved_end_s.store(token, std::memory_order_release);
+    }
+}
+
+void checkup_dhw_trace_forget() {
+    s_x10a.dhw_trace_forgotten.store(true, std::memory_order_release);
+    s_modbus.dhw_trace_forgotten.store(true, std::memory_order_release);
+}
+
+bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage& page, uint32_t& token,
+                                  TickType_t wait_ticks, DiagnosticsSource source) {
+    if (!s_mtx) return false;
+    CheckupSlot& slot = slot_for(source);
+    Lock         lk(s_mtx, wait_ticks);
+    if (!lk.acquired() || slot.dhw_trace_forgotten.load(std::memory_order_acquire)) return false;
+    apply_dhw_reset_locked(slot);
+    const auto     uptime_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
+    const uint32_t unix_s   = (slot.dhw_trace.count || slot.dhw_trace_clock_anchor_s)
+                                  ? dhw_trace_wall_locked(slot, uptime_s)
+                                  : 0;
+    if (slot.dhw_trace_forgotten.load(std::memory_order_acquire)) return false;
+    const uint32_t barrier = slot.dhw_trace_barrier.load(std::memory_order_relaxed);
+    std::memset(&page, 0, sizeof(page));
+    if (barrier != slot.dhw_trace_barrier_acked.load(std::memory_order_acquire)) {
+        token = barrier;
+        return true;
+    }
+    if (!unix_s || slot.reset_requested.load() || !slot.source_confirmed ||
+        s_diagnostics_generation == 0)
+        return false;
+    auto&          trace  = slot.dhw_trace;
+    const uint32_t newest = trace.newest_end_s();
+    if (newest <= trace.frame_offset_s) return false;
+    token = newest - trace.frame_offset_s;
+    if (token & kDhwTraceBarrierToken ||
+        token <= slot.dhw_trace_saved_end_s.load(std::memory_order_acquire))
+        return false;
+    if (uptime_s > UINT32_MAX - trace.frame_offset_s) return false;
+    const uint32_t frame_s = uptime_s + trace.frame_offset_s;
+    trace.expire(frame_s);
+    if (!trace.count) return false;
+    page.unix_s                 = unix_s;
+    page.count                  = trace.count;
+    page.model_fp               = slot.model_fp;
+    page.source_fp              = slot.source_fp;
+    page.dhw_source_fp          = slot.dhw_source_fp;
+    page.diagnostics_generation = s_diagnostics_generation;
+    for (size_t i = 0; i < page.count; ++i)
+        if (!logic::dhw_loss_trace_pack(
+                page.records[i], trace.windows[(trace.head + i) % logic::DHW_LOSS_TRACE_CAPACITY],
+                frame_s))
+            return false;
+    if (slot.dhw_trace_forgotten.load(std::memory_order_acquire) || slot.dhw_reset_requested.load())
+        return false;
+    if (!slot.dhw_trace_clock_anchor_s && unix_s >= uptime_s)
+        slot.dhw_trace_clock_anchor_s = unix_s - uptime_s;
+    return true;
+}
+
+[[gnu::noinline]] bool checkup_dhw_trace_restore_ready(DiagnosticsSource source) {
+    if (!s_mtx) return false;
+    Lock lk(s_mtx, 0);
+    return lk.acquired() && slot_for(source).source_confirmed;
+}
+
+CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePage& page,
+                                                    TickType_t                     wait_ticks,
+                                                    DiagnosticsSource              source) {
+    using Result = CheckupFlashRestoreResult;
+    if (!s_mtx) return Result::Deferred;
+    CheckupSlot& slot = slot_for(source);
+    Lock         lk(s_mtx, wait_ticks);
+    if (!lk.acquired()) return Result::Deferred;
+    if (!slot.dhw_trace_restore_allowed || slot.dhw_trace_forgotten.load() ||
+        slot.reset_requested.load() || slot.dhw_reset_requested.load() ||
+        s_diagnostics_generation == 0)
+        return Result::Ignored;
+    if (!slot.source_confirmed) return Result::Deferred;
+    if (page.model_fp != slot.model_fp || page.source_fp != slot.source_fp ||
+        page.dhw_source_fp != slot.dhw_source_fp ||
+        page.diagnostics_generation != s_diagnostics_generation)
+        return Result::Ignored;
+    const auto     uptime_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
+    const uint32_t unix_s   = dhw_trace_wall_s(uptime_s);
+    if (slot.dhw_trace_forgotten.load() || slot.dhw_reset_requested.load()) return Result::Ignored;
+    if (!unix_s) return Result::Deferred;
+    if (!logic::dhw_loss_trace_restore(slot.dhw_trace, page, uptime_s, unix_s))
+        return Result::Ignored;
+    slot.dhw_trace_clock_anchor_s  = unix_s - uptime_s;
+    slot.dhw_trace_restore_allowed = false;
+    return Result::Restored;
+}
+
+bool checkup_has_cycling_run_contexts(DiagnosticsSource source, uint32_t boot_s,
+                                      uint32_t timeline_unix_s) {
     if (source != DiagnosticsSource::X10a || !s_mtx ||
         !s_diagnostics_enabled.load(std::memory_order_acquire))
         return false;
     Lock lk(s_mtx);
-    return lk.acquired() && s_diagnostics_enabled.load(std::memory_order_acquire) &&
-           !s_x10a.reset_requested.load() && s_x10a.source_confirmed &&
-           !s_x10a.cycling_forgotten.load(std::memory_order_acquire) && s_run_ctx_trace.count > 0;
+    if (!lk.acquired() || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
+        s_x10a.reset_requested.load() || !s_x10a.source_confirmed ||
+        s_x10a.cycling_forgotten.load(std::memory_order_acquire))
+        return false;
+    const uint32_t floor = cycling_restore_floor(s_x10a, boot_s);
+    for (size_t i = 0; i < s_run_ctx_trace.count; ++i) {
+        const auto& run = s_run_ctx_trace.at(i);
+        if (run.flags & logic::RUN_CTX_F_RESTORED) {
+            if (logic::cycling_run_context_restored_in_window(run, boot_s, timeline_unix_s, floor))
+                return true;
+        } else if (run.start_s <= boot_s && boot_s - run.start_s <= logic::CHECKUP_WINDOW_S) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool checkup_cycling_run_contexts(logic::CheckupRunContextSnapshot& out, uint32_t boot_s,
-                                  DiagnosticsSource source) {
+                                  DiagnosticsSource source, uint32_t timeline_unix_s) {
     out.reset();
     if (source != DiagnosticsSource::X10a || !s_mtx ||
         !s_diagnostics_enabled.load(std::memory_order_acquire))
@@ -2561,7 +2911,10 @@ bool checkup_cycling_run_contexts(logic::CheckupRunContextSnapshot& out, uint32_
     }
     logic::cycling_run_context_expire(s_run_ctx_tracker, esp_timer_get_time());
     if (!s_run_ctx_trace.count) return false;
-    logic::cycling_run_context_snapshot(out, s_run_ctx_trace, boot_s);
+    // The report owns this time frame. Use the floor advanced by the timeline so a wall-clock
+    // correction cannot make expired entries visible again.
+    logic::cycling_run_context_snapshot(out, s_run_ctx_trace, boot_s, timeline_unix_s,
+                                        cycling_restore_floor(s_x10a, boot_s));
     return out.count > 0;
 }
 

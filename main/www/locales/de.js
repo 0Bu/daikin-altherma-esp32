@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -182,8 +182,16 @@ I18N.de = localeValues([
   /* check.status.experimental */ "TESTWEISE",
   /* check.status.unavailable */ "ENTFÄLLT",
   /* check.status.no_window */ "KEIN FENSTER",
-  /* check.dhw.maximum */ "Höchstwert",
-  /* check.dhw.measurement */ "Nettoabkühlung am Speichersensor R5T über eine Stunde.",
+  /* check.dhw.maximum */ "Stärkste Abkühlung am Speicherfühler",
+  /* check.dhw.hour_unit */ "°C pro Stunde",
+  /* check.dhw.timeline */ "24-Stunden-Überblick",
+  /* check.dhw.context_title */ "Ursache offen",
+  /* check.dhw.context_hour */ "Messstunde mit diesem Wert",
+  /* check.dhw.context_missing */ "Zu diesem Wert fehlen die Uhrzeit und die Begleitumstände.",
+  /* check.dhw.context_pump */ "Die interne Wasserpumpe lief.",
+  /* check.dhw.context_draw */ "Der schnelle Abfall passt zu einer möglichen Warmwasserentnahme oder raschem Auskühlen.",
+  /* check.dhw.context_quiet */ "Keine Pumpenaktivität und kein Abfall wie bei einer Entnahme erfasst. Eine Entnahme bleibt möglich.",
+  /* check.dhw.context_selected */ "Die Ursache des Abfalls bleibt offen.",
   /* check.dhw.hint */ "Ein Fenster ohne erfasste Pumpen-/Zapfmerkmale erreichte die interne Hinweisschwelle.",
   /* check.dhw.before_snapshot */ (d) => `${d} vor dem Datenstand`,
   /* check.dhw.marker_yes */ "erfasst",
@@ -194,9 +202,9 @@ I18N.de = localeValues([
   /* check.dhw.next */ "Nächstes abgeschlossenes Fenster",
   /* check.dhw.timeline_unavailable */ "Keine Fenster mit Zeitangaben verfügbar. Aus den Summen wird kein Verlauf abgeleitet.",
   /* check.dhw.timeline_empty */ "Keine abgeschlossenen Fenster mit Zeitangaben in dieser 24-h-Ansicht verfügbar.",
-  /* check.dhw.chart_title */ "Abkühlung je abgeschlossenem Fenster",
-  /* check.dhw.timed_scope */ (n) => `Fenster seit Neustart/Zurücksetzen: ${n}, bis zu 24 h. Höchstwert und Zähler können auch auf gespeicherten Stundenwerten beruhen, nicht nur auf den gezeichneten Fenstern.`,
-  /* check.dhw.blank */ "Leer: kein abgeschlossenes Fenster mit Zeitangaben verfügbar, nicht null Abkühlung. Markierungen zeigen Merkmale, keine Laufzeiten.",
+  /* check.dhw.chart_title */ "Abkühlung pro Messstunde",
+  /* check.dhw.timed_scope */ (n) => `Messstunden im Diagramm: ${n} (letzte 24 h). Höchstwert und Zähler können auch auf gespeicherten Stundenwerten beruhen, nicht nur auf den gezeichneten Fenstern.`,
+  /* check.dhw.blank */ "Schraffiert sind Zeiten ohne abgeschlossene Messstunde. Ein flacher Balken zeigt eine Messstunde mit 0 K/h. Markierungen zeigen erfasste Merkmale ohne Angabe der Dauer.",
   /* check.dhw.snapshot */ "Datenstand",
   /* check.dhw.stale */ "Aktuelle Messwerte zur Speicherauskühlung fehlen oder sind veraltet; abgeschlossene Fenster bleiben historische Beobachtungen.",
   /* check.dhw.limit */ "R5T misst einen Punkt im geschichteten Speicher, keine Speicherenergie. Pumpen- und Zapfmerkmale beweisen weder Ursache noch Wasserentnahme.",
@@ -297,7 +305,7 @@ I18N.de = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Ende ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Bei letzter Messung noch aktiv.",
   /* check.cycling.cause_unavailable */ "Keine Details",
-  /* check.cycling.cause_since_boot */ "Ursachen für Start und Stopp werden erst ab dem letzten Neustart erfasst.",
+  /* check.cycling.cause_older_unavailable */ "Für diese älteren Läufe sind keine gespeicherten Details zu Start und Stopp verfügbar.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · Mittel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

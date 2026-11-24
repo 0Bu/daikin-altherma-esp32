@@ -296,9 +296,13 @@ numeric values do not change.
 **History**
 
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
-history card or range picker. Numeric charts share a light area/darker line grammar; gaps break both,
-and a lone sample is a dot. Paired X10A and Modbus series share one chart, axis and cursor, with
-blue/petrol source legends; paired Modbus starts active when available and toggles in the legend.
+history card or range picker. Numeric charts (88 px plot height) share a light area/darker line
+grammar with faint dotted horizontal Y-scale reference lines and a right-aligned unit-bearing Y-axis
+column to the left of the plot (multi-scale outdoor climate follows the first visible series in its
+own colour, and water pressure suppresses ticks colliding with its severity thresholds); gaps break
+both curve and fill, and a lone sample is a dot. Paired X10A and Modbus series share one chart, axis
+and cursor, with blue/petrol source legends; paired Modbus starts active when available and toggles
+in the legend.
 Room temperature can add the configured MQTT source as a third, separately coloured
 series with its name and MQTT attribution, including when no device room sensor is available.
 The device sensor and MQTT source keep distinct current values and explanations. Source replacement
@@ -370,12 +374,14 @@ hour tied to the graph under the pointer until the gesture ends.
 A recorded pin without a boot-relative bucket expires when the plotted series or its alignment
 changes. A forecast pin stays while its timestamp remains selectable on the same chart.
 Closing the inspector preserves a pin for an open
-value row. Collapsing the value panel clears it. Bubbles share one reserved row above the plot, with
-one measurement per line, omitting series without a sample at the selected instant and hiding the
-bubble when no visible series was measured there. The moving bubble paints over the pinned bubble with an opaque surface
-when they overlap. Both selected times
-share the time axis below the plot; the moving time likewise paints over the pinned time. Comparisons
-do not add height or move the plot or pinned time. Phase intervals remain in categorical readouts.
+value row. Collapsing the value panel clears it. Bubbles float directly above the plot without
+reserving vertical space when idle — overlaying header/legend content above — with one measurement
+per line, omitting series without a sample at the selected instant and hiding the bubble when no
+visible series was measured there. The moving bubble paints opaque over the frosted near-opaque
+pinned bubble when they overlap. Both selected times share the single time axis directly below every
+plot, gliding over domain bounds with a surface-matched backdrop so uncovered bounds stay visible
+and moving over the pinned time. Comparisons do not add height or move the plot or pinned time.
+Phase intervals remain in categorical readouts.
 Source legends toggle numeric or paired-state series by source and retain at least one visible series. Choices
 survive polling within the page and apply to both views of the same chart.
 Pointer-loss and a watchdog always release suspended rendering.
@@ -399,15 +405,18 @@ assessment limits. The fault expander shows a hero summary of the latest episode
 24-hour categorical pill bar (`min-width: 3px`, fault-free grey, unmeasured hatch, distinct colors
 per fault code), filter chips and bar tap (`±20 px`) revealing a newest-first episode table on
 demand, and one description paragraph below without a generic Normal target. The compressor-start expander gives the observed start count and completed runs
-by purpose, one short assessment of average heating-run duration, and the 24-hour chart. Keep the
-observed start count available when classification inputs are unsupported. Distinguish unsupported
-inputs from temporarily insufficient readings. Label elapsed time as the observation window and
-reserve event timestamps for recorded events.
+by purpose, one short assessment of average heating-run duration, and the 24-hour chart (showing
+faint dotted horizontal gridlines with a left integer Y-axis column on the cumulative timeline when
+starts are observed). Keep the observed start count available when classification inputs are
+unsupported. Distinguish unsupported inputs from temporarily insufficient readings. Label elapsed
+time as the observation window and reserve event timestamps for recorded events.
 
-The tank-cooling expander shows **Maximum recorded** in K/h when the aggregate has a rate.
-An eligible timeline draws a 24-hour chart. Position each bar by its endpoints and keep zero-rate
-bars visible. Fixed-size markers occupy separate pump and draw-like lanes. Selecting a bar shows
-the interval, rate, readable time and markers. **Data details** and **Calculation example** start
+The tank-cooling expander shows **Largest hourly drop at the tank sensor** in °C per hour when the
+aggregate has a rate. It shows the time and recorded circumstances of the most recent exact hour
+with that rate when available. Open **24-hour history** to see the chart. Position each bar by its
+endpoints, keep zero-rate bars visible and hatch the gaps between completed timed records.
+Fixed-size markers occupy separate pump and draw-like lanes. Selecting a bar shows the interval,
+rate, readable time and circumstances. **Data details** and **Calculation example** start
 collapsed when present.
 Preserve selection and disclosure state during same-scope polling. Select the newest retained
 window if the selected one expires. Clear the chart when an accepted diagnosis response changes
@@ -704,16 +713,16 @@ off-only hour has no fill. The timed chart orders mixed categories chronological
 timed hour button's accessible name distinguishes missing readings from unassigned runtime.
 Each block is selectable through the full plot height. The caption sits above the selection
 highlight. Shift-clicking or dragging across any timed chart selects a contiguous multi-hour range.
-On timed charts with `run_contexts`, the latest contiguous episode of short heating runs (or the latest
-contextual hour when no episode is present) auto-selects on open unless overridden, and selection
-replaces time labels with the selected span and renders a flat period summary plus a quiet 3-column
+On timed charts with at least one run matched to `run_contexts`, the latest contiguous episode of
+short heating runs (or the latest hour with matched details when no episode exists) auto-selects
+on open unless overridden. Selection replaces time labels with the selected span and renders a flat period summary plus a quiet 3-column
 table (`Start`, `Duration`, `Why it stopped`) with borderless tap-to-expand start and stop telemetry
 prose keyed by poll-invariant boot-relative or wall-clock run start so live polls keep open rows
-expanded (marking stopped runs without retained RAM context as **No cause details**, truly
-unstopped gap runs as **Stop unknown**, and pre-reboot X10A runs with **Start and stop details are
-recorded from the last restart onward**). Charts without `run_contexts` keep that pre-reboot X10A
-note when all selected runs preceded the current boot, omit the period summary, and fall back to
-`Start`, `Stop`, `Duration`. Both run grouping and short-run counts bridge brief `<= 15 s`
+expanded. Saved details are shown for earlier runs with matching observed start and stop edges.
+A stopped run without details shows **No cause details**. Interrupted runs show **Stop unknown**.
+Selections with matched and unmatched runs keep the period summary and mark individual missing
+details in the stop column. A chart with no match uses `Start`, `Stop`, `Duration` and can note
+missing details for older X10A runs. Run grouping and short-run counts bridge brief `<= 15 s`
 intra-boot sampling gaps while keeping `> 15 s` gaps and reboot boundaries severed. During a timed-chart drag, the highlight and range follow the pointer and
 commit the dragged range on release (hourly fallback previews the hovered hour readout on drag while preserving
 the pinned hour on release).

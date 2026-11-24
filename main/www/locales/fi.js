@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -182,8 +182,16 @@ I18N.fi = localeValues([
   /* check.status.experimental */ "KOKEILU",
   /* check.status.unavailable */ "EI KOSKE",
   /* check.status.no_window */ "EI MITTAUSJAKSOA",
-  /* check.dhw.maximum */ "Tallennettu enimmäisarvo",
-  /* check.dhw.measurement */ "Tunnin nettojäähtyminen varaajan R5T-anturilla.",
+  /* check.dhw.maximum */ "Suurin tunnin lämpötilan lasku varaajan anturilla",
+  /* check.dhw.hour_unit */ "°C tunnissa",
+  /* check.dhw.timeline */ "24 tunnin historia",
+  /* check.dhw.context_title */ "Syy epäselvä",
+  /* check.dhw.context_hour */ "Tunti, jolta saatiin tämä arvo",
+  /* check.dhw.context_missing */ "Tämän mittauksen aikaa ja olosuhteita ei ole saatavilla.",
+  /* check.dhw.context_pump */ "Lämpöpumpun sisäisen vesipumpun havaittiin käyvän tämän tunnin aikana.",
+  /* check.dhw.context_draw */ "Nopea lämpötilan lasku voi johtua lämpimän veden käytöstä tai nopeasta jäähtymisestä.",
+  /* check.dhw.context_quiet */ "Pumpun käyntiä tai vedenottoa muistuttavaa lämpötilan laskua ei havaittu. Lämmintä vettä on silti voitu käyttää.",
+  /* check.dhw.context_selected */ "Tämän lämpötilan laskun syy jää epäselväksi.",
   /* check.dhw.hint */ "Tunti ilman tallennettuja pumpun tai vedenoton merkkejä saavutti projektin ohjeellisen kynnyksen.",
   /* check.dhw.before_snapshot */ (d) => `${d} ennen tilannekuvaa`,
   /* check.dhw.marker_yes */ "tallennettu",
@@ -195,8 +203,8 @@ I18N.fi = localeValues([
   /* check.dhw.timeline_unavailable */ "Ajoitettuja jaksoja ei ole saatavilla. Historiaa ei päätellä summista.",
   /* check.dhw.timeline_empty */ "Ei valmiita aikaleimattuja mittausjaksoja tässä 24 tunnin näkymässä.",
   /* check.dhw.chart_title */ "Jäähtyminen valmiissa jaksossa",
-  /* check.dhw.timed_scope */ (n) => `Ajoitetut jaksot käynnistyksen/nollauksen jälkeen: ${n}, enintään 24 h. Maksimi ja lukumäärät voivat perustua myös tallennettuihin tuntitietoihin, eivät vain piirrettyihin jaksoihin.`,
-  /* check.dhw.blank */ "Tyhjä kohta: valmista aikaleimattua jaksoa ei ole saatavilla, ei nollajäähtymistä. Merkit kertovat esiintymisestä, eivät kestosta.",
+  /* check.dhw.timed_scope */ (n) => `Kaavion mitatut tunnit: ${n} (viimeiset 24 h). Maksimi ja lukumäärät voivat perustua myös tallennettuihin tuntitietoihin, eivät vain piirrettyihin jaksoihin.`,
+  /* check.dhw.blank */ "Viivoitetut kohdat: valmista aikaleimattua jaksoa ei ole saatavilla, ei nollajäähtymistä. Merkit kertovat esiintymisestä, eivät kestosta.",
   /* check.dhw.snapshot */ "Tilannekuva",
   /* check.dhw.stale */ "Varaajan jäähtymisen nykyiset mittaustiedot puuttuvat tai ovat vanhentuneet; päättyneet jaksot säilyvät historiallisina havaintoina.",
   /* check.dhw.limit */ "R5T mittaa yhtä kohtaa kerrostuneessa varaajassa, ei varaajan energiaa. Pumpun ja vedenoton kaltaiset merkit eivät osoita syytä eivätkä vedenottoa.",
@@ -297,7 +305,7 @@ I18N.fi = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Päättyi ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Kävi vielä viime lukemalla.",
   /* check.cycling.cause_unavailable */ "Ei tarkempia tietoja",
-  /* check.cycling.cause_since_boot */ "Käynnistys- ja pysäytyssyyt tallennetaan vasta viimeisimmästä uudelleenkäynnistyksestä alkaen.",
+  /* check.cycling.cause_older_unavailable */ "Näiden aiempien käyntijaksojen tallennettuja käynnistys- ja pysäytystietoja ei ole saatavilla.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · keskiarvo ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

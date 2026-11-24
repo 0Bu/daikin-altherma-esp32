@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -182,8 +182,16 @@ I18N.nb = localeValues([
   /* check.status.experimental */ "TESTVIS",
   /* check.status.unavailable */ "N/A",
   /* check.status.no_window */ "INGEN MÅLEPERIODE",
-  /* check.dhw.maximum */ "Registrert maksimum",
-  /* check.dhw.measurement */ "Netto avkjøling over én time ved tankføler R5T.",
+  /* check.dhw.maximum */ "Største temperaturfall per time ved tankføleren",
+  /* check.dhw.hour_unit */ "°C per time",
+  /* check.dhw.timeline */ "24-timers historikk",
+  /* check.dhw.context_title */ "Årsak uklar",
+  /* check.dhw.context_hour */ "Målt time med denne verdien",
+  /* check.dhw.context_missing */ "Tidspunkt og omstendigheter for denne målingen er ukjente.",
+  /* check.dhw.context_pump */ "Varmepumpens interne vannpumpe var i drift i løpet av denne timen.",
+  /* check.dhw.context_draw */ "Det raske temperaturfallet kan skyldes tapping av varmtvann eller rask avkjøling.",
+  /* check.dhw.context_quiet */ "Verken pumpeaktivitet eller et temperaturfall som ligner tapping, ble registrert. Varmtvann kan likevel ha blitt tappet.",
+  /* check.dhw.context_selected */ "Årsaken til temperaturfallet er fortsatt uklar.",
   /* check.dhw.hint */ "En time uten registrerte pumpe-/tappemarkører nådde prosjektets veiledende terskel.",
   /* check.dhw.before_snapshot */ (d) => `${d} før øyeblikksbildet`,
   /* check.dhw.marker_yes */ "registrert",
@@ -195,8 +203,8 @@ I18N.nb = localeValues([
   /* check.dhw.timeline_unavailable */ "Målevinduer med tider er utilgjengelige. Historikk utledes ikke fra summene.",
   /* check.dhw.timeline_empty */ "Ingen fullførte målevinduer med tider i denne 24-timersvisningen.",
   /* check.dhw.chart_title */ "Avkjøling per fullført målevindu",
-  /* check.dhw.timed_scope */ (n) => `Målevinduer med tider siden omstart/nullstilling: ${n}, opptil 24 h. Maksimum og tellinger kan også bygge på lagrede timedata, ikke bare de viste målevinduene.`,
-  /* check.dhw.blank */ "Tomt: intet fullført målevindu med tider tilgjengelig, ikke null avkjøling. Markører viser forekomst, ikke varighet.",
+  /* check.dhw.timed_scope */ (n) => `Målte timer i diagrammet: ${n} (siste 24 t). Maksimum og tellinger kan også bygge på lagrede timedata, ikke bare de viste målevinduene.`,
+  /* check.dhw.blank */ "Skraverte områder: intet fullført målevindu med tider tilgjengelig, ikke null avkjøling. Markører viser forekomst, ikke varighet.",
   /* check.dhw.snapshot */ "Øyeblikksbilde",
   /* check.dhw.stale */ "Aktuelle måleverdier for tankavkjøling mangler eller er utdaterte; fullførte målevinduer er fortsatt historiske observasjoner.",
   /* check.dhw.limit */ "R5T måler ett punkt i en sjiktet tank, ikke tankens energi. Pumpe- og tappelignende markører beviser verken årsak eller vannuttak.",
@@ -297,7 +305,7 @@ I18N.nb = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Slutt ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Aktiv ved siste avlesning.",
   /* check.cycling.cause_unavailable */ "Ingen detaljer",
-  /* check.cycling.cause_since_boot */ "Årsaker til start og stopp registreres først fra siste omstart.",
+  /* check.cycling.cause_older_unavailable */ "Lagrede start- og stoppdetaljer er ikke tilgjengelige for disse eldre syklusene.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

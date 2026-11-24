@@ -20,7 +20,8 @@
 //   "link" — the X10A link cache (RX/TX pins, protocol, observation identity). Its writers are the
 //            detection commit and an X10A /set_hp; a service save only maintains it.
 //   "gas"  — the optional gas-comparison tariff blob (DKG1 v1, written only by
-//            /set_gas_comparison) so "cfg" stays v21 and downgrades/rollbacks never drop credentials.
+//            /set_gas_comparison) so "cfg" stays v21 and downgrades/rollbacks never drop
+//            credentials.
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>

@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -182,8 +182,16 @@ I18N.fr = localeValues([
   /* check.status.experimental */ "À L’ESSAI",
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "AUCUNE FENÊTRE",
-  /* check.dhw.maximum */ "Maximum enregistré",
-  /* check.dhw.measurement */ "Refroidissement net sur une heure à la sonde R5T du ballon.",
+  /* check.dhw.maximum */ "Plus forte baisse horaire à la sonde du ballon",
+  /* check.dhw.hour_unit */ "°C par heure",
+  /* check.dhw.timeline */ "Historique sur 24 h",
+  /* check.dhw.context_title */ "Cause indéterminée",
+  /* check.dhw.context_hour */ "Heure de mesure avec ce taux",
+  /* check.dhw.context_missing */ "L’heure et les circonstances de cette mesure ne sont pas disponibles.",
+  /* check.dhw.context_pump */ "La pompe à eau interne de la pompe à chaleur a fonctionné au cours de cette heure.",
+  /* check.dhw.context_draw */ "La baisse rapide peut correspondre à un puisage d’eau chaude ou à un refroidissement rapide.",
+  /* check.dhw.context_quiet */ "Aucun fonctionnement de la pompe ni baisse évoquant un puisage n’a été détecté. Un puisage d’eau chaude reste possible.",
+  /* check.dhw.context_selected */ "La cause de cette baisse reste indéterminée.",
   /* check.dhw.hint */ "Une heure sans indice de pompe ou de puisage enregistré a atteint le seuil indicatif du projet.",
   /* check.dhw.before_snapshot */ (d) => `${d} avant l’instantané`,
   /* check.dhw.marker_yes */ "enregistré",
@@ -195,8 +203,8 @@ I18N.fr = localeValues([
   /* check.dhw.timeline_unavailable */ "Fenêtres horodatées indisponibles. Aucun historique n’est déduit des totaux.",
   /* check.dhw.timeline_empty */ "Aucune fenêtre horodatée terminée disponible dans cette vue sur 24 h.",
   /* check.dhw.chart_title */ "Refroidissement par fenêtre terminée",
-  /* check.dhw.timed_scope */ (n) => `Fenêtres horodatées depuis le redémarrage/la remise à zéro : ${n}, sur 24 h au plus. Le maximum et les décomptes peuvent aussi provenir de données horaires sauvegardées, pas seulement des fenêtres tracées.`,
-  /* check.dhw.blank */ "Vide : aucune fenêtre horodatée terminée disponible, pas un refroidissement nul. Les marques indiquent une présence, pas une durée.",
+  /* check.dhw.timed_scope */ (n) => `Heures mesurées dans le graphique : ${n} (dernières 24 h). Le maximum et les décomptes peuvent aussi provenir de données horaires sauvegardées, pas seulement des fenêtres tracées.`,
+  /* check.dhw.blank */ "Zones hachurées : aucune fenêtre horodatée terminée disponible, pas un refroidissement nul. Les marques indiquent une présence, pas une durée.",
   /* check.dhw.snapshot */ "Instantané",
   /* check.dhw.stale */ "Les mesures actuelles du refroidissement du ballon ECS manquent ou sont périmées ; les fenêtres terminées restent des observations historiques.",
   /* check.dhw.limit */ "R5T mesure un point du ballon stratifié, pas son énergie. Les indices de pompe et de puisage ne prouvent ni la cause ni une consommation d’eau.",
@@ -297,7 +305,7 @@ I18N.fr = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Fin ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Actif au dernier relevé.",
   /* check.cycling.cause_unavailable */ "Sans détails",
-  /* check.cycling.cause_since_boot */ "Les causes de démarrage et d'arrêt sont enregistrées à partir du dernier redémarrage.",
+  /* check.cycling.cause_older_unavailable */ "Aucun détail enregistré sur le démarrage ou l’arrêt n’est disponible pour ces anciens cycles.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

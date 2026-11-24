@@ -363,11 +363,16 @@ def main() -> int:
     if args.pack_startup_script is None:
         minified = minify_page(source)
     else:
+        from build_locale_bundle import compute_locale_asset_tag
         from pack_startup_script import pack_startup_script, validate_assembled_app
 
         try:
             validate_assembled_app(source, args.pack_startup_script)
-            minified = pack_startup_script(minify_page(source))
+            locale_dir = args.pack_startup_script.resolve().parent / "locales"
+            if not locale_dir.is_dir():
+                raise ValueError(f"missing locale directory beside {args.pack_startup_script}")
+            locale_tag = compute_locale_asset_tag(locale_dir)
+            minified = pack_startup_script(minify_page(source), locale_tag=locale_tag)
         except (OSError, ValueError) as error:
             print(f"dashboard: {error}", file=sys.stderr)
             return 2

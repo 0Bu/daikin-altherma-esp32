@@ -677,7 +677,7 @@ async function ensureDerived(id, source = "x10a") {
 // vector-effect="non-scaling-stroke" — otherwise a wide panel would smear the line horizontally.
 // No internal padding: the geometry uses the full box and the container lets the stroke overflow,
 // which keeps the "now" marker's percentage mapping (below) exactly the plot's own scale.
-const HIST_W = 320, HIST_H = 72;
+const HIST_W = 320, HIST_H = 88;
 
 // The plot's vertical scale, derived once and shared by the renderer AND the cursor. It used to be
 // computed in both places, which is a two-copy invariant of the worst kind: a change to the padding
@@ -693,10 +693,81 @@ function histScale(pts, sampleCount, id = "") {
   const y1 = isPressure ? Math.max(2.2, hi + Math.max(0.25, hi * 0.12)) : hi + pad;
   const n = sampleCount || pts.length;
   return {
-    lo, hi,
+    lo, hi, y0, y1,
     X: (i) => (n === 1 ? HIST_W : (i * HIST_W) / (n - 1)),
     Y: (v) => HIST_H - ((v - y0) / (y1 - y0)) * HIST_H,
   };
+}
+
+const histTickFormatters = new Map();
+function histTickFormat(v, step) {
+  const num = Math.abs(v) < 1e-9 ? 0 : v;
+  let minFrac = 0, maxFrac = 0;
+  if (step < 1) {
+    if (Math.abs(step * 10 - Math.round(step * 10)) < 1e-6) {
+      minFrac = 1; maxFrac = 1;
+    } else {
+      maxFrac = 2;
+    }
+  } else if (Math.abs(step - Math.round(step)) >= 1e-6) {
+    maxFrac = 1;
+  }
+  const key = `${LANG}:${minFrac}:${maxFrac}`;
+  let fmt = histTickFormatters.get(key);
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(LANG, { minimumFractionDigits: minFrac, maximumFractionDigits: maxFrac });
+    histTickFormatters.set(key, fmt);
+  }
+  return fmt.format(num);
+}
+
+function histNiceTicks(y0, y1, Y, height = HIST_H, { integer = false, avoidY = [] } = {}) {
+  const span = y1 - y0;
+  if (!(span > 0) || !Number.isFinite(span)) return { step: 1, ticks: [] };
+  const minY = 7, maxY = height - 7, minGapPx = 16;
+  const bases = integer ? [1, 2, 5] : [1, 2, 2.5, 5];
+  const mag = 10 ** Math.floor(Math.log10(span / 4));
+  const steps = [...new Set([0.1, 1, 10].flatMap((e) =>
+    bases.map((b) => Number((b * mag * e).toPrecision(12)))
+  ))].filter((s) => s > 0 && (!integer || (s >= 1 && Math.abs(s - Math.round(s)) < 1e-6)))
+    .sort((a, b) => a - b);
+  let best = null;
+  for (const step of steps) {
+    const start = Math.ceil((y0 - 1e-9) / step) * step;
+    const ticks = [];
+    let spaced = true;
+    for (let k = 0; k < 64; k++) {
+      const raw = start + k * step;
+      if (raw > y1 + 1e-9) break;
+      const v = Math.abs(raw) < step * 1e-6 ? 0 : Number(raw.toPrecision(12)) || 0;
+      const y = Y(v);
+      if (y < minY || y > maxY) continue;
+      if (avoidY.some((ay) => Math.abs(y - ay) < 12)) continue;
+      if (ticks.length && Math.abs(ticks[ticks.length - 1].y - y) < minGapPx) {
+        spaced = false;
+        break;
+      }
+      ticks.push({ v, y });
+    }
+    if (!spaced || !ticks.length) continue;
+    if (ticks.length >= 3 && ticks.length <= 4) return { step, ticks };
+    if (!best || (ticks.length === 2 && best.ticks.length !== 2) ||
+        (best.ticks.length === 1 && ticks.length > 1)) {
+      best = { step, ticks };
+    }
+  }
+  return best || { step: 1, ticks: [] };
+}
+
+function histYGridHtml(scale, unit, { avoidY = [], labelCls = "", height = HIST_H, width = HIST_W } = {}) {
+  const { step, ticks } = histNiceTicks(scale.y0, scale.y1, scale.Y, height, { avoidY });
+  let svg = "", labels = "";
+  for (const tick of ticks) {
+    const text = histTickFormat(tick.v, step) + (unit ? " " + unit : "");
+    svg += `<line class="vhist-grid" x1="0" y1="${tick.y.toFixed(1)}" x2="${width}" y2="${tick.y.toFixed(1)}" vector-effect="non-scaling-stroke"/>`;
+    labels += `<span class="vhist-y-label${labelCls ? " " + labelCls : ""} num" style="top:${tick.y.toFixed(1)}px">${esc(text)}</span>`;
+  }
+  return { svg, yAxis: labels ? `<div class="vhist-y" aria-hidden="true">${labels}</div>` : "" };
 }
 
 const PRESSURE_LOW_BAR = 1.0;
@@ -1507,7 +1578,8 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   // grows with the board; after that every source remains a rolling day. A source that started or
   // changed later contributes explicit null gaps, never a shorter axis or fabricated flat data.
   const full  = n * view.dt >= 23.5 * 3600;
-  const { lo, hi, X, Y } = histScale(allPts, n, id);
+  const scale = histScale(allPts, n, id);
+  const { lo, hi, X, Y } = scale;
   const isPressure = id === "water_pressure";
 
   // Contiguous runs only: each becomes one light area with its darker upper-edge line, so every
@@ -1565,18 +1637,22 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
     }).join("");
   }
   const aux = id === "dhw_tank" ? dhwAuxPhases(view) : [];
-  let phaseBands = "", threshSvg = "", threshHtml = "";
+  let phaseBands = "", threshBands = "", threshLines = "", threshHtml = "";
+  const avoidY = [];
   if (isPressure) {
     const yLow = Y(PRESSURE_LOW_BAR), yCrit = Y(PRESSURE_CRIT_BAR);
-    threshSvg =
+    avoidY.push(yLow, yCrit);
+    threshBands =
       `<rect class="vhist-band vhist-band-low" x="0" y="${yLow.toFixed(1)}" width="${HIST_W}" height="${Math.max(0, yCrit - yLow).toFixed(1)}"/>` +
-      `<rect class="vhist-band vhist-band-crit" x="0" y="${yCrit.toFixed(1)}" width="${HIST_W}" height="${Math.max(0, HIST_H - yCrit).toFixed(1)}"/>` +
+      `<rect class="vhist-band vhist-band-crit" x="0" y="${yCrit.toFixed(1)}" width="${HIST_W}" height="${Math.max(0, HIST_H - yCrit).toFixed(1)}"/>`;
+    threshLines =
       `<line class="vhist-thresh low" x1="0" y1="${yLow.toFixed(1)}" x2="${HIST_W}" y2="${yLow.toFixed(1)}" vector-effect="non-scaling-stroke"/>` +
       `<line class="vhist-thresh crit" x1="0" y1="${yCrit.toFixed(1)}" x2="${HIST_W}" y2="${yCrit.toFixed(1)}" vector-effect="non-scaling-stroke"/>`;
     threshHtml =
       `<span class="vhist-thresh-label low mono num" style="top:${((yLow / HIST_H) * 100).toFixed(2)}%" aria-hidden="true">${esc(histFmt1(PRESSURE_LOW_BAR))} bar</span>` +
       `<span class="vhist-thresh-label crit mono num" style="top:${((yCrit / HIST_H) * 100).toFixed(2)}%" aria-hidden="true">${esc(histFmt1(PRESSURE_CRIT_BAR))} bar</span>`;
   }
+  const grid = histYGridHtml(scale, shownUnit, { avoidY });
   const legendItems = (identifySource || view.series.length > 1 ||
     ["modbus", "room"].includes(view.series[0].source))
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
@@ -1619,22 +1695,23 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   const legend = legendItems.length
     ? `<div class="vhist-legend">${legendItems.join("")}</div>`
     : "";
+  const axis = `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
+    `<span>${esc(histAxisEnd(view))}</span></div>`;
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
-    `<div class="vhist-graph">` +
+    `<div class="vhist-graph${grid.yAxis ? " vhist-has-y" : ""}">` + grid.yAxis +
       histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", chartName || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}">` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshSvg}${phaseBands}${area}${line}${dots}</svg>` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${phaseBands}${area}${line}${dots}</svg>` +
         threshHtml + nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
-      `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+      `</div>` + axis + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
-    `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
-      `<span>${esc(histAxisEnd(view))}</span></div>` + histUnavailableHtml(view) +
-      (modbusFlowUnverified(view) ? `<div class="vhist-note">${esc(t("hist.modbus_flow_unverified"))}</div>` : ""),
+    histUnavailableHtml(view) +
+    (modbusFlowUnverified(view) ? `<div class="vhist-note">${esc(t("hist.modbus_flow_unverified"))}</div>` : ""),
     view.series.length > 1 ? "vhist-multi" : ""
   );
 }
@@ -1755,17 +1832,37 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
         }).join("");
   }
 
+  const visible = histVisibleSeries(view);
+  const axisSeries = visible.find((s) => plotted.includes(s) ||
+    (timedForecast && WEATHER_FORECAST_SERIES.some((spec) => spec.measured === s.source))) || null;
+  const axisSpec = axisSeries && WEATHER_FORECAST_SERIES.find((spec) => spec.measured === axisSeries.source);
+  const axisScale = geometry && axisSpec ? geometry.scaleRanges[axisSpec.key]
+    : (axisSeries && plotted.includes(axisSeries)
+        ? histScale(axisSeries.v.map(v => v == null ? null : v / 10), n)
+        : null);
+  const axisUnit = axisSeries?.unit || axisSpec?.unit || "";
+  const axisCls = axisSeries ? env3SeriesClass(axisSeries.source) : "";
+  const grid = axisScale ? histYGridHtml(axisScale, axisUnit, { labelCls: axisCls }) : { svg: "", yAxis: "" };
+
+  const axis = forecastAreas
+    ? `<div class="vhist-axis vhist-axis-future" style="--now-p:${(nowFrac * 100).toFixed(3)}">` +
+        `<span>${n ? esc(histAxisStart(view, spanH)) : ""}</span>` +
+        `<span class="vhist-axis-now">${esc(t("hist.now"))}</span>` +
+        `<span>${esc(t("hist.in_hours", futureH))}</span></div>`
+    : `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
+        `<span>${esc(histAxisEnd(view))}</span></div>`;
+
   const chart = wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(!n ? t("hist.forecast") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
-    `<div class="vhist-graph">` +
+    `<div class="vhist-graph${grid.yAxis ? " vhist-has-y" : ""}">` + grid.yAxis +
       histTipsHtml(view, pi, pinFrac) +
       `<div class="vhist-plot" data-hist="${view.id}"${histRevision(view)} data-n="${n}" ` +
         `data-measured-p="${(measuredEndFrac * 100).toFixed(3)}" tabindex="0" role="img" ` +
         `aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", t("env.history_title"),
           pi >= 0 ? scrubText(view, pi) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">` +
-          `${areas}${forecastAreas}${lines}${forecastLines}${dots}` +
+          `${grid.svg}${areas}${forecastAreas}${lines}${forecastLines}${dots}` +
           (forecastAreas ? `<line class="vhist-forecast-divider" x1="${timeX(forecast.now).toFixed(1)}" y1="0" ` +
             `x2="${timeX(forecast.now).toFixed(1)}" y2="${HIST_H}" vector-effect="non-scaling-stroke"/>` : "") +
           `</svg>${nowDots}${pinCross}${pinMarks}` +
@@ -1775,15 +1872,8 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
         (forecastAreas ? WEATHER_FORECAST_SERIES.map((spec) =>
           `<span class="vhist-mark vhist-live ${spec.cls}" data-source="${spec.source}" hidden></span>`
         ).join("") : "") +
-      `</div>` + histTimesHtml(view, pi, pinFrac) +
-    `</div>` +
-    (forecastAreas
-      ? `<div class="vhist-axis vhist-axis-future" style="--now-p:${(nowFrac * 100).toFixed(3)}">` +
-          `<span>${n ? esc(histAxisStart(view, spanH)) : ""}</span>` +
-          `<span class="vhist-axis-now">${esc(t("hist.now"))}</span>` +
-          `<span>${esc(t("hist.in_hours", futureH))}</span></div>`
-      : `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
-          `<span>${esc(histAxisEnd(view))}</span></div>`) + histUnavailableHtml(view),
+      `</div>` + axis + histTimesHtml(view, pi, pinFrac) +
+    `</div>` + histUnavailableHtml(view),
     "vhist-multi"
   );
   return view.separateForecast ? chart + env3HistHtml(historyView(ENV3_FORECAST_ID, "", view.separateForecast)) : chart;
@@ -1794,7 +1884,7 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
 // and pointer capture keeps a drag tracking after it leaves the plot. The plot is `touch-action:
 // pan-y` (CSS), which is the load-bearing half on a phone — it hands VERTICAL gestures back to the
 // page so the user can still scroll past the chart, while horizontal movement becomes a scrub.
-// Claiming both axes would trap the page scroll inside a 72 px box.
+// Claiming both axes would trap the page scroll inside an 88 px box.
 
 // Where a sample sits, as a fraction 0..1 of the plot width. Mirrors X() in histHtml — a lone
 // sample is drawn at the right edge, which is also where "now" is.
@@ -1822,18 +1912,21 @@ function computeForecastScrubView(h) {
   if (!(domainSpan > 0)) return null;
   const measuredEnd = h.t0 + Math.max(0, h.v.length - 1) * h.dt;
   const xFrac = (time) => Math.max(0, Math.min(1, (time - h.t0) / domainSpan));
-  const scales = {};
+  const scales = {}, scaleRanges = {};
   for (const spec of WEATHER_FORECAST_SERIES) {
     const measured = h.series.find((s) => s.source === spec.measured);
     const scaleValues = measured ? measured.v.map((v) => v == null ? null : v / 10) : [];
     const current = forecast.anchor[spec.key];
     if (current != null) scaleValues.push(current);
     scaleValues.push(...points.map((p) => p[spec.key]));
-    scales[spec.key] = histScale(scaleValues, h.v.length).Y;
+    const sc = histScale(scaleValues, h.v.length);
+    scales[spec.key] = sc.Y;
+    scaleRanges[spec.key] = { y0: sc.y0, y1: sc.y1, Y: sc.Y };
   }
   return {
     points,
     scales,
+    scaleRanges,
     measuredFrac: xFrac(measuredEnd),
     nowFrac: xFrac(forecast.now),
     xFrac,
@@ -1930,7 +2023,7 @@ function expireFallbackHistoryPins() {
   }
 }
 // Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
-// you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
+// you just made is the obvious way to dismiss it, and needs no extra affordance on an 88 px plot.
 function histPinToggle(id, i, source = "", captured) {
   const h = captured || historyView(id, source);
   if (!h) return;
@@ -2004,19 +2097,13 @@ function scrubTime(h, i) {
   return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
 }
 
-// Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
-// replacing them deduplicates samples without losing a possible wrapped line or phase label.
-// The reserved row stays present, so a comparison never moves the plot or its time labels.
+// Floating readout bubbles above the plot share one container without reserving empty space when
+// closed; the live bubble paints over the pinned bubble when both are visible.
 function histTipsHtml(h, pi, frac, aux = dhwAuxPhases(h)) {
-  // One auxiliary scan per rendered view, not one full-day scan for every sample's readout.
-  const shapes = [...new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
-    (_, i) => histReadout(h, i, aux).replace(/\d/g, "8")))].filter(Boolean);
   const pinned = pi >= 0 ? histReadout(h, pi, aux) : "";
-  return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num"${shapes.length ? "" : ' style="display:none"'} aria-hidden="true">` +
-    shapes.map(html => `<span>${html}</span>`).join("") +
-    `</div><div class="vhist-tip vhist-live mono num" hidden></div>` + (pinned
-      ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${pinned}</div>`
-      : "") + `</div>`;
+  return `<div class="vhist-tips"><div class="vhist-tip vhist-live mono num" hidden></div>` + (pinned
+    ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${pinned}</div>`
+    : "") + `</div>`;
 }
 
 function histTimesHtml(h, pi, frac) {
@@ -2364,7 +2451,7 @@ function replaceHistoryHtml(host, html) {
   else {
     const roots = root => [...root.querySelectorAll(".vhist")]
       .filter(node => !node.parentElement?.closest(".vhist"));
-    const prior = roots(host), template = document.createElement("template");
+    const template = document.createElement("template");
     template.innerHTML = html;
     // Retaining a chart's identity is insufficient in WebKit: moving it through a detached
     // template still invalidates its painting ancestors. Scalar polls can update text in place.
@@ -2414,6 +2501,7 @@ function replaceHistoryHtml(host, html) {
       for (const [a, b] of scopedUpdates) replaceHistoryHtml(a, b.innerHTML);
       return;
     }
+    const prior = roots(host);
     const rebuilding = S.trendRebuilding;
     S.trendRebuilding = true;
     try {
@@ -2716,6 +2804,26 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", p
     `</button>` +
     `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">${innerBody}</div></div></div>` +
     `</div>`;
+}
+
+const numericHistoryMarkup = new WeakMap();
+function cachedHistoryHtml(ring, id, unit, label, source = "", identifySource = false) {
+  if (ring?.err || !ring?.v?.length) return histHtml(id, unit, label, source, identifySource);
+  const signature = JSON.stringify([id, unit, label, source, identifySource, S.histEpoch, LANG,
+    historyRingRevision(ring), id === "flow" && modbusFlowScaleUnverified()]);
+  const pin = S.histPin.get(id);
+  const cached = numericHistoryMarkup.get(ring);
+  if (cached?.signature === signature && cached.pin === pin) return cached.html;
+  const html = histHtml(id, unit, label, source, identifySource);
+  numericHistoryMarkup.set(ring, { signature, pin, html });
+  return html;
+}
+
+function modbusHistoryHtml(id, unit, label) {
+  // Other series need live inputs, paired rings or the tank's auxiliary histories.
+  if (STATE_HIST[id] || id === "dhw_tank" || hasHist(id) || hasEnv3Hist(id) || hasRoomHist(id))
+    return histHtml(id, unit, label);
+  return cachedHistoryHtml(S.hist.get(histCacheKey(id, "modbus")), id, unit, label);
 }
 
 // One value row. If a description matches the label, render the accordion; otherwise a plain,
@@ -3054,7 +3162,7 @@ function modbusOnlyGroupHtml(all) {
     }
     return descAccordion(label, shown, val, "src-val-mb",
                          d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "", hid, unit,
-                         S.dashboardCard !== "modbus");
+                         S.dashboardCard !== "modbus", modbusHistoryHtml);
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.

@@ -200,7 +200,8 @@ function syncDashboardCards() {
   const browser = $("cardBrowser"), nav = $("cardNav"), host = $("valueGroups");
   if (!browser || !nav || !host) return;
   const cards = Array.from(host.querySelectorAll(".vgroup[data-dashboard-card]"));
-  browser.hidden = !cards.length;
+  const hideBrowser = cards.length === 0;
+  if (browser.hidden !== hideBrowser) browser.hidden = hideBrowser;
   const selected = cards.find(card => card.dataset.dashboardCard === S.dashboardCard) || cards[0];
   if (!selected) {
     setHtml("cardNav", "", false);
@@ -208,7 +209,8 @@ function syncDashboardCards() {
     return;
   }
   S.dashboardCard = selected.dataset.dashboardCard;
-  nav.setAttribute("aria-label", t("nav.cards"));
+  const navLabel = t("nav.cards");
+  if (nav.getAttribute("aria-label") !== navLabel) nav.setAttribute("aria-label", navLabel);
   const active = document.activeElement;
   const focused = nav.contains(active) ? active.dataset.card : null;
   setHtml("cardNav", cards.map((card, index) =>
@@ -216,12 +218,18 @@ function syncDashboardCards() {
     `data-card="${esc(card.dataset.dashboardCard)}" aria-pressed="false" aria-controls="valueGroups">` +
     `${dashboardCardIcon(card.dataset.dashboardCard)}` +
     `<span class="dashboard-card-label">${esc(card.dataset.dashboardLabel)}</span></button>`).join(""), false);
-  for (const card of cards) card.hidden = card !== selected;
+  for (const card of cards) {
+    const hidden = card !== selected;
+    if (card.hidden !== hidden) card.hidden = hidden;
+  }
   const buttons = [...nav.querySelectorAll("[data-card]")];
   const chosenButton = buttons.find(button => button.dataset.card === S.dashboardCard);
-  for (const button of buttons)
-    button.setAttribute("aria-pressed", String(button === chosenButton));
-  host.setAttribute("aria-labelledby", chosenButton.id);
+  for (const button of buttons) {
+    const pressed = String(button === chosenButton);
+    if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+  }
+  if (host.getAttribute("aria-labelledby") !== chosenButton.id)
+    host.setAttribute("aria-labelledby", chosenButton.id);
   if (focused && !nav.contains(active))
     (buttons.find(button => button.dataset.card === focused) || chosenButton).focus({ preventScroll: true });
   return selected;
@@ -1348,19 +1356,8 @@ const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 // Both rows are expandable exactly like a value row — same accordion, same chart, same scrub and pin
 // — and attach their series by TREND ID, since the row labels here are translated and there is no
 // catalog label to match on.
-const boardHistoryMarkup = new WeakMap();
 function boardHistoryHtml(id, unit, label) {
-  const ring = S.hist.get(id);
-  if (!ring) return histHtml(id, unit, label, "x10a");
-  const revision = historyRingRevision(ring);
-  const pin = S.histPin.get(id);
-  const cached = boardHistoryMarkup.get(ring);
-  if (cached?.id === id && cached.epoch === S.histEpoch && cached.lang === LANG &&
-      cached.pin === pin && cached.revision === revision)
-    return cached.html;
-  const html = histHtml(id, unit, label, "x10a");
-  boardHistoryMarkup.set(ring, { id, epoch: S.histEpoch, lang: LANG, pin, revision, html });
-  return html;
+  return cachedHistoryHtml(S.hist.get(id), id, unit, label, "x10a");
 }
 
 function memoryRows(sys) {
@@ -1530,6 +1527,14 @@ function checkupDuration(s) {
   return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
 }
 
+function cyclingRunContext(ctxByStart, start, stop, bootStart) {
+  const ctx = ctxByStart.get(start);
+  if (ctx?.restored !== true) return ctx;
+  // A saved explanation only belongs to a run with both observed edges before this boot.
+  return Number.isSafeInteger(stop) && stop === ctx.stop && bootStart != null && stop < bootStart
+    ? ctx : undefined;
+}
+
 function checkupCyclingShortRunCount(c) {
   const rec = c?.timeline?.records;
   if (c?.timeline?.run_edges !== true || !Array.isArray(rec)) return 0;
@@ -1545,10 +1550,13 @@ function checkupCyclingShortRunCount(c) {
     const at = r >>> 3, k = r & 7;
     if (k === 5) {
       gapRun = null;
-      run = { start: at, mode: ctxByStart.get(at)?.mode || null };
+      run = { start: at, mode: null };
     } else if (k === 6) {
       gapRun = null;
-      if (run && run.mode === "space" && at >= run.start && at - run.start < 300) shortN++;
+      if (run && at >= run.start && at - run.start < 300) {
+        const ctx = cyclingRunContext(ctxByStart, run.start, at, bootStart);
+        if ((ctx?.mode || run.mode) === "space") shortN++;
+      }
       run = null;
     } else if (k === 0) {
       if (run) { gapRun = run; gapAt = at; run = null; }
@@ -1560,7 +1568,7 @@ function checkupCyclingShortRunCount(c) {
         run = gapRun;
       }
       gapRun = null;
-      if (run && !ctxByStart.has(run.start)) {
+      if (run) {
         if (k === 3) run.mode = "space";
         else if (k === 2 || k === 4) run.mode = "other";
       }
@@ -1728,9 +1736,18 @@ function cyclingRichText(fn, ...items) {
   return out;
 }
 
+function cyclingFlowReference(ctx, flowTypical) {
+  const reference = ctx?.flow_reference_fixed === true || ctx?.restored === true
+    ? ctx.flow_typical_l_min
+    : flowTypical;
+  return Number.isFinite(reference) && reference > 0 ? reference : null;
+}
+
 function cyclingIsLowFlow(ctx, flowTypical) {
-  return Number.isFinite(ctx?.flow_l_min) && Number.isFinite(flowTypical) &&
-    flowTypical > 0 && ctx.flow_l_min <= flowTypical * 0.65;
+  const reference = cyclingFlowReference(ctx, flowTypical);
+  // Zero can come from the stop sample when no in-run flow was available.
+  return Number.isFinite(ctx?.flow_l_min) && ctx.flow_l_min > 0 &&
+    reference != null && ctx.flow_l_min <= reference * 0.65;
 }
 
 const CYCLING_STOP_KEYS = {
@@ -1755,9 +1772,7 @@ function cyclingStopSummaryText(r, flowTypical) {
 function collectPeriodRuns(model, from, to) {
   const runs = [];
   for (let i = from; i <= to; ++i) {
-    for (const r of model.hours[i].runs) {
-      runs.push({ ...r, ctx: model.runContextByStart.get(r.start) || null });
-    }
+    runs.push(...model.hours[i].runs);
   }
   return runs.sort((a, b) => a.start - b.start);
 }
@@ -1769,7 +1784,7 @@ function cyclingPeriodFindingHtml(model, from, to) {
   if (!runs.length) return esc(t("check.cycling.run_details_unavailable"));
   if (runs.every(r => !r.ctx)) {
     const preBoot = model.source === "x10a" && model.bootStart != null && runs.some(r => r.start < model.bootStart);
-    return esc(t(preBoot ? "check.cycling.cause_since_boot" : "check.cycling.cause_unavailable"));
+    return esc(t(preBoot ? "check.cycling.cause_older_unavailable" : "check.cycling.cause_unavailable"));
   }
 
   const heating = runs.filter(r => (r.ctx?.mode || r.mode) === "space");
@@ -1796,8 +1811,13 @@ function cyclingPeriodFindingHtml(model, from, to) {
   const flowVals = completedHeat.map(r => r.ctx?.flow_l_min).filter(v => Number.isFinite(v) && v > 0);
   const minFlow = flowVals.length ? Math.min(...flowVals) : null;
   const meanFlow = flowVals.length ? flowVals.reduce((a, b) => a + b, 0) / flowVals.length : null;
-  const typ = model.flowTypical;
-  const lowFlow = minFlow != null && typ != null && typ > 0 && minFlow <= typ * 0.65;
+  let lowestFlowStop = null;
+  for (const { ctx } of completedHeat) {
+    if (ctx?.stop_kind === "low_rps_above_target" && cyclingIsLowFlow(ctx, model.flowTypical) &&
+        (lowestFlowStop == null || ctx.flow_l_min < lowestFlowStop.flow_l_min)) {
+      lowestFlowStop = ctx;
+    }
+  }
 
   const fmtFind = (key, ...args) => {
     const raw = String(t(key, ...args));
@@ -1808,9 +1828,10 @@ function cyclingPeriodFindingHtml(model, from, to) {
     return esc(raw);
   };
 
-  if (isCycling && lowRps >= 2 && lowFlow) {
+  if (isCycling && lowRps >= 2 && lowestFlowStop) {
+    const typ = cyclingFlowReference(lowestFlowStop, model.flowTypical);
     const typTag = typ != null ? t("check.cycling.typ_tag", `~${histFmt1(typ)} L/min`) : "";
-    return fmtFind("check.cycling.find_low_flow", `${histFmt1(minFlow)} L/min`, typTag);
+    return fmtFind("check.cycling.find_low_flow", `${histFmt1(lowestFlowStop.flow_l_min)} L/min`, typTag);
   }
   if (isCycling && lowRps >= 2) {
     const flowStr = meanFlow != null ? `${histFmt1(meanFlow)} L/min` : t("check.fault_unknown");
@@ -1837,7 +1858,7 @@ function cyclingRunExplainHtml(r, fromExact, toExact, priorPauseS, flowTypical) 
     : "";
   const lwt = f1(ctx.lwt_c, "°C"), tgt = f1(ctx.target_c, "°C"), rwt = f1(ctx.rwt_c, "°C");
   const flow = f1(ctx.flow_l_min, "L/min");
-  const typ = Number.isFinite(flowTypical) && flowTypical > 0 ? `${histFmt1(flowTypical)} L/min` : null;
+  const typ = f1(cyclingFlowReference(ctx, flowTypical), "L/min");
   const sep = LANG === "ja" ? "、" : LANG === "zh" ? "，" : ", ";
   const startLwt = f1(ctx.start_lwt_c, "°C");
   const startTgt = f1(ctx.start_target_c, "°C") || tgt || null;
@@ -1898,7 +1919,7 @@ function cyclingPeriodDetailsHtml(model, from, to) {
   if (!model.hasContext) {
     if (runs.length) {
       const note = model.source === "x10a" && model.bootStart != null && runs.every(r => r.start < model.bootStart)
-        ? `<p class="vdesc-p checkup-period-finding">${esc(t("check.cycling.cause_since_boot"))}</p>` : "";
+        ? `<p class="vdesc-p checkup-period-finding">${esc(t("check.cycling.cause_older_unavailable"))}</p>` : "";
       return note + checkupCyclingRunsHtml(runs, model.wall);
     }
     const anyObserved = model.runEdges && model.hours.slice(from, to + 1).some(h => h.observed);
@@ -2059,8 +2080,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
   if (run && trace.live !== false && end - observedEnd <= 15) run.latest = observedEnd;
 
   const runContextByStart = new Map();
-  const hasContext = Array.isArray(checkObj?.run_contexts) && checkObj.run_contexts.length > 0;
-  if (hasContext) {
+  if (Array.isArray(checkObj?.run_contexts)) {
     for (const rc of checkObj.run_contexts) runContextByStart.set(rc.at, rc);
   }
   let latestContextHour = null;
@@ -2068,8 +2088,9 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
     const h = hours[i];
     let shortHeating = 0;
     for (const r of h.runs) {
-      const ctx = runContextByStart.get(r.start);
+      const ctx = cyclingRunContext(runContextByStart, r.start, r.stop, bootStart);
       if (ctx) {
+        r.ctx = ctx;
         latestContextHour = i;
         if (Number.isSafeInteger(ctx.stop) && ctx.stop >= r.start && r.stop == null) {
           r.stop = ctx.stop;
@@ -2081,6 +2102,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
     }
     h.isCycling = shortHeating >= 2;
   }
+  const hasContext = latestContextHour != null;
   const episodes = [];
   let openEp = null;
   for (let i = 0; i < 24; ++i) {
@@ -2128,7 +2150,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
   _cyclingModels.clear();
   _cyclingModels.set(scope, {
     hours, wall, clock, offsetStamp, episodes, latestContextHour, bootStart, source,
-    runContextByStart, prevRunByStart, hasContext,
+    prevRunByStart, hasContext,
     runEdges, rev: ++cyclingModelRev,
     flowTypical: Number.isFinite(checkObj?.flow_typical_l_min) ? checkObj.flow_typical_l_min : null,
     outdoorMean: Number.isFinite(checkObj?.outdoor_mean_c) ? checkObj.outdoor_mean_c : null,
@@ -2157,11 +2179,48 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj, source = "x10a") {
   const total = readable.length || count
     ? t("check.cycling.timed_starts", checkupCyclingCountPrefix(count) + t("check.starts", count))
     : t("sys.nodata");
+  let gridSvg = "", gridLabels = "";
+  if (count > 0) {
+    const yNum = v => 96 - v * 90 / count;
+    const mag = 10 ** Math.floor(Math.log10(Math.max(1, count / 4)));
+    const steps = [...new Set([0.1, 1, 10].flatMap(e =>
+      [1, 2, 5].map(b => Math.round(b * mag * e))
+    ))].filter(s => s >= 1).sort((a, b) => a - b);
+    let chosen = null;
+    for (const step of steps) {
+      const ticks = [];
+      let spaced = true;
+      for (let v = step; v <= count; v += step) {
+        const py = yNum(v);
+        if (py < 6 || py > 86) continue;
+        if (ticks.length && Math.abs(ticks[ticks.length - 1].py - py) < 17) {
+          spaced = false;
+          break;
+        }
+        ticks.push({ v, py });
+      }
+      if (!spaced || !ticks.length) continue;
+      if (ticks.length >= 3 && ticks.length <= 4) { chosen = ticks; break; }
+      if (!chosen || (ticks.length === 2 && chosen.length !== 2) ||
+          (chosen.length === 1 && ticks.length > 1)) {
+        chosen = ticks;
+      }
+    }
+    if (chosen) {
+      const intFmt = new Intl.NumberFormat(LANG, { maximumFractionDigits: 0 });
+      for (const tick of chosen) {
+        gridSvg += `<line class="vhist-grid" x1="0" y1="${tick.py.toFixed(2)}" x2="2400" y2="${tick.py.toFixed(2)}" vector-effect="non-scaling-stroke"/>`;
+        gridLabels += `<span class="vhist-y-label num" style="top:${(tick.py * 0.96).toFixed(2)}px">${esc(intFmt.format(tick.v))}</span>`;
+      }
+    }
+  }
   return `<div class="vhist checkup-cycling-chart checkup-cycling-timeline" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
     ` data-cycling="${esc(scope)}"${hasContext ? ' data-has-context="true"' : ""}><div class="checkup-chart-total mono num">${esc(total)}</div>` +
-    `<div class="checkup-chart-graph"><svg class="checkup-chart-plot" viewBox="0 0 2400 100" preserveAspectRatio="none" aria-hidden="true"><path d="${path}"/></svg>` +
+    `<div class="checkup-chart-body${gridLabels ? " vhist-has-y" : ""}">` +
+    (gridLabels ? `<div class="vhist-y checkup-chart-y" aria-hidden="true">${gridLabels}</div>` : "") +
+    `<div class="checkup-chart-graph"><svg class="checkup-chart-plot" viewBox="0 0 2400 100" preserveAspectRatio="none" aria-hidden="true">${gridSvg}<path d="${path}"/></svg>` +
     `<div class="checkup-chart-cols">${cols}</div></div><div class="vhist-axis checkup-chart-axis">` +
-    `<div class="checkup-chart-ticks">${axis}</div><span class="checkup-chart-span" aria-live="polite" hidden></span></div>` +
+    `<div class="checkup-chart-ticks">${axis}</div><span class="checkup-chart-span" aria-live="polite" hidden></span></div></div>` +
     `<div class="checkup-chart-legend">${legend}</div><div class="checkup-run-details" hidden></div></div>`;
 }
 
@@ -2661,7 +2720,7 @@ function checkupDhwEnergy(c) {
 }
 
 // Timed DHW windows are separate from the persisted diagnosis totals. No scalar, journal
-// bucket or previous snapshot can reconstruct a missing current-boot timeline.
+// bucket or previous browser snapshot can reconstruct exact evidence.
 function checkupDhwTimeline(c) {
   const trace = c?.timeline;
   const uint = n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff;
@@ -2714,18 +2773,24 @@ function syncCheckupDhwFreshness(trace, report, check) {
 // Called at status adoption as well as rendering: a held click/gesture cannot leave the
 // previous source or reset epoch's evidence interactive while its replacement is pending.
 function retireCheckupDhwTimeline() {
+  const report = S.status?.health, check = report?.checks?.find(c => c.id === "dhw_loss");
+  const trace = checkupDhwTimeline(check);
+  syncCheckupDhwFreshness(trace, report, check);
   const slot = globalThis.document?.getElementById?.("valueGroups")?.querySelector?.("[data-checkup-dhw]");
   if (!slot) return;
-  const report = S.status?.health, check = report?.checks?.find(c => c.id === "dhw_loss");
-  const trace = checkupDhwTimeline(check), scope = checkupDhwScope(trace, report);
-  syncCheckupDhwFreshness(trace, report, check);
+  const scope = checkupDhwScope(trace, report);
   if (slot.dataset.dhwScope !== scope) {
     if (S.cancelDhwDrag) S.cancelDhwDrag();
+    S.cancelDhwDrag = null;
     const focused = slot.contains?.(globalThis.document?.activeElement);
+    for (const evidence of slot.closest(".checkup-dhw-detail")?.querySelectorAll("[data-dhw-evidence]") || [])
+      evidence.hidden = true;
     slot.textContent = "";
     delete slot._dhwKey;
     slot.dataset.dhwScope = scope;
     dhwSelection = { scope, end: null };
+    // A transient omission can be followed by the same rendered text while a poll is held.
+    delete _html.valueGroups;
     if (focused) slot.closest(".vitem")?.querySelector('[data-desc="model:health_dhw_loss"]')
       ?.focus({ preventScroll: true });
   }
@@ -2739,10 +2804,29 @@ function syncCheckupDhwChart(card) {
 function renderCheckupDhwChart(slot, open = true) {
   const panel = slot.closest(".checkup-dhw-detail");
   if (panel) panel.inert = !open;
-  if (!open) {
-    if (S.cancelDhwDrag) S.cancelDhwDrag();
-    slot.textContent = "";
-    delete slot._dhwKey;
+  const item = slot.closest(".vitem");
+  if (open && item && !item._dhwDisclosures) {
+    item._dhwDisclosures = true;
+    item.addEventListener("toggle", e => {
+      const key = e.target.dataset?.dhwDisclosure;
+      if (!key) return;
+      const id = `dhw:${key}`;
+      if (e.target.open) S.descOpen.add(id); else S.descOpen.delete(id);
+      delete _html.valueGroups;
+      if (key === "timeline" && item.classList.contains("open") &&
+          S.stage === "dashboard" && !item.closest("[hidden]")) {
+        const timelineSlot = e.target.querySelector("[data-checkup-dhw]");
+        if (timelineSlot) renderCheckupDhwChart(timelineSlot);
+      }
+    }, true);
+  }
+  if (!open || !slot.closest('[data-dhw-disclosure="timeline"]')?.open) {
+    if (slot._dhwKey != null) {
+      if (S.cancelDhwDrag) S.cancelDhwDrag();
+      S.cancelDhwDrag = null;
+      slot.textContent = "";
+      delete slot._dhwKey;
+    }
     return;
   }
   const report = S.status?.health || {};
@@ -2764,32 +2848,32 @@ function renderCheckupDhwChart(slot, open = true) {
     paintCheckupDhwChart(chart);
     wireCheckupDhwChart(chart);
   }
-  const item = slot.closest(".vitem");
-  if (item && !item._dhwDisclosures) {
-    item._dhwDisclosures = true;
-    item.addEventListener("toggle", e => {
-      const key = e.target.dataset?.dhwDisclosure;
-      if (!key) return;
-      const id = `dhw:${key}`;
-      if (e.target.open) S.descOpen.add(id); else S.descOpen.delete(id);
-      delete _html.valueGroups;
-    }, true);
-  }
   syncCheckupDhwFreshness(trace, report, c);
 }
-function checkupDhwWindowTime(trace, w) {
+function checkupDhwWindowTime(trace, w, compact = false) {
   if (!trace.unix_s) {
-    const before = s => t("check.dhw.before_snapshot", checkupCyclingDuration(trace.window_end_s - s));
+    const duration = compact ? checkupDuration : checkupCyclingDuration;
+    const before = s => t("check.dhw.before_snapshot", duration(trace.window_end_s - s));
     return `${before(w.start_s)} – ${before(w.end_s)}`;
   }
-  const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "shortOffset" });
-  const at = s => stamp.format(new Date((trace.unix_s + s - trace.window_end_s) * 1000));
-  return `${at(w.start_s)} – ${at(w.end_s)}`;
+  const at = s => new Date((trace.unix_s + s - trace.window_end_s) * 1000);
+  const start = at(w.start_s), end = at(w.end_s);
+  // Offset changes can give a full elapsed hour identical local clock readings.
+  const short = compact && start.getTimezoneOffset() === end.getTimezoneOffset();
+  const precision = short ? {} : { second: "2-digit", timeZoneName: "shortOffset" };
+  const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric", hour: "2-digit",
+    minute: "2-digit", hourCycle: "h23", ...precision });
+  return short && stamp.formatRange ? stamp.formatRange(start, end)
+    : `${stamp.format(start)} – ${stamp.format(end)}`;
 }
 function checkupDhwMarkerText(w) {
   const marker = present => t(`check.dhw.marker_${present ? "yes" : "no"}`);
   return `${t("check.dhw.pump")}: ${marker(w.pump_marker)} · ${t("check.dhw.draw")}: ${marker(w.draw_marker)}`;
+}
+function checkupDhwContext(w) {
+  if (!w.pump_marker && !w.draw_marker) return t("check.dhw.context_quiet");
+  return [w.pump_marker && t("check.dhw.context_pump"), w.draw_marker && t("check.dhw.context_draw")]
+    .filter(Boolean).join(" ");
 }
 function checkupDhwChartHtml(trace, scope) {
   if (!trace) return `<div class="vdesc-p checkup-dhw-empty">${esc(t("check.dhw.timeline_unavailable"))}</div>`;
@@ -2807,7 +2891,7 @@ function checkupDhwChartHtml(trace, scope) {
     `<button type="button" data-dhw-action="previous" aria-label="${esc(t("check.dhw.previous"))}">‹</button>` +
     `<div class="checkup-dhw-readout" aria-live="off" aria-atomic="true">` +
     `<div class="vdesc-n num" data-dhw-readout="rate"></div><div data-dhw-readout="time"></div>` +
-    `<div data-dhw-readout="coverage"></div><div data-dhw-readout="markers"></div></div>` +
+    `<div data-dhw-readout="coverage"></div><div data-dhw-readout="context"></div></div>` +
     `<button type="button" data-dhw-action="next" aria-label="${esc(t("check.dhw.next"))}">›</button></div>` :
     `<div class="vdesc-p checkup-dhw-empty">${esc(t("check.dhw.timeline_empty"))}</div>`;
   return `<div class="vhist checkup-dhw-chart" data-dhw-timeline="${esc(scope)}" role="group"` +
@@ -2821,7 +2905,7 @@ function checkupDhwChartHtml(trace, scope) {
     `<span class="checkup-dhw-lane-label">${esc(t("check.dhw.pump"))}</span>${lane("pump")}` +
     `<span class="checkup-dhw-lane-label">${esc(t("check.dhw.draw"))}</span>${lane("draw")}</div>` +
     `<div class="checkup-dhw-caption">${esc(t("check.dhw.timed_scope", trace.windows.length))}</div>` +
-    `<div class="checkup-dhw-caption">${esc(t("check.dhw.blank"))}</div>` + readout + `</div>`;
+    `<div class="checkup-dhw-caption checkup-dhw-gap-caption">${esc(t("check.dhw.blank"))}</div>` + readout + `</div>`;
 }
 function checkupDhwText(node, value) {
   if (!node || node.textContent === value) return;
@@ -2872,7 +2956,8 @@ function paintCheckupDhwChart(chart, end = dhwSelection.end, announce = false) {
   text("time", checkupDhwWindowTime(trace, chosen));
   text("coverage", t("check.hour.coverage", checkupCyclingDuration(chosen.observed_s),
     checkupCyclingDuration(chosen.end_s - chosen.start_s)));
-  text("markers", checkupDhwMarkerText(chosen));
+  const context = checkupDhwContext(chosen);
+  text("context", chosen.rate_k_h > 0 ? `${context} ${t("check.dhw.context_selected")}` : context);
   const index = windows.indexOf(chosen);
   chart.querySelector('[data-dhw-action="previous"]').disabled = index === 0;
   chart.querySelector('[data-dhw-action="next"]').disabled = index === windows.length - 1;
@@ -2941,9 +3026,12 @@ function wireCheckupDhwChart(chart) {
     chart.addEventListener(event, finish);
 }
 function checkupDhwDetailHtml(c, fullSpan, report) {
-  const hasRate = checkupDhwHasRate(c), scope = checkupDhwScope(checkupDhwTimeline(c), report);
+  const hasRate = checkupDhwHasRate(c), trace = checkupDhwTimeline(c), scope = checkupDhwScope(trace, report);
+  // The timed and aggregate stores retain different hours. An equal rate identifies an
+  // example with that reading, not which exact window contributed the aggregate maximum.
+  const matching = hasRate && trace?.windows.reduce((hour, w) => w.rate_k_h === c.max_k_h ? w : hour, null);
   const count = Number.isInteger(c.windows) && c.windows >= 0 ? c.windows.toLocaleString(LANG) : "—";
-  let assessment = hasRate ? t("check.dhw.measurement")
+  const assessment = hasRate ? (matching ? checkupDhwContext(matching) : t("check.dhw.context_missing"))
     : c.blocked ? t("check.detail.dhw_blocked", 0, "", "")
     : c.verdict === "unavailable" ? t("check.detail.unavailable")
     : Number(c.settle_remaining_s) > 0
@@ -2951,22 +3039,28 @@ function checkupDhwDetailHtml(c, fullSpan, report) {
     : Number(c.candidate_s) > 0
       ? t("check.detail.dhw_candidate", count, "", checkupDuration(c.candidate_s), checkupDuration(3600))
       : t("check.detail.dhw_waiting", count, "");
-  if (hasRate && c.evidence === "heuristic" && ["info", "warn"].includes(c.verdict))
-    assessment += ` ${t("check.dhw.hint")}`;
-  const value = hasRate ? `${esc(checkupFmt1(c.max_k_h))}<span class="checkup-dhw-unit">K/h</span>`
-    : esc(checkupStatusText(c));
+  const hint = hasRate && c.evidence === "heuristic" && ["info", "warn"].includes(c.verdict);
+  const arrow = c.max_k_h > 0 ? `<span class="checkup-dhw-arrow" aria-hidden="true">↓</span>` : "";
+  const hero = hasRate ? `<div class="checkup-dhw-hero">` +
+    `<div class="checkup-dhw-heading">${esc(t("check.dhw.maximum"))}</div>` +
+    `<div class="checkup-dhw-value num has-rate">${esc(checkupFmt1(c.max_k_h))}` +
+    `<span class="checkup-dhw-unit">${esc(t("check.dhw.hour_unit"))}</span>${arrow}</div>` +
+    (matching ? `<div class="checkup-dhw-time" data-dhw-evidence>${esc(t("check.dhw.context_hour"))}<br>` +
+      `${esc(checkupDhwWindowTime(trace, matching, true))}</div>` : "") + `</div>`
+    : `<div class="checkup-dhw-value num">${esc(checkupStatusText(c))}</div>`;
   const energy = checkupDhwEnergy(c);
   const disclosure = (key, label, body) => `<details class="checkup-dhw-disclosure" data-dhw-disclosure="${key}"` +
     `${S.descOpen.has(`dhw:${key}`) ? " open" : ""}><summary>${esc(t(label))}${chevIcon}</summary>` +
     `<div class="checkup-dhw-disclosure-body">${body}</div></details>`;
-  return `<div class="checkup-dhw-detail"${S.descOpen.has("model:health_dhw_loss") ? "" : " inert"}><div class="checkup-dhw-hero">` +
-    (hasRate ? `<div class="checkup-dhw-heading">${esc(t("check.dhw.maximum"))}</div>` : "") +
-    `<div class="checkup-dhw-value num${hasRate ? " has-rate" : ""}">${value}</div>` +
-    `<div class="vdesc-p checkup-dhw-assessment">${esc(assessment)}</div></div>` +
+  return `<div class="checkup-dhw-detail"${S.descOpen.has("model:health_dhw_loss") ? "" : " inert"}>${hero}` +
+    `<div class="vdesc-p checkup-dhw-assessment"${matching ? " data-dhw-evidence" : ""}>` +
+    (hasRate && c.max_k_h > 0 ? `<strong class="vdesc-n">${esc(t("check.dhw.context_title"))}</strong><br>` : "") +
+    `${esc(assessment)}</div>` +
+    (hint ? descParaHtml(esc(t("check.dhw.hint"))) : "") +
     `<div class="vdesc-p checkup-dhw-stale">${esc(t("check.dhw.stale"))}</div>` +
-    `<div data-checkup-dhw data-dhw-scope="${esc(scope)}"></div>` +
-    `<div class="vdesc-p checkup-dhw-limit">${esc(t("check.dhw.limit"))}</div>` +
-    disclosure("basis", "check.dhw.basis", checkupGenericDetailHtml(c, fullSpan, report)) +
+    disclosure("timeline", "check.dhw.timeline", `<div data-checkup-dhw data-dhw-scope="${esc(scope)}"></div>`) +
+    disclosure("basis", "check.dhw.basis", descParaHtml(esc(t("check.dhw.limit"))) +
+      checkupGenericDetailHtml(c, fullSpan, report)) +
     (energy ? disclosure("energy", "check.dhw.energy", descParaHtml(esc(energy))) : "") + `</div>`;
 }
 
@@ -3281,19 +3375,8 @@ function checkupValue(c) {
   return (c.id === "fault" && c.verdict === "collecting") ? st : (checkupMetricValue(c) || st);
 }
 
-const checkupPressureHistoryMarkup = new WeakMap();
 function checkupPressureHistoryHtml(id, unit, label) {
-  const ring = S.hist.get(id);
-  if (!ring) return histHtml(id, unit, label, "x10a", true);
-  const revision = historyRingRevision(ring);
-  const pin = S.histPin.get(id);
-  const cached = checkupPressureHistoryMarkup.get(ring);
-  if (cached?.id === id && cached.label === label && cached.epoch === S.histEpoch &&
-      cached.lang === LANG && cached.pin === pin && cached.revision === revision)
-    return cached.html;
-  const html = histHtml(id, unit, label, "x10a", true);
-  checkupPressureHistoryMarkup.set(ring, { id, label, epoch: S.histEpoch, lang: LANG, pin, revision, html });
-  return html;
+  return cachedHistoryHtml(S.hist.get(id), id, unit, label, "x10a", true);
 }
 
 const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "pressure", "retries"]);

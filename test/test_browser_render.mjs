@@ -1466,27 +1466,34 @@ async function assertPlantDiagnosis(page, context) {
           const body = document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').querySelector('.vdesc-body');
           const detail = body.querySelector('.checkup-dhw-detail');
           const basis = detail?.querySelector('[data-dhw-disclosure="basis"]');
+          const assessment = detail?.querySelector('.checkup-dhw-assessment');
+          const timeline = detail?.querySelector('[data-checkup-dhw]');
           return { wrapper: body.firstElementChild === detail, heroFirst: detail?.firstElementChild?.classList.contains('checkup-dhw-hero'),
             value: detail?.querySelector('.checkup-dhw-value')?.firstChild?.textContent.trim(),
             unit: detail?.querySelector('.checkup-dhw-unit')?.textContent,
-            assessment: detail?.querySelector('.checkup-dhw-assessment')?.textContent,
+            assessmentTitle: assessment?.querySelector('strong')?.textContent,
+            assessment: assessment?.lastChild?.textContent.trim(),
+            hint: Array.from(detail?.querySelectorAll('.vdesc-p') || [])
+              .some(node => node.textContent === t('check.dhw.hint')),
             disclosures: Array.from(detail?.querySelectorAll('details[data-dhw-disclosure]') || [], node =>
               ({key:node.dataset.dhwDisclosure,tag:node.tagName,open:node.open,named:!!node.querySelector('summary')?.textContent.trim()})),
             normal: basis?.querySelector('.vdesc-n')?.textContent,
-            empty: detail?.querySelector('[data-checkup-dhw] .checkup-dhw-empty')?.textContent,
+            empty: timeline && !timeline.hasChildNodes(),
             fabricated: detail?.querySelectorAll('.checkup-dhw-chart, [data-dhw-window], [data-dhw-lane]').length };
         })()`);
         assert.equal(block.count, 1, `${context}/${block.id}: one dedicated detail wrapper, not the generic three blocks`);
         assert.equal(dhw.wrapper && dhw.heroFirst, true, `${context}/${block.id}: the measurement hero leads the detail`);
         assert.equal(dhw.value, "1", `${context}/${block.id}: hero retains the aggregate sensor rate without timed records`);
-        assert.equal(dhw.unit, "K/h", `${context}/${block.id}: separate cooling-rate unit`);
-        assert.equal(dhw.assessment, await page.evaluate("t('check.dhw.measurement') + ' ' + t('check.dhw.hint')"),
-          `${context}/${block.id}: sensor observation and bounded project hint remain distinct`);
-        assert.deepEqual(dhw.disclosures, ["basis", "energy"].map(key => ({key,tag:"DETAILS",open:false,named:true})),
-          `${context}/${block.id}: supporting basis and energy are named native disclosures, initially collapsed`);
+        assert.equal(dhw.unit, await page.evaluate("t('check.dhw.hour_unit')"),
+          `${context}/${block.id}: separate localized cooling-rate unit`);
+        assert.equal(dhw.assessmentTitle, await page.evaluate("t('check.dhw.context_title')"));
+        assert.equal(dhw.assessment, await page.evaluate("t('check.dhw.context_missing')"),
+          `${context}/${block.id}: aggregate-only firmware has unknown timed context`);
+        assert.equal(dhw.hint, true, `${context}/${block.id}: keep the bounded project hint visible`);
+        assert.deepEqual(dhw.disclosures, ["timeline", "basis", "energy"].map(key => ({key,tag:"DETAILS",open:false,named:true})),
+          `${context}/${block.id}: named native disclosures start collapsed`);
         assert.equal(dhw.normal, normalLabel, `${context}/${block.id}: Normal context is retained inside the basis`);
-        assert.equal(dhw.empty, await page.evaluate("t('check.dhw.timeline_unavailable')"),
-          `${context}/${block.id}: aggregate-only firmware explicitly lacks timed evidence`);
+        assert.equal(dhw.empty, true, `${context}/${block.id}: a closed timeline is not mounted`);
         assert.equal(dhw.fabricated, 0, `${context}/${block.id}: totals cannot fabricate chart bars or marker lanes`);
         continue;
       }
@@ -1606,6 +1613,19 @@ async function assertPlantDiagnosis(page, context) {
         count: body.children.length,
         firstIsChart: body.children[0]?.hasAttribute("data-chart"),
         hasPlot: !!body.children[0]?.querySelector(".vhist svg"),
+        hasGrid: body.children[0]?.querySelectorAll(".vhist-grid").length >= 1,
+        hasYLabels: body.children[0]?.querySelectorAll(".vhist-y .vhist-y-label").length >= 1,
+        plotHasNoYLabels: body.children[0]?.querySelectorAll(".vhist-plot .vhist-y-label").length === 0,
+        yLeftOfPlot: (() => {
+          const p = body.children[0].querySelector(".vhist-plot").getBoundingClientRect();
+          const yRects = [...body.children[0].querySelectorAll(".vhist-y-label")].map(el => el.getBoundingClientRect());
+          return yRects.length >= 1 && yRects.every(yr => yr.right <= p.left - 2);
+        })(),
+        noThreshOverlap: (() => {
+          const yRects = [...body.children[0].querySelectorAll(".vhist-y-label")].map(el => el.getBoundingClientRect());
+          const tRects = [...body.children[0].querySelectorAll(".vhist-thresh-label")].map(el => el.getBoundingClientRect());
+          return yRects.every(yr => tRects.every(tr => yr.bottom <= tr.top || yr.top >= tr.bottom));
+        })(),
         hasLowThresh: !!body.children[0]?.querySelector(".vhist-thresh.low"),
         hasCritThresh: !!body.children[0]?.querySelector(".vhist-thresh.crit"),
         hasWarnCurve: !!body.children[0]?.querySelector(".vhist-line.warn"),
@@ -1616,7 +1636,8 @@ async function assertPlantDiagnosis(page, context) {
       };
     })()`);
     assert.deepEqual(pressureExpanded, {
-      count: 2, firstIsChart: true, hasPlot: true,
+      count: 2, firstIsChart: true, hasPlot: true, hasGrid: true, hasYLabels: true,
+      plotHasNoYLabels: true, yLeftOfPlot: true, noThreshOverlap: true,
       hasLowThresh: true, hasCritThresh: true, hasWarnCurve: true, hasErrCurve: true,
       hasLowLegend: true, hasCritLegend: true, secondNormal: normalLabel,
     }, `${context}/model:health_pressure: graph first with Low/Critical thresholds and only Normal below`);
@@ -2692,6 +2713,62 @@ async function assertHistoryReadouts(page, context) {
         document.getElementById("browserHistoryFixture").scrollIntoView({block:"center",behavior:"instant"});
         return true;
       })()`);
+      const idleLayout = await page.evaluate(`(() => {
+        const host = document.getElementById("browserHistoryFixture");
+        const plot = host.querySelector("[data-hist]");
+        const anchor = host.querySelector(".vhist-legend") || host.querySelector(".vhist-head");
+        const axis = host.querySelector(".vhist-axis");
+        const p = plot.getBoundingClientRect(), a = anchor.getBoundingClientRect();
+        const ax = axis.getBoundingClientRect(), hr = host.getBoundingClientRect();
+        const grids = [...plot.querySelectorAll(".vhist-grid")].map(el => el.getBoundingClientRect())
+          .sort((x, y) => x.top - y.top);
+        const yLabels = [...host.querySelectorAll(".vhist-y-label")].map(el => {
+          const r = el.getBoundingClientRect(), st = getComputedStyle(el);
+          return { left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+            mid: (r.top + r.bottom) / 2, cls: el.className,
+            opacity: st.opacity, fontSize: parseFloat(st.fontSize) };
+        }).sort((x, y) => x.top - y.top);
+        return {
+          noReserve: host.querySelector(".vhist-reserve") === null,
+          topGap: p.top - a.bottom,
+          plotHeight: p.height,
+          hasYCol: host.querySelector(".vhist-y") !== null,
+          plotHasNoYLabels: plot.querySelectorAll(".vhist-y-label").length === 0,
+          gridCount: grids.length,
+          yCount: yLabels.length,
+          yOverlap: yLabels.some((r, k) => k > 0 && r.top < yLabels[k - 1].bottom - 0.5),
+          yLeftOfPlot: yLabels.every(r => r.right <= p.left - 2 && r.left >= hr.left - 1),
+          yAlignedVert: yLabels.every(r => r.top >= p.top - 1 && r.bottom <= p.bottom + 1),
+          yMatchesGrid: grids.length === yLabels.length && yLabels.every((r, k) => {
+            const gMid = (grids[k].top + grids[k].bottom) / 2;
+            return Math.abs(r.mid - gMid) <= 1.5;
+          }),
+          yReadable: yLabels.every(r => r.opacity === "1" && r.fontSize >= 11),
+          axisAligned: Math.abs(ax.left - p.left) < 1.5 && Math.abs(ax.right - p.right) < 1.5,
+          envTempScale: yLabels.every(r => r.cls.includes("env-temperature")),
+        };
+      })()`);
+      assert.equal(idleLayout.noReserve, true, `${context}/${id}: no hidden reservation strip may inflate idle height`);
+      assert.ok(idleLayout.topGap >= 0 && idleLayout.topGap <= 16,
+        `${context}/${id}: idle gap above plot must stay compact (got ${idleLayout.topGap})`);
+      assert.equal(idleLayout.plotHasNoYLabels, true, `${context}/${id}: no Y-scale labels may sit inside .vhist-plot`);
+      assert.equal(idleLayout.axisAligned, true, `${context}/${id}: lower time axis must align horizontally with plot`);
+      if (["dhw_tank", "env3_combined"].includes(id)) {
+        assert.ok(Math.abs(idleLayout.plotHeight - 88) < 1.5,
+          `${context}/${id}: numeric plot height must be 88px (got ${idleLayout.plotHeight})`);
+        assert.equal(idleLayout.hasYCol, true, `${context}/${id}: numeric plot must render left .vhist-y column`);
+        assert.ok(idleLayout.gridCount >= 2 && idleLayout.yCount === idleLayout.gridCount,
+          `${context}/${id}: numeric plots must render >= 2 dotted Y gridlines with matching labels`);
+        assert.equal(idleLayout.yOverlap, false, `${context}/${id}: Y-scale labels must not overlap`);
+        assert.equal(idleLayout.yLeftOfPlot, true, `${context}/${id}: Y-scale labels must sit cleanly to the left of the plot`);
+        assert.equal(idleLayout.yAlignedVert, true, `${context}/${id}: Y-scale labels must stay vertically within plot bounds`);
+        assert.equal(idleLayout.yMatchesGrid, true, `${context}/${id}: Y-scale labels must align vertically with dotted gridlines`);
+        assert.equal(idleLayout.yReadable, true, `${context}/${id}: Y-scale labels must render at full opacity and readable size`);
+        if (id === "env3_combined")
+          assert.equal(idleLayout.envTempScale, true, `${context}/${id}: default ENV III Y-scale tracks temperature`);
+      } else {
+        assert.equal(idleLayout.hasYCol, false, `${context}/${id}: categorical timelines must remain full-width without .vhist-y`);
+      }
       const point = async (fraction) => page.evaluate(`(() => {
         const plot = document.querySelector("#browserHistoryFixture [data-hist]");
         const r = plot.getBoundingClientRect();
@@ -2764,7 +2841,7 @@ async function assertHistoryReadouts(page, context) {
           const pinTime = host.querySelector(".vhist-time.vhist-pinned"), liveTime = host.querySelector(".vhist-time.vhist-live");
           const rect = el => {const r=el.getBoundingClientRect();return {left:r.left,right:r.right,
             top:r.top + scrollY,bottom:r.bottom + scrollY,height:r.height,width:r.width};};
-          const p=rect(plot), a=rect(pin), b=rect(live), c=rect(pinTime), d=rect(liveTime), clip=rect(host);
+          const p=rect(plot), a=rect(pin), b=rect(live), c=rect(pinTime), d=rect(liveTime), ax=rect(host.querySelector(".vhist-axis")), clip=rect(host);
           const layer = el => parseInt(getComputedStyle(el).zIndex) || 0;
           const foreground = (el,behind) => layer(el)>layer(behind) &&
             /^rgb\\(/.test(getComputedStyle(el).backgroundColor) && getComputedStyle(el).opacity === "1";
@@ -2778,14 +2855,17 @@ async function assertHistoryReadouts(page, context) {
           return {visible:!live.hidden && !liveTime.hidden && a.height > 0 && b.height > 0,
             valuesAligned:valuesAligned(pin) && valuesAligned(live),
             overlap:a.right > b.left && b.right > a.left, timeOverlap:c.right>d.left && d.right>c.left,
-            shared:Math.abs(a.bottom-b.bottom)<1, sameAxis:Math.abs(c.top-d.top)<1,
-            tipFront:foreground(live,pin),timeFront:foreground(liveTime,pinTime),
+            shared:Math.abs(a.bottom-b.bottom)<1,
+            sameAxis:Math.abs(c.top-d.top)<2 && Math.abs(ax.top-c.top)<2 && Math.abs(ax.top-d.top)<2,
+            tipFront:foreground(live,pin),
+            timeFront:foreground(liveTime,pinTime) && layer(pinTime)>layer(host.querySelector(".vhist-axis")) &&
+              /^rgb\\(/.test(getComputedStyle(pinTime).backgroundColor) && getComputedStyle(pinTime).opacity === "1",
             abovePlot:a.bottom <= p.top - 8 && b.bottom <= p.top - 8,
             plotTop:p.top,plotHeight:p.height,pin:pin.textContent,pinTime:pinTime.textContent,
             axisTime:liveTime.textContent,expectedTime:scrubTime(view,i),
             selectedTimeInBubble:!STATE_HIST[plot.dataset.hist] && live.textContent.includes(scrubTime(view,i)),
             axisBelow:c.top >= p.bottom + 4 && d.top >= p.bottom + 4, pinTimeTop:c.top,
-            inside:[a,b,c,d].every(r=>r.left >= clip.left - 1 && r.right <= clip.right + 1 && r.bottom <= clip.bottom + 1),
+            inside:[a,b,c,d].every(r=>r.left >= clip.left - 1 && r.right <= clip.right + 1 && r.top >= clip.top - 1 && r.bottom <= clip.bottom + 1),
             bounds:{pin:a,live:b,pinTime:c,liveTime:d,clip},
             forecast:i >= view.v.length,
             forecastLabel:live.textContent.includes(t("hist.forecast")),
@@ -2886,6 +2966,18 @@ async function assertHistoryReadouts(page, context) {
             window.__browserHistoryRender();
             auxBehavior = noRetainedText && bothBoostShown && modbusHidden && modbusRestored;
           }
+          let yScaleSwitch = true;
+          if (id === "env3_combined") {
+            const hasYCls = (cls) => host.querySelectorAll(".vhist-y-label." + cls).length >= 2 &&
+              [...host.querySelectorAll(".vhist-y-label")].every((el) => el.classList.contains(cls));
+            const tempFirst = hasYCls("env-temperature");
+            button("env3_temperature").click(); window.__browserHistoryRender();
+            const humSecond = hasYCls("env-humidity");
+            button("env3_humidity").click(); window.__browserHistoryRender();
+            const pressThird = hasYCls("env-pressure");
+            button("env3_temperature").click(); button("env3_humidity").click(); window.__browserHistoryRender();
+            yScaleSwitch = tempFirst && humSecond && pressThird && hasYCls("env-temperature");
+          }
           const changed=[];
           for (const source of sources.slice(1)) {
             const name=historyView(id).series.find(s=>s.source === source).name;
@@ -2907,13 +2999,13 @@ async function assertHistoryReadouts(page, context) {
           beforePoll.focus(); S.clickHold=false;
           setHtml(host.id,host.innerHTML + "<!-- changed poll -->");
           const pollFocus=button(sources[1]) !== beforePoll && document.activeElement === button(sources[1]);
-          return {initialActive,gapBehavior,auxBehavior,hidden:changed.every(Boolean),protectedLast,unchanged,
+          return {initialActive,gapBehavior,auxBehavior,yScaleSwitch,hidden:changed.every(Boolean),protectedLast,unchanged,
             pollFocus,
             restored:sources.every(source=>button(source).getAttribute("aria-pressed") === "true" && !button(source).disabled) &&
               sources.slice(1).every(source=>!!host.querySelector(".vhist-line." + pathClass[source])),
             ringsUnchanged:JSON.stringify(Array.from(S.hist)) === rings};
         })()`);
-        assert.deepEqual(legend,{initialActive:true,gapBehavior:true,auxBehavior:true,hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
+        assert.deepEqual(legend,{initialActive:true,gapBehavior:true,auxBehavior:true,yScaleSwitch:true,hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
           `${context}/${id}: legend clicks hide and restore independent series while retaining the final curve and source history`);
       } else {
         const stateLegend = await page.evaluate(`(() => {

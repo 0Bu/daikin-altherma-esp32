@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1145, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1153, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -603,7 +603,7 @@ for (const code of codes.slice(1)) assert.doesNotMatch(app, new RegExp(`I18N\\.$
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-locales-"));
 let localeGzipTotal = 0;
 let firmwareLocaleGzipTotal = 0;
-let bundleGzipTotal = 0;
+let packGzipTotal = 0;
 try {
   const tool = path.join(root, "tools/web_asset/minify_js_and_gzip.py");
   for (const code of codes.slice(1)) {
@@ -629,50 +629,66 @@ try {
       assert.deepEqual(fs.readFileSync(packed), bytes, "locale encoding must be deterministic");
     }
   }
-  const bundle = path.join(work, "locale-bundle.js.gz");
-  const metadata = path.join(work, "locale-bundle.json");
+  const packDir = path.join(work, "packs");
+  const metadata = path.join(work, "locale-packs.json");
   const bundled = childProcess.spawnSync("python3", [
     path.join(root, "tools/web_asset/build_locale_bundle.py"),
     "--locale-dir", path.join(root, "main/www/locales"), "--locales", ...codes.slice(1),
-    "--output", bundle, "--metadata", metadata, "--max-gzip-bytes", "289792",
+    "--output-dir", packDir, "--metadata", metadata, "--max-gzip-bytes", "296960",
   ], { cwd: root, encoding: "utf8" });
   assert.equal(bundled.status, 0, bundled.stderr || bundled.stdout);
-  bundleGzipTotal = fs.statSync(bundle).size;
   const manifest = JSON.parse(fs.readFileSync(metadata, "utf8"));
-  assert.deepEqual(manifest.locales, codes.slice(1), "joint resource must include every external locale");
-  assert.equal(manifest.bundle_gzip_bytes, bundleGzipTotal);
+  assert.deepEqual(manifest.locales, codes.slice(1), "locale packs must cover every external locale");
+  assert.equal(manifest.packs.length, 5, "locales must split into the five canonical packs");
+  packGzipTotal = manifest.packs.reduce(
+    (n, pack) => n + fs.statSync(path.join(packDir, `locale-${pack.name}.js.gz`)).size, 0);
+  assert.equal(manifest.total_gzip_bytes, packGzipTotal);
   assert.equal(manifest.sources.reduce((n, item) => n + item.source_gzip_bytes, 0),
-    firmwareLocaleGzipTotal, "bundle quality gates must use the same per-file minifier and encoder");
-  assert.ok(manifest.framed_bytes <= 1572864, "decoded locale frame must stay within 1.5 MiB");
+    firmwareLocaleGzipTotal, "pack quality gates must use the same per-file minifier and encoder");
+  for (const pack of manifest.packs) {
+    if (pack.name === "de") assert.equal(pack.encoding, "gzip");
+    else {
+      assert.equal(pack.encoding, "lzma+gzip");
+      assert.ok(pack.framed_bytes <= 1572864, `${pack.name} decoded frame must stay within 1.5 MiB`);
+    }
+  }
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }
-// Apply the existing 283 KiB flash-growth guard to the bytes actually embedded. Per-source 32 KiB
+// Apply the 290 KiB flash-growth guard to the five embedded locale packs. Per-source 32 KiB
 // quality caps, decoded-source parity (test_locale_bundle.mjs), and the signed image gate remain
-// independent. A less efficient host-only zlib proxy no longer represents the firmware resource.
-assert.ok(bundleGzipTotal <= 289792,
-  `embedded locale bundle uses ${bundleGzipTotal} bytes and exceeds the 283 KiB growth guard`);
+// independent.
+assert.ok(packGzipTotal <= 296960,
+  `embedded locale packs use ${packGzipTotal} bytes and exceed the 290 KiB growth guard`);
 assert.ok(firmwareLocaleGzipTotal <= localeGzipTotal - 4096,
   "pinned per-source compression must recover at least one flash sector without dropping copy");
-assert.ok(bundleGzipTotal <= firmwareLocaleGzipTotal - 4096,
-  "joint locale delivery must recover at least one flash sector without dropping copy");
+assert.ok(packGzipTotal <= firmwareLocaleGzipTotal - 4096,
+  "five-pack locale delivery must recover at least one flash sector without dropping copy");
 
 const cmake = fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8");
 const status = fs.readFileSync(path.join(root, "main/http_status.cpp"), "utf8");
 const server = fs.readFileSync(path.join(root, "main/http_server.cpp"), "utf8");
 assert.match(cmake, /set\(UI_LOCALE_CODES de es fr it pl cs uk zh ja nb sv fi\)/);
+assert.match(cmake, /set\(UI_LOCALE_PACK_NAMES de romance slavic nordic cjk\)/);
 assert.match(cmake, /set\(UI_LOCALE_GZIP_MAX_BYTES 32768\)/);
-assert.match(cmake, /set\(UI_LOCALE_BUNDLE_MAX_BYTES 289792\)/);
-assert.match(cmake, /"\$\{UI_LOCALE_BUNDLE_GZIP\}"/, "the joint locale resource must be embedded");
+assert.match(cmake, /set\(UI_LOCALE_PACKS_MAX_BYTES 296960\)/);
+assert.match(cmake, /\$\{UI_LOCALE_PACK_FILES\}/, "the five locale packs must be embedded");
 assert.doesNotMatch(cmake, /EMBED_FILES[\s\S]*\$\{UI_LOCALE_GZIP_FILES\}/,
   "individual quality-check artifacts must not also consume firmware flash");
 assert.match(cmake, /--output "\$\{locale_gz\}"\s+--gzip-encoder zopfli/,
   "firmware locales must retain the pinned compression that fits the signed image");
 assert.match(cmake, /DEPENDS "\$\{locale_src\}" "\$\{UI_LOCALE_MINIFIER\}" "\$\{UI_MINIFIER\}"/,
   "locale assets must rebuild when the shared JavaScript minifier changes");
+const expectedPacks = new Map([
+  ["de", "de"], ["es", "romance"], ["fr", "romance"], ["it", "romance"],
+  ["pl", "slavic"], ["cs", "slavic"], ["uk", "slavic"],
+  ["nb", "nordic"], ["sv", "nordic"], ["fi", "nordic"],
+  ["zh", "cjk"], ["ja", "cjk"],
+]);
 for (const code of codes.slice(1)) {
-  assert.match(status, new RegExp(`\\{"${code}", locale_bundle_js_gz_start, locale_bundle_js_gz_end\\}`),
-    `${code} compressed asset is not routed`);
+  const pack = expectedPacks.get(code);
+  assert.match(status, new RegExp(`\\{"${code}", locale_${pack}_js_gz_start, locale_${pack}_js_gz_end\\}`),
+    `${code} compressed asset is not routed to ${pack}`);
 }
 assert.match(status,
   /http_send_gzip\(req,\s*"text\/javascript; charset=utf-8",\s*asset\.start,\s*asset\.end\)/,

@@ -1,8 +1,13 @@
 set(UI_LOCALE_CODES de es fr it pl cs uk zh ja nb sv fi)
-set(UI_LOCALE_BUNDLE_GZIP "${CMAKE_CURRENT_BINARY_DIR}/locale-bundle.js.gz")
+set(UI_LOCALE_PACK_NAMES de romance slavic nordic cjk)
+set(UI_LOCALE_PACK_FILES "")
+foreach(pack IN LISTS UI_LOCALE_PACK_NAMES)
+    list(APPEND UI_LOCALE_PACK_FILES "${CMAKE_CURRENT_BINARY_DIR}/locale-${pack}.js.gz")
+endforeach()
+set(UI_LOCALE_TAG_HEADER "${CMAKE_CURRENT_BINARY_DIR}/locale_asset_tag.hpp")
 set(UI_LOCALE_GZIP_FILES "")
 foreach(locale IN LISTS UI_LOCALE_CODES)
-    list(APPEND UI_LOCALE_GZIP_FILES "${CMAKE_CURRENT_BINARY_DIR}/locale-${locale}.js.gz")
+    list(APPEND UI_LOCALE_GZIP_FILES "${CMAKE_CURRENT_BINARY_DIR}/locale-source-${locale}.js.gz")
 endforeach()
 
 idf_component_register(
@@ -54,7 +59,7 @@ idf_component_register(
         "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
-        "${UI_LOCALE_BUNDLE_GZIP}"
+        ${UI_LOCALE_PACK_FILES}
         "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz"
         "${CMAKE_CURRENT_SOURCE_DIR}/www/heat_pump_icon.png"
     REQUIRES
@@ -83,6 +88,8 @@ idf_component_register(
         mdns
         espcoredump
 )
+
+target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 # C++17 is the language contract shared with the host logic suite. ESP-IDF 6 currently defaults
 # applications to a newer dialect; inheriting that default would let device-only code start using
@@ -225,12 +232,11 @@ set(UI_LOCALE_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_js
 set(UI_ZOPFLI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset")
 set(UI_STARTUP_PACKER "${UI_ZOPFLI_ROOT}/pack_startup_script.py")
 set(UI_LOCALE_BUNDLE_PRODUCER "${UI_ZOPFLI_ROOT}/build_locale_bundle.py")
-set(UI_LOCALE_DECODER_ROOT "${UI_ZOPFLI_ROOT}/vendor/lzma-js")
-set(UI_LZMA_DECODER_FILES
-    "${UI_LOCALE_DECODER_ROOT}/UPSTREAM.json"
-    "${UI_LOCALE_DECODER_ROOT}/LICENSE"
-    "${UI_LOCALE_DECODER_ROOT}/lzma-d.js"
-    "${UI_LOCALE_DECODER_ROOT}/lzma-d-min.js")
+set(UI_LZMA_DECODER "${UI_ZOPFLI_ROOT}/lzma1_decoder.js")
+set(UI_LOCALE_SOURCES "")
+foreach(locale IN LISTS UI_LOCALE_CODES)
+    list(APPEND UI_LOCALE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/www/locales/${locale}.js")
+endforeach()
 file(GLOB UI_ZOPFLI_SOURCES CONFIGURE_DEPENDS
     "${UI_ZOPFLI_ROOT}/vendor/zopfli/*.c"
     "${UI_ZOPFLI_ROOT}/vendor/zopfli/*.h")
@@ -276,7 +282,7 @@ add_custom_command(
             --max-gzip-bytes ${UI_GZIP_MAX_BYTES}
     DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
             "${UI_MINIFIER}" "${UI_STARTUP_PACKER}" "${UI_LOCALE_BUNDLE_PRODUCER}"
-            ${UI_LZMA_DECODER_FILES}
+            "${UI_LZMA_DECODER}" ${UI_LOCALE_SOURCES}
             ${UI_MINIFIER_VENDOR}
             "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
             "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
@@ -287,16 +293,15 @@ add_custom_command(
 add_custom_target(gen_index_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz")
 add_dependencies(${COMPONENT_LIB} gen_index_gz)
 
-# Keep every individual source producer and its tight quality cap. Only the joint offline bundle
-# is embedded: it registers the same catalogs synchronously through the existing /locale.js lease.
+# Keep every individual source producer and its tight quality cap. Embed the five self-contained
+# locale packs (`de` plain gzipped; four cognate TypedArray-LZMA1 packs) and generated version tag.
 # The startup HTML and its delivery budget stay independent; no external service supplies code.
 set(UI_LOCALE_GZIP_MAX_BYTES 32768)
-set(UI_LOCALE_BUNDLE_MAX_BYTES 289792)
+set(UI_LOCALE_PACKS_MAX_BYTES 296960)
 set(UI_LOCALE_OUTPUTS "")
-set(UI_LOCALE_SOURCES "")
 foreach(locale IN LISTS UI_LOCALE_CODES)
     set(locale_src "${CMAKE_CURRENT_SOURCE_DIR}/www/locales/${locale}.js")
-    set(locale_gz "${CMAKE_CURRENT_BINARY_DIR}/locale-${locale}.js.gz")
+    set(locale_gz "${CMAKE_CURRENT_BINARY_DIR}/locale-source-${locale}.js.gz")
     add_custom_command(
         OUTPUT "${locale_gz}"
         COMMAND ${PYTHON} "${UI_LOCALE_MINIFIER}"
@@ -312,25 +317,25 @@ foreach(locale IN LISTS UI_LOCALE_CODES)
         COMMENT "Minifying and gzipping ${locale} UI locale"
         VERBATIM)
     list(APPEND UI_LOCALE_OUTPUTS "${locale_gz}")
-    list(APPEND UI_LOCALE_SOURCES "${locale_src}")
 endforeach()
 add_custom_command(
-    OUTPUT "${UI_LOCALE_BUNDLE_GZIP}"
+    OUTPUT ${UI_LOCALE_PACK_FILES} "${UI_LOCALE_TAG_HEADER}"
     COMMAND ${PYTHON} "${UI_LOCALE_BUNDLE_PRODUCER}"
             --locale-dir "${CMAKE_CURRENT_SOURCE_DIR}/www/locales"
             --locales ${UI_LOCALE_CODES}
-            --output "${UI_LOCALE_BUNDLE_GZIP}"
+            --output-dir "${CMAKE_CURRENT_BINARY_DIR}"
+            --tag-header "${UI_LOCALE_TAG_HEADER}"
             --source-max-gzip-bytes ${UI_LOCALE_GZIP_MAX_BYTES}
-            --max-gzip-bytes ${UI_LOCALE_BUNDLE_MAX_BYTES}
+            --max-gzip-bytes ${UI_LOCALE_PACKS_MAX_BYTES}
     DEPENDS ${UI_LOCALE_OUTPUTS} ${UI_LOCALE_SOURCES} "${UI_LOCALE_BUNDLE_PRODUCER}"
             "${UI_MINIFIER}" ${UI_MINIFIER_VENDOR}
-            ${UI_LZMA_DECODER_FILES}
+            "${UI_LZMA_DECODER}"
             "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
             "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
             "${UI_ZOPFLI_ROOT}/vendor/zopfli/UPSTREAM.json" ${UI_ZOPFLI_SOURCES}
-    COMMENT "Packing offline UI locales (limit: ${UI_LOCALE_BUNDLE_MAX_BYTES} bytes)"
+    COMMENT "Packing offline UI locale packs (limit: ${UI_LOCALE_PACKS_MAX_BYTES} bytes)"
     VERBATIM)
-add_custom_target(gen_locale_gz DEPENDS ${UI_LOCALE_OUTPUTS} "${UI_LOCALE_BUNDLE_GZIP}")
+add_custom_target(gen_locale_gz DEPENDS ${UI_LOCALE_OUTPUTS} ${UI_LOCALE_PACK_FILES} "${UI_LOCALE_TAG_HEADER}")
 add_dependencies(${COMPONENT_LIB} gen_locale_gz)
 
 # Minify the captive portal with the same offline, syntax-preserving dashboard tool.

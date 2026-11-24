@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -182,8 +182,16 @@ I18N.it = localeValues([
   /* check.status.experimental */ "IN PROVA",
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "NESSUN INTERVALLO",
-  /* check.dhw.maximum */ "Massimo registrato",
-  /* check.dhw.measurement */ "Raffreddamento netto in un’ora al sensore R5T del serbatoio.",
+  /* check.dhw.maximum */ "Massimo calo orario al sensore del serbatoio",
+  /* check.dhw.hour_unit */ "°C all’ora",
+  /* check.dhw.timeline */ "Storico delle ultime 24 ore",
+  /* check.dhw.context_title */ "Causa incerta",
+  /* check.dhw.context_hour */ "Ora di misurazione con questo valore",
+  /* check.dhw.context_missing */ "L’orario e le circostanze di questa misurazione non sono disponibili.",
+  /* check.dhw.context_pump */ "In quest’ora è stata rilevata attività della pompa dell’acqua interna alla pompa di calore.",
+  /* check.dhw.context_draw */ "Il calo rapido può essere legato al prelievo di acqua calda o a un raffreddamento rapido.",
+  /* check.dhw.context_quiet */ "Non è stata rilevata attività della pompa né un calo simile a quello da prelievo. Un prelievo di acqua calda resta possibile.",
+  /* check.dhw.context_selected */ "La causa di questo calo resta incerta.",
   /* check.dhw.hint */ "Un’ora senza segnali registrati di pompa o prelievo ha raggiunto la soglia indicativa del progetto.",
   /* check.dhw.before_snapshot */ (d) => `${d} prima dell’istantanea`,
   /* check.dhw.marker_yes */ "registrato",
@@ -195,8 +203,8 @@ I18N.it = localeValues([
   /* check.dhw.timeline_unavailable */ "Intervalli con tempi non disponibili. Non si ricostruisce una cronologia dai totali.",
   /* check.dhw.timeline_empty */ "Nessun intervallo completo con tempi disponibile in questa vista di 24 h.",
   /* check.dhw.chart_title */ "Raffreddamento per intervallo completo",
-  /* check.dhw.timed_scope */ (n) => `Intervalli con tempi dal riavvio/azzeramento: ${n}, fino a 24 h. Il massimo e i conteggi possono basarsi anche su dati orari salvati, non solo sugli intervalli tracciati.`,
-  /* check.dhw.blank */ "Vuoto: nessun intervallo completo con tempi disponibile, non raffreddamento nullo. I segni indicano presenza, non durata.",
+  /* check.dhw.timed_scope */ (n) => `Ore misurate nel grafico: ${n} (ultime 24 ore). Il massimo e i conteggi possono basarsi anche su dati orari salvati, non solo sugli intervalli tracciati.`,
+  /* check.dhw.blank */ "Aree tratteggiate: nessun intervallo completo con tempi disponibile, non raffreddamento nullo. I segni indicano presenza, non durata.",
   /* check.dhw.snapshot */ "Istantanea",
   /* check.dhw.stale */ "Le letture attuali per il raffreddamento dell’accumulo ACS mancano o sono obsolete; gli intervalli completati restano osservazioni storiche.",
   /* check.dhw.limit */ "R5T misura un punto del serbatoio stratificato, non la sua energia. I segnali di pompa e prelievo non provano né la causa né un prelievo d’acqua.",
@@ -297,7 +305,7 @@ I18N.it = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Fine ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Attivo all’ultima lettura.",
   /* check.cycling.cause_unavailable */ "Nessun dettaglio",
-  /* check.cycling.cause_since_boot */ "Le cause di avvio e arresto vengono registrate solo dall'ultimo riavvio.",
+  /* check.cycling.cause_older_unavailable */ "Per questi cicli precedenti non sono disponibili dettagli salvati sull’avvio e sull’arresto.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

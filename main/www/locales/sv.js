@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -182,8 +182,16 @@ I18N.sv = localeValues([
   /* check.status.experimental */ "TESTVIS",
   /* check.status.unavailable */ "EJ AKTUELL",
   /* check.status.no_window */ "INGET MÄTFÖNSTER",
-  /* check.dhw.maximum */ "Registrerat maximum",
-  /* check.dhw.measurement */ "Nettoavkylning under en timme vid tankgivare R5T.",
+  /* check.dhw.maximum */ "Största temperaturfall per timme vid tankgivaren",
+  /* check.dhw.hour_unit */ "°C per timme",
+  /* check.dhw.timeline */ "24 timmars historik",
+  /* check.dhw.context_title */ "Oklar orsak",
+  /* check.dhw.context_hour */ "Mättimme med detta värde",
+  /* check.dhw.context_missing */ "Tidpunkt och omständigheter för den här mätningen saknas.",
+  /* check.dhw.context_pump */ "Värmepumpens interna vattenpump gick under den här timmen.",
+  /* check.dhw.context_draw */ "Det snabba temperaturfallet kan bero på varmvattentappning eller snabb avkylning.",
+  /* check.dhw.context_quiet */ "Ingen pumpaktivitet eller temperaturminskning som liknar tappning upptäcktes. Varmvatten kan ändå ha använts.",
+  /* check.dhw.context_selected */ "Orsaken till temperaturfallet är fortfarande oklar.",
   /* check.dhw.hint */ "En timme utan registrerade pump-/tappningsmarkörer nådde projektets vägledande tröskel.",
   /* check.dhw.before_snapshot */ (d) => `${d} före ögonblicksbilden`,
   /* check.dhw.marker_yes */ "registrerad",
@@ -195,8 +203,8 @@ I18N.sv = localeValues([
   /* check.dhw.timeline_unavailable */ "Mätfönster med tider är inte tillgängliga. Ingen historik härleds från summorna.",
   /* check.dhw.timeline_empty */ "Inga avslutade tidsstämplade mätfönster i denna 24-timmarsvy.",
   /* check.dhw.chart_title */ "Avkylning per avslutat mätfönster",
-  /* check.dhw.timed_scope */ (n) => `Mätfönster med tider sedan omstart/nollställning: ${n}, upp till 24 h. Maxvärdet och antalen kan även bygga på sparade timdata, inte bara de visade mätfönstren.`,
-  /* check.dhw.blank */ "Tomt: inget avslutat tidsstämplat mätfönster tillgängligt, inte noll avkylning. Markörer visar förekomst, inte varaktighet.",
+  /* check.dhw.timed_scope */ (n) => `Uppmätta timmar i diagrammet: ${n} (senaste 24 h). Maxvärdet och antalen kan även bygga på sparade timdata, inte bara de visade mätfönstren.`,
+  /* check.dhw.blank */ "Skrafferade områden: inget avslutat tidsstämplat mätfönster tillgängligt, inte noll avkylning. Markörer visar förekomst, inte varaktighet.",
   /* check.dhw.snapshot */ "Ögonblicksbild",
   /* check.dhw.stale */ "Aktuella mätvärden för tankavsvalningen saknas eller är inaktuella; avslutade mätfönster förblir historiska observationer.",
   /* check.dhw.limit */ "R5T mäter en punkt i en skiktad tank, inte tankens energi. Pump- och tappningsliknande markörer bevisar varken orsak eller vattenuttag.",
@@ -297,7 +305,7 @@ I18N.sv = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Slut ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Aktiv vid senaste mätning.",
   /* check.cycling.cause_unavailable */ "Inga detaljer",
-  /* check.cycling.cause_since_boot */ "Orsaker till start och stopp registreras först från senaste omstarten.",
+  /* check.cycling.cause_older_unavailable */ "Sparade start- och stoppuppgifter saknas för de här äldre körningarna.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

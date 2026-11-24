@@ -101,8 +101,10 @@
 #include "logic/checkup_persist.hpp"
 #include "logic/working_figure.hpp"
 #include "logic/cycling_persist.hpp"
+#include "logic/cycling_run_persist.hpp"
 #include "logic/fault_trace.hpp"
 #include "logic/fault_persist.hpp"
+#include "logic/dhw_loss_persist.hpp"
 #include "logic/history_persist.hpp"
 #include "logic/lwt_select.hpp"
 #include "logic/rwt_select.hpp"
@@ -12248,11 +12250,10 @@ static void test_config_store() {
         bad_ver[4]                   = ::rt(v);
         restamp(bad_ver);
         CHECK(!gas_comparison_blob_deserialize(bad_ver.data(), bad_ver.size(), gas_rt));
-        CHECK(std::string(stored_blob_reject_reason(bad_ver.data(), bad_ver.size(),
-                                                    GAS_BLOB_MAGIC_TEXT, GAS_BLOB_VERSION,
-                                                    GAS_BLOB_VERSION)) ==
-              (v > GAS_BLOB_VERSION ? "newer layout than this build reads"
-                                    : "unknown older layout"));
+        CHECK(std::string(stored_blob_reject_reason(
+                  bad_ver.data(), bad_ver.size(), GAS_BLOB_MAGIC_TEXT, GAS_BLOB_VERSION,
+                  GAS_BLOB_VERSION)) == (v > GAS_BLOB_VERSION ? "newer layout than this build reads"
+                                                              : "unknown older layout"));
     }
     {
         std::vector<uint8_t> bad_crc = gas_buf;
@@ -16710,7 +16711,8 @@ static void test_dhw_loss_trace() {
     CHECK(sizeof(DhwLossTraceWindow) == 16);
     CHECK(sizeof(DhwLossTrace) <= 416 && sizeof(DhwLossTimeline) <= 416);
     CHECK(DHW_LOSS_WINDOW_S * DHW_LOSS_TRACE_CAPACITY == DHW_LOSS_TRACE_WINDOW_S);
-    // No additional persisted layout enlargement was added for the runtime-only DHW trace.
+    // CheckupJournalPayload includes the 32 B working-figure energy bucket; the timed DHW journal
+    // page stays independent of aggregate and handoff layouts.
     CHECK(sizeof(DhwLossBucket) == 20 && sizeof(CheckupJournalPayload) == 160);
 
     constexpr int64_t frame_us = 100 * us;
@@ -16967,6 +16969,118 @@ static void test_dhw_loss_trace() {
     }
 }
 
+static void test_dhw_loss_restore() {
+    using namespace logic;
+    constexpr uint32_t saved = 1795000000;
+    constexpr uint32_t frame = DHW_LOSS_TRACE_RESTORE_OFFSET_S;
+    constexpr int64_t  us    = 1000000;
+    DhwLossTracePage   page{};
+    CHECK(dhw_loss_trace_page_valid(page, true));
+    page.model_fp               = 1;
+    page.source_fp              = 2;
+    page.dhw_source_fp          = 3;
+    page.diagnostics_generation = 4;
+    page.unix_s                 = saved;
+    page.count                  = DHW_LOSS_TRACE_CAPACITY;
+    for (size_t i = 0; i < page.count; ++i) {
+        const auto     start = frame - DHW_LOSS_TRACE_WINDOW_S + static_cast<uint32_t>(i) * 3600;
+        const uint16_t rate  = i ? 45 : 0;
+        CHECK(dhw_loss_trace_pack(page.records[i],
+                                  {start, start + 3600, rate, 3591, i % 2 == 1, i == 23}, frame));
+    }
+    CHECK(dhw_loss_trace_page_valid(page, false));
+    CHECK(!dhw_loss_trace_page_valid(page, true));
+    DhwLossTrace trace;
+    trace.epoch = UINT32_MAX;
+    CHECK(!dhw_loss_trace_restore(trace, page, 10, saved + 9));     // future at boot
+    CHECK(!dhw_loss_trace_restore(trace, page, 10, saved + 86400)); // strict expiry
+    CHECK(!dhw_loss_trace_restore(trace, page, UINT32_MAX, saved));
+    CHECK(!dhw_loss_trace_restore(trace, page, 10, 9));
+    CHECK(dhw_loss_trace_restore(trace, page, 10, saved + 20));
+    trace.prepend_restored({1, 3601}); // full
+    DhwLossTimeline timeline;
+    CHECK(trace.snapshot(timeline, 10 * us, CHECKUP_MAX_GAP_S));
+    CHECK(!timeline.live && !timeline.observed && timeline.count == 24 && timeline.epoch == 1);
+    CHECK(timeline.window_end_s == frame + 10);
+    CHECK(timeline.windows[0].rate_tenths == 0 && timeline.windows[0].observed_s == 3591);
+    CHECK(timeline.windows[23].end_s == frame - 10 && timeline.windows[23].draw_marker &&
+          timeline.windows[23].pump_marker && timeline.windows[23].rate_tenths == 45);
+    CHECK(!dhw_loss_trace_restore(trace, page, 10, saved + 20));
+    trace.observe(12 * us, true);
+    CHECK(trace.snapshot(timeline, 12 * us, CHECKUP_MAX_GAP_S));
+    CHECK(timeline.live && timeline.observed_end_s == frame + 12 &&
+          timeline.windows[23].end_s == frame - 10);
+    trace.observe(3612 * us, true);
+    CHECK(trace.record(12 * us, 3612 * us, 15, 3600, false, true));
+    CHECK(trace.snapshot(timeline, 3612 * us, CHECKUP_MAX_GAP_S) && timeline.count == 24 &&
+          timeline.windows[23].start_s == frame + 12);
+    CHECK(trace.snapshot(timeline, (3612 + 86400LL) * us, CHECKUP_MAX_GAP_S) &&
+          timeline.count == 0);
+    trace.epoch = UINT32_MAX;
+    trace.discard_restored();
+    CHECK(trace.epoch == 1 && trace.since_s == frame);
+    for (const uint32_t age : {82820u, 83500u}) {
+        trace.reset();
+        CHECK(dhw_loss_trace_restore(trace, page, 5, saved + age));
+        CHECK(trace.count == 1);
+    }
+
+    page.count = 1;
+    CHECK(
+        dhw_loss_trace_pack(page.records[0], {frame - 3631, frame, 900, 3630, true, false}, frame));
+    // Time may arrive after live windows. A new frame is adopted once and keeps real live
+    // freshness, with a visible gap from the restored endpoint to the first live window.
+    trace.reset();
+    trace.observe(0, true);
+    trace.observe(3600 * us, true);
+    CHECK(trace.record(0, 3600 * us, 0, 3600, false, false));
+    CHECK(dhw_loss_trace_restore(trace, page, 3600, saved + 3607));
+    CHECK(trace.snapshot(timeline, 3600 * us, CHECKUP_MAX_GAP_S) && timeline.count == 2);
+    CHECK(timeline.windows[0].end_s == frame - 7 && timeline.windows[0].rate_tenths == 900 &&
+          timeline.windows[0].end_s - timeline.windows[0].start_s == 3631);
+    CHECK(timeline.windows[1].start_s == frame && timeline.observed_end_s == frame + 3600);
+    trace.prepend_restored(timeline.windows[0]); // overlap
+    CHECK(trace.count == 2);
+    trace.discard_restored();
+    CHECK(trace.count == 1 && trace.windows[trace.head].start_s == frame);
+    page.records[0][5] |= 0x80;
+    CHECK(!dhw_loss_trace_page_valid(page, false));
+    trace.reset();
+    CHECK(!dhw_loss_trace_restore(trace, page, 1, saved + 2));
+    page.records[0][5] &= 0x7f;
+    page.count = 2; // following old window overlaps or is out of order
+    CHECK(!dhw_loss_trace_page_valid(page, false));
+    for (const auto& invalid :
+         {DhwLossTraceWindow{10, 9}, DhwLossTraceWindow{1, frame + 1}, DhwLossTraceWindow{0, 3600},
+          DhwLossTraceWindow{frame - 3599, frame}, DhwLossTraceWindow{frame - 3632, frame},
+          DhwLossTraceWindow{frame - 3600, frame, 901},
+          DhwLossTraceWindow{frame - 3600, frame, 0, 3601}})
+        CHECK(!dhw_loss_trace_pack(page.records[0], invalid, frame));
+    DhwLossTraceWindow decoded;
+    CHECK(!dhw_loss_trace_unpack(page.records[0], 1, decoded));
+    page.reserved[0] = 1;
+    CHECK(!dhw_loss_trace_page_valid(page, false));
+    HistoryJournalHeader header{};
+    header.magic       = HISTORY_JOURNAL_MAGIC;
+    header.version     = HISTORY_JOURNAL_VERSION;
+    header.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    header.catalog_fp  = dhw_loss_trace_schema(true, false);
+    header.value_count = sizeof(DhwLossTracePage) / sizeof(HistorySample);
+    header.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    header.dt_s        = 3600;
+    header.commit      = HISTORY_JOURNAL_COMMITTED;
+    header.sequence    = 1;
+    header.rings[0] = header.rings[1] = header.rings[2] = 1;
+    CHECK(dhw_loss_trace_header_matches(header, true));
+    CHECK(!dhw_loss_trace_header_matches(header, false));
+    header.catalog_fp = dhw_loss_trace_schema(false, true);
+    CHECK(dhw_loss_trace_header_matches(header, false));
+    header.source = static_cast<uint8_t>(HistoryJournalSource::X10a);
+    CHECK(!dhw_loss_trace_header_matches(header, false));
+    CHECK(dhw_loss_trace_schema(false, false) != dhw_loss_trace_schema(true, false));
+    CHECK(dhw_loss_trace_schema(false, false) != dhw_loss_trace_schema(false, true));
+}
+
 // ── The rolling X10A operating observation (logic/checkup.hpp, issue legacy-208)
 // ───────────────────── Three things are worth testing here and one of them is worth most of the
 // file:
@@ -17119,6 +17233,16 @@ static void test_checkup_population() {
         CHECK(!snapshot.count && !snapshot.live); // Both clocks are ahead of the snapshot.
         checkup_cycling_snapshot(snapshot, saved, current, wall + 180000, 180000, 0);
         CHECK(!snapshot.count && !snapshot.live); // A stale live ring contributes no coverage.
+        current.push(6, Trace::Stop);
+        Trace empty;
+        checkup_cycling_snapshot(snapshot, empty, current, wall, 5, 0, true);
+        CHECK(snapshot.live && snapshot.end_s == CHECKUP_WINDOW_S && snapshot.count == 2);
+        CHECK(Trace::kind(snapshot.at(1)) == Trace::Start);
+        current.reset();
+        current.push(6, Trace::Start);
+        current.end_s = 6;
+        checkup_cycling_snapshot(snapshot, empty, current, wall, 5, 0, true);
+        CHECK(!snapshot.live && !snapshot.count); // No sample fits the corrected clock.
         current.reset();
         current.push(0, Trace::Heat);
         current.end_s = 86411;
@@ -17132,7 +17256,6 @@ static void test_checkup_population() {
         current.reset();
         current.push(0, Trace::Off);
         current.end_s = 60;
-        Trace empty;
         checkup_cycling_snapshot(snapshot, empty, current, wall, CHECKUP_WINDOW_S, 0);
         CHECK(snapshot.count == 1 && snapshot.at(0) == Trace::Off);
         saved.reset();
@@ -26078,17 +26201,6 @@ static void test_checkup_journal_rebuild_in_place() {
         CHECK(live_out.dhw.buf[0].observed_s == 3600 && live_out.dhw.buf[1].observed_s == 1800);
         CHECK(live_out.energy.buf[0].observed_s == 0 && live_out.energy.buf[1].observed_s == 0 &&
               live_out.energy.buf[1].heat_ws == 0);
-
-        // Backward-compat 17-parameter overload exercises legacy callers without EnergyRing.
-        CheckupRing             compat_ring;
-        DhwLossRing             compat_dhw;
-        CheckupJournalSlotTimes compat_times;
-        const bool              compat_dhw_ret =
-            checkup_journal_rebuild(compat_ring, compat_dhw, compat_times, CheckupJournalLiveSpan{},
-                                    &stored_rec, 1, 498, 498, same_pel.now_unix_s, same_pel.now_us,
-                                    true, model, source, generation, false, dhw_fp, false);
-        CHECK(!compat_dhw_ret && compat_ring.buf[0].starts == 7 &&
-              compat_dhw.buf[0].observed_s == 3600);
     }
 }
 
@@ -26447,7 +26559,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 13536);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 14904);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -34538,15 +34650,16 @@ static void test_working_figure() {
 
     // HomeHub Modbus working-figure coverage requires an Affirmative probe basis
     CHECK(energy_modbus_coverage(::rt(ModbusProfile::HomeHub)).supported());
-    CHECK(energy_modbus_coverage(::rt(ModbusProfile::HomeHub), ::rt(ModbusProfileBasis::Affirmative))
-              .supported());
+    CHECK(
+        energy_modbus_coverage(::rt(ModbusProfile::HomeHub), ::rt(ModbusProfileBasis::Affirmative))
+            .supported());
     CHECK(!energy_modbus_coverage(::rt(ModbusProfile::HomeHub), ::rt(ModbusProfileBasis::Probing))
                .supported());
     CHECK(!energy_modbus_coverage(::rt(ModbusProfile::HomeHub), ::rt(ModbusProfileBasis::Fallback))
                .supported());
-    CHECK(
-        !energy_modbus_coverage(::rt(ModbusProfile::Altherma4), ::rt(ModbusProfileBasis::Affirmative))
-             .supported());
+    CHECK(!energy_modbus_coverage(::rt(ModbusProfile::Altherma4),
+                                  ::rt(ModbusProfileBasis::Affirmative))
+               .supported());
 }
 
 namespace hydronic_host_tests {
@@ -36134,6 +36247,177 @@ void test_cycling_run_context() {
     CHECK(tr.at(5).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
 }
 
+void test_cycling_run_journal() {
+    using namespace daik::logic;
+
+    auto closed_run = [](uint32_t start, uint32_t stop, int16_t flow) {
+        auto run        = cycling_run_context_empty();
+        run.start_s     = start;
+        run.stop_s      = stop;
+        run.flow_tenths = flow;
+        run.mode        = static_cast<uint8_t>(CyclingRunMode::Space);
+        run.stop_kind   = static_cast<uint8_t>(CyclingStopKind::LowRpsAboveTarget);
+        run.flags       = RUN_CTX_F_STOPPED;
+        return run;
+    };
+    constexpr uint32_t     boot_unix = 1700000000;
+    CheckupRunContextTrace trace;
+    trace.push(closed_run(10, 610, 100));
+    trace.push(closed_run(620, 650, 70));
+    trace.push(cycling_run_context_empty());
+    trace.latest_mut()->start_s = 655;
+
+    auto old = closed_run(boot_unix - 900, boot_unix - 300, 300);
+    old.flags |= RUN_CTX_F_FINALIZED | RUN_CTX_F_RESTORED;
+    old.flow_typical_tenths = 280;
+    CHECK(trace.prepend(old));
+
+    cycling_run_context_finalize(trace, -1);
+    cycling_run_context_finalize(trace, (static_cast<int64_t>(UINT32_MAX) + 1) * 1000000);
+    cycling_run_context_finalize(trace, 680999999, boot_unix + 680);
+    CHECK(!(trace.at(2).flags & RUN_CTX_F_FINALIZED)); // preserve the last fraction of refinement
+    CHECK(trace.at(2).flow_typical_tenths == CHECKUP_ABSENT);
+    cycling_run_context_finalize(trace, 681000000, boot_unix + 681);
+    CHECK((trace.at(2).flags & RUN_CTX_F_FINALIZED) && trace.at(2).flow_typical_tenths == 200);
+    CHECK((trace.at(3).flags & RUN_CTX_F_FINALIZED) == 0 && trace.at(0).flow_typical_tenths == 280);
+
+    CheckupRunContextSnapshot snapshot;
+    cycling_run_context_snapshot(snapshot, trace, 700, boot_unix + 700);
+    CHECK(snapshot.count == 4 && snapshot.flow_typical_tenths == 200);
+    CHECK(snapshot.entries[0].start_s == CHECKUP_WINDOW_S - 1600);
+    CHECK(snapshot.entries[0].stop_s == CHECKUP_WINDOW_S - 1000);
+    CHECK(snapshot.entries[0].flags & RUN_CTX_F_RESTORED);
+    CHECK(snapshot.entries[2].start_s == CHECKUP_WINDOW_S - 80);
+    CHECK(snapshot.entries[2].flow_typical_tenths == 200);
+    cycling_run_context_snapshot(snapshot, trace, 700, boot_unix + 700, old.start_s + 1);
+    CHECK(snapshot.count == 3 && snapshot.flow_typical_tenths == 100);
+    cycling_run_context_snapshot(snapshot, trace, 700, 0);
+    CHECK(snapshot.count == 3); // unresolved wall clock
+    cycling_run_context_snapshot(snapshot, trace, 700, old.stop_s + 700);
+    CHECK(snapshot.count == 3); // saved stop now overlaps the corrected boot time
+    cycling_run_context_snapshot(snapshot, trace, 700, old.start_s + CHECKUP_WINDOW_S + 1);
+    CHECK(snapshot.count == 3); // out of the restored window
+    cycling_run_context_finalize(trace, 701000000);
+    CHECK(trace.at(2).flow_typical_tenths == 200); // loss of baseline cannot change a finalized row
+
+    // A full ring retains the newest rows and still accepts its next live witness.
+    while (trace.count < CYCLING_RUN_CONTEXT_CAP) CHECK(trace.prepend(old));
+    CHECK(!trace.prepend(old));
+    const auto next = closed_run(800, 801, CHECKUP_ABSENT);
+    trace.push(next);
+    CHECK(trace.count == CYCLING_RUN_CONTEXT_CAP && trace.latest_mut()->start_s == 800);
+    cycling_run_context_finalize(trace, 832000000, boot_unix + 832, old.start_s + 1);
+    CHECK(trace.latest_mut()->flags & RUN_CTX_F_FINALIZED);
+    CHECK(trace.latest_mut()->flow_typical_tenths == 100); // expired restored runs cannot return
+
+    CyclingRunJournalPage page;
+    page.identity   = {7, 8, 9};
+    page.entries[0] = old;
+    page.entries[0].flags &= static_cast<uint8_t>(~RUN_CTX_F_RESTORED);
+    page.entries[1] = closed_run(boot_unix + 620, boot_unix + 650, 70);
+    page.entries[1].flags |= RUN_CTX_F_FINALIZED | RUN_CTX_F_LOW_RPS_ABOVE_TGT;
+    page.entries[1].flow_typical_tenths = 200;
+
+    HistoryJournalHeader h{};
+    h.magic       = HISTORY_JOURNAL_MAGIC;
+    h.version     = HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    h.catalog_fp  = CYCLING_RUN_JOURNAL_SCHEMA;
+    h.commit      = HISTORY_JOURNAL_COMMITTED;
+    h.value_count = CYCLING_RUN_JOURNAL_WORDS;
+    h.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = 42;
+    h.bucket      = checkup_journal_bucket(page.entries[1].stop_s);
+    h.dt_s        = CHECKUP_DT_S;
+    h.rings[0] = h.rings[1] = h.rings[2] = 1;
+    CHECK(cycling_run_journal_header_matches(h));
+    CHECK(cycling_run_journal_page_valid(h, page));
+    CHECK(cycling_run_journal_count(page) == 2);
+
+    uint8_t payload[HISTORY_JOURNAL_PAYLOAD_BYTES]{};
+    std::memcpy(payload, &page, sizeof(page));
+    CyclingRunJournalPage decoded;
+    std::memcpy(&decoded, payload, sizeof(decoded));
+    CHECK(cycling_run_journal_page_valid(h, decoded));
+    CHECK(decoded.entries[1].flow_typical_tenths == 200);
+    auto bad_header   = h;
+    bad_header.commit = HISTORY_JOURNAL_ERASED;
+    CHECK(!cycling_run_journal_header_matches(bad_header));
+    CHECK(cycling_run_journal_page_valid(bad_header, page)); // validate the body before commit
+    bad_header        = h;
+    bad_header.source = static_cast<uint8_t>(HistoryJournalSource::Modbus);
+    CHECK(!cycling_run_journal_header_matches(bad_header));
+    bad_header = h;
+    ++bad_header.bucket;
+    CHECK(!cycling_run_journal_page_valid(bad_header, page));
+
+    for (const auto invalid_identity :
+         {CyclingTraceIdentity{0, 8, 9}, CyclingTraceIdentity{7, 0, 9},
+          CyclingTraceIdentity{7, 8, 0}}) {
+        decoded          = page;
+        decoded.identity = invalid_identity;
+        CHECK(!cycling_run_journal_page_valid(h, decoded));
+    }
+    decoded                    = page;
+    decoded.entries[1].start_s = old.stop_s - 1;
+    CHECK(!cycling_run_journal_page_valid(h, decoded));
+    decoded                     = page;
+    decoded.entries[1].reserved = 1;
+    CHECK(!cycling_run_journal_page_valid(h, decoded));
+    decoded                 = page;
+    decoded.entries[3].mode = static_cast<uint8_t>(CyclingRunMode::Dhw);
+    CHECK(!cycling_run_journal_page_valid(h, decoded)); // nonzero tail
+    decoded.entries[0] = {};
+    CHECK(!cycling_run_journal_page_valid(h, decoded)); // empty page
+    decoded = page;
+    for (size_t i = 2; i < CYCLING_RUN_JOURNAL_CAPACITY; ++i) {
+        decoded.entries[i] = page.entries[1];
+        decoded.entries[i].start_s += 30 * (i - 1);
+        decoded.entries[i].stop_s += 30 * (i - 1);
+    }
+    CHECK(cycling_run_journal_count(decoded) == CYCLING_RUN_JOURNAL_CAPACITY);
+    h.bucket = checkup_journal_bucket(decoded.entries[4].stop_s);
+    CHECK(cycling_run_journal_page_valid(h, decoded)); // exactly adjacent periods
+
+    const auto valid   = page.entries[1];
+    auto       invalid = valid;
+    invalid.start_s    = 0;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid        = valid;
+    invalid.stop_s = invalid.start_s;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid.stop_s += CHECKUP_WINDOW_S;
+    CHECK(cycling_run_journal_entry_valid(invalid));
+    ++invalid.stop_s;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid          = valid;
+    invalid.reserved = 1;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid       = valid;
+    invalid.flags = RUN_CTX_F_STOPPED;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid.flags |= RUN_CTX_F_FINALIZED | RUN_CTX_F_RESTORED;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid      = valid;
+    invalid.mode = UINT8_MAX;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid            = valid;
+    invalid.start_kind = UINT8_MAX;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid           = valid;
+    invalid.stop_kind = UINT8_MAX;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid             = valid;
+    invalid.flow_tenths = -1;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid.flow_tenths         = 0;
+    invalid.flow_typical_tenths = 0;
+    CHECK(!cycling_run_journal_entry_valid(invalid));
+    invalid.flow_tenths         = CHECKUP_ABSENT;
+    invalid.flow_typical_tenths = CHECKUP_ABSENT;
+    CHECK(cycling_run_journal_entry_valid(invalid));
+}
+
 int main() {
     hydronic_host_tests::test_hourly_wire_and_population();
     hydronic_host_tests::test_population_and_boundaries();
@@ -36144,6 +36428,7 @@ int main() {
     hydronic_host_tests::test_secondary_supply_inputs();
     hydronic_host_tests::test_secondary_supply_continuity();
     test_cycling_run_context();
+    test_cycling_run_journal();
     test_stop_context();
     test_stop_context_inputs();
     test_stop_context_output();
@@ -36198,6 +36483,7 @@ int main() {
     test_checkup(false);
     test_checkup(true);
     test_dhw_loss_trace();
+    test_dhw_loss_restore();
     test_checkup_population();
     test_checkup_evidence_overhaul();
     test_no_publish();

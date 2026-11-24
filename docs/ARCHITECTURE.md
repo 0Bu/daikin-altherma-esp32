@@ -222,9 +222,10 @@ that boundary, preserving the order and position of the restored samples.
 
 The journal occupies the upper 4 MiB of the official 8 MiB layout. Dense source records have a CRC
 and a commit word programmed last; a torn slot is skipped without erasing older committed neighbors.
-Erase sectors rotate over the partition. Record geometry grows by powers of two with a compile-time
-minimum retention of 72 hours for all active sources. Old physical records remain wear reserve
-until rotation reaches them.
+Erase sectors rotate over the partition. Record geometry grows by powers of two to cover at least
+72 hours at the compile-time write budgets for all active sources. The tank-cooling budget allows
+one checkpoint and one reset barrier per source per hour. Repeated resets or shutdowns can shorten
+physical retention. Old records remain until rotation reaches them.
 
 Per-source semantic manifests name trend identity, locator, kind, converter and unit, excluding
 labels. They allow unchanged curves to survive added or reordered rows. Duplicate ids, damaged
@@ -279,10 +280,10 @@ The separate Stop journal, DHW restart handoff and trend history retain their ow
 X10A (`s_x10a`, `CHECKUP_PERSIST_MAGIC`) and HomeHub/Altherma 4 Modbus (`s_modbus`,
 `CHECKUP_MODBUS_PERSIST_MAGIC`) use separate `.noinit` stores, separate 24 h `CheckupRing` /
 `DhwLossRing` rings, separate cycling traces, and separate flash-journal sources
-(`kCheckupModbusSource`, `kCyclingModbusTraceSource`). Circulation broker/mapping/interpretation
-identity gates only DHW buckets; changed circulation or HomeHub config must not retire independent
-X10A evidence, and switching the `diagnostics_source` preference (`v21`) only chooses which store
-`/status.health` renders without merging or clearing either history.
+(`kCheckupModbusSource`, `kCyclingModbusTraceSource`). The circulation broker, mapping, and
+interpretation identity gates the affected source's DHW buckets, timeline, and unfinished-window
+handoff. The sources retain independent histories. The `diagnostics_source` preference (`v21`)
+selects which store `/status.health` renders.
 A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage
 to completed checks. The first opt-in draws a durable non-zero generation; pausing diagnostics
 (`enabled: false`) preserves both 24-hour diagnostic stores, closes any open run as censored without
@@ -293,12 +294,12 @@ X10A, Modbus, and circulation epochs remain independent. Same-boot journal creat
 restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
 
-Exact completed tank-cooling windows use separate ordinary static RAM per source
-([`dhw_loss_trace.hpp`](../main/logic/dhw_loss_trace.hpp)), not `.noinit` or the history journal.
-The recorder copies accepted results without changing diagnostic rules or the `CheckupReport` layout.
-Existing persisted structs, fingerprints, journal payloads and NVS remain unchanged. The
-[timeline API](API.md#dhw-cooling-timeline) defines retention, collection resets and client
-invalidation.
+Exact completed tank-cooling windows use bounded static RAM per source and a separate
+single-page checkpoint in the history journal. That page records endpoint ages, duration, rate,
+readable time, and both markers. It binds source and profile, circulation identity, and consent.
+The existing append, CRC, and commit checks protect the page. Reset barriers withdraw older
+checkpoints. The core hourly payload and NVS layout stay compatible. The
+[timeline API](API.md#dhw-cooling-timeline) defines retention and client invalidation.
 
 A run completion is booked to its retained start hour. If the journal cursor has reached that
 hour, the writer schedules a replay from it through later live hours. The boot index keeps each
@@ -323,16 +324,33 @@ The rolling compressor trace uses the dated journal with a separate payload fing
 can offer an eligible checkpoint at most once every 240 seconds, with up to 192 records in four
 journal slots. The bounded shutdown flush can save a newer trace. Restoration checks a
 bounded set of groups newer than the last committed reset fence, newest first. A damaged or
-incomplete group can fall back to an older candidate. The first structurally complete group
-determines the result. Admission requires synchronized time, a matching model, link and
-diagnostics-consent identity, and observations eligible for the rolling window. An incompatible
-complete group ends the search. A scoped reset withdraws restored evidence immediately. Once the
+incomplete group can fall back to an older candidate. Admission requires synchronized time, a
+matching model, link and diagnostics-consent identity, and observations eligible for the rolling
+window. A complete group with a different identity ends the search. An X10A group with matching
+identity can yield to its predecessor if it is future-dated, outside the rolling window, or overlaps
+the current boot. On Modbus, a complete group with an unusable date ends the search. A scoped reset
+withdraws restored evidence immediately. Once the
 writer sees the pending reset, it drops any unfinished data group and gives the fence the next
 eligible write for this trace. The reset becomes durable when the fence commits. Power loss
 before that commit can leave an earlier compatible group eligible. After the journal scan, an
 orderly shutdown can save the undated fence even before time sync or trend restoration. No
 observations are admitted by that fence-only drain. Restored observations keep
 their saved times and age with a monotonic floor. The journal retains its existing geometry.
+
+Completed X10A compressor-run details use separate versioned pages in the same journal after
+post-stop refinement. Each page adds up to five newly finalized runs and the comparison saved for
+each run. Preparing the first dated X10A checkpoint fixes the calendar mapping for the collection.
+The mapping stays fixed until it differs from the current clock by at least 24 hours. The live
+chart uses the current clock. A checkpoint ends at the last dated observation or earlier if the
+clock moved back. A backward correction can postpone a write that would shorten a checkpoint
+already offered to flash. Both archiving and restoration require the exact start and first matching
+stop in the trace. A gap of up to 15 seconds qualifies if running observations resume before the
+stop. To archive a run, a verified checkpoint on the same clock mapping must cover the stop.
+Verified run commits are at least 240 seconds apart during normal operation. During orderly
+shutdown the writer can attempt up to two additional run pages after the existing diagnostic and
+ordinary journal drains, provided the X10A cycling reset fence is clear.
+Restoration also requires matching model, link and diagnostics consent and a page after the last
+committed reset fence.
 
 Unit-reported fault traces ([`fault_trace.hpp`](../main/logic/fault_trace.hpp),
 [`fault_persist.hpp`](../main/logic/fault_persist.hpp)) record X10A and Modbus fault, warning,
@@ -410,15 +428,17 @@ backs off to 30 seconds while unreachable, and suspends ordinary polling while h
 
 English and the application code remain in the startup page, capped at 181,248 gzip bytes.
 The build packs the minified script into an LZMA frame with a 512 KiB dictionary and a 1 MiB
-decoded-size limit. The inline loader verifies the header, decoded length, prefix, CRC and UTF-8
-before inserting the classic script synchronously at the end of the body. A validation failure
-prevents dashboard initialization.
-A first non-English locale request loads one local gzip resource containing twelve catalogs.
-It uses the same 512 KiB LZMA dictionary with a 1.5 MiB decoded-size limit across the twelve catalogs
-and validates the payload before synchronous registration.
-Later language changes reuse the registered tables. A locale load failure retains English.
-Both resources embed the pinned decoder and its license. Packing reduces flash use and costs
-transient browser memory and CPU. Per-catalog 32 KiB and aggregate locale size checks still
+decoded-size limit using a self-contained pure-TypedArray LZMA1 decoder (`tools/web_asset/lzma1_decoder.js`).
+The inline loader verifies the header, decoded length, prefix, CRC and UTF-8 before inserting the
+classic script synchronously at the end of the body. A validation failure prevents dashboard initialization.
+Non-English locales are embedded as five pre-compressed packs capped at 296,960 gzip bytes total:
+plain gzipped JavaScript for `de`, and four self-contained cognate TypedArray-LZMA1 packs (`es/fr/it`,
+`pl/cs/uk`, `nb/sv/fi`, `zh/ja`), each with the 512 KiB LZMA dictionary, a 1.5 MiB decoded-size
+limit and header/length/prefix/CRC/UTF-8 validation before synchronous registration.
+Requests carrying the build-time `v=<tag>` query digest receive immutable private caching, while
+untagged or mismatched queries revalidate with `no-cache` and the running image `ETag`.
+Later language changes within a loaded pack or already-loaded language reuse the registered tables.
+A locale load failure retains English. Per-catalog 32 KiB and aggregate locale size checks still
 apply. See `tools/web_asset/` and the delivery and locale contracts in [test/README.md](../test/README.md#ui-interaction-rendering-and-recording).
 
 Registration goes through the common exception boundary. The open setup AP exposes provisioning;

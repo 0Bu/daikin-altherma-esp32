@@ -544,7 +544,7 @@ void test_config_transactions_allocate_nothing_after_first_write(bool mutate_lat
         expect_quiet(s.coordinator, 1);
     }
     { // gas comparison save: success with non-SSO currency string and write failure
-        Scenario s(mutate_late_allocation);
+        Scenario          s(mutate_late_allocation);
         const std::string wide_cur(40, 'Z');
         CHECK_EQ(s.coordinator.save_gas_comparison(3200, 1050, wide_cur).result,
                  daik::ConfigSaveResult::Saved);

@@ -66,6 +66,8 @@ inline daik::Config                   current;
 inline std::vector<daik::CachedValue> rows, modbus_rows;
 inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
+inline bool                           ota_brief_busy  = false;
+inline const char*                    ota_brief_state = "idle";
 // Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
 inline int                              values_readers = 0, values_readers_peak = 0;
 inline bool                                   refuse_values_admission = false, clock_synced = true;
@@ -108,8 +110,8 @@ inline unsigned                         hydronic_report_calls      = 0;
 inline bool                             checkup_x10a_has_data      = false;
 inline bool                             checkup_modbus_has_data    = false;
 inline daik::DiagnosticsSource          last_checkup_report_source = daik::DiagnosticsSource::X10a;
-inline daik::logic::WorkingFigureReport        working_figure_x10a{};
-inline daik::logic::WorkingFigureReport        working_figure_modbus{};
+inline daik::logic::WorkingFigureReport working_figure_x10a{};
+inline daik::logic::WorkingFigureReport working_figure_modbus{};
 inline daik::logic::RefrigerantServiceSnapshot refrigerant_report{};
 inline unsigned                                refrigerant_report_calls = 0;
 inline std::string                             log;
@@ -154,12 +156,12 @@ void reset() {
     stop_report               = {};
     hydronic_report            = {};
     flow_min_tenths            = -1;
-    defrost_start              = {};
-    curve_bins                 = {};
-    curve_bins_available       = false;
-    cycling_hours              = {};
-    cycling_trace              = {};
-    cycling_run_contexts       = {};
+    defrost_start                = {};
+    curve_bins                   = {};
+    curve_bins_available         = false;
+    cycling_hours                = {};
+    cycling_trace                = {};
+    cycling_run_contexts         = {};
     cycling_run_contexts_present = false;
     for (auto& timeline : dhw_timelines) timeline.clear();
     dhw_snapshot_calls[0] = dhw_snapshot_calls[1] = checkup_report_calls = 0;
@@ -385,8 +387,14 @@ std::string config_profile() { return fixture::current.profile; }
 bool        config_stored_blob_unreadable() { return fixture::config_unreadable; }
 bool        hw_octal_spi() { return false; }
 bool        provisioning_ap_active() { return false; }
-bool        ota_download_active() { return fixture::ota; }
-bool        ota_busy() { return fixture::ota; }
+bool           ota_download_active() { return fixture::ota; }
+bool           ota_busy() { return fixture::ota; }
+OtaStatusBrief ota_status_brief() {
+    OtaStatusBrief out{};
+    out.busy  = fixture::ota_brief_busy;
+    out.state = fixture::ota_brief_state;
+    return out;
+}
 size_t      heap_largest_internal_block() { return 32768; }
 uint8_t     heap_guard_restarts() { return 0; }
 void        stack_watch_sample(StackWatch) noexcept { ++fixture::stack_samples; }
@@ -662,12 +670,12 @@ CheckupStopContextReport checkup_stop_context_report() {
     ++fixture::stop_report_calls;
     return fixture::stop_report;
 }
-bool checkup_has_cycling_run_contexts(DiagnosticsSource source) {
+bool checkup_has_cycling_run_contexts(DiagnosticsSource source, uint32_t, uint32_t) {
     return source == DiagnosticsSource::X10a && fixture::current.diagnostics_enabled &&
            fixture::cycling_run_contexts_present && fixture::cycling_run_contexts.count > 0;
 }
-bool checkup_cycling_run_contexts(daik::logic::CheckupRunContextSnapshot& out, uint32_t,
-                                  DiagnosticsSource                       source) {
+bool checkup_cycling_run_contexts(daik::logic::CheckupRunContextSnapshot& out, uint32_t boot_s,
+                                  DiagnosticsSource source, uint32_t timeline_unix_s) {
     if (source != DiagnosticsSource::X10a || !fixture::current.diagnostics_enabled ||
         !fixture::cycling_run_contexts_present) {
         out.reset();
@@ -675,6 +683,9 @@ bool checkup_cycling_run_contexts(daik::logic::CheckupRunContextSnapshot& out, u
     }
     fixture::check(fixture::values_readers == 1,
                    "cycling run contexts overlap the completed chart reader");
+    fixture::check(boot_s == fixture::cycling_trace.boot_s &&
+                       timeline_unix_s == fixture::cycling_trace.unix_s,
+                   "cycling run contexts are not in the emitted chart's time frame");
     out = fixture::cycling_run_contexts;
     return out.count > 0;
 }
@@ -1859,7 +1870,7 @@ int main(int argc, char** argv) {
         cycling_trace.unix_s       = 1795000000u;
         cycling_trace.window_end_s = daik::logic::CHECKUP_WINDOW_S;
         cycling_trace.end_s        = 86390;
-        cycling_trace.boot_s       = 500;
+        cycling_trace.boot_s       = 200;
         cycling_trace.live         = true;
         cycling_trace.push(86000, daik::logic::CheckupCyclingTrace::Heat);
         auto& dhw        = dhw_timelines[0];
@@ -1880,12 +1891,14 @@ int main(int argc, char** argv) {
         e.stop_rwt_tenths                        = 336;
         e.stop_tgt_tenths                        = 320;
         e.flow_tenths                            = 82;
+        e.flow_typical_tenths                    = 158;
         e.outdoor_tenths                         = 64;
         e.min_rps_tenths                         = 180;
         e.mode       = static_cast<uint8_t>(daik::logic::CyclingRunMode::Space);
         e.start_kind = static_cast<uint8_t>(daik::logic::CyclingStartKind::CooldownRestart);
         e.stop_kind  = static_cast<uint8_t>(daik::logic::CyclingStopKind::LowRpsAboveTarget);
-        e.flags      = daik::logic::RUN_CTX_F_STOPPED | daik::logic::RUN_CTX_F_LOW_RPS_ABOVE_TGT;
+        e.flags      = daik::logic::RUN_CTX_F_STOPPED | daik::logic::RUN_CTX_F_LOW_RPS_ABOVE_TGT |
+                  daik::logic::RUN_CTX_F_FINALIZED | daik::logic::RUN_CTX_F_RESTORED;
         cycling_run_contexts.count   = 1;
         cycling_run_contexts_present = true;
 
@@ -1901,7 +1914,9 @@ int main(int argc, char** argv) {
                                 "\"start_lwt_c\":28.4,\"start_target_c\":32.0,\"lwt_c\":35.1,"
                                 "\"rwt_c\":33.6,\"target_c\":32.0,\"flow_l_min\":8.2,"
                                 "\"outdoor_c\":6.4,\"min_rps\":18.0,"
-                                "\"low_rps_above_target\":true}]") != std::string::npos,
+                                "\"low_rps_above_target\":true,\"flow_reference_fixed\":true,"
+                                "\"flow_typical_l_min\":15.8,\"restored\":true}]") !=
+                  std::string::npos,
               "status payload missing or malformed cycling run_contexts");
 
         req = request();
@@ -1922,6 +1937,40 @@ int main(int argc, char** argv) {
         check(req.response.find("\"run_contexts\"") == std::string::npos &&
                   req.response.find("\"flow_typical_l_min\"") == std::string::npos,
               "modbus /status leaked X10A cycling run_contexts");
+    });
+    run("status_ota_brief", [] {
+        ota             = false;
+        ota_brief_busy  = false;
+        ota_brief_state = "idle";
+        auto req        = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "idle status ota brief failed");
+        successful(req);
+        check(req.response.find(
+                  "\"ota\":{\"channel\":\"release\",\"busy\":false,\"state\":\"idle\"}") !=
+                      std::string::npos ||
+                  req.response.find(
+                      "\"ota\":{\"channel\":\"dev\",\"busy\":false,\"state\":\"idle\"}") !=
+                      std::string::npos,
+              "idle /status missing expected ota brief fields");
+
+        ota_brief_busy  = true;
+        ota_brief_state = "checking";
+        req             = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "busy status ota brief failed");
+        successful(req);
+        check(req.response.find("\"busy\":true,\"state\":\"checking\"") != std::string::npos,
+              "busy /status missing expected ota brief fields");
+
+        ota_brief_busy  = false;
+        ota_brief_state = "";
+        req             = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "empty-state ota brief failed");
+        successful(req);
+        check(req.response.find("\"busy\":false,\"state\":\"idle\"") != std::string::npos,
+              "empty ota_brief.state did not fall back to idle");
+
+        ota_brief_busy  = false;
+        ota_brief_state = "idle";
     });
     check(count > 0, "unknown oracle");
     std::printf("PASS total=%u\n", count);

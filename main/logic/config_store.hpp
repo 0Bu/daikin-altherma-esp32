@@ -357,7 +357,7 @@ struct GasComparisonBlob {
     std::string tariff_currency       = "EUR";
 };
 
-inline constexpr uint8_t GAS_BLOB_VERSION     = 1;
+inline constexpr uint8_t GAS_BLOB_VERSION      = 1;
 inline constexpr char    GAS_BLOB_MAGIC_TEXT[] = "DKG1";
 
 inline bool gas_comparison_blob_strings_fit(const GasComparisonBlob& g) {
@@ -383,10 +383,9 @@ inline bool gas_comparison_blob_deserialize(const uint8_t* d, size_t n, GasCompa
     if (d == nullptr || n < 5 + 4 + 4 + 2 + 4) return false;
     if (d[0] != 'D' || d[1] != 'K' || d[2] != 'G' || d[3] != '1') return false;
     if (d[4] != GAS_BLOB_VERSION) return false;
-    const uint32_t want = static_cast<uint32_t>(d[n - 4]) |
-        (static_cast<uint32_t>(d[n - 3]) << 8) |
-        (static_cast<uint32_t>(d[n - 2]) << 16) |
-        (static_cast<uint32_t>(d[n - 1]) << 24);
+    const uint32_t want = static_cast<uint32_t>(d[n - 4]) | (static_cast<uint32_t>(d[n - 3]) << 8) |
+                          (static_cast<uint32_t>(d[n - 2]) << 16) |
+                          (static_cast<uint32_t>(d[n - 1]) << 24);
     if (config_crc32(d, n - 4) != want) return false;
     const size_t body_end = n - 4;
     const auto   get_u32  = [&](size_t p) {

@@ -107,6 +107,14 @@ CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTra
                                                   TickType_t, DiagnosticsSource) {
     return CheckupFlashRestoreResult::Ignored;
 }
+bool checkup_cycling_runs_checkpoint(logic::CyclingRunJournalPage&, uint32_t, uint32_t&, TickType_t,
+                                     uint32_t, uint32_t) {
+    return false;
+}
+CheckupFlashRestoreResult checkup_cycling_runs_restore(const logic::CyclingRunJournalPage&,
+                                                       uint32_t, TickType_t) {
+    return CheckupFlashRestoreResult::Ignored;
+}
 void checkup_cycling_forget() {}
 bool checkup_fault_checkpoint(logic::CheckupFaultTrace&, logic::CyclingTraceIdentity&, uint32_t&,
                               TickType_t, bool, bool, DiagnosticsSource) {
@@ -120,6 +128,18 @@ CheckupFlashRestoreResult checkup_fault_restore(const logic::CheckupFaultTrace&,
     return CheckupFlashRestoreResult::Ignored;
 }
 void checkup_fault_forget() {}
+bool checkup_dhw_trace_checkpoint(logic::DhwLossTracePage&, uint32_t&, TickType_t,
+                                  DiagnosticsSource) {
+    return false;
+}
+bool                      checkup_dhw_trace_reset_pending(DiagnosticsSource) { return false; }
+void                      checkup_dhw_trace_checkpoint_appended(uint32_t, DiagnosticsSource) {}
+bool                      checkup_dhw_trace_restore_ready(DiagnosticsSource) { return false; }
+CheckupFlashRestoreResult checkup_dhw_trace_restore(const logic::DhwLossTracePage&, TickType_t,
+                                                    DiagnosticsSource) {
+    return CheckupFlashRestoreResult::Ignored;
+}
+void checkup_dhw_trace_forget() {}
 } // namespace daik
 namespace {
 using namespace daik;

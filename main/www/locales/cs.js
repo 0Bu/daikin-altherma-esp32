@@ -1,4 +1,4 @@
-// translation-source: d69767c70806e190fa760fd1ccb17fc7c45aba75654e81c26bcea5f8579c05b3
+// translation-source: 48446b34ac9b8b8e16f8a6bf86ba64a11d5b004ded52e0d054685bab42487234
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -182,8 +182,16 @@ I18N.cs = localeValues([
   /* check.status.experimental */ "ZKUŠEBNĚ",
   /* check.status.unavailable */ "N/A",
   /* check.status.no_window */ "BEZ OKNA",
-  /* check.dhw.maximum */ "Zaznamenané maximum",
-  /* check.dhw.measurement */ "Čisté hodinové ochlazení u čidla R5T zásobníku.",
+  /* check.dhw.maximum */ "Největší hodinový pokles teploty u čidla zásobníku",
+  /* check.dhw.hour_unit */ "°C za hodinu",
+  /* check.dhw.timeline */ "Průběh za 24 hodin",
+  /* check.dhw.context_title */ "Příčina není jasná",
+  /* check.dhw.context_hour */ "Hodina měření se stejnou hodnotou",
+  /* check.dhw.context_missing */ "Čas a okolnosti tohoto měření nejsou k dispozici.",
+  /* check.dhw.context_pump */ "V této hodině běželo vnitřní vodní čerpadlo tepelného čerpadla.",
+  /* check.dhw.context_draw */ "Rychlý pokles teploty může souviset s odběrem teplé vody nebo s rychlým ochlazováním.",
+  /* check.dhw.context_quiet */ "Nebyl zaznamenán chod čerpadla ani pokles typický pro odběr. Odběr teplé vody je přesto možný.",
+  /* check.dhw.context_selected */ "Příčina tohoto poklesu zůstává nejasná.",
   /* check.dhw.hint */ "Hodina bez zaznamenané značky čerpadla nebo odběru dosáhla orientačního prahu projektu.",
   /* check.dhw.before_snapshot */ (d) => `${d} před snímkem`,
   /* check.dhw.marker_yes */ "zaznamenáno",
@@ -195,8 +203,8 @@ I18N.cs = localeValues([
   /* check.dhw.timeline_unavailable */ "Okna s časovými údaji nejsou dostupná. Ze součtů se historie neodvozuje.",
   /* check.dhw.timeline_empty */ "V tomto 24hodinovém přehledu nejsou dostupná dokončená okna s časovými údaji.",
   /* check.dhw.chart_title */ "Ochlazení v dokončeném okně",
-  /* check.dhw.timed_scope */ (n) => `Okna s časy od restartu/vynulování: ${n}, nejvýše 24 h. Maximum i počty mohou vycházet také z uložených hodinových údajů, nejen z vykreslených oken.`,
-  /* check.dhw.blank */ "Prázdno: není dostupné dokončené okno s časovými údaji, nikoli nulové ochlazení. Značky ukazují výskyt, ne dobu trvání.",
+  /* check.dhw.timed_scope */ (n) => `Naměřené hodiny v grafu: ${n} (posledních 24 h). Maximum i počty mohou vycházet také z uložených hodinových údajů, nejen z vykreslených oken.`,
+  /* check.dhw.blank */ "Šrafované úseky: není dostupné dokončené okno s časovými údaji, nikoli nulové ochlazení. Značky ukazují výskyt, ne dobu trvání.",
   /* check.dhw.snapshot */ "Snímek",
   /* check.dhw.stale */ "Aktuální údaje o chladnutí zásobníku chybí nebo jsou zastaralé; dokončená okna zůstávají historickými pozorováními.",
   /* check.dhw.limit */ "R5T měří jeden bod ve vrstveném zásobníku, nikoli jeho energii. Značky čerpadla a odběru neprokazují příčinu ani odběr vody.",
@@ -297,7 +305,7 @@ I18N.cs = localeValues([
   /* check.cycling.e_norm */ (to, vals) => `Konec ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Běžel při posledním odečtu.",
   /* check.cycling.cause_unavailable */ "Bez podrobností",
-  /* check.cycling.cause_since_boot */ "Příčiny spuštění a zastavení se zaznamenávají až od posledního restartu.",
+  /* check.cycling.cause_older_unavailable */ "Pro tyto starší cykly nejsou k dispozici uložené podrobnosti o spuštění a zastavení.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · průměr ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
