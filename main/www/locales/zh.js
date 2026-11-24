@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -170,6 +170,11 @@ I18N.zh = localeValues([
   /* check.defrost */ "除霜次数",
   /* check.pressure */ "水压",
   /* check.flow */ "最低流量",
+  /* check.flow.lowest */ "实测最低流量",
+  /* check.flow.runup */ "水泵连续运行至少 1 分钟后",
+  /* check.flow.assessment */ "流量是否足够取决于机型和运行模式。",
+  /* check.flow.measurements */ "测量详情",
+  /* check.flow.live */ "当前",
   /* check.heater */ "电加热器",
   /* check.retries */ "保护计数器",
   /* check.status.ok */ "正常",

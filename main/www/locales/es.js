@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -170,6 +170,11 @@ I18N.es = localeValues([
   /* check.defrost */ "Desescarches",
   /* check.pressure */ "Presión de agua",
   /* check.flow */ "Caudal mín.",
+  /* check.flow.lowest */ "Menor caudal medido",
+  /* check.flow.runup */ "Tras al menos 1 min de funcionamiento continuo de la bomba",
+  /* check.flow.assessment */ "Que el caudal sea suficiente depende del modelo y del modo de funcionamiento.",
+  /* check.flow.measurements */ "Detalles de medición",
+  /* check.flow.live */ "Ahora",
   /* check.heater */ "Resistencias",
   /* check.retries */ "Contadores protección",
   /* check.status.ok */ "OK",

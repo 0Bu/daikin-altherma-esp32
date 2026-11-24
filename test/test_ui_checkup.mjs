@@ -131,6 +131,7 @@ const context = {
   S: { status: null, descOpen: new Set(), faultCodes: new Set(), faultSnapKeys: null, faultHoverIdx: null },
   document: { getElementById: () => null },
   fetch: () => { throw new Error("unexpected fetch in checkup test"); },
+  modbusFlowScaleUnverified: () => false,
   localStorage: { getItem: () => "en", setItem: () => {} },
   navigator: { language: "en" },
 };
@@ -142,6 +143,8 @@ vm.runInContext(
      metric: checkupMetricValue,
      status: checkupStatusText,
      detail: checkupDetailHtml,
+     flowReport: checkupFlowReport,
+     flowBrief: checkupFlowBriefHtml,
      chart: checkupCyclingChartHtml,
      timeline: checkupCyclingTimelineHtml,
      periodDetails: (trace, checkObj, from, to, source = "x10a") => {
@@ -1111,8 +1114,7 @@ assert.doesNotMatch(card, /All clear|healthy|8 values|health score/);
 context.S.status.health = { status: "unavailable", assessable: 0, evaluated: 0,
   checks: [{ id: "flow", verdict: "ok", evidence: "observation", min_l_min: 8.4 }] };
 card = ui.card();
-assert.match(card, />Observations<\/span>/);
-assert.doesNotMatch(card, /0\/0|N\/A<\/span>|>OK</);
+assert.equal(card, "", "a flow-only report belongs in the inspector and cannot create a second card");
 context.S.status.health = { status: "unavailable", persist: "unknown",
   checks: [{ id: "cycling", verdict: "unavailable" }] };
 for (const lang of locales) {
@@ -1132,13 +1134,13 @@ assert.match(ui.card(), />Collecting data<\/span>/);
 context.S.status.health.checks = [{ id: "future_check", verdict: "warn", opaque: "<must-not-render>" }];
 assert.equal(ui.card(), "");
 
-// Retained dated H1 population keeps the offline X10A flow row visible without overriding badge status
-// or spilling onto unconfirmed / undated / method!=1 records.
+// The inspector keeps the retained X10A heating observation independently of its lowest-flow
+// result. Neither evidence source reintroduces the former Plant diagnostics row.
 context.S.status = {
   hp: { connected: false },
   diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
   health: {
-    status: "unavailable",
+    source: "x10a", status: "unavailable", source_fresh: false, span_s: 900,
     checks: [
       { id: "fault", verdict: "unavailable", active: null },
       { ...hydronicFlow, verdict: "unavailable", min_l_min: null,
@@ -1146,13 +1148,11 @@ context.S.status = {
     ],
   },
 };
-const offlineHydroCard = ui.card(false);
-assert.ok(offlineHydroCard.includes("health_flow"),
-          "offline X10A card must retain confirmed dated H1 flow row");
-assert.ok(!offlineHydroCard.includes("health_fault"),
-          "H1 retention must not fabricate visibility for unrelated unavailable checks");
-assert.match(offlineHydroCard, /class="vrow-val checkup-val dim">N\/A<\/span>/);
-assert.doesNotMatch(offlineHydroCard, /badge|No hint|0\/0|>OK</);
+assert.equal(ui.card(false), "", "an offline X10A H1 report cannot create a second flow card");
+const offlineFlow = ui.flowReport();
+assert.equal(offlineFlow.source, "x10a");
+assert.equal(offlineFlow.minimum, null, "dated heating statistics are independent of the pump-flow minimum");
+assert.match(ui.detail(offlineFlow.check, false, offlineFlow.health), /Population: Dated/);
 for (const unconfirmed of [
   { method: 2 },
   { confirmed: false },
@@ -1163,9 +1163,58 @@ for (const unconfirmed of [
     ...hydronicFlow, verdict: "unavailable", min_l_min: null,
     hydronic: { ...hydronicFlow.hydronic, ...unconfirmed },
   }];
-  assert.equal(ui.card(false), "", "offline X10A card must omit unconfirmed/undated H1 records");
+  assert.doesNotMatch(ui.detail(context.S.status.health.checks[0], false, context.S.status.health), /Population: Dated|Water spread: min/);
+  assert.equal(ui.card(false), "", "unconfirmed/undated H1 records cannot create a second flow card");
 }
+context.S.status.health = { source: "x10a", status: "ok", persist: "fresh", span_s: 900,
+  checks: [{ ...hydronicFlow, min_l_min: 0 }] };
+assert.equal(ui.flowReport().minimum, 0, "valid measured zero is not missing");
+for (const lang of locales) {
+  const requiredCopy = ["check.flow.lowest", "check.flow.runup", "check.flow.assessment", "check.detail.period_label"];
+  for (const key of requiredCopy) assert.ok(Object.hasOwn(ui.copy[lang], key), lang + "/" + key);
+  ui.setLang(lang);
+  const flow = ui.flowReport();
+  const brief = ui.flowBrief(flow);
+  for (const key of requiredCopy)
+    assert.ok(brief.includes(escapeText(ui.text(lang, key))), lang + "/" + key + " is visible");
+  assert.ok(brief.includes(escapeText(ui.text(lang, "check.detail.period_label") + " 15 min")));
+  assert.ok(brief.includes("X10A"), lang + " has a named diagnostic source");
+  assert.doesNotMatch(brief, /check\.flow\.|NaN|Infinity|undefined|23 h 45 min/);
+}
+ui.setLang("en");
+for (const minimum of [null, "5.9", -1, NaN, Infinity]) {
+  context.S.status.health.checks[0].min_l_min = minimum;
+  assert.equal(ui.flowReport()?.minimum ?? null, null, "an invalid minimum must not be plotted");
+}
+Object.assign(context.S.status.health.checks[0], { verdict: "collecting", min_l_min: 0 });
+const waitingFlow = ui.flowReport();
+assert.equal(waitingFlow.minimum, null, "collection cannot publish a lowest value");
+assert.ok(ui.flowBrief(waitingFlow).includes(ui.text("en", "check.status.collecting")));
+context.S.status.diagnostics.enabled = false;
+assert.equal(ui.flowReport(), null, "disabled diagnostics hide the flow report");
+context.S.status.diagnostics.enabled = true;
+context.S.status.health.persist = "unknown";
+assert.equal(ui.flowReport(), null, "unreadable persistence hides the flow report");
+context.S.status.health = { source: "modbus", status: "ok", checks: [hydronicFlow] };
+assert.equal(ui.flowReport().source, "modbus", "the active diagnostic instrument can differ from the live value");
+assert.equal(ui.flowReport().minimum, hydronicFlow.min_l_min);
+assert.match(ui.flowBrief(ui.flowReport()), /Lowest measured flow · Modbus/);
+context.modbusFlowScaleUnverified = () => true;
+const provisionalFlow = ui.flowReport();
+assert.equal(provisionalFlow.minimum, null, "an unverified Modbus scale cannot label a measured minimum");
+assert.equal(provisionalFlow.check.verdict, "unavailable");
+assert.equal(provisionalFlow.check.min_l_min, null, "expanded details must suppress the provisional minimum too");
+assert.equal(context.S.status.health.checks[0].min_l_min, hydronicFlow.min_l_min,
+  "a provisional live row cannot rewrite the accepted health frame");
+context.modbusFlowScaleUnverified = () => false;
+context.S.otaCached = true;
+assert.equal(ui.flowReport(), null, "cached OTA status cannot publish a flow diagnostic");
+context.S.otaCached = false;
+context.S.transportUnavailable = "status";
+assert.equal(ui.flowReport(), null, "a failed status poll hides obsolete diagnostic evidence");
+context.S.transportUnavailable = null;
 context.S.status.health = { status: "ok", persist: "fresh", checks: [] };
+assert.equal(ui.flowReport(), null, "a firmware frame without a flow report omits the diagnosis");
 
 // Every shipped language must have dynamic copies for the changed states, not English fallback keys.
 for (const lang of locales) {
@@ -1398,9 +1447,9 @@ context.S.status = {
 };
 let cardHtml = ui.card(true);
 assert.match(cardHtml, /Plant diagnostics · 24 h · Modbus</);
-for (const shown of ["health_fault", "health_flow", "health_heater", "health_cycling", "health_dhw_loss"])
+for (const shown of ["health_fault", "health_heater", "health_cycling", "health_dhw_loss"])
   assert.ok(cardHtml.includes(shown), `Modbus card must render ${shown}`);
-for (const hidden of ["health_defrost", "health_pressure", "health_retries", "refrigerant_service"])
+for (const hidden of ["health_defrost", "health_flow", "health_pressure", "health_retries", "refrigerant_service"])
   assert.ok(!cardHtml.includes(hidden), `Modbus card must hide ${hidden}`);
 
 context.S.status.health.checks = modbusChecks.map((c) =>

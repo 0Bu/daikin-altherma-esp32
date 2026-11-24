@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -170,6 +170,11 @@ I18N.uk = localeValues([
   /* check.defrost */ "Відтавання",
   /* check.pressure */ "Тиск води",
   /* check.flow */ "Мін. витрата",
+  /* check.flow.lowest */ "Найнижча виміряна витрата",
+  /* check.flow.runup */ "Після щонайменше 1 хв безперервної роботи насоса",
+  /* check.flow.assessment */ "Потрібна витрата залежить від моделі та режиму роботи.",
+  /* check.flow.measurements */ "Подробиці вимірювання",
+  /* check.flow.live */ "Зараз",
   /* check.heater */ "Електронагрівачі",
   /* check.retries */ "Лічильники захисту",
   /* check.status.ok */ "НОРМА",

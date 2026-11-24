@@ -1,4 +1,4 @@
-// translation-source: 2b317f805732fb9e03daf262ffde7f72a7330c45a50031f73852331ccff529f7
+// translation-source: e515227a5278453e65d0915d7f466cf0bc3181b019370d01a222e720fbed1689
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -170,6 +170,11 @@ I18N.de = localeValues([
   /* check.defrost */ "Abtauvorgänge",
   /* check.pressure */ "Wasserdruck",
   /* check.flow */ "Min. Durchfluss",
+  /* check.flow.lowest */ "Niedrigster Messwert",
+  /* check.flow.runup */ "Ab 1 min durchgehendem Pumpenlauf",
+  /* check.flow.assessment */ "Ob der Durchfluss ausreicht, hängt vom Modell und der Betriebsart ab.",
+  /* check.flow.measurements */ "Messdetails",
+  /* check.flow.live */ "Jetzt",
   /* check.heater */ "Heizstäbe",
   /* check.retries */ "Schutzzähler",
   /* check.status.ok */ "OK",
