@@ -8015,6 +8015,12 @@ static void test_modbus_plan() {
         CHECK(!mb_offset_is_heating_witness(MbFunc::ReadInput, 32));
         CHECK(mb_plan_max_requests(b, nb, false, true, true) ==
               mb_plan_max_requests(b, nb, false) + 3);
+        // A standalone pump register has no batch fallback overhead. Full sweeps keep their
+        // separate optional probe even when heating observation enables extra fast witnesses.
+        const MbBatch pump_only{MbFunc::ReadInput, 30, 1, 0, 1};
+        CHECK(mb_plan_max_requests(&pump_only, 1, false, true, true) == 1);
+        CHECK(mb_plan_max_requests(&pump_only, 1, true, false, true) == 1);
+        CHECK(mb_plan_max_requests(&pump_only, 1, true, true, true) == 2);
         // Every gate offset really is inside some fast batch — the assertion above counts batches,
         // this one proves the coverage it is standing in for.
         for (size_t g = 0; g < MB_GATE_OFFSET_COUNT; g++) {

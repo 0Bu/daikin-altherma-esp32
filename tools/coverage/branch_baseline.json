@@ -2524,6 +2524,27 @@
       },
       "test_source_sha256": "d6212258b5d6a2f2485b70c17379c65d35e1b9fde7122bf9c921eb2a2204e06d",
       "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 and aarch64 gcc-15-linux-ubuntu26 confirmation remain separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, pinned ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, pinned Ubuntu 26.04 release-coverage Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "The locally measured x86-64 release-coverage Docker result supplies the hosted profile candidate. Authoritative GitHub CI confirmation remains separate.",
+      "measurement_limits": [
+        "All four compilers ran the logic suite and measured both Modbus headers directly.",
+        "The optional GCC 15 aarch64 full-profile check shows four earlier Hydronic-v2 mismatches in hydronic_hourly.hpp, hydronic_input.hpp, hydronic_observation.hpp and hydronic_payload.hpp. Those entries are outside this Modbus update and remain unchanged."
+      ],
+      "runner": "The compile and gcov commands from scripts/run-mock-tests.sh --coverage, run in separate scratch directories on Darwin and in pinned/local Linux containers.",
+      "scope": "HomeHub heating-flow observation and fast poll request budgeting. Tests cover the separate single-pump read and the optional full-sweep probe. modbus_plan.hpp: 53/60 to 76/86 on Clang and 61/68 to 97/104 on all measured GCC profiles. New modbus_heating_flow.hpp: 49/64 on Clang and 56/72 on GCC. Every existing branch ratio floor and the 95-percent executable-line floor are retained.",
+      "sources": {
+        "main/logic/modbus_heating_flow.hpp": "0ca21f9b686f72533631ad0a85841321f79662287a768f5dbff68d6482258613",
+        "main/logic/modbus_plan.hpp": "acb0fff6b947894cb5f6140be07411efc3e54350dc2357ab91ca611c1a5c2ff7"
+      },
+      "test_source_sha256": "67486aca4f053129f1d145853096514333cf67dc3176333c5328f84f24099458",
+      "validation_boundary": "Local host and container tests exercise synthetic inputs. These measurements do not establish hosted CI or hardware behavior."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2809,9 +2830,13 @@
         "outcomes": 14,
         "taken": 14
       },
+      "main/logic/modbus_heating_flow.hpp": {
+        "outcomes": 64,
+        "taken": 49
+      },
       "main/logic/modbus_plan.hpp": {
-        "outcomes": 60,
-        "taken": 53
+        "outcomes": 86,
+        "taken": 76
       },
       "main/logic/modbus_profile.hpp": {
         "outcomes": 82,
@@ -3287,9 +3312,13 @@
         "outcomes": 32,
         "taken": 27
       },
+      "main/logic/modbus_heating_flow.hpp": {
+        "outcomes": 72,
+        "taken": 56
+      },
       "main/logic/modbus_plan.hpp": {
-        "outcomes": 68,
-        "taken": 61
+        "outcomes": 104,
+        "taken": 97
       },
       "main/logic/modbus_profile.hpp": {
         "outcomes": 90,
@@ -3765,9 +3794,13 @@
         "outcomes": 32,
         "taken": 27
       },
+      "main/logic/modbus_heating_flow.hpp": {
+        "outcomes": 72,
+        "taken": 56
+      },
       "main/logic/modbus_plan.hpp": {
-        "outcomes": 68,
-        "taken": 61
+        "outcomes": 104,
+        "taken": 97
       },
       "main/logic/modbus_profile.hpp": {
         "outcomes": 90,
@@ -4243,9 +4276,13 @@
         "outcomes": 32,
         "taken": 27
       },
+      "main/logic/modbus_heating_flow.hpp": {
+        "outcomes": 72,
+        "taken": 56
+      },
       "main/logic/modbus_plan.hpp": {
-        "outcomes": 68,
-        "taken": 61
+        "outcomes": 104,
+        "taken": 97
       },
       "main/logic/modbus_profile.hpp": {
         "outcomes": 90,
