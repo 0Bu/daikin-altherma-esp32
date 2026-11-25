@@ -2242,6 +2242,72 @@ function checkupFlowBriefHtml({ source, minimum, locationsMissing, unsupported, 
   return head + checkupWaterAgreementHtml(agreement);
 }
 
+function checkupHeaterContextHtml(c) {
+  const s = c.context;
+  if (!s || typeof s !== "object" || Array.isArray(s)) return "";
+  const splitSegs = (key, count) => {
+    const raw = t(key);
+    const parts = typeof raw === "string" ? raw.split("|") : [];
+    return parts.length === count ? parts : null;
+  };
+  const states = splitSegs("check.heater_context.states", 9);
+  const labels = splitSegs("check.heater_context.categories", 9);
+  const columns = splitSegs("check.heater_context.columns", 3);
+  const totals = splitSegs("check.heater_context.totals", 6);
+  if (!states || !labels || !columns || !totals) return "";
+  const state = [];
+  if (s.confirmed !== true) state.push(states[0]);
+  if (s.dated !== true) state.push(states[1]);
+  if (s.coverage_partial === true) state.push(states[2]);
+  const droppedLabel = Number.isFinite(s.dropped) && s.dropped > 0
+    ? ` (≥${s.dropped.toLocaleString(LANG)})` : "";
+  if (s.archive_incomplete === true) state.push(states[5] + droppedLabel);
+  else if (s.storage_loss === true || s.dropped > 0) state.push(states[5] + droppedLabel);
+  else if (s.restore_pending === true) state.push(states[3]);
+  if (s.persistence_pending === true) state.push(states[4]);
+  if (s.clock_uncertain === true) state.push(states[6]);
+  if (s.buh?.saturated === true || s.bsh?.saturated === true) state.push(states[7]);
+  const channels = [s.buh, s.bsh].map(h => (h && typeof h === "object" && !Array.isArray(h) ? h : null));
+  const title = descParaHtml(`<span class="vdesc-n">${esc(t("check.heater_context.title"))}</span>`);
+  const hasHeater = channels.some(h => h?.supported === true);
+  if (!hasHeater && s.confirmed === true) state.push(states[8]);
+  const status = state.length ? descParaHtml(esc(state.join(" · "))) : "";
+  if (s.confirmed !== true || !hasHeater) return title + status + descParaHtml(esc(t("check.heater_context.limits")));
+  const number = (n, saturated, unit = " s") => Number.isFinite(n) && n >= 0
+    ? `${saturated ? "≥" : ""}${Math.floor(n).toLocaleString(LANG)}${unit}` : t("sys.nodata");
+  const row = (label, value) => `<tr><th scope="row">${esc(label)}</th><td>${esc(value)}</td></tr>`;
+  const categoryIds = ["emergency", "error", "defrost_recovery", "dhw_route", "silent",
+    "cold_outdoor", "mild_outdoor", "compressor_off", "quiet_mild_heating"];
+  const countsCaption = t("check.heater_context.counts");
+  const table = channels.map((h, heater) => {
+    const name = columns[heater + 1];
+    if (h?.supported !== true) return descParaHtml(esc(`${name}: ${h?.supported === false ? states[8] : t("sys.nodata")}`));
+    const categoryRows = categoryIds.map((id, k) => {
+      const v = h.categories?.[id];
+      let value = t("sys.nodata");
+      if (v?.supported === false) value = states[8];
+      else if (v?.supported === true && (v.positive_s ?? v.evaluable_on_s ?? v.positive_samples) != null) {
+        const saturated = h.saturated === true;
+        const positive = !saturated && v.positive_s === 0 &&
+          Number.isFinite(v.positive_samples) && v.positive_samples > 0
+          ? "<1 s" : number(v.positive_s, saturated);
+        value = `${positive} / ${number(v.evaluable_on_s, saturated)} · ${number(v.positive_samples, saturated, "")}`;
+      }
+      return row(labels[k], value);
+    });
+    const totalRows = ["on_s", "union_s", "overlap_s", "unknown_context_s", "unclassified_s",
+      "readable_s"].map((key, k) => row(totals[k], number(h[key], h.saturated === true)));
+    return `<table class="heater-context"><caption>${esc(countsCaption)}</caption>` +
+      `<thead><tr><th scope="col">${esc(columns[0])}</th><th scope="col">${esc(name)}</th></tr></thead>` +
+      `<tbody>${categoryRows.join("")}${totalRows.join("")}</tbody></table>`;
+  }).join("");
+  const notice = channels.some(h => h?.supported === true && h.quiet_mild_notice === true)
+    ? descParaHtml(esc(t("check.heater_context.notice"))) : "";
+  return title + status + table + notice +
+    descParaHtml(esc(t("check.heater_context.rule"))) +
+    descParaHtml(esc(t("check.heater_context.limits")));
+}
+
 function checkupStatusKey(c) {
   const verdict = typeof c === "string" ? c : c?.verdict;
   // Older firmware reported this completed, unsuccessful day as collecting. Keep its
@@ -2749,6 +2815,7 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
          descParaHtml(esc(detail)) +
+         (c.id === "heater" && report?.source === "x10a" ? checkupHeaterContextHtml(c) : "") +
          descNoteHtml(t("normal.label"), normal);
 }
 

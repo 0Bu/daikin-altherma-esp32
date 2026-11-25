@@ -59,6 +59,9 @@
 #include "logic/hydronic_payload.hpp"
 #include "logic/modbus_heating_flow.hpp"
 #include "logic/stop_context_input.hpp"
+#include "logic/heater_context_input.hpp"
+#include "logic/heater_context_hourly.hpp"
+#include "logic/heater_context_payload.hpp"
 #include "logic/observation_hourly.hpp"
 #include "checkup_population_fixture.hpp"
 #include "logic/health_gate.hpp"
@@ -24779,6 +24782,19 @@ static void test_retired_room_journal_record() {
 static void test_history_persist() {
     using namespace logic;
 
+    CHECK(history_journal_next_sequence(rt<uint64_t>(0)) == 1);
+    CHECK(history_journal_next_sequence(rt<uint64_t>(41)) == 42);
+    CHECK(history_journal_next_sequence(rt<uint64_t>(UINT64_MAX - 1)) == UINT64_MAX);
+    CHECK(history_journal_next_sequence(rt<uint64_t>(UINT64_MAX)) == 0);
+    CHECK(history_journal_sequence_reservable(rt<uint64_t>(1), rt<size_t>(1)));
+    CHECK(history_journal_sequence_reservable(rt<uint64_t>(1), rt<size_t>(3)));
+    CHECK(!history_journal_sequence_reservable(rt<uint64_t>(0), rt<size_t>(1)));
+    CHECK(!history_journal_sequence_reservable(rt<uint64_t>(1), rt<size_t>(0)));
+    CHECK(history_journal_sequence_reservable(rt<uint64_t>(UINT64_MAX - 3), rt<size_t>(3)));
+    CHECK(!history_journal_sequence_reservable(rt<uint64_t>(UINT64_MAX - 2), rt<size_t>(3)));
+    CHECK(history_journal_sequence_reservable(rt<uint64_t>(UINT64_MAX - 1), rt<size_t>(1)));
+    CHECK(!history_journal_sequence_reservable(rt<uint64_t>(UINT64_MAX), rt<size_t>(1)));
+
     // --- the streaming CRC is the SAME function the config blob is sealed with -------------------
     // Split into update/final so the ring seal can skip the open bucket's `pending` (see the
     // header). The property every caller depends on is that feeding two regions equals feeding
@@ -24998,7 +25014,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 14904);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 15408);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -35598,7 +35614,1057 @@ void test_cycling_run_journal() {
     CHECK(cycling_run_journal_entry_valid(invalid));
 }
 
+// Add after including logic/heater_context_input.hpp. These are sampled reported-state
+// oracles, not physical validation of heater output, an operating cause or electricity use.
+namespace heater_context_host_tests {
+namespace hc                  = daik::logic::heater_context;
+namespace hi                  = daik::logic::heater_context_input;
+constexpr int64_t           S = 1000000;
+template <class T> static T runtime(T value) {
+    volatile T observed = value;
+    return observed;
+}
+static size_t     category(hc::Category c) { return static_cast<size_t>(c); }
+static hc::Sample known() {
+    hc::Sample s;
+    s.heater[0] = s.heater[1] = hc::Bit::On;
+    s.emergency = s.error = s.defrost = s.silent = s.dhw = s.compressor_off = hc::Bit::Off;
+    s.mode           = daik::logic::CheckupOperatingMode::Heating;
+    s.outdoor_source = daik::logic::OutdoorSource::X10a;
+    s.outdoor_known  = true;
+    s.outdoor_tenths = 30;
+    return s;
+}
+static hc::Admission feed(hc::State& state, hc::Hour& hour, const hc::Sample& s, int64_t now,
+                          uint32_t generation = 1, uint32_t schema = 2, uint8_t heaters = 3,
+                          uint16_t capabilities = hc::ALL) {
+    return hc::step(state, hour, now, generation, schema, heaters, capabilities, s);
+}
+static void invariant(const hc::HourCounters& c) {
+    CHECK(uint64_t(c.readable_us) == uint64_t(c.on_us) + c.off_us + c.transition_us);
+    CHECK(uint64_t(c.on_us) == uint64_t(c.union_us) + c.unclassified_us);
+    CHECK(uint64_t(c.on_us) == uint64_t(c.complete_context_us) + c.unknown_context_us);
+    CHECK(c.overlap_us <= c.union_us && c.union_us <= c.on_us);
+    CHECK(c.on_samples <= c.readable_samples && c.readable_samples <= c.samples);
+    for (size_t k = 0; k < hc::CATEGORIES; ++k) {
+        CHECK(c.positive_us[k] <= c.evaluable_on_us[k] && c.evaluable_on_us[k] <= c.on_us);
+        CHECK(c.positive_samples[k] <= c.evaluable_on_samples[k]);
+        CHECK(c.evaluable_on_samples[k] <= c.on_samples);
+    }
+}
+struct Row {
+    uint8_t     reg = 0, off = 0;
+    uint16_t    conv = 0;
+    bool        held = false, held_unknown = false;
+    std::string value;
+};
+static bool location(const daik::logic::CheckupLocator& r, int reg, int off, int conv) {
+    return r.reg == reg && r.off == off && r.conv == conv;
+}
+struct Inputs {
+    hi::Binding      binding{11, 22, 33, 0, 44};
+    hi::Plan         plan;
+    hi::Sweep        sweep{binding, true, true, true};
+    std::vector<Row> rows;
+    explicit Inputs(const char* id = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw") {
+        plan = hi::make_plan(id, daik::def::lookup_view(id), binding);
+        for (size_t k = 0; k < hi::INPUTS; ++k) {
+            const auto i = static_cast<hi::Input>(k);
+            if (!hi::has(plan.inputs, i)) continue;
+            const auto& r    = plan.inputs.rows[k];
+            const char* text = i == hi::Input::Mode      ? "Heating"
+                               : i == hi::Input::Rps     ? "12"
+                               : i == hi::Input::Outdoor ? "3.0"
+                                                         : "0";
+            rows.push_back({r.reg, r.off, static_cast<uint16_t>(r.conv), false, false, text});
+        }
+        for (size_t k = 0; k < plan.inputs.fault_count; ++k) {
+            const auto& r = plan.inputs.fault_rows[k];
+            rows.push_back({r.reg, r.off, static_cast<uint16_t>(r.conv), false, false, "Normal"});
+        }
+    }
+    Row& row(hi::Input input) {
+        const auto& r = plan.inputs.rows[size_t(input)];
+        for (auto& value : rows)
+            if (value.reg == r.reg && value.off == r.off && value.conv == r.conv) return value;
+        std::abort();
+    }
+    hi::Snapshot collect() const { return hi::collect(plan, rows.data(), rows.size(), sweep); }
+};
+} // namespace heater_context_host_tests
+
+static void test_heater_context_core() {
+    using namespace heater_context_host_tests;
+    using B           = hc::Bit;
+    using C           = hc::Category;
+    using A           = hc::Admission;
+    const B states[]  = {B::Unknown, B::Off, B::On};
+    const B ors[3][3] = {
+        {B::Unknown, B::Unknown, B::On}, {B::Unknown, B::Off, B::On}, {B::On, B::On, B::On}};
+    const B ands[3][3] = {
+        {B::Unknown, B::Off, B::Unknown}, {B::Off, B::Off, B::Off}, {B::Unknown, B::Off, B::On}};
+    for (size_t i = 0; i < 3; ++i)
+        for (size_t j = 0; j < 3; ++j) {
+            CHECK(hc::tri_or(runtime(states[i]), runtime(states[j])) == ors[i][j]);
+            CHECK(hc::tri_and(runtime(states[i]), runtime(states[j])) == ands[i][j]);
+        }
+    CHECK(hc::truth(runtime(false), true) == B::Unknown);
+    CHECK(hc::truth(runtime(true), false) == B::Off);
+    CHECK(hc::truth(runtime(true), true) == B::On);
+    CHECK(unsigned(hc::Heater::Buh) == 0 && unsigned(hc::Heater::Bsh) == 1);
+    uint16_t all = 0;
+    for (size_t k = 0; k < hc::CATEGORIES; ++k) {
+        CHECK(hc::mask(runtime(static_cast<C>(k))) == (1u << k));
+        all |= hc::mask(static_cast<C>(k));
+    }
+    CHECK(hc::HEATERS == 2 && hc::CATEGORIES == 9 && all == hc::ALL);
+    CHECK(hc::deadline(runtime(int64_t(7))) == 300000007);
+    CHECK(hc::deadline(runtime(INT64_MAX)) == INT64_MAX);
+
+    // Each category has an independent expected positive/negative endpoint, including the
+    // mutually exclusive outdoor bands and the heating/space requirement of Quiet+mild.
+    hc::State endpoint_state;
+    endpoint_state.capability_mask = hc::ALL;
+    auto s                         = known();
+    s.emergency = s.error = s.defrost = s.silent = s.dhw = s.compressor_off = B::On;
+    auto    e              = hc::endpoint(endpoint_state, s, 0, false);
+    const B dhw_expected[] = {B::On, B::On, B::On, B::On, B::On, B::Off, B::On, B::On, B::Off};
+    for (size_t k = 0; k < hc::CATEGORIES; ++k) CHECK(e.context[k] == dhw_expected[k]);
+    s.dhw = B::Off;
+    e     = hc::endpoint(endpoint_state, s, S, false);
+    CHECK(e.context[category(C::QuietMildHeating)] == B::On);
+    s.outdoor_tenths = 20;
+    e                = hc::endpoint(endpoint_state, s, 2 * S, false);
+    CHECK(e.context[category(C::ColdOutdoor)] == B::On);
+    CHECK(e.context[category(C::MildOutdoor)] == B::Off);
+    CHECK(e.context[category(C::QuietMildHeating)] == B::Off);
+    s.outdoor_tenths = 21;
+    e                = hc::endpoint(endpoint_state, s, 3 * S, false);
+    CHECK(e.context[category(C::ColdOutdoor)] == B::Off);
+    CHECK(e.context[category(C::MildOutdoor)] == B::On);
+    s.outdoor_known = false;
+    e               = hc::endpoint(endpoint_state, s, 4 * S, false);
+    CHECK(e.context[category(C::ColdOutdoor)] == B::Unknown);
+    CHECK(e.context[category(C::QuietMildHeating)] == B::Unknown);
+    endpoint_state.capability_mask &= ~hc::mask(C::Emergency);
+    e = hc::endpoint(endpoint_state, s, 5 * S, false);
+    CHECK(e.context[category(C::Emergency)] == B::Unknown);
+    CHECK(e.context[category(C::Silent)] == B::On);
+
+    // Simultaneous BUH+BSH must remain two heater populations. Seven positive clocks here
+    // overlap; their sum is not seven independent heater runtimes or a causal partition.
+    hc::State st;
+    hc::Hour  h{};
+    s           = known();
+    s.emergency = s.error = s.defrost = s.silent = s.compressor_off = B::On;
+    CHECK(feed(st, h, s, 0) == A::Seeded);
+    CHECK(h.heater[0].on_samples == 1 && h.heater[0].on_us == 0);
+    CHECK(feed(st, h, s, 10 * S) == A::Continued);
+    for (const auto& c : h.heater) {
+        CHECK(c.samples == 2 && c.readable_samples == 2 && c.on_samples == 2);
+        CHECK(c.on_us == 10 * S && c.union_us == 10 * S && c.overlap_us == 10 * S);
+        CHECK(c.complete_context_us == 10 * S && c.unknown_context_us == 0);
+        CHECK(c.positive_us[category(C::DhwRoute)] == 0);
+        CHECK(c.positive_us[category(C::ColdOutdoor)] == 0);
+        CHECK(c.positive_us[category(C::QuietMildHeating)] == 10 * S);
+        invariant(c);
+    }
+    hc::State missing_state;
+    hc::Hour  missing{};
+    s.emergency = B::Unknown;
+    feed(missing_state, missing, s, 0);
+    feed(missing_state, missing, s, 10 * S);
+    CHECK(missing.heater[0].unknown_context_us == 10 * S);
+    CHECK(missing.heater[0].positive_us[category(C::Emergency)] == 0);
+    CHECK(missing.heater[0].evaluable_on_us[category(C::Emergency)] == 0);
+    CHECK(missing.heater[0].positive_us[category(C::Silent)] == 10 * S);
+    CHECK(missing.heater[0].union_us == 10 * S);
+    invariant(missing.heater[0]);
+
+    hc::State bsh_state;
+    hc::Hour  bsh{};
+    s           = known();
+    s.heater[0] = B::Unknown;
+    s.defrost   = B::On;
+    s.dhw       = B::On;
+    feed(bsh_state, bsh, s, 0, 1, 2, 2);
+    feed(bsh_state, bsh, s, 10 * S, 1, 2, 2);
+    CHECK(bsh.heater[0].samples == 0 && bsh.heater[0].on_us == 0);
+    CHECK(bsh.heater[1].positive_us[category(C::DefrostRecovery)] == 10 * S);
+    CHECK(bsh.heater[1].positive_us[category(C::DhwRoute)] == 10 * S);
+    invariant(bsh.heater[1]);
+
+    hc::State transitions;
+    hc::Hour  clocks{};
+    s = known();
+    feed(transitions, clocks, s, 0);
+    s.heater[0] = B::Off;
+    feed(transitions, clocks, s, 10 * S);
+    feed(transitions, clocks, s, 20 * S);
+    s.heater[0] = B::Unknown;
+    feed(transitions, clocks, s, 30 * S);
+    CHECK(clocks.heater[0].transition_us == 10 * S && clocks.heater[0].off_us == 10 * S);
+    CHECK(clocks.heater[0].unreadable_us == 10 * S && clocks.heater[0].on_us == 0);
+    CHECK(clocks.heater[1].on_us == 30 * S);
+    invariant(clocks.heater[0]);
+    invariant(clocks.heater[1]);
+    hc::State initially_unknown;
+    hc::Hour  unreadable{};
+    s           = known();
+    s.heater[0] = B::Unknown;
+    feed(initially_unknown, unreadable, s, 0);
+    s.heater[0] = B::On;
+    feed(initially_unknown, unreadable, s, 10 * S);
+    CHECK(unreadable.heater[0].unreadable_us == 10 * S && unreadable.heater[0].on_us == 0);
+    hc::State no_context;
+    hc::Hour  unclassified{};
+    s               = known();
+    s.outdoor_known = false;
+    feed(no_context, unclassified, s, 0);
+    feed(no_context, unclassified, s, 10 * S);
+    CHECK(unclassified.heater[0].union_us == 0 && unclassified.heater[0].unclassified_us == 10 * S);
+    CHECK(unclassified.heater[0].unknown_context_us == 10 * S);
+    invariant(unclassified.heater[0]);
+
+    // Startup does not fabricate a witnessed defrost edge. The project tail is exclusive at
+    // edge+300s; an interval whose endpoints disagree is not charged as a full positive.
+    hc::State startup;
+    hc::Hour  startup_hour{};
+    s = known();
+    for (int second = 0; second <= 300; second += 15) feed(startup, startup_hour, s, second * S);
+    CHECK(startup.previous_context.context[category(C::DefrostRecovery)] == B::Off);
+    CHECK(startup_hour.heater[0].evaluable_on_us[category(C::DefrostRecovery)] == 0);
+    feed(startup, startup_hour, s, 315 * S);
+    CHECK(startup_hour.heater[0].evaluable_on_us[category(C::DefrostRecovery)] == 15 * S);
+    hc::State recovery;
+    hc::Hour  recovered{};
+    s.defrost = B::On;
+    feed(recovery, recovered, s, 0);
+    s.defrost = B::Off;
+    for (int second = 10; second <= 300; second += 10) feed(recovery, recovered, s, second * S);
+    CHECK(recovery.previous_context.context[category(C::DefrostRecovery)] == B::On);
+    feed(recovery, recovered, s, 310 * S);
+    CHECK(recovery.previous_context.context[category(C::DefrostRecovery)] == B::Off);
+    CHECK(recovered.heater[0].positive_us[category(C::DefrostRecovery)] == 300 * S);
+    CHECK(recovered.heater[0].evaluable_on_us[category(C::DefrostRecovery)] == 300 * S);
+    for (int interruption = 0; interruption < 3; ++interruption) {
+        hc::State r;
+        hc::Hour  q{};
+        auto      v = known();
+        v.defrost   = B::On;
+        feed(r, q, v, 0);
+        v.defrost = B::Off;
+        feed(r, q, v, 10 * S);
+        if (interruption == 0) v.dhw = B::On;
+        if (interruption == 1) v.mode = daik::logic::CheckupOperatingMode::Cooling;
+        if (interruption == 2) v.dhw = B::Unknown;
+        feed(r, q, v, 20 * S);
+        CHECK(r.recovery_until_us == -1);
+        v = known();
+        feed(r, q, v, 30 * S);
+        CHECK(r.previous_context.context[category(C::DefrostRecovery)] != B::On);
+    }
+    hc::State unknown_defrost;
+    hc::Hour  unknown_hour{};
+    s         = known();
+    s.defrost = B::Unknown;
+    feed(unknown_defrost, unknown_hour, s, 0);
+    s.defrost = B::Off;
+    feed(unknown_defrost, unknown_hour, s, 10 * S);
+    CHECK(unknown_defrost.previous_context.context[category(C::DefrostRecovery)] == B::Unknown);
+    for (int exclusion = 0; exclusion < 4; ++exclusion) {
+        hc::State r;
+        hc::Hour  q{};
+        auto      v = known();
+        v.defrost   = B::On;
+        if (exclusion == 0) v.dhw = B::On;
+        if (exclusion == 1) v.mode = daik::logic::CheckupOperatingMode::Cooling;
+        feed(r, q, v, 0);
+        v.defrost = B::Off;
+        if (exclusion < 2) {
+            v.dhw  = B::Off;
+            v.mode = daik::logic::CheckupOperatingMode::Heating;
+        }
+        if (exclusion == 2) v.dhw = B::On;
+        if (exclusion == 3) v.mode = daik::logic::CheckupOperatingMode::Unknown;
+        feed(r, q, v, 10 * S);
+        CHECK(r.recovery_until_us == -1);
+        CHECK(r.previous_context.context[category(C::DefrostRecovery)] != B::On);
+    }
+
+    // Source/schema/mask changes, duplicate/backward time and >15s gaps cannot bridge duration.
+    for (int cut = 0; cut < 7; ++cut) {
+        hc::State r;
+        hc::Hour  q{};
+        auto      v = known();
+        feed(r, q, v, 0);
+        CHECK(feed(r, q, v, 15 * S) == A::Continued);
+        int64_t  now = 16 * S;
+        uint32_t gen = 1, schema = 2;
+        uint8_t  heaters = 3;
+        uint16_t caps    = hc::ALL;
+        if (cut == 0) now = 30 * S + 1;
+        if (cut == 1) now = 15 * S;
+        if (cut == 2) now = 14 * S;
+        if (cut == 3) gen = 2;
+        if (cut == 4) schema = 3;
+        if (cut == 5) heaters = 2;
+        if (cut == 6) caps &= ~hc::mask(C::Silent);
+        CHECK(feed(r, q, v, now, gen, schema, heaters, caps) == A::Seeded);
+        CHECK(q.heater[0].on_us == 15 * S && q.heater[1].on_us == 15 * S);
+        hc::pause(r);
+        CHECK(!r.active && r.previous_us == -1);
+        CHECK(feed(r, q, v, 31 * S, gen, schema, heaters, caps) == A::Seeded);
+    }
+    for (int refusal = 0; refusal < 5; ++refusal) {
+        hc::State r;
+        hc::Hour  q{};
+        auto      v = known();
+        feed(r, q, v, 0);
+        const int64_t now = refusal == 0 ? -1 : refusal == 1 ? INT64_MAX : S;
+        CHECK(hc::step(r, q, now, refusal == 2 ? 0 : 1, refusal == 3 ? 0 : 2, 3, hc::ALL, v,
+                       refusal != 4) == A::Paused);
+        CHECK(!r.active && r.previous_us == -1 && q.heater[0].samples == 1);
+    }
+    for (int cut = 0; cut < 2; ++cut) {
+        hc::State r;
+        hc::Hour  q{};
+        auto      v = known();
+        v.silent    = B::On;
+        feed(r, q, v, 0);
+        if (cut == 0)
+            v.outdoor_source = daik::logic::OutdoorSource::HomeHub;
+        else
+            ++v.outdoor_generation;
+        feed(r, q, v, 10 * S);
+        CHECK(q.heater[0].on_us == 10 * S);
+        CHECK(q.heater[0].positive_us[category(C::Silent)] == 10 * S);
+        CHECK(q.heater[0].evaluable_on_us[category(C::MildOutdoor)] == 0);
+        CHECK(q.heater[0].evaluable_on_us[category(C::QuietMildHeating)] == 0);
+    }
+
+    uint16_t narrow    = UINT16_MAX - 1;
+    bool     saturated = false;
+    hc::add(narrow, 1u, saturated);
+    CHECK(narrow == UINT16_MAX && !saturated);
+    hc::add(narrow, 1u, saturated);
+    CHECK(narrow == UINT16_MAX && saturated);
+    uint32_t narrow32 = UINT32_MAX;
+    saturated         = false;
+    hc::add(narrow32, uint32_t(1), saturated);
+    CHECK(narrow32 == UINT32_MAX && saturated);
+    hc::Totals total;
+    hc::merge(total, recovered.heater[0]);
+    hc::merge(total, recovered.heater[1]);
+    CHECK(total.on_us == 620 * S && total.samples == 64);
+    total.on_us = UINT64_MAX;
+    hc::merge(total, recovered.heater[0]);
+    CHECK(total.on_us == UINT64_MAX && total.saturated);
+    total.samples   = UINT32_MAX;
+    total.saturated = false;
+    hc::merge(total, recovered.heater[0]);
+    CHECK(total.samples == UINT32_MAX && total.saturated);
+    hc::Totals       propagated;
+    hc::HourCounters flagged;
+    flagged.saturated = true;
+    hc::merge(propagated, flagged);
+    CHECK(propagated.saturated);
+    hc::Totals notice;
+    for (auto c : {C::Silent, C::MildOutdoor, C::QuietMildHeating}) {
+        notice.positive_us[category(c)] = 900 * S - 1;
+        CHECK(!hc::notice(notice, c));
+        notice.positive_us[category(c)] = 900 * S;
+        CHECK(hc::notice(notice, c));
+    }
+    CHECK(!hc::notice(notice, C::Emergency));
+    hc::CoverageGate gate{23ULL * 3600 * S, true, true, true, false, false, false};
+    hc::Totals       absent;
+    absent.readable_us = gate.horizon_us;
+    CHECK(hc::absence_assessable(absent, C::Silent, hc::ALL, gate));
+    absent.on_us                                = 10 * S;
+    absent.evaluable_on_us[category(C::Silent)] = 10 * S;
+    CHECK(hc::absence_assessable(absent, C::Silent, hc::ALL, gate));
+    for (int refusal = 0; refusal < 14; ++refusal) {
+        auto g         = gate;
+        auto c         = absent;
+        auto supported = hc::ALL;
+        if (refusal == 0) g.confirmed = false;
+        if (refusal == 1) g.dated = false;
+        if (refusal == 2) g.full_span = false;
+        if (refusal == 3) g.partial = true;
+        if (refusal == 4) g.pending = true;
+        if (refusal == 5) g.loss = true;
+        if (refusal == 6) --g.horizon_us;
+        if (refusal == 7) g.horizon_us = uint64_t(24) * 3600 * S + 1;
+        if (refusal == 8) c.saturated = true;
+        if (refusal == 9) c.transition_us = 1;
+        if (refusal == 10) c.unreadable_us = 1;
+        if (refusal == 11) --c.evaluable_on_us[category(C::Silent)];
+        if (refusal == 12) supported &= ~hc::mask(C::Silent);
+        if (refusal == 13) --c.readable_us;
+        CHECK(!hc::absence_assessable(c, C::Silent, supported, g));
+    }
+}
+
+static void test_heater_context_inputs() {
+    using namespace heater_context_host_tests;
+    using B = hc::Bit;
+    using I = hi::Input;
+    using C = hc::Category;
+    Inputs      f;
+    const auto& view = daik::def::lookup_view("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw");
+    CHECK(f.plan.valid && f.plan.supported_heaters == 3 && f.plan.capability_mask == hc::ALL);
+    CHECK(hi::INPUT_METHOD == 2 && hi::INPUTS == 10 && hi::MAX_FAULT_ROWS == 4);
+    CHECK(location(f.plan.inputs.rows[size_t(I::Buh1)], 0x60, 12, 304));
+    CHECK(location(f.plan.inputs.rows[size_t(I::Buh2)], 0x60, 12, 303));
+    CHECK(location(f.plan.inputs.rows[size_t(I::Bsh)], 0x60, 12, 305));
+    CHECK(location(f.plan.inputs.rows[size_t(I::Silent)], 0x60, 2, 301));
+    CHECK(location(f.plan.inputs.rows[size_t(I::Emergency)], 0x62, 2, 300));
+    CHECK(location(f.plan.inputs.rows[size_t(I::Route)], 0x60, 12, 306));
+    CHECK(location(f.plan.inputs.rows[size_t(I::Mode)], 0x60, 2, 315));
+    CHECK(location(f.plan.inputs.rows[size_t(I::Defrost)], 0x10, 1, 304));
+    const auto a = f.collect();
+    CHECK(a.admitted && a.sample.heater[0] == B::Off && a.sample.heater[1] == B::Off);
+    CHECK(a.sample.error == B::Off && a.sample.emergency == B::Off);
+    CHECK(a.sample.compressor_off == B::Off && a.sample.outdoor_known &&
+          a.sample.outdoor_tenths == 30);
+    CHECK(a.sample.outdoor_source == daik::logic::OutdoorSource::X10a &&
+          a.sample.outdoor_generation == 0);
+    CHECK(hi::same_binding(a.binding, f.binding) && hi::still_current(f.plan, a, f.sweep));
+    for (int token = 0; token < 5; ++token) {
+        auto changed = f.binding;
+        if (token == 0) ++changed.source_fp;
+        if (token == 1) ++changed.model_fp;
+        if (token == 2) ++changed.source_generation;
+        if (token == 3) ++changed.consent_generation;
+        if (token == 4) ++changed.consent_epoch;
+        CHECK(!hi::same_binding(f.binding, changed));
+        auto current    = f.sweep;
+        current.binding = changed;
+        CHECK(!hi::accepts(f.plan, current));
+        CHECK(!hi::still_current(f.plan, a, current));
+        const auto rebound = hi::bind_plan(f.plan.inputs, changed);
+        CHECK(rebound.valid && rebound.inputs.schema_fp == f.plan.inputs.schema_fp);
+        CHECK(!hi::same_lifecycle(f.plan, rebound));
+        CHECK(!hi::still_current(rebound, a, current));
+    }
+    for (int refused = 0; refused < 3; ++refused) {
+        auto sweep = f.sweep;
+        if (refused == 0) sweep.diagnostics_enabled = false;
+        if (refused == 1) sweep.source_confirmed = false;
+        if (refused == 2) sweep.completed_sweep = false;
+        CHECK(!hi::collect(f.plan, f.rows.data(), f.rows.size(), sweep).admitted);
+    }
+    auto altered     = a;
+    altered.admitted = false;
+    CHECK(!hi::still_current(f.plan, altered, f.sweep));
+    altered = a;
+    ++altered.schema_fp;
+    CHECK(!hi::still_current(f.plan, altered, f.sweep));
+    altered = a;
+    altered.capability_mask ^= 1;
+    CHECK(!hi::still_current(f.plan, altered, f.sweep));
+    altered = a;
+    altered.supported_heaters ^= 1;
+    CHECK(!hi::still_current(f.plan, altered, f.sweep));
+    CHECK(hi::same_lifecycle(f.plan, hi::bind_plan(f.plan.inputs, f.binding)));
+    auto changed_plan  = f.plan;
+    changed_plan.valid = false;
+    CHECK(!hi::same_lifecycle(f.plan, changed_plan));
+    CHECK(!hi::same_lifecycle(changed_plan, f.plan));
+    CHECK(!hi::collect(changed_plan, f.rows.data(), f.rows.size(), f.sweep).admitted);
+    changed_plan = f.plan;
+    ++changed_plan.inputs.schema_fp;
+    CHECK(!hi::same_lifecycle(f.plan, changed_plan));
+    changed_plan = f.plan;
+    changed_plan.capability_mask ^= 1;
+    CHECK(!hi::same_lifecycle(f.plan, changed_plan));
+    changed_plan = f.plan;
+    changed_plan.supported_heaters ^= 1;
+    CHECK(!hi::same_lifecycle(f.plan, changed_plan));
+    for (int invalid = 0; invalid < 3; ++invalid) {
+        auto b = f.binding;
+        if (invalid == 0) b.source_fp = 0;
+        if (invalid == 1) b.model_fp = 0;
+        if (invalid == 2) b.source_generation = 0;
+        CHECK(!hi::bind_plan(f.plan.inputs, b).valid);
+    }
+    CHECK(hi::bind_plan(f.plan.inputs, f.binding).valid); // consent_generation == 0 is valid
+    CHECK(!hi::bind_plan({}, f.binding).valid);
+    CHECK(hi::resolve_layout(nullptr, view).schema_fp == 0);
+    CHECK(hi::resolve_layout("", view).schema_fp == 0);
+    CHECK(hi::resolve_layout("auto", view).schema_fp == 0);
+    auto auto_view       = view;
+    auto_view.profile_id = "auto";
+    CHECK(hi::resolve_layout("auto", auto_view).schema_fp == 0);
+    CHECK(hi::resolve_layout("wrong", view).schema_fp == 0);
+    CHECK(hi::resolve_layout(view.profile_id, {}).schema_fp == 0);
+    daik::logic::ProfileView empty_view;
+    empty_view.profile_id   = "empty-heater-test";
+    const auto empty_layout = hi::resolve_layout(empty_view.profile_id, empty_view);
+    CHECK(empty_layout.schema_fp != 0 && hi::capabilities(empty_layout) == 0);
+    for (int span = 0; span < 3; ++span) {
+        auto malformed = view;
+        if (span == 0) {
+            malformed.base       = nullptr;
+            malformed.base_count = 1;
+        }
+        if (span == 1) {
+            malformed.extra       = nullptr;
+            malformed.extra_count = 1;
+        }
+        if (span == 2) {
+            malformed.extra2       = nullptr;
+            malformed.extra2_count = 1;
+        }
+        CHECK(hi::resolve_layout(view.profile_id, malformed).schema_fp == 0);
+    }
+
+    // OFF requires all expected BUH steps; one readable ON is sufficient despite a missing sibling.
+    f.row(I::Buh1).value = "1";
+    f.row(I::Buh2).value = "?";
+    CHECK(f.collect().sample.heater[0] == B::On);
+    f.row(I::Buh1).value = "0";
+    CHECK(f.collect().sample.heater[0] == B::Unknown);
+    f.row(I::Buh2).value = "1";
+    CHECK(f.collect().sample.heater[0] == B::On);
+    f.row(I::Buh2).value = "0";
+    CHECK(f.collect().sample.heater[0] == B::Off);
+    f.row(I::Bsh).value = "1";
+    CHECK(f.collect().sample.heater[1] == B::On);
+    auto& bsh_row = f.row(I::Bsh);
+    bsh_row.conv  = 302;
+    CHECK(f.collect().sample.heater[1] == B::Unknown);
+    bsh_row.conv = 305;
+    for (const auto& text :
+         {std::string("0.01"), std::string("1.0"), std::string("2"), std::string("ON"),
+          std::string(" 0"), std::string("1 "), std::string("1\0x", 3)}) {
+        f.row(I::Bsh).value = text;
+        CHECK(f.collect().sample.heater[1] == B::Unknown);
+        CHECK(f.collect().sample.heater[0] == B::Off);
+    }
+    CHECK(hi::binary(static_cast<const Row*>(nullptr)) == B::Unknown);
+    f.row(I::Bsh).value = "0";
+    for (size_t k = 0; k < f.plan.inputs.fault_count; ++k) {
+        auto& r = f.rows[hi::INPUTS + k];
+        for (const char* text : {"Warning", "Caution", "Normal"}) {
+            r.value = text;
+            CHECK(f.collect().sample.error == B::Off);
+            CHECK(f.collect().sample.emergency == B::Off);
+        }
+        r.value = "Error";
+        CHECK(f.collect().sample.error == B::On);
+        r.value = std::string("Error\0x", 7);
+        CHECK(f.collect().sample.error == B::Unknown);
+        r.value = "?";
+        CHECK(f.collect().sample.error == B::Unknown);
+        r.value = "Normal";
+    }
+    f.rows[hi::INPUTS].held = true;
+    CHECK(f.collect().sample.error == B::Unknown);
+    f.rows[hi::INPUTS].held   = false;
+    f.row(I::Emergency).value = "1";
+    CHECK(f.collect().sample.emergency == B::On && f.collect().sample.error == B::Off);
+    f.row(I::Mode).value = "Cooling + DHW";
+    CHECK(f.collect().sample.mode == daik::logic::CheckupOperatingMode::Cooling);
+    f.row(I::Mode).value = std::string("Heating\0x", 9);
+    CHECK(f.collect().sample.mode == daik::logic::CheckupOperatingMode::Unknown);
+    f.row(I::Mode).value = "Heating";
+    CHECK(hi::complete_text(f.row(I::Mode)));
+    f.row(I::Mode).value.clear();
+    CHECK(!hi::complete_text(f.row(I::Mode)));
+    f.row(I::Mode).value = "Heating";
+
+    struct NumericCase {
+        const char* text;
+        bool        valid;
+        int         tenths;
+        bool        negative, nonzero;
+    };
+    const NumericCase numbers[] = {
+        {"0", true, 0, false, false},          {"-0.00", true, 0, false, false},
+        {"0.01", true, 0, false, true},        {"-0.01", true, 0, true, true},
+        {"12.34", true, 123, false, true},     {"12.35", true, 124, false, true},
+        {"1.2345", true, 12, false, true},     {"-12.35", true, -124, true, true},
+        {"+.05", true, 1, false, true},        {"3276.74", true, 32767, false, true},
+        {"-3276.6", true, -32766, true, true}, {"", false, 0, false, false},
+        {"+", false, 0, false, false},         {"-.", false, 0, false, false},
+        {".", false, 0, false, false},         {"3276.75", false, 0, false, false},
+        {"-3276.7", false, 0, false, false},   {"-3276.8", false, 0, false, false},
+        {"3277", false, 0, false, false},      {"99999", false, 0, false, false},
+        {"3278", false, 0, false, false},      {"1e1", false, 0, false, false},
+        {"0x1", false, 0, false, false},       {"NaN", false, 0, false, false},
+        {"inf", false, 0, false, false},       {" 1", false, 0, false, false},
+        {"1 ", false, 0, false, false},        {"1..0", false, 0, false, false},
+        {"1junk", false, 0, false, false}};
+    Row number;
+    for (const auto& n : numbers) {
+        number.value = n.text;
+        hi::Number parsed{987, true, true};
+        CHECK(hi::numeric(&number, parsed) == n.valid);
+        if (n.valid)
+            CHECK(parsed.tenths == n.tenths && parsed.negative == n.negative &&
+                  parsed.nonzero == n.nonzero);
+        else
+            CHECK(parsed.tenths == 987 && parsed.negative && parsed.nonzero);
+    }
+    number.value = std::string("12\0x", 4);
+    hi::Number parsed;
+    CHECK(!hi::numeric(&number, parsed));
+    CHECK(!hi::numeric(static_cast<const Row*>(nullptr), parsed));
+    for (const char* positive : {"0.01", "12", "3276.7"}) {
+        f.row(I::Rps).value = positive;
+        CHECK(f.collect().sample.compressor_off == B::Off);
+        CHECK(f.collect().sample.outdoor_known);
+    }
+    for (const char* zero : {"0", "-0.00"}) {
+        f.row(I::Rps).value = zero;
+        CHECK(f.collect().sample.compressor_off == B::On);
+        CHECK(!f.collect().sample.outdoor_known);
+    }
+    for (const auto& invalid : {std::string("?"), std::string("-1"), std::string("-0.01"),
+                                std::string("0junk"), std::string("1\0x", 3)}) {
+        f.row(I::Rps).value = invalid;
+        CHECK(f.collect().sample.compressor_off == B::Unknown);
+        CHECK(!f.collect().sample.outdoor_known);
+        CHECK(f.collect().sample.heater[0] == B::Off);
+    }
+    f.row(I::Rps).value     = "12";
+    f.row(I::Outdoor).value = "-3276.7";
+    CHECK(!f.collect().sample.outdoor_known);
+    f.row(I::Outdoor).value = "3.0";
+    for (size_t k = 0; k < hi::INPUTS; ++k) {
+        const auto input   = static_cast<I>(k);
+        auto&      r       = f.row(input);
+        const auto locator = f.plan.inputs.rows[k];
+        r.held             = true;
+        CHECK(hi::current_row(locator, f.rows.data(), f.rows.size()) == nullptr);
+        r.held         = false;
+        r.held_unknown = true;
+        CHECK(hi::current_row(locator, f.rows.data(), f.rows.size()) == nullptr);
+        r.held_unknown = false;
+        auto duplicate = r;
+        f.rows.push_back(duplicate);
+        CHECK(hi::current_row(locator, f.rows.data(), f.rows.size()) == nullptr);
+        f.rows.pop_back();
+    }
+    CHECK(hi::current_row(f.plan.inputs.rows[0], static_cast<const Row*>(nullptr), 0) == nullptr);
+    auto absent                                = f.plan;
+    absent.inputs.states[size_t(I::Emergency)] = daik::logic::InstrumentState::Absent;
+    const auto independent                     = hi::bind_plan(absent.inputs, f.binding);
+    CHECK(!(independent.capability_mask & hc::mask(C::Emergency)));
+    CHECK(independent.capability_mask & hc::mask(C::Silent));
+    CHECK(hi::collect(independent, f.rows.data(), f.rows.size(), f.sweep).sample.emergency ==
+          B::Unknown);
+    absent.inputs.states[size_t(I::Buh2)] = daik::logic::InstrumentState::Withheld;
+    auto missing_buh                      = hi::bind_plan(absent.inputs, f.binding);
+    CHECK(hi::collect(missing_buh, f.rows.data(), f.rows.size(), f.sweep).sample.heater[0] ==
+          B::Unknown);
+    absent.inputs.states[size_t(I::Buh2)] = daik::logic::InstrumentState::Absent;
+    missing_buh                           = hi::bind_plan(absent.inputs, f.binding);
+    CHECK(hi::collect(missing_buh, f.rows.data(), f.rows.size(), f.sweep).sample.heater[0] ==
+          B::Off);
+    auto only_second                           = f.plan;
+    only_second.inputs.states[size_t(I::Buh1)] = daik::logic::InstrumentState::Absent;
+    only_second                                = hi::bind_plan(only_second.inputs, f.binding);
+    CHECK(hi::heater_support(only_second.inputs) == 3);
+    CHECK(hi::collect(only_second, f.rows.data(), f.rows.size(), f.sweep).sample.heater[0] ==
+          B::Off);
+    only_second.inputs.states[size_t(I::Buh1)] = daik::logic::InstrumentState::Withheld;
+    only_second                                = hi::bind_plan(only_second.inputs, f.binding);
+    CHECK(hi::collect(only_second, f.rows.data(), f.rows.size(), f.sweep).sample.heater[0] ==
+          B::Unknown);
+    for (auto missing : {I::Silent, I::Route, I::Mode}) {
+        auto layout                    = f.plan.inputs;
+        layout.states[size_t(missing)] = daik::logic::InstrumentState::Absent;
+        CHECK(!(hi::capabilities(layout) & hc::mask(C::QuietMildHeating)));
+        CHECK(hi::capabilities(layout) & hc::mask(C::MildOutdoor));
+    }
+    absent.inputs.fault_overflow = true;
+    const auto overflow          = hi::bind_plan(absent.inputs, f.binding);
+    CHECK(!(overflow.capability_mask & hc::mask(C::Error)));
+    CHECK(hi::collect(overflow, f.rows.data(), f.rows.size(), f.sweep).sample.error == B::Unknown);
+    daik::ValueDef           faults[] = {{0x10, 0, 203, 1, -1, "Error type0"},
+                                         {0x10, 1, 203, 1, -1, "Error type1"},
+                                         {0x10, 2, 203, 1, -1, "Error type2"},
+                                         {0x10, 3, 203, 1, -1, "Error type3"},
+                                         {0x10, 4, 203, 1, -1, "Error type4"}};
+    daik::logic::ProfileView fault_view;
+    fault_view.base       = faults;
+    fault_view.base_count = 5;
+    fault_view.profile_id = "heater-fault-test";
+    auto fault_layout     = hi::resolve_layout(fault_view.profile_id, fault_view);
+    CHECK(fault_layout.fault_count == 4 && fault_layout.fault_overflow);
+    CHECK(!(hi::capabilities(fault_layout) & hc::mask(C::Error)));
+    faults[4].no_publish = true;
+    fault_layout         = hi::resolve_layout(fault_view.profile_id, fault_view);
+    CHECK(fault_layout.fault_count == 4 && !fault_layout.fault_overflow);
+    CHECK(hi::capabilities(fault_layout) & hc::mask(C::Error));
+
+    // Exact profile inventory and independent existing heater/flag locators. These are catalog
+    // contracts, not proof that every supported instrument is physically fitted/readable.
+    size_t profiles = 0, heater_profiles = 0;
+    for (const auto& entry : daik::def::profiles) {
+        ++profiles;
+        const auto v      = daik::def::lookup_view(entry.id);
+        const auto layout = hi::resolve_layout(entry.id, v);
+        const auto p      = hi::bind_plan(layout, f.binding);
+        CHECK(p.valid && layout.schema_fp != 0);
+        CHECK(hi::same_lifecycle(p, hi::make_plan(entry.id, v, f.binding)));
+        const bool supported =
+            std::strcmp(entry.id, "altherma3_r_erga") && std::strcmp(entry.id, "protocol_s");
+        CHECK(hi::has(layout, I::Bsh) == supported);
+        CHECK(hi::has(layout, I::Buh1) == supported && hi::has(layout, I::Buh2) == supported);
+        CHECK(hi::has(layout, I::Silent) == supported &&
+              hi::has(layout, I::Emergency) == supported);
+        CHECK(p.supported_heaters == (supported ? 3 : 0));
+        if (supported) {
+            ++heater_profiles;
+            CHECK(location(layout.rows[size_t(I::Bsh)], 0x60, 12, 305));
+            CHECK(location(layout.rows[size_t(I::Buh1)], 0x60, 12, 304));
+            CHECK(location(layout.rows[size_t(I::Buh2)], 0x60, 12, 303));
+            CHECK(location(layout.rows[size_t(I::Silent)], 0x60, 2, 301));
+            CHECK(location(layout.rows[size_t(I::Emergency)], 0x62, 2, 300));
+        }
+        Inputs     model(entry.id);
+        const auto sampled = model.collect();
+        CHECK(sampled.admitted && sampled.supported_heaters == p.supported_heaters);
+        CHECK(sampled.sample.heater[0] == (supported ? B::Off : B::Unknown));
+        CHECK(sampled.sample.heater[1] == (supported ? B::Off : B::Unknown));
+        if (!std::strcmp(entry.id, "generic")) {
+            CHECK(!hi::has(layout, I::Rps));
+            CHECK(sampled.sample.compressor_off == B::Unknown && !sampled.sample.outdoor_known);
+        }
+    }
+    CHECK(profiles == 46 && heater_profiles == 44);
+}
+
+static void test_heater_context_hourly() {
+    namespace hc        = daik::logic::heater_context;
+    namespace hh        = daik::logic::heater_context_hourly;
+    constexpr int64_t S = 1000000;
+    hc::Sample        s;
+    s.heater[0] = s.heater[1] = hc::Bit::On;
+    s.emergency = s.error = s.defrost = s.dhw = s.compressor_off = hc::Bit::Off;
+    s.silent                                                     = hc::Bit::On;
+    s.mode           = daik::logic::CheckupOperatingMode::Heating;
+    s.outdoor_source = daik::logic::OutdoorSource::X10a;
+    s.outdoor_known  = true;
+    s.outdoor_tenths = 30;
+    hc::State state;
+    hc::Hour  delta{}, before{}, after{};
+    auto      admission = hc::step(state, delta, 3595 * S, 1, 1, 3, hc::ALL, s);
+    CHECK(admission == hc::Admission::Seeded);
+    hh::Split plan;
+    CHECK(hh::split(admission, -1, 3595 * S, plan));
+    CHECK(hh::valid_split(plan) && plan.seeded && plan.count == 1);
+    CHECK(hh::valid_delta(delta, 0));
+    CHECK(hh::merge_piece(before, delta, plan, 0));
+    CHECK(before.heater[0].samples == 1 && before.heater[1].samples == 1);
+    CHECK(before.heater[0].on_us == 0);
+    delta     = {};
+    admission = hc::step(state, delta, 3605 * S, 1, 1, 3, hc::ALL, s);
+    CHECK(admission == hc::Admission::Continued && hh::valid_delta(delta, 10 * S));
+    CHECK(hh::split(admission, 3595 * S, 3605 * S, plan));
+    CHECK(plan.count == 2 && !plan.seeded && hh::valid_split(plan));
+    CHECK(plan.pieces[0].bucket == 0 && plan.pieces[1].bucket == 1);
+    CHECK(plan.pieces[0].duration_us == 5 * S && plan.pieces[1].duration_us == 5 * S);
+    CHECK(!plan.pieces[0].samples && plan.pieces[1].samples);
+    CHECK(hh::merge_piece(before, delta, plan, 0));
+    CHECK(hh::merge_piece(after, delta, plan, 1));
+    for (size_t h = 0; h < hc::HEATERS; ++h) {
+        CHECK(before.heater[h].on_us == 5 * S && after.heater[h].on_us == 5 * S);
+        CHECK(before.heater[h].samples == 1 && after.heater[h].samples == 1);
+        CHECK(before.heater[h].overlap_us == 5 * S && after.heater[h].overlap_us == 5 * S);
+        CHECK(before.heater[h].positive_us[size_t(hc::Category::Silent)] == 5 * S);
+        hc::Totals total;
+        hc::merge(total, before.heater[h]);
+        hc::merge(total, after.heater[h]);
+        CHECK(total.on_us == 10 * S && total.samples == 2);
+    }
+    CHECK(!hh::merge_piece(delta, delta, plan, 0));
+    CHECK(!hh::merge_piece(after, delta, plan, 2));
+    auto invalid              = plan;
+    invalid.pieces[0].samples = true;
+    CHECK(!hh::valid_split(invalid) && !hh::merge_piece(after, delta, invalid, 0));
+    invalid                  = plan;
+    invalid.pieces[1].bucket = 3;
+    CHECK(!hh::valid_split(invalid));
+    invalid                       = plan;
+    invalid.pieces[0].duration_us = 1;
+    CHECK(!hh::valid_split(invalid));
+    invalid.count = 0;
+    CHECK(!hh::valid_split(invalid));
+    invalid.count = 3;
+    CHECK(!hh::valid_split(invalid));
+    CHECK(!hh::split(hc::Admission::Paused, 0, 1, plan));
+    CHECK(plan.count == 2 && plan.interval_us == 10 * S);
+    CHECK(!hh::split(static_cast<hc::Admission>(255), 0, 1, plan));
+    CHECK(!hh::split(hc::Admission::Seeded, 0, -1, plan));
+    CHECK(!hh::split(hc::Admission::Continued, -1, 1, plan));
+    CHECK(!hh::split(hc::Admission::Continued, 2, 1, plan));
+    CHECK(!hh::split(hc::Admission::Continued, 1, 1, plan));
+    CHECK(!hh::split(hc::Admission::Continued, 0, hc::MAX_GAP_US + 1, plan));
+    CHECK(hh::split(hc::Admission::Continued, 0, hc::MAX_GAP_US, plan));
+    CHECK(plan.count == 1 && plan.pieces[0].samples && hh::valid_split(plan));
+    CHECK(hh::split(hc::Admission::Seeded, -1, INT64_MAX, plan));
+    CHECK(hh::valid_split(plan));
+    CHECK(hh::split(hc::Admission::Continued, INT64_MAX - 1, INT64_MAX, plan));
+    CHECK(hh::valid_split(plan));
+    hc::State edge_state;
+    hc::Hour  edge_seed{}, edge_delta{}, edge_before{}, edge_after{};
+    hc::step(edge_state, edge_seed, 3595 * S, 1, 1, 3, hc::ALL, s);
+    admission = hc::step(edge_state, edge_delta, 3600 * S, 1, 1, 3, hc::ALL, s);
+    CHECK(hh::split(admission, 3595 * S, 3600 * S, plan));
+    CHECK(plan.count == 2 && plan.pieces[1].duration_us == 0 && plan.pieces[1].samples);
+    CHECK(hh::merge_piece(edge_before, edge_delta, plan, 0));
+    CHECK(hh::merge_piece(edge_after, edge_delta, plan, 1));
+    CHECK(edge_before.heater[0].on_us == 5 * S && edge_before.heater[0].samples == 0);
+    CHECK(edge_after.heater[0].on_us == 0 && edge_after.heater[0].samples == 1);
+    auto broken            = edge_delta;
+    broken.heater[0].on_us = 1;
+    CHECK(!hh::valid_delta(broken, 5 * S));
+    broken                   = edge_delta;
+    broken.heater[0].samples = 2;
+    CHECK(!hh::valid_delta(broken, 5 * S));
+    broken                     = edge_delta;
+    broken.heater[0].saturated = true;
+    CHECK(!hh::valid_delta(broken, 5 * S));
+    broken                          = edge_delta;
+    broken.heater[0].positive_us[0] = 1;
+    CHECK(!hh::valid_delta(broken, 5 * S));
+    broken                               = edge_delta;
+    broken.heater[0].positive_samples[0] = 2;
+    CHECK(!hh::valid_delta(broken, 5 * S));
+    // Independent review counterexamples: the one-step validator must refuse internally
+    // contradictory endpoint/duration and category/union claims, even before journal encoding.
+    broken                   = {};
+    broken.heater[0].samples = broken.heater[0].readable_samples = broken.heater[0].on_samples = 1;
+    broken.heater[0].readable_us = broken.heater[0].off_us = 5 * S;
+    CHECK(!hh::valid_delta(broken, 5 * S));
+    broken                    = edge_delta;
+    broken.heater[0].union_us = broken.heater[0].overlap_us = 0;
+    broken.heater[0].unclassified_us                        = 5 * S;
+    CHECK(!hh::valid_delta(broken, 5 * S));
+    broken                      = edge_delta;
+    broken.heater[0].overlap_us = 0;
+    CHECK(!hh::valid_delta(broken, 5 * S));
+    broken                               = edge_delta;
+    broken.heater[0].unknown_context_us  = 0;
+    broken.heater[0].complete_context_us = 5 * S;
+    CHECK(!hh::valid_delta(broken, 5 * S));
+    CHECK(!hh::valid_delta(edge_delta, hc::MAX_GAP_US + 1));
+    edge_after.heater[0].samples = UINT16_MAX;
+    CHECK(hh::merge_piece(edge_after, edge_delta, plan, 1));
+    CHECK(edge_after.heater[0].samples == UINT16_MAX && edge_after.heater[0].saturated);
+
+    // Real reducer outputs, including known OFF, transitions and unreadable endpoints. No
+    // interval is assigned the state of only one endpoint, and unsupported heaters stay empty.
+    const hc::Bit bits[] = {hc::Bit::Unknown, hc::Bit::Off, hc::Bit::On};
+    for (auto a : bits)
+        for (auto b : bits) {
+            hc::State pair_state;
+            hc::Hour  seed{}, fresh{}, folded{};
+            auto      pair = s;
+            pair.heater[0] = a;
+            hc::step(pair_state, seed, 10 * S, 1, 1, 1, hc::ALL, pair);
+            pair.heater[0] = b;
+            admission      = hc::step(pair_state, fresh, 11 * S, 1, 1, 1, hc::ALL, pair);
+            CHECK(hh::valid_delta(fresh, S));
+            CHECK(hh::split(admission, 10 * S, 11 * S, plan));
+            CHECK(hh::merge_piece(folded, fresh, plan, 0));
+            const auto& c = folded.heater[0];
+            if (a == hc::Bit::Unknown || b == hc::Bit::Unknown)
+                CHECK(c.unreadable_us == S);
+            else if (a != b)
+                CHECK(c.transition_us == S);
+            else if (a == hc::Bit::On)
+                CHECK(c.on_us == S);
+            else
+                CHECK(c.off_us == S);
+            CHECK(c.samples == 1 && folded.heater[1].samples == 0);
+        }
+    hc::State warm;
+    hc::Hour  complete{};
+    auto      quiet_off = s;
+    quiet_off.silent    = hc::Bit::Off;
+    for (int64_t t = 0; t <= 301; ++t) {
+        complete = {};
+        hc::step(warm, complete, t * S, 1, 1, 3, hc::ALL, quiet_off);
+    }
+    CHECK(complete.heater[0].complete_context_us == S);
+    CHECK(complete.heater[0].overlap_us == 0 && complete.heater[0].union_us == S);
+    CHECK(hh::valid_delta(complete, S));
+    hc::Hour complete_fold{};
+    CHECK(hh::split(hc::Admission::Continued, 300 * S, 301 * S, plan));
+    CHECK(hh::merge_piece(complete_fold, complete, plan, 0));
+    CHECK(complete_fold.heater[0].complete_context_us == S);
+    hc::State no_context;
+    hc::Hour  no_seed{}, no_positive{};
+    hc::step(no_context, no_seed, 0, 1, 1, 3, 0, s);
+    hc::step(no_context, no_positive, S, 1, 1, 3, 0, s);
+    CHECK(no_positive.heater[0].unclassified_us == S);
+    CHECK(no_positive.heater[0].unknown_context_us == S);
+    CHECK(hh::valid_delta(no_positive, S));
+    hc::Hour unclassified_fold{};
+    CHECK(hh::split(hc::Admission::Continued, 0, S, plan));
+    CHECK(hh::merge_piece(unclassified_fold, no_positive, plan, 0));
+    CHECK(unclassified_fold.heater[0].unclassified_us == S);
+
+    // An aggregate or corrupted transfer cannot masquerade as one fresh interval.
+    using DurationMember                        = uint32_t hc::HourCounters::*;
+    const DurationMember            durations[] = {
+        &hc::HourCounters::readable_us,     &hc::HourCounters::on_us,
+        &hc::HourCounters::off_us,          &hc::HourCounters::transition_us,
+        &hc::HourCounters::unreadable_us,   &hc::HourCounters::union_us,
+        &hc::HourCounters::overlap_us,      &hc::HourCounters::unknown_context_us,
+        &hc::HourCounters::unclassified_us, &hc::HourCounters::complete_context_us};
+    for (auto member : durations) {
+        broken                   = complete;
+        broken.heater[0].*member = 1;
+        CHECK(!hh::valid_delta(broken, S));
+    }
+    for (size_t k = 0; k < hc::CATEGORIES; ++k) {
+        broken                          = complete;
+        broken.heater[0].positive_us[k] = 1;
+        CHECK(!hh::valid_delta(broken, S));
+        broken                              = complete;
+        broken.heater[0].evaluable_on_us[k] = 1;
+        CHECK(!hh::valid_delta(broken, S));
+        broken                               = complete;
+        broken.heater[0].positive_samples[k] = 2;
+        CHECK(!hh::valid_delta(broken, S));
+        broken                                   = complete;
+        broken.heater[0].evaluable_on_samples[k] = 2;
+        CHECK(!hh::valid_delta(broken, S));
+    }
+    broken                            = complete;
+    broken.heater[0].readable_samples = 2;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                      = complete;
+    broken.heater[0].on_samples = 2;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                      = complete;
+    broken.heater[0].on_samples = 0;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                            = complete;
+    broken.heater[0].on_us            = 0;
+    broken.heater[0].off_us           = S;
+    broken.heater[0].on_samples       = 0;
+    broken.heater[0].readable_samples = 0;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                       = complete;
+    broken.heater[0].readable_us = 0;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                         = complete;
+    broken.heater[0].unreadable_us = S;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                    = complete;
+    broken.heater[0].union_us = 0;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                               = complete;
+    broken.heater[0].complete_context_us = 0;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                           = complete;
+    broken.heater[0].union_us        = 0;
+    broken.heater[0].unclassified_us = S;
+    broken.heater[0].overlap_us      = S;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                                                               = complete;
+    broken.heater[0].positive_samples[size_t(hc::Category::MildOutdoor)] = 0;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                                                                 = complete;
+    broken.heater[0].evaluable_on_samples[size_t(hc::Category::Emergency)] = 0;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                                                             = complete;
+    broken.heater[0].positive_samples[size_t(hc::Category::Emergency)] = 1;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                                                              = complete;
+    broken.heater[0].evaluable_on_us[size_t(hc::Category::MildOutdoor)] = 0;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                                                            = {};
+    broken.heater[0].evaluable_on_us[size_t(hc::Category::Emergency)] = S;
+    CHECK(!hh::valid_delta(broken, S));
+    broken                       = {};
+    broken.heater[0].samples     = 1;
+    broken.heater[0].readable_us = broken.heater[0].off_us = S;
+    CHECK(!hh::valid_delta(broken, S));
+    CHECK(hh::split(hc::Admission::Continued, 300 * S, 301 * S, plan));
+    const auto previous_samples = edge_after.heater[0].samples;
+    CHECK(!hh::merge_piece(edge_after, broken, plan, 0));
+    CHECK(edge_after.heater[0].samples == previous_samples);
+
+    // Refuse malformed hour spans: missing endpoints, wrong-hour samples and hidden gaps.
+    CHECK(hh::split(hc::Admission::Seeded, -1, 0, plan));
+    invalid                  = plan;
+    invalid.pieces[0].bucket = -1;
+    CHECK(!hh::valid_split(invalid));
+    invalid                  = plan;
+    invalid.pieces[0].bucket = INT64_MAX;
+    CHECK(!hh::valid_split(invalid));
+    invalid                           = plan;
+    invalid.pieces[0].first_offset_us = hh::HOUR_US;
+    invalid.pieces[0].last_offset_us  = hh::HOUR_US;
+    CHECK(!hh::valid_split(invalid));
+    invalid                           = plan;
+    invalid.pieces[0].first_offset_us = 1;
+    CHECK(!hh::valid_split(invalid));
+    invalid                          = plan;
+    invalid.pieces[0].last_offset_us = hh::HOUR_US + 1;
+    CHECK(!hh::valid_split(invalid));
+    invalid        = plan;
+    invalid.seeded = false;
+    CHECK(!hh::valid_split(invalid));
+    CHECK(hh::split(hc::Admission::Continued, 0, S, plan));
+    invalid             = plan;
+    invalid.interval_us = hc::MAX_GAP_US + 1;
+    CHECK(!hh::valid_split(invalid));
+    invalid             = plan;
+    invalid.interval_us = 1;
+    CHECK(!hh::valid_split(invalid));
+    invalid                   = plan;
+    invalid.pieces[0].samples = false;
+    CHECK(!hh::valid_split(invalid));
+    invalid                           = plan;
+    invalid.pieces[0].first_offset_us = hh::HOUR_US - S;
+    invalid.pieces[0].last_offset_us  = hh::HOUR_US;
+    CHECK(!hh::valid_split(invalid));
+    invalid             = plan;
+    invalid.interval_us = 2 * S;
+    CHECK(!hh::valid_split(invalid));
+    invalid        = plan;
+    invalid.seeded = true;
+    CHECK(!hh::valid_split(invalid));
+    CHECK(hh::split(hc::Admission::Continued, 3595 * S, 3605 * S, plan));
+    invalid        = plan;
+    invalid.seeded = true;
+    CHECK(!hh::valid_split(invalid));
+    invalid                  = plan;
+    invalid.pieces[1].bucket = 0;
+    CHECK(!hh::valid_split(invalid));
+    invalid = plan;
+    --invalid.pieces[0].last_offset_us;
+    --invalid.pieces[0].duration_us;
+    ++invalid.pieces[1].last_offset_us;
+    ++invalid.pieces[1].duration_us;
+    CHECK(!hh::valid_split(invalid));
+    invalid = plan;
+    ++invalid.pieces[1].first_offset_us;
+    ++invalid.pieces[1].last_offset_us;
+    CHECK(!hh::valid_split(invalid));
+}
+
+#include "heater_context_cohort_checks.inc"
+#include "heater_independent_hour_checks.inc"
+#include "heater_context_payload_checks.inc"
+
 int main() {
+    test_heater_context_cohort();
+    test_heater_independent_hour();
+    test_heater_context_payload();
+    test_heater_context_core();
+    test_heater_context_inputs();
+    test_heater_context_hourly();
     hydronic_host_tests::test_hourly_wire_and_population();
     hydronic_host_tests::test_modbus_heating_flow();
     hydronic_host_tests::test_population_and_boundaries();

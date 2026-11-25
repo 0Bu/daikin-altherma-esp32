@@ -29,13 +29,15 @@ idf_component_register(
         "stop_observation_store.cpp"
         "state_dwell.cpp"
         "http_server.cpp"
+        # Place http_status.cpp, http_deadline.cpp, and heater_context_store.cpp past Xtensa's
+        # 256 KiB l32r literal-pool island so their frames remain natively decoded by objdump
+        # while packed_config.py decodes http_config.cpp on the island boundary.
+        "http_config.cpp"
         "http_common.cpp"
         "http_client_diag.cpp"
-        "http_deadline.cpp"
-        # Place http_status.cpp past Xtensa's 256 KiB l32r literal-pool island so its status
-        # helpers remain natively decoded by objdump while packed_config.py decodes http_config.cpp.
-        "http_config.cpp"
         "http_status.cpp"
+        "heater_context_store.cpp"
+        "http_deadline.cpp"
         "http_ota.cpp"
         "mcp_server.cpp"
         "provisioning.cpp"
@@ -198,6 +200,7 @@ set_source_files_properties(
     captive_dns.cpp
     checkup.cpp
     diag_log.cpp
+    heater_context_store.cpp
     heap_guard.cpp
     hp_comm.cpp
     http_client_diag.cpp

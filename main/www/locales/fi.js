@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -313,6 +313,15 @@ I18N.fi = localeValues([
   /* check.cycling.e_ongoing */ "Kävi vielä viime lukemalla.",
   /* check.cycling.cause_unavailable */ "Ei tarkempia tietoja",
   /* check.cycling.cause_older_unavailable */ "Näiden aiempien käyntijaksojen tallennettuja käynnistys- ja pysäytystietoja ei ole saatavilla.",
+  /* check.heater_context.title */ "Ilmoitettujen lämmitinlippujen asiayhteys",
+  /* check.heater_context.columns */ "Asiayhteys|BUH|BSH",
+  /* check.heater_context.counts */ "Positiivinen aika / arvioitava ON-aika · positiiviset näytteet",
+  /* check.heater_context.categories */ "hätäkäytön lippu|virhetila|sulatus/palautuminen|käyttövesireitti|Silent Mode -lippu|ulkoilma ≤+2°C|ulkoilma >+2°C|kompressori ilmoitettu pysähtyneeksi|Silent Mode + lämmitys leudolla säällä",
+  /* check.heater_context.totals */ "ilmoitettu ON|asiayhteyksien yhdiste|päällekkäisyys|tuntematon asiayhteys|ei positiivista luokkaa|luettavan lipun aika",
+  /* check.heater_context.states */ "Lähdettä ei vahvistettu|Päiväämättömät havainnot|Puutteelliset 24 h|Arkistoa ei vielä vahvistettu|Tallennus odottaa|Arkisto ei käytettävissä: vaurioituneita tai lukemattomia tietueita|Epävarma kellonaika|Kyllästyminen: alarajat|Ei tuettu",
+  /* check.heater_context.notice */ "Vähintään 15 minuuttia ilmoitettua lämmitinaikaa Silent Mode -tilassa, lämmityksessä ja leudossa ulkoilmassa: alustava projektin huomio.",
+  /* check.heater_context.rule */ "Luettavat aikavälin päät, aukot ≤15 s. Palautuminen rajoittuu 300 sekuntiin lämmityksen aikana havaitun sulatuksen päättymisestä. +2°C:n jako ja 900 sekunnin huomio ovat projektin heuristiikkoja.",
+  /* check.heater_context.limits */ "Luokat menevät päällekkäin erikseen kullekin lämmittimelle. Puuttuva asiayhteys pysyy tuntemattomana. Energiaa, käytön syytä, kahden lämmönlähteen käytön syytä tai tarpeellisuutta ei osoiteta. Varoitus ei ole hätäkäyttö; Low noise control jää luokittelematta. Näytteiden väliset tilat pysyvät tuntemattomina.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `säiliö ${d}`,
   /* check.buh_runtime */ (d) => `vara ${d}`,

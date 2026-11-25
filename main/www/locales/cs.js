@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -313,6 +313,15 @@ I18N.cs = localeValues([
   /* check.cycling.e_ongoing */ "Běžel při posledním odečtu.",
   /* check.cycling.cause_unavailable */ "Bez podrobností",
   /* check.cycling.cause_older_unavailable */ "Pro tyto starší cykly nejsou k dispozici uložené podrobnosti o spuštění a zastavení.",
+  /* check.heater_context.title */ "Kontext hlášených příznaků ohřívačů",
+  /* check.heater_context.columns */ "Kontext|BUH|BSH",
+  /* check.heater_context.counts */ "Kladná doba / vyhodnotitelná doba ON · kladné vzorky",
+  /* check.heater_context.categories */ "příznak nouzového provozu|chybový stav|odmrazování/zotavení|okruh teplé vody|příznak Silent Mode|venku ≤+2°C|venku >+2°C|kompresor hlášen jako zastavený|Silent Mode + vytápění za mírného počasí",
+  /* check.heater_context.totals */ "hlášené ON|sjednocení kontextů|překryv|neznámý kontext|žádná kladná kategorie|doba čitelného příznaku",
+  /* check.heater_context.states */ "Zdroj nepotvrzen|Pozorování bez data|Neúplných 24 h|Archiv dosud neověřen|Čeká se na uložení|Archiv nedostupný: poškozené nebo nepřečtené záznamy|Nejistý čas|Saturace: dolní meze|Nepodporováno",
+  /* check.heater_context.notice */ "Alespoň 15 minut hlášeného ohřívače při Silent Mode, vytápění a mírné venkovní teplotě: předběžné upozornění projektu.",
+  /* check.heater_context.rule */ "Čitelné konce intervalu, mezery ≤15 s. Zotavení trvá nejvýše 300 s po pozorovaném konci odmrazování při vytápění. Rozdělení při +2°C a upozornění po 900 s jsou heuristiky projektu.",
+  /* check.heater_context.limits */ "Kategorie se překrývají zvlášť pro každý ohřívač. Chybějící kontext zůstává neznámý. Neprokazuje se energie, důvod provozu, bivalence ani nezbytnost. Varování není nouzový provoz; Low noise control zůstává nezařazeno. Stavy mezi vzorky zůstávají neznámé.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `zásobník ${d}`,
   /* check.buh_runtime */ (d) => `záložní ${d}`,

@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1001, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1010, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -126,6 +126,10 @@ for (const code of codes) {
     ["check.hydronic.agree_reasons", 5],
     ["check.hydronic.agree_limits", 2],
     ["check.hydronic.agree_meta", 3],
+    ["check.heater_context.columns", 3],
+    ["check.heater_context.categories", 9],
+    ["check.heater_context.totals", 6],
+    ["check.heater_context.states", 9],
   ]) {
     const parts = dict[key].split("|");
     assert.equal(parts.length, segments, `${code}/${key} segment count`);

@@ -4,7 +4,8 @@
 #include <cstddef>
 #include <vector>
 inline constexpr esp_err_t ESP_FAIL = -1, ESP_ERR_INVALID_ARG = 2, ESP_ERR_INVALID_SIZE = 3,
-                           ESP_ERR_INVALID_RESPONSE = 4;
+                           ESP_ERR_INVALID_RESPONSE = 4, ESP_ERR_INVALID_STATE = 5,
+                           ESP_ERR_NOT_FINISHED = 6;
 struct esp_partition_t {
     uint32_t address;
     size_t   size;

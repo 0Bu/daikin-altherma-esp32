@@ -15,6 +15,9 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 CASES = [
+    "hc_fresh", "hc_not_completed", "hc_empty_gap", "hc_flag_gap", "hc_unknown_step",
+    "hc_held", "hc_bsh_locator", "hc_read_fence", "hc_source_generation", "hc_scope_roundtrip",
+    "hc_layout_change", "hc_same_scope_redetect",
     "buh_one_on_other_missing", "buh_second_on_first_missing", "buh_one_off_other_missing",
     "buh_both_off", "heaters_both_on", "legacy_text_unknown", "single_declared_buh_step",
     "independent_heaters", "fault_missing_sibling", "fault_worst_readable",
@@ -57,6 +60,7 @@ SOURCE = (ROOT / "main/checkup.cpp").resolve()
 STORES = [
     ("stop", (ROOT / "main/stop_observation_store.cpp").resolve()),
     ("hydronic", (ROOT / "main/hydronic_observation_store.cpp").resolve()),
+    ("heater", (ROOT / "main/heater_context_store.cpp").resolve()),
 ]
 FIXTURE = (HERE / "fixture.cpp").resolve()
 if not SOURCE.is_file():
@@ -203,7 +207,7 @@ def build(source, digest, tag):
 
 baseline = build(SOURCE, source_digest, "baseline")
 vacuity_controls = []
-for case in ["buh_unknown_case", "fault_unknown_case", "dhw_trace_unknown_case",
+for case in ["hc_unknown_case", "buh_unknown_case", "fault_unknown_case", "dhw_trace_unknown_case",
              "consent_sampling_unknown_case",
              "consent_caller_unknown_case", "hydronic_unknown_case"]:
     result = command([str(baseline), case], timeout=15)
@@ -220,7 +224,10 @@ for case in CASES:
     print(result.stdout.strip(), flush=True)
 
 source_text = source_bytes.decode("utf-8")
-entry = "                    uint32_t consent_epoch, bool profile_confirmed, int64_t sweep_started_us) {\n"
+entry = (
+    "                    uint32_t consent_epoch, bool profile_confirmed, bool completed_sweep,\n"
+    "                    int64_t sweep_started_us) {\n"
+)
 guard = (
     "    if (!s_diagnostics_enabled.load(std::memory_order_acquire) ||\n"
     "        consent_epoch != s_diagnostics_epoch.load(std::memory_order_acquire))\n"
@@ -230,6 +237,21 @@ for name, anchor in [("record entry", entry), ("commit guard", guard)]:
     if source_text.count(anchor) != 1:
         raise RuntimeError("Expected one production " + name + " anchor")
 mutations = [
+    ("metadata_is_a_completed_heater_sweep",
+     source_text.replace("record_heater_locked(v, n, now, source_generation, completed_sweep);",
+                         "record_heater_locked(v, n, now, source_generation, true);"),
+     "hc_not_completed", "heater_default_metadata_callback_cannot_seed_or_book"),
+    ("omit_heater_pause_on_gap",
+     source_text.replace("sample_us <= s_heater_read_fence_us) {\n        heater_context_pause();",
+                         "sample_us <= s_heater_read_fence_us) {"),
+     "hc_flag_gap", "heater_non_sweep_pauses_before_next_seed"),
+    ("omit_heater_initial_generation_guard",
+     source_text.replace("    if (!hp_poll_generation_matches(source_generation)) return;\n", ""),
+     "hc_source_generation", "heater_foreign_generation_cannot_change_current_scope"),
+    ("omit_same_scope_heater_retirement",
+     source_text.replace("        s_heater_read_fence_us = esp_timer_get_time();\n        heater_context_reset();",
+                         "        s_heater_read_fence_us = esp_timer_get_time();"),
+     "hc_same_scope_redetect", "heater_profile_scope_cutover_retires_old_totals_immediately"),
     ("report_false_absence_when_lock_fails",
      source_text.replace("*persist = logic::CheckupRestore::Unknown;",
                          "*persist = logic::CheckupRestore::NoRecord;"),

@@ -42,6 +42,7 @@ tasks and transport.
 | Local accessory | `env3.cpp` | `env3.hpp` |
 | MQTT publishing and circulation input | `mqtt_ha.cpp` | `ha_device.hpp`, `discovery.hpp`, `x10a_snapshot.hpp`, `mqtt_group.hpp`, `circulation_source.hpp` |
 | Plant checkup | `checkup.cpp` | `checkup.hpp`, `instrument.hpp` |
+| Heater context | `heater_context_store.cpp` | `heater_context*.hpp`, `heater_independent_hour.hpp`, `heater_context_payload.hpp`, `json_output.hpp` |
 | History and duration evidence | `history.cpp`, `state_dwell.cpp` | `history.hpp`, `history_persist.hpp`, `state_dwell.hpp` |
 | HTTP and MCP | `http_common.cpp`, `http_status.cpp`, `http_config.cpp`, `http_ota.cpp`, `mcp_server.cpp` | `http_surface.hpp`, `http_request.hpp`, `mcp.hpp`, `redact.hpp` |
 | OTA and absolute download deadlines | `ota_update.cpp`, `http_deadline.cpp`, `http_client_diag.cpp` | `ota_manifest.hpp`, `ota_headroom.hpp`, `ota_quiesce.hpp`, `ota_transport.hpp`, `ota_upload.hpp`, `health_gate.hpp` |
@@ -74,8 +75,11 @@ missing, sentinel and boundary inputs.
 <a id="physical-instruments"></a>
 ### Physical instruments
 
-A new diagnosis observation finds its inputs through `logic/instrument.hpp`; stop context resolves
-its own consumer plan there at source confirmation. Each instrument has exact page/offset/converter locators.
+A new diagnosis observation finds its inputs through `logic/instrument.hpp`; stop and heater contexts
+resolve their consumer plans there at source confirmation. `checkup_profile_layout()` resolves
+stop and heater profile layouts before taking HP or Checkup locks and before manual config saves,
+committing only bounded POD bindings (including consent epoch) under the Checkup lock. Each
+instrument has exact page/offset/converter locators.
 Where one coordinate means different instruments on different profiles, a label token also
 decides; refrigerant pressures use the structural rule in `convert.hpp`, and 0x20/14 is the low
 side only beside a 0x20/12 pressure, whatever its label says. On a resolved profile an instrument
@@ -408,6 +412,19 @@ does not establish erasure or persistence across a reboot.
 The observation owner also rechecks wall/monotonic agreement on reports and flash service. An offset
 change beyond two seconds withdraws the dated view, fences the old archive and pauses this
 collection lifecycle; a fresh lifecycle or boot establishes a new anchor.
+
+Reported heater flag context uses its own owner in `heater_context_store.cpp` (`kHeaterContextSource`),
+independent of the legacy BUH/BSH diagnosis counters. It persists 192-byte per-heater hourly
+records and 32-byte Method-3 reset fences inside the shared physical Checkup journal envelope with
+its own format fingerprints (`heater_independent::fingerprint`), so older cohort records are
+never treated as current data. RAM storage is fixed (`2 x 24` = 48 cells, 8 reset fences, 192-byte
+wire buffer) with zero dynamic allocation; journal service validates committed CRC readbacks, keeps
+at most 256 Reader calls per 5 ms slice without holding `s_mutex` during flash reads, preserves
+lock ordering (`checkup -> heater` and `flash -> heater`), yields sector erases during active
+retention checks, and drains queued claims up to the bounded 12-record shutdown allowance.
+HTTP `/status` emits an unconfirmed placeholder (`confirmed: false`) in Modbus mode without
+reading X10A heater state, and MQTT `<base>/heater/{buh,bsh}` publishes one non-retained QoS 0
+snapshot per heater on the 10-second heartbeat cadence.
 
 The former small history partition is unsupported. OTA cannot install a partition table: an
 old-layout device needs an explicitly authorized signed USB/Web Serial update to the official

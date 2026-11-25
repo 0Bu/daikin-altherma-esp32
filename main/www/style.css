@@ -885,6 +885,11 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vdesc-p { margin-top: 11px; }
 .vdesc-p:first-child { margin-top: 0; }
 .vdesc-n { color: var(--fg); font-weight: 600; }
+.heater-context { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 11px; font-variant-numeric: tabular-nums; }
+.heater-context caption { text-align: left; margin-bottom: 6px; }
+.heater-context th, .heater-context td { text-align: left; vertical-align: top; overflow-wrap: anywhere; padding: 5px 4px; border-bottom: 1px solid var(--line); font-weight: 400; }
+.heater-context th:first-child { width: 44%; padding-left: 0; }
+.heater-context thead th { color: var(--fg); font-weight: 600; }
 /* DHW shares the card's type ramp, ink and disclosure spacing. Only its primary measurement
    is enlarged; ordinary labels/prose keep the same roles as the neighbouring diagnosis rows. */
 .checkup-dhw-hero { padding: 10px 12px;

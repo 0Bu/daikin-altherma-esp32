@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -313,6 +313,15 @@ I18N.ja = localeValues([
   /* check.cycling.e_ongoing */ "最新測定時も運転中。",
   /* check.cycling.cause_unavailable */ "詳細なし",
   /* check.cycling.cause_older_unavailable */ "これらの過去の運転については、保存された起動・停止の詳細がありません。",
+  /* check.heater_context.title */ "報告されたヒーターフラグの状況",
+  /* check.heater_context.columns */ "状況|BUH|BSH",
+  /* check.heater_context.counts */ "陽性時間 / 評価可能な ON 時間 · 陽性サンプル数",
+  /* check.heater_context.categories */ "緊急運転フラグ|エラー状態|除霜/回復|給湯経路|Silent Mode フラグ|外気 ≤+2°C|外気 >+2°C|圧縮機が停止と報告|Silent Mode + 温暖時の暖房",
+  /* check.heater_context.totals */ "報告 ON|状況の和集合|重複|不明な状況|陽性カテゴリなし|フラグが読めた時間",
+  /* check.heater_context.states */ "発生源未確認|日時未確定の観測|24 時間未充足|アーカイブ未検証|保存待ち|アーカイブ利用不可：破損または未読の記録|時刻不確定|飽和：下限値|非対応",
+  /* check.heater_context.notice */ "Silent Mode、暖房、温暖な外気条件で報告されたヒーター時間が 15 分以上：プロジェクトの暫定的な注記です。",
+  /* check.heater_context.rule */ "区間両端が読め、欠測は 15 秒以下。回復は暖房中に観測した除霜終了後 300 秒以内に限ります。+2°C の区分と 900 秒の注記はプロジェクト独自の経験則です。",
+  /* check.heater_context.limits */ "カテゴリはヒーターごとに重複します。欠けた状況は不明のままです。エネルギー、運転原因、二熱源運転の理由、必要性は確定しません。警告は緊急運転ではなく、Low noise control は分類しません。 サンプル間の状態は不明のままです。",
   /* check.min */ (m) => `${m}分`,
   /* check.tank_runtime */ (d) => `タンク ${d}`,
   /* check.buh_runtime */ (d) => `補助 ${d}`,

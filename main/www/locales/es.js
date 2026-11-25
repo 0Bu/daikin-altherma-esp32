@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -313,6 +313,15 @@ I18N.es = localeValues([
   /* check.cycling.e_ongoing */ "Activo en última lectura.",
   /* check.cycling.cause_unavailable */ "Sin detalles",
   /* check.cycling.cause_older_unavailable */ "No hay detalles guardados sobre el arranque y la parada de estos ciclos anteriores.",
+  /* check.heater_context.title */ "Contexto de las señales de calentador notificadas",
+  /* check.heater_context.columns */ "Contexto|BUH|BSH",
+  /* check.heater_context.counts */ "Tiempo positivo / tiempo ON evaluable · muestras positivas",
+  /* check.heater_context.categories */ "señal de emergencia|estado de error|desescarche/recuperación|circuito de agua caliente|señal Silent Mode|exterior ≤+2°C|exterior >+2°C|compresor notificado parado|Silent Mode + calefacción con exterior suave",
+  /* check.heater_context.totals */ "ON notificado|unión de contextos|solapamiento|contexto desconocido|ninguna categoría positiva|tiempo de señal legible",
+  /* check.heater_context.states */ "Fuente sin confirmar|Observaciones sin fecha|24 h incompletas|Archivo aún sin validar|Almacenamiento pendiente|Archivo no disponible: registros dañados o no leídos|Hora incierta|Saturado: límites inferiores|No compatible",
+  /* check.heater_context.notice */ "Al menos 15 minutos de señal de calentador con Silent Mode, calefacción y exterior suave: aviso provisional del proyecto.",
+  /* check.heater_context.rule */ "Extremos legibles, huecos ≤15 s. La recuperación se limita a 300 s tras un fin de desescarche observado durante calefacción. La división de +2°C y el aviso de 900 s son heurísticas del proyecto.",
+  /* check.heater_context.limits */ "Las categorías se solapan por separado para cada calentador. El contexto ausente sigue desconocido. No se demuestra energía, causa de funcionamiento, bivalencia ni necesidad. Una advertencia no es emergencia; Low noise control no se clasifica. Los estados entre muestras siguen siendo desconocidos.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `depósito ${d}`,
   /* check.buh_runtime */ (d) => `apoyo ${d}`,

@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -313,6 +313,15 @@ I18N.sv = localeValues([
   /* check.cycling.e_ongoing */ "Aktiv vid senaste mätning.",
   /* check.cycling.cause_unavailable */ "Inga detaljer",
   /* check.cycling.cause_older_unavailable */ "Sparade start- och stoppuppgifter saknas för de här äldre körningarna.",
+  /* check.heater_context.title */ "Sammanhang för rapporterade värmarflaggor",
+  /* check.heater_context.columns */ "Sammanhang|BUH|BSH",
+  /* check.heater_context.counts */ "Positiv tid / bedömbar ON-tid · positiva mätpunkter",
+  /* check.heater_context.categories */ "nöddriftsflagga|felstatus|avfrostning/återhämtning|varmvattenväg|Silent Mode-flagga|uteluft ≤+2°C|uteluft >+2°C|kompressorn rapporterad stoppad|Silent Mode + uppvärmning vid milt väder",
+  /* check.heater_context.totals */ "rapporterad ON|union av sammanhang|överlappning|okänt sammanhang|ingen positiv kategori|tid med läsbar flagga",
+  /* check.heater_context.states */ "Källan är obekräftad|Odaterade observationer|Ofullständiga 24 h|Arkivet är ännu inte validerat|Lagring väntar|Arkivet är otillgängligt: skadade eller olästa poster|Osäker tid|Mättnad: undre gränser|Stöds inte",
+  /* check.heater_context.notice */ "Minst 15 minuter rapporterad värmartid med Silent Mode, uppvärmning och mild uteluft: preliminär projektanmärkning.",
+  /* check.heater_context.rule */ "Läsbara intervalländar, luckor ≤15 s. Återhämtningen begränsas till 300 s efter observerat avfrostningsslut under uppvärmning. Gränsen +2°C och anmärkningen efter 900 s är projektheuristiker.",
+  /* check.heater_context.limits */ "Kategorierna överlappar separat för varje värmare. Saknat sammanhang förblir okänt. Energi, driftorsak, bivalens eller nödvändighet är inte fastställd. En varning är inte nöddrift; Low noise control är oklassificerad. Tillstånd mellan mätpunkterna förblir okända.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `Tank ${d}`,
   /* check.buh_runtime */ (d) => `Tillsats ${d}`,

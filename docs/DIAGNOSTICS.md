@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: ca39ba9102f7147c393e8464fa0a307bd45cd2f30b6a0addf2ec4e505324c308 -->
+<!-- user-docs-contract: a9597ef0ee6218516dc3d583e43b7fd23f6bba47c8b6254b81d02524a8549ed8 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -281,8 +281,20 @@ electric backup heater (**BUH**) and tank electric booster heater (**BSH**).
 wait for a full day. A reported zero applies only to the observed intervals. A missing heater signal
 remains absent, rather than being counted as off.
 
+When the card displays **X10A**, the expanded row also shows **reported heater flag context**
+separately for each heater (hidden in **Modbus** mode). The table gives positive time, evaluable ON
+time and positive samples for overlapping operating contexts. Unknown input stays unknown. A
+context with zero positive samples is limited to its evaluated population; it is not an absence
+finding for the whole day. The provisional Silent Mode + mild heating notice needs 15 minutes
+(900 s) of qualified accumulated flag-time, not necessarily one continuous run.
+
 **Important limit:** Runtime does not establish electricity consumed, necessity or a defect.
 Controller settings, weather and operating schedules can make this activity intentional.
+The contexts report co-occurrence, not a controller's reason, calibration, or bivalence. Samples can
+miss intermediate changes. If stored records cannot be read or validated, totals are marked
+incomplete. Previously validated totals may remain visible during the same boot; new live
+observations remain separate. Reset, clock and incomplete-record safeguards are described in the
+evidence.
 
 **Evidence and limits:** [Electric heaters](DIAGNOSTIC_EVIDENCE.md#diagnosis-heater)
 

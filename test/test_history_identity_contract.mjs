@@ -107,6 +107,8 @@ assert.match(builder, /note\.bound\s*=\s*anchor/, "the trend builder bounds by t
 assert.match(checkupBuilder, /note\.bound\s*=\s*wall_bucket/,
   "the checkup builder bounds by the wall hour bucket");
 const forService = functionBody("bool flash_build_for_service(", "} // namespace");
+assert.match(forService, /if \(src_i == kHeaterContextSource\) return flash_build_next_heater_context\(r\);/,
+  "heater context journal stream must use its own dispatcher");
 assert.match(forService, /flash_build_next_checkup_record\(r,\s*wait_ticks,\s*note,\s*src_i\s*==\s*kCheckupModbusSource\)/);
 assert.match(forService, /kCyclingModbusTraceSource/,
   "independent Modbus cycling stream must use its own journal dispatcher");
@@ -137,6 +139,9 @@ assert.equal(countResets(history), resetOwners.reduce((n, body) => n + countRese
 // The cursor fields are otherwise written from the record just appended (and by the scan).
 const appendAt = functionBody("esp_err_t flash_append_record_at(", "// One sector is abandoned");
 assert.match(appendAt, /s_flash_last_bucket\[src\]\s*=\s*r\.header\.bucket/);
+assert.match(appendAt,
+  /logic::heater_cohort::kind\(verify\.header\) != logic::heater_cohort::Kind::Unknown\s*\|\|\s*logic::heater_independent::kind\(verify\.header\) !=\s*logic::heater_cohort::Kind::Unknown[\s\S]*heater_context_flash_appended\(/,
+  "committed heater records confirm only the heater context owner");
 const trendRestore = functionBody("void history_service_flash_restore()",
   "static size_t history_flash_service_journal(");
 const checkupRestore = functionBody("static void history_restore_checkup_flash()",
@@ -153,14 +158,22 @@ assert.match(noteAhead, /if \(s_flash_ahead_logged\[src_i\]\) return;[\s\S]*s_fl
   "the writer's report is logged once per episode");
 const releases = history.match(/s_flash_ahead_logged\[[^\]]*\]\s*=\s*false/g) || [];
 assert.equal(releases.length, 1, "exactly one site releases the writer's latch");
+const heaterOwned = functionBody("bool flash_is_heater_owned(", "void flash_heater_append_outcome(");
+assert.match(heaterOwned,
+  /logic::heater_cohort::kind\(h\) != logic::heater_cohort::Kind::Unknown\s*\|\|\s*logic::heater_independent::kind\(h\) != logic::heater_cohort::Kind::Unknown/,
+  "both heater formats are recognized independently of the legacy source byte");
 const appendFn = functionBody("esp_err_t flash_append_record(FlashJournalRecord& r) {",
   "// Log, once per source and episode");
 assert.match(appendFn,
-  /const bool\s+stop_owned\s*=\s*logic::observation_append_owned\(r\.header\);[\s\S]*const bool\s+hydronic_owned\s*=\s*logic::hydronic_append_owned\(r\.header\);[\s\S]*flash_append_record_at\(r, slot\)/,
-  "append dispatch captures builder ownership before the separate commit transaction");
+  /flash_append_record_at\(r, slot\);[\s\S]*const bool\s+stop_owned\s*=\s*logic::observation_append_owned\(r\.header\);[\s\S]*const bool\s+hydronic_owned\s*=\s*logic::hydronic_append_owned\(r\.header\);/,
+  "append dispatch captures builder ownership after the flash write transaction");
 assert.match(appendFn,
-  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\) && !stop_owned && !hydronic_owned &&\s+!flash_cycling_owned\(r\.header\)\)\s*\{\s*if \(!flash_fault_owned\(r\.header\) && !flash_dhw_owned\(r\.header, false\) &&\s+!flash_dhw_owned\(r\.header, true\)\)\s+s_flash_ahead_logged\[flash_modbus_checkup_owned\(r\.header\)\s*\?\s*kCheckupModbusSource\s*:\s*r\.header\.source\]\s*=\s*false;/,
-  "only appending a source's own data releases its ahead-of-clock latch");
+  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_heater_owned\(r\.header\)\)\s*\{\s*if \(!flash_is_manifest\(r\.header\) && !stop_owned && !hydronic_owned &&\s+!flash_cycling_owned\(r\.header\)\)\s*\{\s*if \(!flash_fault_owned\(r\.header\) && !flash_dhw_owned\(r\.header, false\) &&\s+!flash_dhw_owned\(r\.header, true\)\)\s+s_flash_ahead_logged\[flash_modbus_checkup_owned\(r\.header\)\s*\?\s*kCheckupModbusSource\s*:\s*r\.header\.source\]\s*=\s*false;/,
+  "only appending a source's own data releases its ahead-of-clock latch; manifests, observations and both heater formats cannot");
+assert.match(appendFn, /if \(flash_is_heater_owned\(r\.header\)\) flash_heater_append_outcome\(true\);/,
+  "retention yield defers a pinned heater piece cleanly");
+assert.match(appendFn, /if \(flash_is_heater_owned\(r\.header\)\) flash_heater_append_outcome\(false\);/,
+  "a failed heater append notifies the heater store without advancing its index");
 assert.match(appendFn, /if \(stop_owned\) stop_observation_flash_failed\(\);/,
   "a failed builder-owned observation releases its reservation without a committed read header");
 assert.match(appendFn, /if \(hydronic_owned\) hydronic_observation_flash_failed\(\);/,

@@ -72,6 +72,8 @@ inline constexpr esp_err_t ESP_FAIL                 = -1;
 inline constexpr esp_err_t ESP_ERR_INVALID_ARG      = 2;
 inline constexpr esp_err_t ESP_ERR_INVALID_SIZE     = 3;
 inline constexpr esp_err_t ESP_ERR_INVALID_RESPONSE = 4;
+inline constexpr esp_err_t ESP_ERR_INVALID_STATE    = 5;
+inline constexpr esp_err_t ESP_ERR_NOT_FINISHED     = 6;
 struct esp_partition_t {
     uint32_t address;
     size_t   size;

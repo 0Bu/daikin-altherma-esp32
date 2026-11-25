@@ -97,9 +97,11 @@ python3 test/poll_runtime/run.py
 python3 test/checkup_runtime/run.py
 python3 test/stop_observation_runtime/run.py
 python3 test/hydronic_observation_runtime/run.py --sanitizer undefined
+python3 test/heater_context_runtime/run.py --sanitizer undefined
 # The complete shared journal owner verifies append failure dispatch and exact claim receipts.
 python3 test/history_journal_runtime/run.py
 python3 test/hydronic_history_runtime/run.py --sanitizer undefined
+python3 test/heater_journal_runtime/run.py --sanitizer undefined
 python3 test/startup_runtime/run.py
 # The bounded retirement journal executes its production NVS adapter and failure controls.
 python3 test/mqtt_retirement_store/run.py

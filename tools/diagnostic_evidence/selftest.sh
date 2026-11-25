@@ -33,6 +33,13 @@ reset() {
     cp main/stop_observation_store.hpp main/stop_observation_store.cpp \
        main/hydronic_observation_store.hpp main/hydronic_observation_store.cpp \
        main/history.cpp "$WORK/main/"
+    cp main/logic/heater_context.hpp main/logic/heater_context_input.hpp \
+       main/logic/heater_context_hourly.hpp main/logic/heater_context_cohort.hpp \
+       main/logic/heater_independent_hour.hpp \
+       main/logic/heater_context_payload.hpp main/logic/history_persist.hpp \
+       main/logic/json_output.hpp "$WORK/main/logic/"
+    cp main/heater_context_store.hpp main/heater_context_store.cpp \
+       main/mqtt_ha.cpp "$WORK/main/"
     cp main/hp_poll.cpp "$WORK/main/hp_poll.cpp"
     cp main/hp_modbus.cpp "$WORK/main/hp_modbus.cpp"
     cp main/http_status.cpp "$WORK/main/http_status.cpp"
@@ -233,6 +240,18 @@ assert s.count(old) == 1
 p.write_text(s.replace(old, 'gates.hot_start_clear = true;'))
 PY
 run_case "changed Modbus heating witness is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+
+echo "== Heater context rules and outputs are part of the evidence =="
+for component in main/logic/heater_context.hpp main/logic/heater_context_input.hpp \
+    main/logic/heater_context_hourly.hpp main/logic/heater_context_cohort.hpp \
+    main/logic/heater_independent_hour.hpp \
+    main/logic/heater_context_payload.hpp main/logic/history_persist.hpp \
+    main/logic/json_output.hpp main/heater_context_store.hpp main/heater_context_store.cpp \
+    main/mqtt_ha.cpp; do
+    reset
+    printf '\n// selftest: changed heater evidence contract\n' >> "$WORK/$component"
+    run_case "changed heater source $component is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+done
 
 echo "== 13. reviewed implementation can be deliberately re-stamped =="
 reset
