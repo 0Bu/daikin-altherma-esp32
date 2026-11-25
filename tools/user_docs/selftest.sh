@@ -26,6 +26,7 @@ reset() {
        main/logic/hydronic_observation.hpp main/logic/hydronic_input.hpp \
        main/logic/hydronic_hourly.hpp main/logic/hydronic_payload.hpp \
        main/logic/working_figure.hpp main/logic/gas_comparison.hpp \
+       main/logic/modbus_heating_flow.hpp main/logic/modbus_plan.hpp \
        "$WORK/main/logic/"
     cp main/stop_observation_store.hpp main/stop_observation_store.cpp \
        main/hydronic_observation_store.hpp main/hydronic_observation_store.cpp \

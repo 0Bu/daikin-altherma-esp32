@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -180,7 +180,7 @@ I18N.es = localeValues([
   /* check.flow.show */ "Mostrar un mínimo en el gráfico",
   /* check.flow.readout */ (value) => `En este tramo se midió ${value} al menos una vez. La calefacción llevaba en marcha al menos diez minutos.`,
   /* check.flow.locations_missing */ "No se guardó la hora de las mediciones anteriores con este valor.",
-  /* check.flow.x10a_only */ "El mínimo en calefacción se calcula a partir de las mediciones X10A.",
+  /* check.flow.unavailable */ "Faltan las mediciones necesarias para calcular el caudal más bajo en calefacción.",
   /* check.flow.waiting */ "A la espera de un período de calefacción que cumpla las condiciones.",
   /* check.heater */ "Resistencias",
   /* check.retries */ "Contadores protección",

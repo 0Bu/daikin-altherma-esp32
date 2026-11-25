@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -180,7 +180,7 @@ I18N.fr = localeValues([
   /* check.flow.show */ "Afficher un minimum sur le graphique",
   /* check.flow.readout */ (value) => `Dans cet intervalle, au moins une mesure a donné ${value}. Le chauffage des pièces fonctionnait déjà depuis au moins dix minutes.`,
   /* check.flow.locations_missing */ "L’heure des anciennes mesures à cette valeur n’a pas été enregistrée.",
-  /* check.flow.x10a_only */ "Le minimum en chauffage est calculé à partir des mesures X10A.",
+  /* check.flow.unavailable */ "Les mesures nécessaires pour déterminer le débit le plus bas en chauffage sont indisponibles.",
   /* check.flow.waiting */ "En attente d’une période de chauffage qui remplit les conditions de mesure.",
   /* check.heater */ "Résistances",
   /* check.retries */ "Compteurs de protection",

@@ -168,8 +168,11 @@ const mutations=[
     before:/append_stop_context_json\(\s*j,\s*diag_effective == DiagnosticsSource::Modbus\s*\?\s*StopContextPayloadFields\{\}\s*:\s*stop_context_payload_fields\(checkup_stop_context_report\(\)\)\);/,
     after:'j += "null";'},
   {name:"leaked-x10a-hydronic-on-modbus",file:"status",scenario:"status_modbus_diagnostics",
-    before:/CheckupHydronicReport\s+report\{\};\s*if\s*\(diag_effective == DiagnosticsSource::Modbus\)\s*\{[\s\S]*?\}\s*else\s*\{\s*report\s*=\s*checkup_hydronic_report\(\);\s*\}/,
-    after:"const CheckupHydronicReport report = checkup_hydronic_report();"},
+    before:/if \(diag_effective == DiagnosticsSource::Modbus\) \{\s*report\s*=\s*\{\};/,
+    after:"if (diag_effective == DiagnosticsSource::Modbus) {"},
+  {name:"leaked-heating-minimum-windows",file:"status",scenario:"heating_minimum_status",
+    before:/append_heating_windows\(j, use_modbus \? modbus\.windows : obs\.minimum_windows,\s*redact \|\| !observed\);/,
+    after:"append_heating_windows(j, use_modbus ? modbus.windows : obs.minimum_windows, !observed);"},
   {name:"unsupported-stop-count-leak",file:"heartbeat",scenario:"stop_context_populated",
     before:"number(c.positive[k], known && supported);",after:"number(c.positive[k], known);"},
   {name:"elapsed-on-closed-hour",file:"status",scenario:"cycling_hours_wire",
@@ -219,7 +222,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,34);
+  assert.equal(caseCount,35);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -242,6 +245,20 @@ try {
       source:{reg:101,offset:4,conv:105},zone_context:"unknown",
     }],
     ["secondary-expired",null],
+  ]);
+  const heatingWindows=(hour,mask)=>({t0:1800000000,slot_s:300,
+    hour_masks:Array.from({length:24},(_,i)=>i===hour?mask:0),locations_missing:false});
+  const modbusHeating={source:"modbus",reason:"observed",min_l_min:5.2,
+    minimum_windows:heatingWindows(23,4)};
+  const x10aHeating={source:"x10a",reason:"observed",min_l_min:7.125,
+    minimum_windows:heatingWindows(22,16)};
+  const heatingWires=new Map([
+    ["status-modbus-diagnostics",{source:"modbus",report:modbusHeating}],
+    ["heating-modbus-fallback",{source:"x10a",report:modbusHeating}],
+    ["heating-modbus-redacted",{source:"x10a",report:{...modbusHeating,minimum_windows:null}}],
+    ["heating-x10a-priority",{source:"x10a",report:x10aHeating}],
+    ["heating-x10a-with-modbus-diagnostics",{source:"modbus",report:x10aHeating}],
+    ["heating-disabled",{source:"x10a",report:null}],
   ]);
   const cyclingWires=new Map([
     ["cycling-partial",{bucket:0,elapsed_s:450,starts:1,run_s:180,observed_s:420,space_s:0,dhw_s:60}],
@@ -542,6 +559,16 @@ try {
       assert.deepEqual(defrost?.last_observed_start,{unix_s:2000000000,route:"space_heating",outdoor_c:-2.5},name);
       defrostOutdoorSeen=true;
     }
+    if(heatingWires.has(name)) {
+      const {source,report}=heatingWires.get(name);
+      assert.equal(doc.health.source,source,name);
+      const flow=doc.health.checks.find(check=>check.id==="flow");
+      assert.deepEqual(flow?.heating_minimum,report,name);
+      assert.deepEqual(flow?.minimum_windows,name==="heating-x10a-priority"
+        ?x10aHeating.minimum_windows:null,`${name}: legacy X10A windows`);
+      assert.equal(flow?.min_l_min,source==="x10a"&&report?6.5:null,`${name}: legacy pump minimum`);
+      heatingWires.delete(name);
+    }
     if(stopWires.has(name)) {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
       assert.ok(cycling,`${name}: retain the existing cycling row`);
@@ -707,6 +734,7 @@ try {
   assert.ok(defrostOutdoorSeen,"X10A defrost outdoor status snapshot must run");
   assert.equal(refrigerantWires.size,0,"all populated, missing, reset and omitted refrigerant wire oracles must run");
   assert.equal(secondaryWires.size,0,"all secondary-supply wire cases must be present");
+  assert.equal(heatingWires.size,0,"all heating-minimum wire cases must be present");
   const wireUiCount=renderWireSnapshots(wires);
   console.log(`WIRE->UI contract bridge: ${wireUiCount} C++ snapshot scenarios rendered through strict DOM`);
   const controls=[];

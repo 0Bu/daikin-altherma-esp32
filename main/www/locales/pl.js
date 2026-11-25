@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -185,7 +185,7 @@ I18N.pl = localeValues([
   /* check.flow.show */ "Pokaż minimum na wykresie",
   /* check.flow.readout */ (value) => `W tym przedziale co najmniej raz zmierzono ${value}. Ogrzewanie pomieszczeń trwało już od co najmniej dziesięciu minut.`,
   /* check.flow.locations_missing */ "Nie zapisano czasu starszych pomiarów o tej wartości.",
-  /* check.flow.x10a_only */ "Najniższy przepływ podczas ogrzewania jest obliczany na podstawie pomiarów X10A.",
+  /* check.flow.unavailable */ "Brakuje pomiarów potrzebnych do ustalenia najniższego przepływu podczas ogrzewania.",
   /* check.flow.waiting */ "Oczekiwanie na okres ogrzewania spełniający warunki pomiaru.",
   /* check.heater */ "Grzałki",
   /* check.retries */ "Liczniki ochrony",

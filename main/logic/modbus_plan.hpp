@@ -175,26 +175,40 @@ constexpr int mb_plan_build(const MbFunc* spaces, const uint16_t* offsets, int n
     return nb;
 }
 
+constexpr bool mb_offset_is_heating_witness(MbFunc space, uint16_t offset) {
+    return space == MbFunc::ReadInput && (offset == 30 || offset == 31);
+}
+
 // Must this batch be read on a fast cycle? Derived from the offsets the batch covers, so a batch
 // containing a gate or the named event context carries its neighbours along at no extra cost. This
-// is why the fast cycle also refreshes the 3-way valve, compressor flag, flow, power and room
-// temperature even though only the gates plus input 44 are committed outside the value cache.
-constexpr bool mb_batch_is_fast(const MbBatch& b) {
-    for (uint16_t k = 0; k < b.count; k++)
-        if (mb_offset_is_gate(b.space, static_cast<uint16_t>(b.first_offset + k)) ||
-            mb_offset_is_fast_context(b.space, static_cast<uint16_t>(b.first_offset + k)))
+// keeps the named witnesses fresh without committing a partial value cache. A confirmed HomeHub
+// heating observation also needs current pump and compressor state between full flow readings.
+constexpr bool mb_batch_is_fast(const MbBatch& b, bool heating_observation = false) {
+    for (uint16_t k = 0; k < b.count; k++) {
+        const auto offset = static_cast<uint16_t>(b.first_offset + k);
+        if (mb_offset_is_gate(b.space, offset) || mb_offset_is_fast_context(b.space, offset) ||
+            (heating_observation && mb_offset_is_heating_witness(b.space, offset)))
             return true;
+    }
     return false;
 }
 
 // A batch may first return an exception and then be retried once per register. Bound that valid
 // fallback as well as the compact path; extended profile probing adds one request on full cycles.
 constexpr uint32_t mb_plan_max_requests(const MbBatch* batches, int count, bool full_cycle,
-                                        bool include_probe = true) {
+                                        bool include_probe       = true,
+                                        bool heating_observation = false) {
     uint32_t requests = full_cycle && include_probe ? 1 : 0;
     for (int i = 0; i < count; ++i) {
         const MbBatch& b = batches[i];
-        if (!full_cycle && !mb_batch_is_fast(b)) continue;
+        if (!full_cycle && !mb_batch_is_fast(b)) {
+            if (heating_observation && mb_batch_is_fast(b, true)) {
+                requests += b.count > 1 ? 1 : 0; // the failed batch attempt
+                for (uint16_t k = 0; k < b.count; ++k)
+                    if (mb_offset_is_heating_witness(b.space, b.first_offset + k)) ++requests;
+            }
+            continue;
+        }
         requests += b.count <= 1 ? 1 : static_cast<uint32_t>(b.count) + 1;
     }
     return requests;

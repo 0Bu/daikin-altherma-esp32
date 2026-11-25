@@ -287,11 +287,11 @@ setpoint, and electrical CT/inverter currents).
 
 **Flow rate** follows that order. Its trend comes after the explanation and Normal note. The
 HomeHub comparison follows the trend when paired, and the heating observation comes last. Violet
-fill marks recorded five-minute windows wherever they overlap the visible, dated X10A
-curve. Gaps stay clear. Select an area or use the legend to read its time and heating conditions
-directly below the plot. Adjacent five-minute windows share a single readout. When a recorded
-window overlaps the dated chart and an X10A sample is visible, the legend also reaches windows
-inside curve gaps. The usual cursor reads the trend samples.
+fill marks recorded five-minute windows wherever they overlap the visible, dated curve of the
+reporting source. Gaps stay clear. Select an area or open the legend to read its time and heating
+conditions directly below the plot. Adjacent five-minute windows share a readout.
+The legend closes the readout on the second activation and reopens it at the next recorded window,
+including windows inside curve gaps. The usual cursor reads the trend samples.
 
 Explain what the quantity is, its bounded normal context, then current state or absence. Held data
 cannot reappear in a headline, members or state sentence. A fallback pressure row must own headline,

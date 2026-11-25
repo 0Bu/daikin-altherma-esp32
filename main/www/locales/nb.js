@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -180,7 +180,7 @@ I18N.nb = localeValues([
   /* check.flow.show */ "Vis et lavpunkt i grafen",
   /* check.flow.readout */ (value) => `I dette tidsrommet ble ${value} målt minst én gang. Romoppvarmingen hadde da vært i gang i minst ti minutter.`,
   /* check.flow.locations_missing */ "Tidspunktet for eldre målinger med denne verdien ble ikke lagret.",
-  /* check.flow.x10a_only */ "Den laveste vannmengden under oppvarming beregnes fra X10A-målinger.",
+  /* check.flow.unavailable */ "Målingene som trengs for å finne den laveste vannmengden under oppvarming, mangler.",
   /* check.flow.waiting */ "Venter på en oppvarmingsperiode som oppfyller målekravene.",
   /* check.heater */ "Elkolber",
   /* check.retries */ "Beskyttelsestellere",

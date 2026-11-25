@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -180,7 +180,7 @@ I18N.de = localeValues([
   /* check.flow.show */ "Tiefstwert im Verlauf zeigen",
   /* check.flow.readout */ (value) => `In diesem Abschnitt wurden mindestens einmal ${value} gemessen. Die Raumheizung lief da schon seit mindestens zehn Minuten.`,
   /* check.flow.locations_missing */ "Für ältere Messungen mit diesem Wert wurde der Zeitpunkt nicht gespeichert.",
-  /* check.flow.x10a_only */ "Der Tiefstwert beim Heizen wird aus X10A-Messwerten ermittelt.",
+  /* check.flow.unavailable */ "Für den Tiefstwert beim Heizen fehlen die nötigen Messwerte.",
   /* check.flow.waiting */ "Warten auf eine passende Heizphase.",
   /* check.heater */ "Heizstäbe",
   /* check.retries */ "Schutzzähler",
