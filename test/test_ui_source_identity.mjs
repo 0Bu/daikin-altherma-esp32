@@ -3,16 +3,14 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { createStrictDocument } from "../tools/ui/strict_dom.mjs";
 
 const read = (file) => fs.readFileSync(new URL(`../main/www/js/${file}.js`, import.meta.url), "utf8");
-const elements = new Map();
-const $ = (id) => {
-  if (!elements.has(id)) elements.set(id, { value: "", disabled: false });
-  return elements.get(id);
-};
+const document = createStrictDocument("main/www/index.html");
+const $ = (id) => document.getElementById(id);
 const pending = [];
 const context = {
-  $, LANG: "en", pollSignal: () => undefined, hpProbeIsOpen: () => false,
+  document, $, LANG: "en", pollSignal: () => undefined, hpProbeIsOpen: () => false,
   TextDecoder,
   esc: String, t: key => key,
   setLangFromStatus: async () => {}, displayUnit: (j) => j.unit,

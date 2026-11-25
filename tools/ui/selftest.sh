@@ -59,7 +59,7 @@ echo "ui selftest: an unknown compressor reported as stopped is detected"
 # nonempty passive observation could otherwise keep the diagnosis card alive.
 (cd "$tmp" && node test/test_ui_card_navigation.mjs >/dev/null 2>&1) || {
   echo "ui selftest: card-navigation fixture fails before mutation" >&2; exit 1; }
-sed 's/^  const checkup = S.status?.diagnostics?.enabled === true$/  const checkup = true/' \
+sed 's/^  if (S.status?.diagnostics?.enabled === true) {$/  if (true) {/' \
   "$proj/main/www/js/dashboard.js" > "$tmp/main/www/js/dashboard.js"
 if (cd "$tmp" && node test/test_ui_card_navigation.mjs >"$tmp/diagnostics-opt-in.log" 2>&1); then
   echo "ui selftest: removed diagnosis opt-in escaped card-navigation checks" >&2; exit 1
@@ -429,3 +429,57 @@ fi
 rm -rf "$matrix_tmp"
 
 echo "ui selftest: an unexplained COP block reason, and a scrape that stopped reading the rule, are both detected"
+
+# Negative-control mutations for the static JS/DOM/i18n/CSS audit gate.
+static_tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$matrix_tmp" "$static_tmp"; [ -z "${hook_tmp:-}" ] || rm -rf "$hook_tmp"' EXIT
+mkdir -p "$static_tmp/main" "$static_tmp/test" "$static_tmp/tools"
+cp -R "$proj/main/www" "$static_tmp/main/www"
+cp -R "$proj/tools/ui" "$static_tmp/tools/ui"
+cp "$proj/test/test_ui_static_analysis.mjs" "$static_tmp/test/"
+
+(cd "$static_tmp" && node test/test_ui_static_analysis.mjs >/dev/null 2>&1) || {
+  echo "ui selftest: static analysis fails on unmodified tree" >&2; exit 1; }
+
+cp "$static_tmp/main/www/js/dashboard.js" "$static_tmp/dashboard.orig"
+cp "$static_tmp/main/www/style.css" "$static_tmp/style.orig"
+
+# 1. Undeclared identifier inside an unexecuted branch.
+sed 's/^function checkupOutdoorContext(c) {/function checkupOutdoorContext(c) {\n  if (false) return ghostOutdoorSourceLabel(c);/' \
+  "$static_tmp/dashboard.orig" > "$static_tmp/main/www/js/dashboard.js"
+if (cd "$static_tmp" && node test/test_ui_static_analysis.mjs >"$static_tmp/static-undef.log" 2>&1); then
+  echo "ui selftest: undeclared identifier in unexecuted branch escaped static audit" >&2; exit 1
+fi
+grep -q "undeclared identifier 'ghostOutdoorSourceLabel'" "$static_tmp/static-undef.log" || {
+  echo "ui selftest: undeclared identifier mutation failed outside expected check" >&2; exit 1; }
+
+# 2. Missing DOM ID queried via $("...").
+sed 's/^function renderCards(hold = true) {/function renderCards(hold = true) {\n  if (false) $("ghostMissingDomId");/' \
+  "$static_tmp/dashboard.orig" > "$static_tmp/main/www/js/dashboard.js"
+if (cd "$static_tmp" && node test/test_ui_static_analysis.mjs >"$static_tmp/static-dom.log" 2>&1); then
+  echo "ui selftest: missing DOM id escaped static audit" >&2; exit 1
+fi
+grep -q "unknown DOM id 'ghostMissingDomId'" "$static_tmp/static-dom.log" || {
+  echo "ui selftest: missing DOM id mutation failed outside expected check" >&2; exit 1; }
+
+# 3. Missing I18N.en key in literal t("...").
+sed 's/^function renderCards(hold = true) {/function renderCards(hold = true) {\n  if (false) t("ghost.missing.key");/' \
+  "$static_tmp/dashboard.orig" > "$static_tmp/main/www/js/dashboard.js"
+if (cd "$static_tmp" && node test/test_ui_static_analysis.mjs >"$static_tmp/static-i18n.log" 2>&1); then
+  echo "ui selftest: missing i18n key escaped static audit" >&2; exit 1
+fi
+grep -q "missing I18N.en key 'ghost.missing.key'" "$static_tmp/static-i18n.log" || {
+  echo "ui selftest: missing i18n key mutation failed outside expected check" >&2; exit 1; }
+
+cp "$static_tmp/dashboard.orig" "$static_tmp/main/www/js/dashboard.js"
+
+# 4. Undeclared CSS custom property var(--...).
+printf '\n.ghost-selftest { color: var(--ghost-missing-var); }\n' >> "$static_tmp/main/www/style.css"
+if (cd "$static_tmp" && node test/test_ui_static_analysis.mjs >"$static_tmp/static-css.log" 2>&1); then
+  echo "ui selftest: missing CSS custom property escaped static audit" >&2; exit 1
+fi
+grep -q "undeclared CSS custom property '--ghost-missing-var'" "$static_tmp/static-css.log" || {
+  echo "ui selftest: missing CSS custom property mutation failed outside expected check" >&2; exit 1; }
+
+rm -rf "$static_tmp"
+echo "ui selftest: static JS/DOM/i18n/CSS negative controls all detected"

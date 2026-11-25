@@ -340,10 +340,13 @@ export async function launchBrowser({ timeoutMs = 30000 } = {}) {
   ], { stdio: ["ignore", "pipe", "pipe"] });
 
   let socket;
+  let pageRef = null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error("Chrome launch deadline exceeded")), timeoutMs);
   let closing;
-  const close = () => {
+  let enforceDiagnostics = true;
+  const close = ({ checkDiagnostics = true } = {}) => {
+    if (!checkDiagnostics) enforceDiagnostics = false;
     if (!closing) closing = (async () => {
       try {
         try { socket?.close(); } catch { /* already closed */ }
@@ -353,12 +356,15 @@ export async function launchBrowser({ timeoutMs = 30000 } = {}) {
         process.off("SIGINT", onInt);
         process.off("SIGTERM", onTerm);
       }
+      if (enforceDiagnostics && !controller.signal.aborted && pageRef?.diagnostics?.length) {
+        throw new Error(`browser emitted unexpected diagnostics: ${pageRef.diagnostics.join(" | ")}`);
+      }
     })();
     return closing;
   };
   const onSignal = (signal) => {
     controller.abort(new Error(`Chrome interrupted by ${signal}`));
-    close().then(() => process.exit(signal === "SIGINT" ? 130 : 143), (error) => {
+    close({ checkDiagnostics: false }).then(() => process.exit(signal === "SIGINT" ? 130 : 143), (error) => {
       console.error(`Chrome signal cleanup failed: ${error.message}`);
       process.exit(2);
     });
@@ -392,6 +398,7 @@ export async function launchBrowser({ timeoutMs = 30000 } = {}) {
     }
     socket = await connectSocket(target.webSocketDebuggerUrl, controller.signal);
     const page = new CdpPage(socket);
+    pageRef = page;
     await abortable(page.enable(), controller.signal);
     const version = await json(`http://${endpoint.host}/json/version`);
     clearTimeout(timer);
@@ -404,7 +411,7 @@ export async function launchBrowser({ timeoutMs = 30000 } = {}) {
   } catch (error) {
     clearTimeout(timer);
     try {
-      await close();
+      await close({ checkDiagnostics: false });
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError],
         "Browser launch failed and its temporary profile could not be cleaned up");

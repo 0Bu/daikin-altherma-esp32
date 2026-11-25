@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { renderWireSnapshots } from "../tools/ui/render_wire_snapshot.mjs";
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const fixture=path.join(root,"test/http_stream_runtime");
@@ -300,6 +301,7 @@ try {
   ]);
   const dhwSeen=new Set();
   let persistUnknownSeen=false;
+  let defrostOutdoorSeen=false;
   const stopIds=["low_rps_above_main_target","request_withdrawal","defrost",
     "dhw_transition","route_mode_transition"];
   const stopCountKeys=["witnessed_stops_recent_heating","unclassified_stops","unknown_stops",
@@ -501,6 +503,16 @@ try {
       const flow=doc.health.checks.find(check=>check.id==="flow");
       assert.equal(flow?.secondary_supply,null,name);
     }
+    if(name==="status-x10a-defrost-outdoor") {
+      const defrost=doc.health.checks.find(check=>check.id==="defrost");
+      assert.equal(defrost?.verdict,"info",name);
+      assert.equal(defrost?.outdoor_source,"x10a",name);
+      assert.equal(defrost?.outdoor_min_c,-4.5,name);
+      assert.equal(defrost?.outdoor_mean_c,-2,name);
+      assert.equal(defrost?.outdoor_samples,12,name);
+      assert.deepEqual(defrost?.last_observed_start,{unix_s:2000000000,route:"space_heating",outdoor_c:-2.5},name);
+      defrostOutdoorSeen=true;
+    }
     if(stopWires.has(name)) {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
       assert.ok(cycling,`${name}: retain the existing cycling row`);
@@ -655,8 +667,11 @@ try {
     "all DHW source, frame, admission, OOM, redaction and MCP wire oracles must run exactly once");
   assert.equal(persistWires.size,0,"plain, redacted and framed diagnosis snapshots must run");
   assert.ok(persistUnknownSeen,"unreadable diagnosis snapshot must run");
+  assert.ok(defrostOutdoorSeen,"X10A defrost outdoor status snapshot must run");
   assert.equal(refrigerantWires.size,0,"all populated, missing, reset and omitted refrigerant wire oracles must run");
   assert.equal(secondaryWires.size,0,"all secondary-supply wire cases must be present");
+  const wireUiCount=renderWireSnapshots(wires);
+  console.log(`WIRE->UI contract bridge: ${wireUiCount} C++ snapshot scenarios rendered through strict DOM`);
   const controls=[];
   if(!process.argv.includes("--no-mutations")) for(const mutation of mutations) {
     const result=execute(compile(mutation.name,mutation),[mutation.scenario],false);

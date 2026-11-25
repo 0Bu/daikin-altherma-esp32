@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { gzipSync } from "node:zlib";
+import { spliceInlineAssets } from "../ui/inline_page.mjs";
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
 
@@ -66,7 +67,7 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   const icon = fs.readFileSync(path.join(projectRoot, "main/www/heat_pump_icon.png"));
   const favicon = gzipSync(fs.readFileSync(path.join(projectRoot, "main/www/favicon.ico")), { level: 9 });
   const setupWork = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-setup-render-"));
-  let setup, localeTag;
+  let setup, mcp, localeTag;
   const localePackByCode = new Map();
   try {
     const output = path.join(setupWork, "setup.html.gz");
@@ -75,6 +76,20 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
       "--max-gzip-bytes", "4096"], { cwd: projectRoot, encoding: "utf8" });
     if (built.status !== 0) throw new Error(built.stderr || built.stdout || "setup asset build failed");
     setup = fs.readFileSync(output);
+    const mcpInlined = path.join(setupWork, "mcp_dashboard_inlined.html");
+    const mcpGz = path.join(setupWork, "mcp.html.gz");
+    fs.writeFileSync(mcpInlined, spliceInlineAssets(
+      fs.readFileSync(path.join(projectRoot, "main/www/mcp_dashboard.html"), "utf8"),
+      {
+        css: fs.readFileSync(path.join(projectRoot, "main/www/mcp_dashboard.css"), "utf8"),
+        js: fs.readFileSync(path.join(projectRoot, "main/www/mcp_dashboard.js"), "utf8"),
+      },
+    ));
+    const mcpBuilt = spawnSync("python3", [path.join(projectRoot, "tools/web_asset/minify_and_gzip.py"),
+      "--input", mcpInlined, "--output", mcpGz,
+      "--max-gzip-bytes", "8192"], { cwd: projectRoot, encoding: "utf8" });
+    if (mcpBuilt.status !== 0) throw new Error(mcpBuilt.stderr || mcpBuilt.stdout || "mcp asset build failed");
+    mcp = fs.readFileSync(mcpGz);
     const cmake = fs.readFileSync(path.join(projectRoot, "main/CMakeLists.txt"), "utf8");
     const codes = cmake.match(/set\(UI_LOCALE_CODES ([a-z ]+)\)/)?.[1].trim().split(/\s+/);
     if (!codes?.length) throw new Error("locale build inventory unavailable");
@@ -106,6 +121,11 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8",
         "Content-Encoding": "gzip", "Cache-Control": "no-store" });
       return response.end(setup);
+    }
+    if (url.pathname === "/mcp") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8",
+        "Content-Encoding": "gzip", "Cache-Control": "no-store" });
+      return response.end(mcp);
     }
     if (url.pathname === "/set_wifi" && request.method === "POST") {
       let body = "";
@@ -172,6 +192,8 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
     setupRequests,
     historyRequests,
     get valuesRequests() { return valuesRequests; },
+    defaultStatus: () => JSON.parse(JSON.stringify(STATUS)),
+    defaultValues: () => JSON.parse(JSON.stringify(VALUES)),
     setTelemetry(frame) { telemetry = frame || { status: STATUS, values: VALUES, histories: {} }; },
     setSetupReply(reply) { setupReply = reply; },
     close: () => new Promise((resolve, reject) => {

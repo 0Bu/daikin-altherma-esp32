@@ -686,7 +686,7 @@ function renderApp() {
 // blink out on each render.
 function renderHeaderMeta() {
   const w = S.status?.wifi || {};
-  $("hdrIp").textContent = w.ip || location.hostname;
+  $("hdrIp").textContent = S.status?.net?.ip || w.ip || location.hostname;
   const vl = $("verLink");
   vl.textContent = "v" + (S.status?.version || (S.otaInstalling && S.imageLease?.version) || "?");
   vl.title = S.otaAvail ? t("ota.title_avail", S.otaAvail) : t("ota.title_check");

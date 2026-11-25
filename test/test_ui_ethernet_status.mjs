@@ -5,30 +5,32 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
+import { createStrictDocument } from "../tools/ui/strict_dom.mjs";
 
-const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + readAppFragments(["dashboard.js"]);
+const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + readAppFragments(["app_state.js", "dashboard.js"]);
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
+const strictDoc = createStrictDocument("main/www/index.html");
 
 const context = {
+  document: strictDoc,
+  location: { hostname: "daikin-fallback.local" },
   navigator: { language: "de-DE" },
   localStorage: { getItem: () => null, setItem: () => {} },
-  S: { status: {} },
   signalBars: () => "",
-  esc: (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
-  }[c])),
+  fetch: async () => ({ ok: true, json: async () => ({}) }),
+  setTimeout, clearTimeout,
 };
 
 const sandbox = vm.createContext(context);
 vm.runInContext(
-  `${source}\nthis.__connLinks = connLinks; this.__connRow = connRow; this.__setLang = (v) => { LANG = v; };`,
+  `${source}\nthis.__connLinks = connLinks; this.__connRow = connRow; this.__renderHeaderMeta = renderHeaderMeta; this.__S = S; this.__setLang = (v) => { LANG = v; };`,
   sandbox,
   { filename: "main/www/app.sources" },
 );
 
 function ethRow(patch, lang = "de") {
   sandbox.__setLang(lang);
-  context.S.status = {
+  sandbox.__S.status = {
     wifi: { connected: false, std: "Wi-Fi" },
     mqtt: { configured: false },
     syslog: { configured: false },
@@ -96,12 +98,44 @@ function ethRow(patch, lang = "de") {
 
 // 5. Board without Ethernet controller
 {
-  context.S.status = {
+  sandbox.__S.status = {
     wifi: { connected: true, ssid: "test-wifi", rssi: -60 },
     net: { eth: { present: false } },
   };
   const row = sandbox.__connLinks().find((r) => r.label === "Ethernet");
   assert.equal(row, undefined, "Ethernet row must be absent when no controller is present");
+}
+
+// 5b. Header IP transport priority: active net.ip wins even when wifi.ip is empty or different.
+{
+  sandbox.__setLang("en");
+  sandbox.__S.status = {
+    version: "2.0.0",
+    wifi: { connected: false, ip: "" },
+    net: { ip: "192.0.2.88", eth: { present: true, link: true, lease: true } },
+  };
+  sandbox.__renderHeaderMeta();
+  assert.equal(strictDoc.getElementById("hdrIp").textContent, "192.0.2.88",
+    "renderHeaderMeta must display status.net.ip when wifi.ip is empty");
+
+  sandbox.__S.status = {
+    version: "2.0.0",
+    wifi: { connected: true, ip: "192.0.2.10" },
+    net: { ip: "192.0.2.77" },
+  };
+  sandbox.__renderHeaderMeta();
+  assert.equal(strictDoc.getElementById("hdrIp").textContent, "192.0.2.77",
+    "status.net.ip must take precedence over wifi.ip");
+
+  sandbox.__S.status = { version: "2.0.0", wifi: { ip: "192.0.2.10" }, net: {} };
+  sandbox.__renderHeaderMeta();
+  assert.equal(strictDoc.getElementById("hdrIp").textContent, "192.0.2.10",
+    "wifi.ip must serve as fallback when net.ip is omitted");
+
+  sandbox.__S.status = { version: "2.0.0", wifi: {}, net: {} };
+  sandbox.__renderHeaderMeta();
+  assert.equal(strictDoc.getElementById("hdrIp").textContent, "daikin-fallback.local",
+    "location.hostname must remain fallback when neither net.ip nor wifi.ip is set");
 }
 
 // 6. CSS contract: 15px fixed column for perfect vertical right-alignment across rows

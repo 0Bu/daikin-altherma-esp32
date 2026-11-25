@@ -21,58 +21,13 @@
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readAppSource } from "../tools/ui/read_app_source.mjs";
+import { createStrictDocument } from "../tools/ui/strict_dom.mjs";
 
-// ── A DOM shim wide enough to load the production bundle ───────────────────────────────────────
-class ClassList {
-  constructor() { this.names = new Set(); }
-  add(...n) { n.forEach((x) => this.names.add(x)); }
-  remove(...n) { n.forEach((x) => this.names.delete(x)); }
-  contains(n) { return this.names.has(n); }
-  toggle(n, f) {
-    const on = f === undefined ? !this.names.has(n) : !!f;
-    if (on) this.names.add(n); else this.names.delete(n);
-    return on;
-  }
-}
-class Element {
-  constructor(id, doc) {
-    this.id = id; this.doc = doc; this._value = ""; this.checked = false; this.disabled = false;
-    this.hidden = String(id).endsWith("Modal"); this.innerHTML = ""; this.textContent = "";
-    this.dataset = {}; this.classList = new ClassList(); this.listeners = new Map();
-    this.onclick = null; this.style = {}; this.children = []; this.attributes = {};
-  }
-  set value(v) { this._value = String(v ?? ""); }
-  get value() { return this._value; }
-  addEventListener(t, l) { const a = this.listeners.get(t) || []; a.push(l); this.listeners.set(t, a); }
-  removeEventListener() {}
-  querySelector() { return null; }
-  querySelectorAll() { return []; }
-  focus() {} blur() {}
-  setAttribute(n, v) { this.attributes[n] = String(v); this[n] = String(v); }
-  getAttribute(n) { return this.attributes[n] ?? null; }
-  removeAttribute(n) { delete this.attributes[n]; }
-  appendChild(c) { this.children.push(c); return c; }
-  remove() {} matches() { return false; } closest() { return null; } contains() { return false; }
-  setPointerCapture() {} releasePointerCapture() {} scrollIntoView() {}
-  getBoundingClientRect() { return { top: 0, left: 0, width: 100, height: 20, bottom: 20, right: 100 }; }
-}
-class Document {
-  constructor() {
-    this.elements = new Map(); this.listeners = new Map(); this.activeElement = null;
-    this.documentElement = new Element("html", this); this.body = new Element("body", this);
-  }
-  getElementById(id) {
-    if (!this.elements.has(id)) this.elements.set(id, new Element(id, this));
-    return this.elements.get(id);
-  }
-  createElement(tag) { return new Element(`tag:${tag}`, this); }
-  querySelector() { return null; }
-  querySelectorAll() { return []; }
-  addEventListener() {} removeEventListener() {}
-}
+const strictDoc = createStrictDocument("main/www/index.html");
+const consoleErrors = [];
 
 const context = vm.createContext({
-  document: new Document(),
+  document: strictDoc,
   fetch: async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "" }),
   navigator: { language: "de-DE" },
   localStorage: { getItem: () => null, setItem() {} },
@@ -83,16 +38,24 @@ const context = vm.createContext({
     innerWidth: 900, innerHeight: 800,
   },
   history: { state: null, pushState() {}, replaceState() {}, back() {}, forward() {} },
-  location: { pathname: "/", search: "", hash: "", reload() {} },
-  URL, URLSearchParams, Blob, AbortController, console,
+  location: { pathname: "/", search: "", hash: "", hostname: "daikin-absence.local", reload() {} },
+  URL, URLSearchParams, Blob, AbortController,
+  console: {
+    log: () => {},
+    warn: () => {},
+    error: (...args) => { consoleErrors.push(args.map(String).join(" ")); },
+  },
   setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
   requestAnimationFrame: () => 1, cancelAnimationFrame() {},
 });
 
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
+  applyStaticI18n();
+  labelSchematicHits();
+  wire();
   this.__ui = { S, t, esp32CardHtml, circulationSettingsCardHtml,
                 refrigerantServiceRowHtml, checkupCardHtml, checkupDetailHtml, connLinks, liveData,
-                histHtml, INSPECT };`, context,
+                renderApp, renderCards, histHtml, INSPECT };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -405,7 +368,42 @@ for (const scenario of SCENARIOS) {
     checks++;
   }
 
+  // Full unstubbed bundle render: verify renderApp() + renderCards() succeed cleanly with strict DOM,
+  // including when health.checks is populated for scenarios with an active health block.
+  assert.doesNotThrow(() => {
+    ui.renderApp();
+    ui.renderCards(false);
+  }, `${scenario.name}: full renderApp/renderCards threw under strict DOM`);
+  for (const hostId of ["valueGroups", "settingsCards", "connTile"]) {
+    assert.doesNotMatch(strictDoc.getElementById(hostId).innerHTML, /undefined|NaN|\[object Object\]/,
+      `${scenario.name}: #${hostId} rendered a JavaScript artefact during full renderApp`);
+  }
+  if (status.health) {
+    const withChecks = JSON.parse(JSON.stringify(status));
+    withChecks.diagnostics = { enabled: true, source: withChecks.health.source || "x10a",
+      effective_source: withChecks.health.source || "x10a",
+      available_sources: [withChecks.health.source || "x10a"] };
+    withChecks.health.covered_s = withChecks.health.covered_s || 3600;
+    withChecks.health.checks = [
+      { id: "cycling", verdict: "ok", evidence: "measured", starts: 1, observed_s: 3600, required_s: 3600 },
+      { id: "defrost", verdict: "collecting", evidence: "measured", count: 0, paired_count: 0,
+        observed_s: 600, required_s: 3600, outdoor_source: "none", outdoor_samples: 0 },
+      { id: "fault", verdict: "ok", evidence: "manufacturer", active: 0, observed_s: 3600 },
+    ];
+    ui.S.status = withChecks;
+    assert.doesNotThrow(() => {
+      ui.renderApp();
+      ui.renderCards(false);
+    }, `${scenario.name}: renderApp/renderCards with populated health.checks threw`);
+    assert.equal(strictDoc.getElementById("cardBrowser").hidden, false,
+      `${scenario.name}: active diagnostics with health.checks must reveal #cardBrowser`);
+    assert.ok(strictDoc.getElementById("valueGroups").innerHTML.length > 0,
+      `${scenario.name}: active diagnostics with health.checks must populate #valueGroups`);
+  }
+  checks++;
 }
+assert.deepEqual(consoleErrors, [],
+  `UI absence full-bundle renders must emit no console errors: ${consoleErrors.join("; ")}`);
 
 // The board's own memory trends are the case that must survive EVERY plant absence: they describe
 // the ESP32, not the heat pump. Assert it here as a property of the matrix rather than of one

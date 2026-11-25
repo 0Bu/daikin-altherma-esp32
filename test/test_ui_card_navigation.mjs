@@ -70,6 +70,7 @@ for (const id of ["cardBrowser", "cardNav", "valueGroups"])
   document.elements.set(id, new Element(document, id));
 const i18n = readAppFragments(["i18n.js"]);
 const locales = JSON.parse(i18n.match(/const UI_LANGS = Object.freeze\((\[[^\n]+\])\)/)[1]);
+const consoleErrors = [];
 const context = vm.createContext({
   document,
   navigator: { language: "en" },
@@ -77,6 +78,11 @@ const context = vm.createContext({
   fetch() { throw new Error("card selection must not fetch or write settings"); },
   valueGroupsHtml: () => "",
   _pollBusy: false,
+  console: {
+    error: (...args) => { consoleErrors.push(args.map(String).join(" ")); },
+    log: () => {},
+    warn: () => {},
+  },
   setTimeout, clearTimeout,
 });
 vm.runInContext(readAppFragments(["i18n.js", "app_state.js", "dashboard.js"]) +
@@ -284,5 +290,21 @@ expectSelection("group:Operation", "disabled diagnosis preserves other card choi
 ui.S.dashboardCard = "diagnosis";
 ui.render(card("diagnosis"), "", card("modbus"));
 expectSelection("modbus", "without Model, disabled diagnosis falls back to an available source");
+
+// Part A.5: render resilience — a throwing checkupCardHtml() must log console.error and isolate
+// failure so model + live value cards below the schematic still render and navigate cleanly.
+consoleErrors.length = 0;
+ui.S.status.diagnostics = { enabled: true };
+ui.S.dashboardCard = "diagnosis";
+context.checkupCardHtml = () => { throw new Error("synthetic checkup defect"); };
+context.statusCardsHtml = () => card("model", "Model");
+context.valueGroupsHtml = () => card("group:Operation", "Operation");
+context.renderCards(false);
+assert.ok(consoleErrors.length >= 1 && consoleErrors.every((msg) => /Checkup card render failed/.test(msg)),
+  "checkupCardHtml exception must emit explicit Checkup card render failed console.error");
+assert.equal(browser.hidden, false, "surviving cards must keep #cardBrowser visible");
+assert.deepEqual(keys(), ["model", "group:Operation"],
+  "checkup isolation must still mount status and live value cards");
+expectSelection("model", "falling back after isolated checkup error selects surviving first card");
 
 console.log("dashboard card navigation: stable selection, localized labels, availability fallback and held-frame interactions passed");
