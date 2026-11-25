@@ -107,6 +107,26 @@ if 'PASS total=19 assertions=4645\n' not in baseline.stdout:
     raise RuntimeError('the current behavioral group inventory changed\n' + baseline.stdout)
 print(baseline.stdout, end='')
 
+layout_staging = command([binary, 'profile_layout_staging'])
+if not re.search(r'PASS profile_layout_staging assertions=[1-9][0-9]*\n', layout_staging.stdout):
+    raise RuntimeError('profile layout staging check did not confirm assertions\n' + layout_staging.stdout)
+print(layout_staging.stdout, end='')
+layout_controls = []
+prepare = ('        if (reset_checkup && c.x10a_identity_fp != 0)\n'
+           '            checkup_profile_layout(c.profile.c_str(), checkup_layout);\n')
+without_prepare = replace_once(source_text, prepare, '', 'omit_profile_layout_stage')
+for tag, contents in [
+        ('omit_profile_layout_stage', without_prepare),
+        ('prepare_profile_layout_after_persistence', replace_once(
+            without_prepare,
+            '                checkup_reset_on_detect(checkup_layout, c.x10a_identity_fp);',
+            '                checkup_profile_layout(c.profile.c_str(), checkup_layout);\n'
+            '                checkup_reset_on_detect(checkup_layout, c.x10a_identity_fp);',
+            'prepare_profile_layout_after_persistence'))]:
+    mutant = OUT / (tag + '.cpp')
+    mutant.write_text(contents)
+    layout_controls.append(rejected(compile(mutant, tag), 'profile_layout_staging', tag))
+
 sanitizer_control = None
 if args.sanitizer == 'undefined':
     # Compile the same complete HTTP fixture with one deliberate overflow in its actual setter.
@@ -274,6 +294,8 @@ record = {'compiler': compiler, 'c_compiler': c_compiler,
           'compiler_commands': {'c': CC, 'cxx': CXX},
           'sanitizer': args.sanitizer, 'sanitizer_control': sanitizer_control, 'commands': commands,
           'baseline_stdout': baseline.stdout,
+          'profile_layout_staging_stdout': layout_staging.stdout,
+          'profile_layout_negative_controls': layout_controls,
           'negative_controls': controls, 'input_sha256': after,
           'claim_limits': ['Complete production http_config.cpp and http_ota.cpp compile; actual setter handlers and ota_do execute.',
                            'Real resolved cJSON, JsonGuard, shared ingress, pure validators, config_save_transaction and config_commit_detected_link_transaction execute.',

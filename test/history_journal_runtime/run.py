@@ -383,17 +383,20 @@ if not args.expect_red:
         ("seed_past_pending_bucket", seed_body, seed_body.replace(
             seed_boundary, "    bucket = logic::history_bucket(now_us);\n" + seed_boundary),
          ["restore_before_pending_bucket"], "restore_keeps_pending_bucket_open"),
-        ("omit_failure_callback", "        if (stop_owned) stop_observation_flash_failed();",
+        ("omit_failure_callback",
+         "    } else {\n"
+         "        if (stop_owned) stop_observation_flash_failed();",
+         "    } else {\n"
          "        (void)stop_owned;", ["data_commit", "barrier_commit"],
          "failed_append_releases_claim_for_real_service_retry"),
-        ("old_read_classifier", "const bool      stop_owned     = logic::observation_append_owned(r.header);",
-         "const bool      stop_owned     = logic::observation_header_matches(r.header);",
+        ("old_read_classifier", "const bool stop_owned     = logic::observation_append_owned(r.header);",
+         "const bool stop_owned     = logic::observation_header_matches(r.header);",
          ["data_commit", "barrier_commit"], "failed_append_releases_claim_for_real_service_retry"),
         ("clear_core_ahead_on_stop_success",
          "if (!flash_is_manifest(r.header) && !stop_owned && !hydronic_owned &&\n"
-         "            !flash_cycling_owned(r.header))",
+         "                !flash_cycling_owned(r.header))",
          "if (!flash_is_manifest(r.header) && !hydronic_owned &&\n"
-         "            !flash_cycling_owned(r.header))", ["core_ahead"],
+         "                !flash_cycling_owned(r.header))", ["core_ahead"],
          "stop_success_preserves_core_ahead_episode"),
         ("trust_write_error_over_valid_readback",
          "const bool committed = read_e == ESP_OK && flash_record_physically_valid(verify) &&",
@@ -452,8 +455,10 @@ if not args.expect_red:
     # Undo only reservation timing, restoring the old success-only sequence increment. The
     # paired seed must still pass; its fresh process must lose the acknowledged late correction.
     name = "reuse_sequence_until_verified_success"
-    reserve = "    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence))\n" \
-              "        return ESP_ERR_INVALID_ARG;\n"
+    reserve = "    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence)) {\n" \
+              "        s_flash_seq_rejected = true;\n" \
+              "        return ESP_ERR_INVALID_ARG;\n" \
+              "    }\n"
     success = "    s_flash_next_slot = (slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT;\n"
     if text.count(reserve) != 1 or text.count(success) != 1:
         raise RuntimeError("Expected unique sequence timing mutation anchors")

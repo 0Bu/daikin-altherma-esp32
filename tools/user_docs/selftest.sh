@@ -31,6 +31,13 @@ reset() {
     cp main/stop_observation_store.hpp main/stop_observation_store.cpp \
        main/hydronic_observation_store.hpp main/hydronic_observation_store.cpp \
        main/history.cpp "$WORK/main/"
+    cp main/logic/heater_context.hpp main/logic/heater_context_input.hpp \
+       main/logic/heater_context_hourly.hpp main/logic/heater_context_cohort.hpp \
+       main/logic/heater_independent_hour.hpp \
+       main/logic/heater_context_payload.hpp main/logic/history_persist.hpp \
+       main/logic/json_output.hpp "$WORK/main/logic/"
+    cp main/heater_context_store.hpp main/heater_context_store.cpp \
+       main/hp_poll.cpp main/http_status.cpp main/mqtt_ha.cpp "$WORK/main/"
     cp docs/DIAGNOSTICS.md "$WORK/docs/DIAGNOSTICS.md"
     cp docs/DIAGNOSTIC_EVIDENCE.md "$WORK/docs/DIAGNOSTIC_EVIDENCE.md"
 }
@@ -187,6 +194,31 @@ new = old + '    normal: "No fault reported.",\n'
 open(p, 'w').write(s.replace(old, new, 1))
 PY
 run_case "generic Normal paragraph on health_fault is caught" 1 "U016 health_fault.en.normal"
+
+echo "== 14. heater context needs an explicit project boundary =="
+reset
+patch_file "$WORK/docs/DIAGNOSTIC_EVIDENCE.md" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+a = s.index('### 7. Electric backup and booster heaters (`heater`)')
+b = s.index('### 8. Protection-limit counter changes', a)
+block = s[a:b]
+if block.count('**Project boundary:**') != 1: sys.exit(1)
+open(p, 'w').write(s[:a] + block.replace('**Project boundary:**', '**Context:**', 1) + s[b:])
+PY
+run_case "heater heuristics require a visible boundary" 1 "U012 heater"
+
+echo "== 15. every heater production component binds the guide =="
+for component in main/logic/heater_context.hpp main/logic/heater_context_input.hpp \
+    main/logic/heater_context_hourly.hpp main/logic/heater_context_cohort.hpp \
+    main/logic/heater_independent_hour.hpp \
+    main/logic/heater_context_payload.hpp main/logic/history_persist.hpp \
+    main/logic/json_output.hpp main/heater_context_store.hpp main/heater_context_store.cpp \
+    main/hp_poll.cpp main/http_status.cpp main/mqtt_ha.cpp; do
+    reset
+    printf '\n// selftest: changed heater owner-facing contract\n' >> "$WORK/$component"
+    run_case "heater guide fingerprint covers $component" 1 "U010 docs/DIAGNOSTICS.md"
+done
 
 echo
 if [ "$fail" -eq 0 ]; then

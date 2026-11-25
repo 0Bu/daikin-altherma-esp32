@@ -510,6 +510,18 @@ inline constexpr size_t history_journal_next_sector_slot(size_t slot) {
            HISTORY_JOURNAL_SLOT_COUNT;
 }
 
+// Zero is an exhausted/invalid cursor, never a new journal generation. A wrapped sequence would
+// let a reboot prefer old records to new commits. Reserve the whole cohort before its first piece;
+// UINT64_MAX remains an exhausted sentinel so every successful append has a representable
+// successor.
+inline constexpr uint64_t history_journal_next_sequence(uint64_t highest) {
+    return highest == UINT64_MAX ? 0 : highest + 1;
+}
+
+inline constexpr bool history_journal_sequence_reservable(uint64_t first, size_t records) {
+    return first != 0 && records != 0 && first <= UINT64_MAX - static_cast<uint64_t>(records);
+}
+
 // A torn program in the middle of a sector cannot be retried in place and its sector cannot be
 // erased because older committed slots precede it. An erased candidate is usable; a non-erased
 // sector-first candidate is reusable after erasing that sector; only a non-erased MID-sector slot
@@ -582,7 +594,9 @@ inline constexpr bool history_journal_retry_due(bool paused, int64_t now_us,
 // measured maximum under unbounded churn. Both cycling traces add up to four slots per four-minute
 // checkpoint, finalized X10A run details add one slot per four-minute batch, and both fault traces
 // add one slot per fifteen-minute checkpoint. Each tank-cooling trace reserves one checkpoint
-// and one reset barrier per hour. Repeated resets or shutdowns can shorten retention.
+// and one reset barrier per hour. Heater context adds two full two-heater cohorts (close plus
+// seam revision, three slots each) and one coalesced fence per hour. Repeated resets or shutdowns
+// can shorten retention.
 inline constexpr size_t HISTORY_FLASH_CYCLING_MAX_PARTS      = 4;
 inline constexpr size_t HISTORY_FLASH_CYCLING_INTERVAL_S     = 240;
 inline constexpr size_t HISTORY_FLASH_CYCLING_RUN_INTERVAL_S = 240;
@@ -592,7 +606,7 @@ inline constexpr size_t HISTORY_FLASH_FUTURE_SAMPLES =
     HISTORY_FLASH_FUTURE_HOURS * 60u * 60u / HISTORY_DT_S;
 inline constexpr size_t HISTORY_FLASH_FUTURE_RECORDS =
     HISTORY_FLASH_FUTURE_SAMPLES * 4u +
-    (2u + 2u + 4u + 4u + 2u * 2u +
+    (2u + 2u + 4u + 4u + 2u * 2u + 7u +
      2u * (3600u / HISTORY_FLASH_CYCLING_INTERVAL_S * HISTORY_FLASH_CYCLING_MAX_PARTS) +
      3600u / HISTORY_FLASH_CYCLING_RUN_INTERVAL_S + 2u * (3600u / HISTORY_FLASH_FAULT_INTERVAL_S)) *
         HISTORY_FLASH_FUTURE_HOURS;

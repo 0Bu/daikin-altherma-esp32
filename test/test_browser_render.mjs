@@ -101,7 +101,7 @@ const layoutAudit = `(() => {
     ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .dashboard-card-label, .ota-alert-message, " +
     ".recovery-banner .crash-title, .recovery-banner .crash-meta, " +
     "#valueGroups .vitem.open .vdesc-inner, #valueGroups .vitem.open .vdesc-body, " +
-    "#valueGroups .vitem.open .vdesc-p"
+    "#valueGroups .vitem.open .vdesc-p, .heater-context th, .heater-context td, .heater-context caption"
   );
   for (const el of candidates) {
     if (!shown(el)) continue;
@@ -1371,7 +1371,8 @@ async function assertDashboardCardNavigation(page, context, viewport) {
 async function captureNativeEvidence(page, context, target = "valueGroups", ancestor = null) {
   const directory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
   if (!directory || (!/^(desktop\/en|phone\/de)(\/|$)/.test(context) &&
-      !context.endsWith("/diagnosis/cycling"))) return;
+      !context.endsWith("/diagnosis/cycling") && !context.endsWith("/diagnosis/heater") &&
+      !context.endsWith("/diagnosis/heater-partial"))) return;
   assert.ok(path.isAbsolute(directory), "browser evidence directory must be absolute");
   fs.mkdirSync(directory, { recursive: true });
   const elementQuery = ancestor
@@ -1817,6 +1818,22 @@ async function assertPlantDiagnosis(page, context) {
     S._modbus = [...(S._modbus || []).filter(row => row.concept !== "flow" && row.concept !== "water_pressure"),
       { label: "Volume flow", value: "19.8", unit: "L/min", concept: "flow", off: 49 }];
     S.insp = null;
+    const heaterCategories = ["emergency", "error", "defrost_recovery", "dhw_route", "silent",
+      "cold_outdoor", "mild_outdoor", "compressor_off", "quiet_mild_heating"];
+    const heaterChannel = supported => ({ supported,
+      on_s: supported ? 30 : null, union_s: supported ? 0 : null,
+      overlap_s: supported ? 0 : null, unknown_context_s: supported ? 30 : null,
+      unclassified_s: supported ? 30 : null, readable_s: supported ? 7200 : null,
+      saturated: false, quiet_mild_notice: false,
+      categories: Object.fromEntries(heaterCategories.map(id => [id, {
+        supported: supported ? true : null,
+        positive_s: null, evaluable_on_s: null, positive_samples: null }])) });
+    const heaterContext = { confirmed: true, dated: true, coverage_partial: true,
+      restore_pending: false, persistence_pending: true, archive_incomplete: false,
+      clock_uncertain: false, storage_loss: false, dropped: 0,
+      buh: heaterChannel(true), bsh: heaterChannel(false) };
+    heaterContext.buh.categories.emergency = { supported: true,
+      positive_s: 0, evaluable_on_s: 0, positive_samples: 1 };
     S.status.history = {
       ...(S.status.history || {}),
       rows: [
@@ -1889,7 +1906,7 @@ async function assertPlantDiagnosis(page, context) {
           observed_s: 60, required_s: 0 },
         { id: "heater", verdict: "ok", evidence: "observation", buh_s: 43200,
           bsh_s: 64800, buh_observed_s: 72000, bsh_observed_s: 72000,
-          observed_s: 72000, required_s: 0 },
+          observed_s: 72000, required_s: 0, context: heaterContext },
         { id: "retries", verdict: "info", evidence: "experimental", seen: 1,
           observed_s: 7200, required_s: 0 }
       ]
@@ -2014,6 +2031,7 @@ async function assertPlantDiagnosis(page, context) {
       return { id: row.dataset.desc, count: body.children.length,
         firstValue: body.children[0]?.firstElementChild?.className,
         normal: body.children[2]?.querySelector('.vdesc-n')?.innerText,
+        lastNormal: body.lastElementChild?.querySelector('.vdesc-n')?.innerText,
         text: Array.from(body.children, block => block.innerText) };
     })`);
     assert.equal(blocks.length, 6, `${context}: include the independent refrigerant observation`);
@@ -2056,6 +2074,13 @@ async function assertPlantDiagnosis(page, context) {
         assert.equal(dhw.fabricated, 0, `${context}/${block.id}: totals cannot fabricate chart bars or marker lanes`);
         continue;
       }
+      if (block.id === "model:health_heater") {
+        assert.ok(block.count >= 5, `${context}/${block.id}: includes independent heater context blocks`);
+        assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
+        assert.equal(block.lastNormal, normalLabel, `${context}/${block.id}: Normal last`);
+        assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
+        continue;
+      }
       if (block.id === "model:health_fault") {
         assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
         assert.ok(!block.text.some(text => text.includes(normalLabel)),
@@ -2079,6 +2104,54 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: raw source coordinates stay outside the owner-facing explanation`);
     assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
       `${context}: populated selected metrics do not add a generic source sentence`);
+    const heaterTable = () => page.evaluate(`(() => {
+      const table = document.querySelector("[data-desc='model:health_heater']")
+        .closest('.vitem').querySelector('.heater-context');
+      return table ? { text: table.closest('.vdesc-body').innerText,
+        columns: table.querySelectorAll('thead th[scope=col]').length,
+        rows: table.querySelectorAll('tbody th[scope=row]').length,
+        valueWidth: table.querySelector('tbody td').getBoundingClientRect().width } : null;
+    })()`);
+    const heaterInitial = await heaterTable();
+    assert.ok(heaterInitial, `${context}: actual heater disclosure contains its independent table`);
+    assert.equal(heaterInitial.columns, 2);
+    assert.equal(heaterInitial.rows, 15);
+    assert.ok(heaterInitial.valueWidth >= 100,
+      `${context}: each separate heater table leaves readable space for its values`);
+    assert.ok(heaterInitial.text.includes('<1 s / 0 s · 1'), `${context}: retain early flag sample`);
+    assert.ok(heaterInitial.text.includes(await page.evaluate("t('check.heater_context.states').split('|')[8]")),
+      `${context}: an unsupported heater cannot become reported OFF`);
+    await captureNativeEvidence(page, `${context}/heater`,
+      "[data-desc='model:health_heater']", ".vitem");
+    await page.evaluate(`(() => {
+      const row = S.status.health.checks.find(c => c.id === 'heater');
+      row.buh_s = row.bsh_s = null;
+      row.context.bsh = structuredClone(row.context.buh);
+      Object.assign(row.context.bsh, { on_s: 120, union_s: 3, unclassified_s: 117,
+        unknown_context_s: 120 });
+      row.context.bsh.categories.emergency = { supported: true,
+        positive_s: 3, evaluable_on_s: 10, positive_samples: 2 };
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assert.ok((await heaterTable()).text.includes('3 s / 10 s · 2'),
+      `${context}: second heater keeps its own independent population without legacy runtime`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/heater-both`);
+    await page.evaluate(`(() => {
+      const row = S.status.health.checks.find(c => c.id === 'heater');
+      Object.assign(row.context, { archive_incomplete: true, restore_pending: true });
+      row.context.bsh.saturated = true;
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assert.ok((await heaterTable()).text.includes('≥3 s / ≥10 s · ≥2'),
+      `${context}: saturated values retain lower bounds in the real DOM`);
+    const heaterBody = await page.evaluate(`document.querySelector("[data-desc='model:health_heater']")
+      .closest('.vitem').innerText`);
+    assert.ok(heaterBody.includes(await page.evaluate("t('check.heater_context.states').split('|')[5]")),
+      `${context}: damaged archive is explicit, not an ordinary pending wait`);
+    await captureNativeEvidence(page, `${context}/heater-partial`,
+      "[data-desc='model:health_heater']", ".vitem");
     if (context.split("/")[1] === "en") {
       const serviceRow = "[data-desc='service:refrigerant']";
       await page.evaluate(`(() => {

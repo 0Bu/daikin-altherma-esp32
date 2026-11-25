@@ -46,6 +46,7 @@
 #include "config.hpp"
 #include "logic/task_failure.hpp"
 #include "checkup.hpp"
+#include "heater_context_store.hpp"
 #include "def/homehub.hpp"
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
@@ -67,6 +68,7 @@
 #include "logic/fault_state.hpp"
 #include "logic/ha_device.hpp"
 #include "logic/heartbeat.hpp"
+#include "logic/heater_context_payload.hpp"
 #include "logic/hydronic_payload.hpp"
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
 #include "logic/mqtt_cleanup.hpp"
@@ -228,7 +230,7 @@ static size_t                s_inbound_rx_received       = 0;
 // synchronising nothing, and taking a lock on the event task is what this hand-off exists to avoid.
 static std::atomic<uint32_t>       s_inbound_dropped{0};
 static uint32_t                    s_inbound_dropped_reported = 0;
-static std::array<std::string, 29> s_mqtt_strings;
+static std::array<std::string, 31> s_mqtt_strings;
 static CirculationSourceStatus  s_circulation_status;
 static CirculationPowerTracker s_circulation_tracker;
 static SourceTimestampHighWater s_circulation_source_time; // guarded by s_mtx
@@ -288,6 +290,8 @@ static std::string& s_retired_modbus_status = s_mqtt_strings[19];
 static std::string& s_legacy_state          = s_mqtt_strings[20];
 static std::string& s_heartbeat             = s_mqtt_strings[21];
 static std::string& s_crash                 = s_mqtt_strings[22];
+static std::string& s_heater_buh_topic      = s_mqtt_strings[29];
+static std::string& s_heater_bsh_topic      = s_mqtt_strings[30];
 static std::string& s_announced_profile =
     s_mqtt_strings[23]; // profile we last published discovery for (mqtt_task only)
 static std::string& s_discovered_profile =
@@ -1884,6 +1888,20 @@ static __attribute__((noinline)) void append_heartbeat_hydronic(std::string& js)
     js.push_back('}');
 }
 
+[[gnu::noinline]] static void publish_heater_context() {
+    checkup_heater_context_expire();
+    logic::HeaterContextPayloadFields fields{};
+    heater_context_payload(fields);
+    // One small message at a time. Both use the SAME atomic two-heater evidence snapshot.
+    for (uint8_t h = 0; h < logic::heater_context::HEATERS; ++h) {
+        std::string json;
+        json.reserve(2048);
+        append_heater_context_json(json, fields, true, h);
+        mqtt_publish(h ? s_heater_bsh_topic : s_heater_buh_topic, json.c_str(),
+                     static_cast<int>(json.size()), 0, 0);
+    }
+}
+
 static __attribute__((noinline)) void publish_heartbeat() {
     std::string js = build_heartbeat_payload();
     append_heartbeat_hydronic(js);
@@ -2914,6 +2932,7 @@ static void mqtt_task(void*) {
                 heartbeat_elapsed_s += delay_s;
                 if (heartbeat_elapsed_s >= HEARTBEAT_INTERVAL_S) {
                     publish_heartbeat();
+                    if (cycle_config.diagnostics_enabled) publish_heater_context();
                     // The crash topic is RETAINED but otherwise only published once per connect, so a
                     // dump pulled + cleared (POST /coredump/clear) mid-session would leave HA's "Crash
                     // Dump Waiting" ON until the next reconnect (and, for an orphan-dump-only boot,
@@ -3117,6 +3136,8 @@ void mqtt_ha_start() {
         {20, "/state"},                      // s_legacy_state
         {21, "/heartbeat"},                  // s_heartbeat
         {22, "/crash"},                      // s_crash
+        {29, "/heater/buh"},                 // s_heater_buh_topic
+        {30, "/heater/bsh"},                 // s_heater_bsh_topic
     };
     for (const auto& t : kBaseTopics) {
         std::string& dst = s_mqtt_strings[t.slot];

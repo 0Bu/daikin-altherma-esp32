@@ -583,7 +583,7 @@ assert.match(status, /if \(!dw\.exact\) j \+= ",\\"dwell_min\\":true";/,
 // for the first numeric value. The record buckets are the authority for the span; NO_READING is a
 // recorded sample, not padding.
 assert.match(history,
-  /history_flash_restore_start\(\s*s_flash_oldest_bucket\[src_i\], newest, HISTORY_SAMPLES\)/,
+  /history_flash_restore_start\(\s*s_flash_oldest_bucket\[src_i\],\s*newest,\s*HISTORY_SAMPLES\)/,
   "flash restore must derive the span from journal buckets so an all-null row survives");
 assert.doesNotMatch(history, /history_flash_lead_skip/,
   "flash restore must not infer whether a bucket exists from the sample value");

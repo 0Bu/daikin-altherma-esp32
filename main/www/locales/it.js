@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -313,6 +313,15 @@ I18N.it = localeValues([
   /* check.cycling.e_ongoing */ "Attivo all’ultima lettura.",
   /* check.cycling.cause_unavailable */ "Nessun dettaglio",
   /* check.cycling.cause_older_unavailable */ "Per questi cicli precedenti non sono disponibili dettagli salvati sull’avvio e sull’arresto.",
+  /* check.heater_context.title */ "Contesto dei flag dei riscaldatori segnalati",
+  /* check.heater_context.columns */ "Contesto|BUH|BSH",
+  /* check.heater_context.counts */ "Tempo positivo / tempo ON valutabile · campioni positivi",
+  /* check.heater_context.categories */ "flag di emergenza|stato di errore|sbrinamento/recupero|circuito acqua calda|flag Silent Mode|esterno ≤+2°C|esterno >+2°C|compressore segnalato fermo|Silent Mode + riscaldamento con clima mite",
+  /* check.heater_context.totals */ "ON segnalato|unione dei contesti|sovrapposizione|contesto sconosciuto|nessuna categoria positiva|tempo con flag leggibile",
+  /* check.heater_context.states */ "Fonte non confermata|Osservazioni senza data|24 h incomplete|Archivio non ancora validato|Salvataggio in attesa|Archivio non disponibile: record danneggiati o non letti|Ora incerta|Saturazione: limiti inferiori|Non supportato",
+  /* check.heater_context.notice */ "Almeno 15 minuti di riscaldatore segnalato con Silent Mode, riscaldamento e clima mite: avviso provvisorio del progetto.",
+  /* check.heater_context.rule */ "Estremi leggibili, intervalli mancanti ≤15 s. Il recupero è limitato a 300 s dopo una fine sbrinamento osservata durante il riscaldamento. La soglia di +2°C e l’avviso di 900 s sono euristiche del progetto.",
+  /* check.heater_context.limits */ "Le categorie si sovrappongono separatamente per ogni riscaldatore. Il contesto mancante resta sconosciuto. Non si dimostrano energia, causa di funzionamento, bivalenza o necessità. Un avviso non è emergenza; Low noise control non viene classificato. Gli stati tra i campioni restano sconosciuti.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `serbatoio ${d}`,
   /* check.buh_runtime */ (d) => `ausiliaria ${d}`,

@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -318,6 +318,15 @@ I18N.pl = localeValues([
   /* check.cycling.e_ongoing */ "Praca przy ostatnim odczycie.",
   /* check.cycling.cause_unavailable */ "Brak szczegółów",
   /* check.cycling.cause_older_unavailable */ "Brak zapisanych szczegółów uruchomienia i zatrzymania dla tych wcześniejszych cykli.",
+  /* check.heater_context.title */ "Kontekst zgłoszonych flag grzałek",
+  /* check.heater_context.columns */ "Kontekst|BUH|BSH",
+  /* check.heater_context.counts */ "Czas dodatni / ocenialny czas ON · dodatnie próbki",
+  /* check.heater_context.categories */ "flaga pracy awaryjnej|stan błędu|odszranianie/powrót|obieg ciepłej wody|flaga Silent Mode|na zewnątrz ≤+2°C|na zewnątrz >+2°C|sprężarka zgłoszona jako zatrzymana|Silent Mode + grzanie przy łagodnej pogodzie",
+  /* check.heater_context.totals */ "zgłoszone ON|suma zbiorów kontekstów|nakładanie|nieznany kontekst|brak dodatniej kategorii|czas czytelnej flagi",
+  /* check.heater_context.states */ "Źródło niepotwierdzone|Obserwacje bez daty|Niepełne 24 h|Archiwum jeszcze niezweryfikowane|Zapis oczekuje|Archiwum niedostępne: uszkodzone lub nieodczytane rekordy|Niepewny czas|Nasycenie: dolne granice|Nieobsługiwane",
+  /* check.heater_context.notice */ "Co najmniej 15 minut zgłoszonej pracy grzałki z Silent Mode, grzaniem i łagodną temperaturą zewnętrzną: wstępna wskazówka projektu.",
+  /* check.heater_context.rule */ "Czytelne końce przedziału, luki ≤15 s. Powrót trwa najwyżej 300 s po zaobserwowanym końcu odszraniania podczas grzania. Podział przy +2°C i wskazówka po 900 s są heurystykami projektu.",
+  /* check.heater_context.limits */ "Kategorie nakładają się osobno dla każdej grzałki. Brakujący kontekst pozostaje nieznany. Nie ustala się energii, przyczyny pracy, biwalencji ani konieczności. Ostrzeżenie nie oznacza pracy awaryjnej; Low noise control pozostaje bez klasyfikacji. Stany między próbkami pozostają nieznane.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `zbiornik ${d}`,
   /* check.buh_runtime */ (d) => `dodatkowa ${d}`,

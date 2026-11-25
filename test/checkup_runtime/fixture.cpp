@@ -105,10 +105,15 @@ CheckupCoverage coverage() {
     require(c.buh1 && c.buh2 && c.bsh && c.fault_rows == 2, "fixture_real_profile_coverage");
     return c;
 }
+void reset_detect(const char* profile_id, uint32_t source_fp) {
+    CheckupProfileLayout layout;
+    checkup_profile_layout(profile_id, layout);
+    checkup_reset_on_detect(layout, source_fp);
+}
 void boot() {
     adapter::cfg.circulation_topic = "synthetic/circulation";
     checkup_start(true, 23);
-    checkup_reset_on_detect("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x12345678);
+    reset_detect("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x12345678);
 }
 void sample(int64_t at_s, const std::vector<CachedValue>& rows, const CheckupCoverage& cov,
             bool rps_known = true, bool running = false, bool confirmed = true,
@@ -116,7 +121,7 @@ void sample(int64_t at_s, const std::vector<CachedValue>& rows, const CheckupCov
     const uint32_t consent_epoch = checkup_consent_epoch();
     sdk::now_us                  = at_s * 1000000;
     checkup_record(rows.data(), rows.size(), rps_known, running, cov, generation, consent_epoch,
-                   confirmed);
+                   confirmed, true);
 }
 std::vector<CachedValue> heater(const char* first, const char* second, const char* bsh) {
     std::vector<CachedValue> v;
@@ -124,6 +129,106 @@ std::vector<CachedValue> heater(const char* first, const char* second, const cha
     if (second) v.push_back(row(CHECKUP_LOC_BUH2, second));
     if (bsh) v.push_back(row(CHECKUP_LOC_BSH, bsh));
     return v;
+}
+void heater_context_case(const std::string& name) {
+    require(name == "hc_fresh" || name == "hc_not_completed" || name == "hc_empty_gap" ||
+                name == "hc_flag_gap" || name == "hc_unknown_step" || name == "hc_held" ||
+                name == "hc_bsh_locator" || name == "hc_read_fence" ||
+                name == "hc_source_generation" || name == "hc_scope_roundtrip" ||
+                name == "hc_layout_change" || name == "hc_same_scope_redetect",
+            "unknown_case");
+    boot();
+    const auto cov  = coverage();
+    auto       rows = heater("1", "0", "1");
+    if (name == "hc_unknown_step") rows = heater("0", nullptr, "1");
+    if (name == "hc_held") {
+        rows                 = heater("1", "0", "1");
+        rows[0].held         = true;
+        rows[2].held_unknown = true;
+    }
+    if (name == "hc_bsh_locator") rows = {row({0x60, 12, 302}, "1")};
+    if (name == "hc_not_completed") {
+        for (int t : {2, 12}) {
+            sdk::now_us = t * 1000000LL;
+            checkup_record(rows.data(), rows.size(), true, false, cov, adapter::poll_generation,
+                           checkup_consent_epoch()); // capability metadata is not a sweep receipt
+        }
+        const auto status = heater_context_status();
+        require(status.on_us[0] == 0 && status.on_us[1] == 0 && status.readable_us[0] == 0 &&
+                    status.readable_us[1] == 0,
+                "heater_default_metadata_callback_cannot_seed_or_book");
+        return;
+    }
+    sample(2, rows, cov);
+    sample(12, rows, cov);
+    const auto before = heater_context_status();
+    if (name == "hc_unknown_step" || name == "hc_held" || name == "hc_bsh_locator") {
+        require(before.on_us[0] == 0 && before.readable_us[0] == 0,
+                "heater_missing_or_held_step_does_not_prove_buh_off");
+        require(before.on_us[1] == (name == "hc_unknown_step" ? 10000000 : 0) &&
+                    before.readable_us[1] == (name == "hc_unknown_step" ? 10000000 : 0),
+                "heater_bsh_305_is_independent_of_missing_or_wrong_302_rows");
+        return;
+    }
+    require(before.on_us[0] == 10000000 && before.on_us[1] == 10000000,
+            "heater_real_completed_sweeps_book_independent_clocks");
+    if (name == "hc_fresh") return;
+    if (name == "hc_empty_gap" || name == "hc_flag_gap") {
+        sdk::now_us = 17000000;
+        checkup_record(name == "hc_empty_gap" ? nullptr : rows.data(),
+                       name == "hc_empty_gap" ? 0 : rows.size(), true, false, cov,
+                       adapter::poll_generation, checkup_consent_epoch(), true, false);
+        sample(22, rows, cov);
+        sample(32, rows, cov);
+        const auto after = heater_context_status();
+        require(after.on_us[0] == 20000000 && after.on_us[1] == 20000000,
+                "heater_non_sweep_pauses_before_next_seed");
+    } else if (name == "hc_read_fence") {
+        sdk::before_take = [] {
+            sdk::now_us = 32000000;
+            checkup_heater_context_expire();
+        };
+        sample(21, rows, cov);
+        sample(33, rows, cov);
+        sample(43, rows, cov);
+        const auto after = heater_context_status();
+        require(after.on_us[0] == 20000000 && after.on_us[1] == 20000000 &&
+                    !(after.flags & logic::heater_cohort::Clock),
+                "heater_expiry_rejects_old_waiting_sample_without_false_clock_fault");
+    } else if (name == "hc_source_generation") {
+        sample(13, rows, cov, true, false, true, adapter::poll_generation + 1);
+        require(heater_context_status().on_us[0] == 10000000,
+                "heater_foreign_generation_cannot_change_current_scope");
+        ++adapter::poll_generation;
+        sample(22, rows, cov, true, false, true, adapter::poll_generation);
+        sample(23, rows, cov, true, false, true, adapter::poll_generation);
+        sample(33, rows, cov, true, false, true, adapter::poll_generation);
+        require(s_heater_inputs.binding.source_generation == adapter::poll_generation &&
+                    heater_context_status().on_us[0] == 10000000,
+                "heater_generation_cutover_retires_old_totals_before_new_seed");
+    } else {
+        CheckupProfileLayout layout;
+        checkup_profile_layout("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", layout);
+        if (name == "hc_layout_change") ++layout.heater.schema_fp;
+        sdk::now_us = 14000000;
+        checkup_reset_on_detect(layout, name == "hc_scope_roundtrip" ? 0x87654321 : 0x12345678);
+        require(heater_context_status().on_us[0] == 0,
+                "heater_profile_scope_cutover_retires_old_totals_immediately");
+        sample(15, rows, cov); // consumes the core's established explicit-detection discard barrier
+        sample(16, rows, cov);
+        sample(26, rows, cov);
+        require(heater_context_status().on_us[0] == 10000000,
+                "heater_replacement_scope_has_only_its_new_endpoints");
+        if (name == "hc_scope_roundtrip") {
+            sdk::now_us = 28000000;
+            checkup_reset_on_detect(layout, 0x12345678);
+            require(heater_context_status().on_us[0] == 0,
+                    "heater_a_to_b_to_a_never_revives_a_totals");
+        } else {
+            require(s_heater_inputs.inputs.schema_fp == layout.heater.schema_fp,
+                    "heater_current_schema_is_installed_without_profile_pointer");
+        }
+    }
 }
 void heater_case(const std::string& name) {
     require(name == "buh_one_on_other_missing" || name == "buh_second_on_first_missing" ||
@@ -447,7 +552,7 @@ void restored_cycling_detail() {
     using Result = CheckupFlashRestoreResult;
     require(checkup_cycling_restore(saved, identity, wall, 0) == Result::Deferred,
             "cycling_waits_for_current_source");
-    checkup_reset_on_detect(profile, identity.source_fp);
+    reset_detect(profile, identity.source_fp);
     auto other = identity;
     ++other.diagnostics_generation;
     require(checkup_cycling_restore(saved, other, wall, 0) == Result::Ignored,
@@ -692,7 +797,7 @@ void consent_staged_sample(const std::string& name) {
     else
         consent_off_on();
     sdk::now_us = 21000000;
-    checkup_record(old.data(), old.size(), true, false, cov, source_generation, consent_epoch,
+    checkup_record(old.data(), old.size(), true, false, cov, source_generation, consent_epoch, true,
                    true);
     const auto after = checkup_report();
     require(adapter::poll_generation == source_generation, "consent_does_not_change_x10a_epoch");
@@ -708,6 +813,13 @@ void consent_staged_sample(const std::string& name) {
                 after[CheckupCheck::Heater].c == -1 && after[CheckupCheck::Heater].d == -1,
             caller ? "consent_epoch_discards_already_collected_sample"
                    : "consent_epoch_discards_staged_sample");
+    const auto                heater_after = heater_context_status();
+    HeaterContextHeaterReport heater_samples;
+    heater_context_report(0, heater_samples);
+    require(heater_after.on_us[0] == 0 && heater_after.on_us[1] == 0 &&
+                heater_after.readable_us[0] == 0 && heater_after.readable_us[1] == 0 &&
+                heater_samples.counters.samples == 0,
+            "heater_consent_epoch_discards_staged_sample");
     sample(31, normal, cov, true, false, true, source_generation);
     const auto first = checkup_report();
     require(first.source_fresh && first.source_age_s == 0 && first.covered_s == 0 &&
@@ -722,6 +834,9 @@ void consent_staged_sample(const std::string& name) {
                 pair[CheckupCheck::Heater].a == 0 && pair[CheckupCheck::Heater].b == 0 &&
                 pair[CheckupCheck::Heater].c == 10 && pair[CheckupCheck::Heater].d == 10,
             "new_consent_positive_control");
+    const auto heater_pair = heater_context_status();
+    require(heater_pair.readable_us[0] == 10000000 && heater_pair.readable_us[1] == 10000000,
+            "heater_new_consent_binding_accepts_its_new_endpoints");
 }
 std::vector<CachedValue> stop_rows(bool running, bool request = true, bool target = true) {
     std::vector<CachedValue> v = {
@@ -805,11 +920,14 @@ void stop_context_case(const std::string& name) {
             boot();
             require(s_mtx == nullptr, "stop_checkup_allocation_failure_exercised");
         }
-        const auto r = checkup_stop_context_report();
+        const unsigned mutexes_before = sdk::mutex_count;
+        const unsigned takes_before   = sdk::takes;
+        const auto     r              = checkup_stop_context_report();
         require(!r.observation.restore_pending && !r.observation.persistence_pending &&
                     !r.pending && !r.observation.confirmed && !r.capability_mask,
                 "stop_forget_no_mutex_reports_no_restore");
-        require(sdk::mutex_count == 0 && sdk::takes == 0,
+        require(sdk::mutex_count == mutexes_before && sdk::takes == takes_before &&
+                    sdk::mutex_count == 0,
                 "stop_early_read_does_not_allocate_or_lock");
         return;
     }
@@ -892,7 +1010,7 @@ void stop_context_case(const std::string& name) {
         if (name != "stop_forget_expiry" && name != "stop_forget_shutdown") {
             checkup_set_diagnostics(false, 24);
             checkup_set_diagnostics(true, 25);
-            checkup_reset_on_detect("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x12345678);
+            reset_detect("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x12345678);
             for (int t = 42; t <= 80; ++t) sample(t, stop_rows(true, true), cov, true, true);
             sample(81, stopped, cov, true, false);
             require(s_stop_context.last_sample_us == -1, "stop_forget_skips_private_producer");
@@ -920,7 +1038,7 @@ void stop_context_case(const std::string& name) {
         checkup_set_diagnostics(true, 23);
         sdk::now_us = 42000000;
         checkup_record(stopped.data(), stopped.size(), true, false, cov, adapter::poll_generation,
-                       old_epoch, true);
+                       old_epoch, true, true);
         const auto paused = checkup_stop_context_report();
         require(!paused.pending && paused.observation.readable_us == 40000000 &&
                     paused.observation.counters.witnessed_stops_recent_heating == 0,
@@ -1588,7 +1706,8 @@ void hydronic_sample(int64_t now, const std::vector<CachedValue>& rows, const Ch
                      uint32_t generation = 7) {
     sdk::now_us      = now;
     const auto epoch = checkup_consent_epoch();
-    checkup_record(rows.data(), rows.size(), known, running, cov, generation, epoch, true, started);
+    checkup_record(rows.data(), rows.size(), known, running, cov, generation, epoch, true, true,
+                   started);
 }
 void hydronic_settle(const std::vector<CachedValue>& rows, const CheckupCoverage& cov) {
     for (int64_t t = 1; t <= 601; t += 15)
@@ -1833,7 +1952,7 @@ void hydronic_case(const std::string& name) {
         } else {
             sdk::before_take = [] {
                 ++adapter::poll_generation;
-                checkup_reset_on_detect(HYDR_PROFILE, 0x87654321);
+                reset_detect(HYDR_PROFILE, 0x87654321);
             };
         }
         hydronic_sample(603 * HYDR_SECOND, rows, cov, 603 * HYDR_SECOND);
@@ -1981,7 +2100,7 @@ void x10a_cycling_run_contexts() {
     require(!checkup_cycling_run_contexts(snap, 780, DiagnosticsSource::X10a) && snap.count == 0,
             "checkup_reset_clears_run_contexts");
 
-    checkup_reset_on_detect("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x12345678);
+    reset_detect("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x12345678);
     // First post-reset sample consumes the reset barrier and is conservatively discarded.
     sample(800, ctx_rows("0", "28.0", "26.0", "35.0", "0.0", "0"), cov, true, false);
     sample(810, ctx_rows("0", "28.0", "26.0", "35.0", "0.0", "1"), cov, true, false);
@@ -2137,7 +2256,9 @@ void x10a_cycling_run_context_restart() {
 int main(int argc, char** argv) {
     std::string name = argc == 2 ? argv[1] : "";
     try {
-        if (name.rfind("hydronic_", 0) == 0)
+        if (name.rfind("hc_", 0) == 0)
+            heater_context_case(name);
+        else if (name.rfind("hydronic_", 0) == 0)
             hydronic_case(name);
         else if (name.rfind("stop_", 0) == 0)
             stop_context_case(name);

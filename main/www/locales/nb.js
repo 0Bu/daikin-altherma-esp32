@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -313,6 +313,15 @@ I18N.nb = localeValues([
   /* check.cycling.e_ongoing */ "Aktiv ved siste avlesning.",
   /* check.cycling.cause_unavailable */ "Ingen detaljer",
   /* check.cycling.cause_older_unavailable */ "Lagrede start- og stoppdetaljer er ikke tilgjengelige for disse eldre syklusene.",
+  /* check.heater_context.title */ "Kontekst for rapporterte varmeflagg",
+  /* check.heater_context.columns */ "Kontekst|BUH|BSH",
+  /* check.heater_context.counts */ "Positiv tid / vurderbar ON-tid · positive målepunkter",
+  /* check.heater_context.categories */ "nøddriftsflagg|feilstatus|avriming/gjenoppretting|varmtvannsvei|Silent Mode-flagg|uteluft ≤+2°C|uteluft >+2°C|kompressor rapportert stoppet|Silent Mode + oppvarming ved mildvær",
+  /* check.heater_context.totals */ "rapportert ON|forening av kontekster|overlapp|ukjent kontekst|ingen positiv kategori|tid med lesbart flagg",
+  /* check.heater_context.states */ "Kilden er ubekreftet|Udaterte observasjoner|Ufullstendige 24 t|Arkivet er ikke validert ennå|Venter på lagring|Arkivet er utilgjengelig: skadde eller uleste poster|Usikkert klokkeslett|Metning: nedre grenser|Ikke støttet",
+  /* check.heater_context.notice */ "Minst 15 minutter rapportert varmetid med Silent Mode, oppvarming og mild uteluft: foreløpig prosjektmerknad.",
+  /* check.heater_context.rule */ "Lesbare intervallender, hull ≤15 s. Gjenoppretting er begrenset til 300 s etter observert avrimingsslutt under oppvarming. Skillet ved +2°C og merknaden etter 900 s er prosjektheuristikker.",
+  /* check.heater_context.limits */ "Kategoriene overlapper separat for hver varmer. Manglende kontekst forblir ukjent. Energi, driftsårsak, bivalens eller nødvendighet er ikke fastslått. En advarsel er ikke nøddrift; Low noise control er uklassifisert. Tilstander mellom målepunktene forblir ukjente.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `Tank ${d}`,
   /* check.buh_runtime */ (d) => `Tillegg ${d}`,

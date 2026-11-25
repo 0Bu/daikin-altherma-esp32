@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 8fbe8d871de65ee7e46a20c1181979dda8b990448f32991f23341af4316c115b -->
+<!-- diagnostic-evidence-contract: a84aa01ee5e83470f94ae86821b231e4c4ec1e43e41e6f6ced1a5d51a0de1c71 -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -755,7 +755,7 @@ on configuration, the booster heater can support domestic-hot-water preparation,
 operation outside the heat pump's operating range. Backup and/or booster heaters can carry load in
 emergency operation after a heat-pump failure ([D1], sections 8.4.6 and 8.4.9, printed pages 66 and
 71–72). The manual also requires sufficient water flow during backup-heater and defrost operation
-([D1], section 9.3).
+([D1], section 9.4, printed page 80).
 
 **Firmware rule:** The diagnosis separately totals observed active seconds for electric backup
 heater (BUH) steps in the water circuit and the tank booster heater (BSH). Usable runtime evidence
@@ -763,11 +763,42 @@ is published immediately as **MEASURED**, without waiting for 24 hours. A zero a
 readable observed intervals; unsupported or unreadable inputs remain null. Proving BUH off requires
 every profile-provided step to be readable; either readable active step proves on. On Modbus,
 `checkup_modbus_coverage` enables `bsh` (HomeHub EKRHH input register 32, [D3]) while `buh` steps
-remain unsupported and null. See the Heater branch in [checkup.hpp](../main/logic/checkup.hpp).
+remain unsupported and null; `/status` leaves `heater.context` as an unconfirmed X10A placeholder
+(`confirmed: false`, null `epoch`, metrics and channel objects). See the Heater branch in
+[checkup.hpp](../main/logic/checkup.hpp).
+
+The independent [`heater_context.hpp`](../main/logic/heater_context.hpp) reducer admits only
+completed, current-source X10A sweeps with current consent and profile capability. Separate BUH
+and BSH clocks require readable matching heater states at both interval endpoints, with gaps no
+greater than 15 seconds. Either readable BUH step proves ON; OFF requires every expected step.
+Unknown and changing intervals remain explicit. Emergency and error are separate categories;
+Warning/Caution is not emergency. Other overlapping categories observe defrost/recovery, DHW
+route, the supported hydronic Silent Mode flag, cold/mild outdoor context, compressor stopped and
+Silent Mode with mild space heating. Unvalidated `Low noise control` is not classified.
+
+Recovery starts only at a witnessed defrost-ON to defrost-OFF edge in confirmed space heating,
+expires after 300 seconds and cannot resume after route/cooling/unknown-segment interruption.
+Fresh X10A outdoor evidence needs its own compressor-positive witness. Missing optional inputs
+affect their dependent categories only. The per-heater context union, overlap, unknown and
+unclassified populations are published independently; simultaneous BUH+BSH never share one
+subtracted OR clock. The separate journal restores each heater's complete compatible hourly
+revision after physical CRC and scope/fence proof. Opaque/damaged records refuse new archive
+admission; indispensable reset fences and damaged sectors are preserved during journal rotation.
+Fresh live observations do not certify that archive. See the [wire contract](API.md) and
+[storage architecture](ARCHITECTURE.md).
+
+**Project boundary:** The 15-second endpoint gap, 300-second recovery, cold ≤+2 °C / mild >+2 °C
+split and 900 seconds of accumulated Silent Mode/mild-heating heater time are provisional project
+heuristics. Positive samples may be shown before a full second accumulates. No new whole-day
+absence assessment is issued. Sampled co-occurrence does not establish continuous intermediate
+states. The existing D1 heater sections were reopened on 6 November 2026; they do not validate
+these proprietary flag categories, recovery duration or numerical heuristics.
 
 **Not established:** Runtime alone establishes neither energy consumed, unnecessary use nor a
 defect. Electrical power, delivered heat and the controller's operating reason are not supplied by
-this counter.
+this counter. Context additionally establishes neither bivalence, a disinfection cycle nor the
+operating reason. The owner's existing monitored electrical circuit cannot establish coverage of
+every heater supply.
 
 <a id="diagnosis-retries"></a>
 ### 8. Protection-limit counter changes (`retries`)

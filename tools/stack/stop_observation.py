@@ -415,6 +415,7 @@ def validate_sources(budgets, sources, error):
                                              'hydronic_observation_forget();'
                                              'checkup_cycling_forget();'
                                              'checkup_dhw_trace_forget();'
+                                             'heater_context_forget();'
                                              'bump_history_epoch();'
                                              'if(!s_flash_forget_ready.load(std::memory_order_acquire))returnfalse;')
             or 's_flash_scan_ok=flash_journal_scan();' not in flash_start
@@ -535,31 +536,28 @@ def self_test(budgets, sources, error):
         else:
             raise AssertionError('accepted stop observation source/path regression')
     for key in SYMBOLS:
-        altered = json.loads(encoded_budget)
-        del altered['symbols'][key]
-        reject(altered)
+        reject({**budgets, 'symbols': {k: v for k, v in budgets['symbols'].items() if k != key}})
         if key.startswith('dhw_trace_') or key in ('dhw_loss_step', 'checkup_cycling_anchor'):
             for field in ('pattern', 'max_bytes'):
-                altered = json.loads(encoded_budget)
-                altered['symbols'][key][field] += '|unreviewed' if field == 'pattern' else 16
-                reject(altered)
+                altered_sym = dict(budgets['symbols'][key])
+                altered_sym[field] += '|unreviewed' if field == 'pattern' else 16
+                reject({**budgets, 'symbols': {**budgets['symbols'], key: altered_sym}})
     for name, (owner, _) in PATHS.items():
         for field in ('symbols', 'base_bytes', 'max_bytes', 'multipliers', 'owner'):
-            altered = json.loads(encoded_budget)
-            rule = altered['paths'][name]
+            if field == 'owner':
+                altered_task = {**budgets['tasks'][owner],
+                                'paths': [p for p in budgets['tasks'][owner]['paths'] if p != name]}
+                reject({**budgets, 'tasks': {**budgets['tasks'], owner: altered_task}})
+                continue
+            rule = dict(budgets['paths'][name])
             if field == 'symbols': rule[field] = rule[field][:-1]
             elif field == 'multipliers': rule[field] = {rule['symbols'][0]: 2}
-            elif field == 'owner': altered['tasks'][owner]['paths'].remove(name)
             else: rule[field] += 16
-            reject(altered)
+            reject({**budgets, 'paths': {**budgets['paths'], name: rule}})
         if '_dhw_trace_' in name:
-            altered = json.loads(encoded_budget)
-            del altered['paths'][name]
-            reject(altered)
-    altered = json.loads(encoded_budget)
-    altered['paths']['poll_dhw_trace_unreviewed'] = {
-        'symbols': ['poll_task'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}
-    reject(altered)
+            reject({**budgets, 'paths': {k: v for k, v in budgets['paths'].items() if k != name}})
+    reject({**budgets, 'paths': {**budgets['paths'], 'poll_dhw_trace_unreviewed': {
+        'symbols': ['poll_task'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}}})
     for path in HEADERS:
         altered = dict(sources)
         altered[path] += '\ninline void unreviewed_stack() { alloca(external_bytes); }\n'
@@ -601,8 +599,9 @@ def self_test(budgets, sources, error):
         ('main/history.cpp',
          'logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence)', 'true'),
         ('main/history.cpp',
-         'if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence))\n'
-         '        return ESP_ERR_INVALID_ARG;\n    esp_err_t e = flash_prepare_next_slot(slot);',
+         'if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence)) {\n'
+         '        s_flash_seq_rejected = true;\n'
+         '        return ESP_ERR_INVALID_ARG;\n    }\n    esp_err_t e = flash_prepare_next_slot(slot);',
          'esp_err_t e = flash_prepare_next_slot(slot);\n'
          '    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence))\n'
          '        return ESP_ERR_INVALID_ARG;'),

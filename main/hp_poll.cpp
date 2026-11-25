@@ -67,6 +67,7 @@ static logic::RefrigerantServiceCoverage s_refrigerant_service_coverage;
 static logic::RefrigerantServiceCoverage s_refrigerant_service_cycle_coverage;
 static logic::RefrigerantServiceSample   s_refrigerant_service_cycle_sample;
 static logic::HistoryDerivedCoverage     s_history_cycle_coverage;
+static CheckupProfileLayout              s_detection_checkup_layout;
 static uint8_t                           s_refrigerant_service_seen_registers[32];
 
 // Auto-detect backoff state — poll-task-owned, RAM only (model/detection is never persisted: it is
@@ -272,8 +273,9 @@ static void refrigerant_service_record_poll_gap(uint32_t generation) {
 }
 
 static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed = false) {
-    checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation,
-                   checkup_consent_epoch(), profile_confirmed);
+    static constexpr logic::CheckupCoverage kEmptyCoverage{};
+    checkup_record(nullptr, 0, false, false, kEmptyCoverage, generation, checkup_consent_epoch(),
+                   profile_confirmed);
 }
 
 // Overlay sweep locals with the task's other branches instead of stacking both frames. The
@@ -566,7 +568,7 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
     // state is handed over rather than re-derived, so the checkup and the held-over marking above
     // can never disagree about whether the unit was running.
     checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage,
-                   cycle_generation, consent_epoch, true, sweep_started_us);
+                   cycle_generation, consent_epoch, true, true, sweep_started_us);
 
     // And how long each switched row has read what it reads (logic/state_dwell.hpp). Here for
     // the reasons above and one of its own: a row that did not answer is simply ABSENT from
@@ -673,6 +675,7 @@ static bool poll_detect() { // false only when an attempted sweep found no bus
         // agrees (detect_commit_no_match, logic/detect.hpp). Keeping "auto" means the next cycle
         // simply re-detects; the model is RAM-only either way, so nothing is persisted by waiting.
         std::string    detected_profile = d.best.empty() ? "generic" : d.best;
+        checkup_profile_layout(detected_profile.c_str(), s_detection_checkup_layout);
         const uint32_t identity_fp =
             history_x10a_identity(detected_profile.c_str(), d.rx, d.tx, static_cast<char>(d.proto));
         bool     first_no_match    = false;
@@ -731,7 +734,7 @@ static bool poll_detect() { // false only when an attempted sweep found no bus
                     // All observation resets are inside the same generation barrier as the detected
                     // config commit. An HTTP reconfigure therefore happens wholly before or after
                     // this block, never between the new identity and its reset boundary.
-                    checkup_reset_on_detect(detected_profile.c_str(), identity_fp);
+                    checkup_reset_on_detect(s_detection_checkup_layout, identity_fp);
                     dwell_reset_on_detect(detected_profile.c_str());
                     history_reset_on_detect(identity_fp);
                     // Both strings are already owned before persistence. Move them through the
