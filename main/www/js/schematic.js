@@ -552,8 +552,19 @@ function updateSchematicStateA11y(d) {
   set("gSgRequest", concept("sgrequest", t("schem.sg_boost")), sgModeText(d && d.sgMode));
   set("gBshState", concept("bsh", t("schem.bsh_label")),
       !d || d.bsh == null ? "—" : t(d.bsh ? "state.on" : "state.off"));
-  set("gDefrostState", concept("defrost", t("schem.defrost_pill")),
-      !d || d.defrost == null ? "—" : t(d.defrost ? "state.on" : "state.off"));
+  const defrost = $("gDefrostState");
+  if (defrost) {
+    const check = S.status?.health &&
+      checkupFreshDefrostCheck(S.status, S.otaCached || S.transportUnavailable === "status");
+    const note = check?.verdict === "info";
+    defrost.classList.toggle("sc-defrost-alert", note);
+    const state = !d || d.defrost == null ? "—" : t(d.defrost ? "state.on" : "state.off");
+    const label = `${concept("defrost", t("schem.defrost_pill"))}: ${state}` +
+      (note ? ` · ${t("check.defrost.notice")}` : "");
+    defrost.setAttribute("aria-label", label);
+    const title = defrost.querySelector?.(":scope > title");
+    if (title && title.textContent !== label) title.textContent = label;
+  }
   set("gQuietState", concept("quiet", t("chip.quiet")),
       !d || d.quiet == null ? "—" : t(d.quiet ? "state.on" : "state.off"));
   set("g2wv", concept("valve2", t("schem.valve2")),
@@ -669,7 +680,7 @@ function renderLive() {
 
   // Bit-flag states, each drawn at the component it belongs to: normal space heat/cool operation on
   // the space riser, the BUH step in the BUH label, low-noise mode on the outdoor unit. (Pump and
-  // defrost were already drawn — rotation + "PUMP n%", the ❄ pill + the reversed refrigerant loop.)
+  // defrost were already drawn — rotation + "PUMP n%", the state pill + the reversed refrigerant loop.)
   const pumping = waterMoving(d);
   setTxt("svSpaceH", t(d.spaceOp ? "chip.space_on" : "chip.space_off"));
   $("gSpaceH").classList.toggle("on", d.spaceOp === true);
@@ -1668,7 +1679,7 @@ function inspectSourceStyle(mb = false) {
     $(id).classList.toggle("src-val-mb", mb);
   }
 }
-function inspectSig(e) {
+function inspectSig(e, defrostRows = "", modbusDefrost = false) {
   if (!e) return "";
   if (e.env3) {
     const env = S.status?.env3 || {};
@@ -1696,7 +1707,7 @@ function inspectSig(e) {
           d && e.head ? e.head(d) : "",
           inspFieldText(e, "what", d) || "",
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "",
-          inspUnknownAge(e, d) ? "unknown_age" : "", rows, pressureSig].join("|");
+          inspUnknownAge(e, d) ? "unknown_age" : "", rows, pressureSig, defrostRows, modbusDefrost].join("|");
 }
 
 // The trend under the inspector: the same chart the value list draws. A resolved X10A row chooses
@@ -1730,6 +1741,7 @@ function renderInspectHist(e, row, mode = "", flow = null) {
                  JSON.stringify([pin, ...sensorPins])].join("|");
     if (sig === S.inspHistSig) return started;
     S.inspHistSig = sig;
+    S.inspHistId = offered.length ? ENV3_COMBINED_ID : "";
     const el = $("inspHist");
     el.hidden = !offered.length;
     replaceHistoryHtml(el, offered.length ? env3HistHtml(historyView(ENV3_COMBINED_ID)) : "");
@@ -1753,9 +1765,10 @@ function renderInspectHist(e, row, mode = "", flow = null) {
   const offered = (id) => trendSource === "modbus" ? hasModbusHist(id)
     : trendSource === "x10a" ? hasHist(id) : hasHist(id) || hasModbusHist(id);
   const explicitId = trendId && offered(trendId) ? trendId : "";
+  const keepDefrostHistory = S.insp === "defrost" && checkupDefrostCheck(S.status);
   const mbFallbackId = S.insp === "pel" ? (!explicitId && S.live?.pelSrc === "MB" ? "modbus_power" : "")
     : S.insp === "ou" ? (down ? "compressor_state" : "")
-    : (!explicitId || down ? (MB_INSPECT_TREND[S.insp] || "") : "");
+    : (!explicitId || (down && !keepDefrostHistory) ? (MB_INSPECT_TREND[S.insp] || "") : "");
   const useMbFallback = !!mbFallbackId && hasModbusHist(mbFallbackId);
   if (useMbFallback) trendSource = "modbus";
   const id = (useMbFallback ? mbFallbackId : explicitId)
@@ -1795,6 +1808,7 @@ function renderInspectHist(e, row, mode = "", flow = null) {
                pressureChart ? JSON.stringify([!!pressure, pressure?.finding]) : ""].join("|");
   if (sig === S.inspHistSig) return started;
   S.inspHistSig = sig;
+  S.inspHistId = id;
   const el = $("inspHist");
   el.hidden = !id;
   // Label the chart with the stable quantity, independent of the current operating state.
@@ -1827,10 +1841,17 @@ function renderInspect(mode = "") {
   // of the card's: the series arrives from an async fetch that changes no live value.
   // inspCurRow refuses a retained X10A row. renderInspectHist may still resolve this target's paired
   // Modbus ring, so a petrol headline gets petrol history without reviving stale X10A samples.
-  renderInspectHist(e, S.live && e ? inspCurRow(e) : null, mode, flow);
+  const defrostInspector = S.insp === "defrost";
+  const defrostRows = defrostInspector
+    ? checkupDefrostInspectorRows(S.status, S.transportUnavailable === "status" || S.otaCached)
+    : "";
+  const row = S.live && e ? inspCurRow(e) : null;
+  renderInspectHist(e, row, mode, flow);
+  // The combined Modbus trend describes historical readings, without supplying a live X10A state.
+  const modbusDefrost = defrostInspector && !row && S.inspHistId === "modbus_defrost_state";
   // Compare the inspector signature before rendering changed live readings; unchanged polls need
   // no DOM writes and preserve the reader's text selection.
-  const sig = inspectSig(e) + (flow ? JSON.stringify([
+  const sig = inspectSig(e, defrostRows, modbusDefrost) + (flow ? JSON.stringify([
     flow.source, flow.minimum, flow.locationsMissing, flow.unsupported, flow.agreement,
   ]) : "");
   if (sig === S.inspSig) return;
@@ -1845,6 +1866,7 @@ function renderInspect(mode = "") {
   const pressurePanel = $("inspPressure");
   if (pressurePanel) pressurePanel.hidden = S.insp !== "wp";
   inspect.classList.toggle("open", !!e);
+  card.classList.toggle("inspect-defrost", defrostInspector);
   if (e) {
     card.removeAttribute("aria-hidden");
     card.removeAttribute("inert");
@@ -1884,7 +1906,6 @@ function renderInspect(mode = "") {
   // rather than a blank card. So "is there a snapshot" and "is the X10A row current" are two
   // questions, and inspCurRow asks the second one.
   const d = S.live;
-  const row = d ? inspCurRow(e) : null;
   // The gateway's reading of this target while X10A is silent — null in normal operation, so
   // everything below is the panel it always was unless the drawing itself has switched source.
   const fb = row ? null : mbForInspect(S.insp);
@@ -1905,7 +1926,7 @@ function renderInspect(mode = "") {
                      : displayReadingLabel(row ? row.label : (e.sample || ""), row);
   setHtml("inspSrc", esc(srcName) +
     (fb && !isFlow ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : ""), false);
-  $("inspSrc").hidden = !(row || fb || e.sample);
+  $("inspSrc").hidden = modbusDefrost || !(row || fb || e.sample);
   // Headline = the ONE compact reading this target stands for (its row, or a derived `head` for the
   // computed pills). An assembly like the outdoor unit has no single number, so it gets no headline
   // at all rather than a "—" that would read as a missing value.
@@ -1930,23 +1951,30 @@ function renderInspect(mode = "") {
   // same shape — the two are mutually exclusive, since a sentence about what a reading is doing is
   // void when there is no reading. Never the headline either: a sentence in a 19px number slot
   // reads as a broken value.
-  const sentence = inspNowText(e, d);
+  const sentence = defrostInspector && !row ? null : inspNowText(e, d);
   const desc = fb ? descFor(fb.label, fb) : (e.sample ? descFor(e.sample, row) : null);
   const ownWhat = inspFieldText(e, "what", d);
   // A native replacement must retain its source-specific interpretation limits in every locale.
   // Generic inspector copy describes the X10A quantity and cannot override the defining register.
   const preferSourceDesc = fb && desc?.sourceQualified;
+  let copy = desc ? descriptionCopy(desc) : null;
+  if (defrostInspector && desc) {
+    const base = LANG === "de" && desc.de ? desc.de : desc;
+    copy = [copy?.[0] ?? base.what, t("check.defrost.normal")];
+  }
   const what = isFlow && !preferSourceDesc
     ? descParaHtml(esc(t("check.flow.explain"))) + descNoteHtml(t("normal.label"), t("check.flow.assessment")) +
       (fb && modbusFlowScaleUnverified() ? descParaHtml(esc(t("hist.modbus_flow_unverified"))) : "")
-    : ownWhat && !preferSourceDesc ? descParaHtml(esc(ownWhat))
-                       : (desc ? descBodyHtml(desc, (row || fb)?.value, descriptionCopy(desc)) : "");
+    : modbusDefrost
+    ? descBodyHtml({ what: t("check.defrost.modbus.about"), normal: t("check.defrost.modbus.normal") })
+    : ownWhat && !preferSourceDesc && !defrostInspector ? descParaHtml(esc(ownWhat))
+    : desc ? descBodyHtml(desc, (row || fb)?.value, copy) : "";
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.
   // The inspector records its signature immediately, so its writes cannot wait for clickHold.
   // setHtml still preserves identical prose while a values poll changes the headline number.
   setHtml("inspBody", what + (sentence ? descParaHtml(esc(sentence)) : "") + inspHeldHtml(e, d), false);
-  let rows = !d ? "" : inspValues(e, row, fb)
+  const rows = !d ? "" : inspValues(e, row, fb)
     // A member reading with a twin gets the gateway's value as its OWN row, labelled "(Modbus)" and
     // petrol throughout — never appended to the X10A value in the same cell, which is what this did
     // first and which rendered as "46.2 °C 46.0 °C": two numbers of equal weight, jammed together,
@@ -1969,7 +1997,7 @@ function renderInspect(mode = "") {
         inspComparisonHtml(m, d);
     })
     .join("");
-  setHtml("inspRows", rows, false);
+  setHtml("inspRows", rows + defrostRows, false);
   if (isPressure) setHtml("inspPressureFinding", pressureFindingHtml(pressureDiagnosis(d)), false);
 }
 
@@ -2015,5 +2043,12 @@ function labelSchematicHits() {
 function inspectPick(key = null) {
   cancelHistoryGesture();
   S.insp = S.insp !== key ? key : null;
+  const returnToNotice = S.inspFromDefrostNotice && !S.insp;
+  S.inspFromDefrostNotice = false;
   renderInspect(S.insp ? "open" : "");
+  if (returnToNotice) {
+    (document.querySelector(".vgroup:not([hidden]) [data-defrost-inspect]") ||
+      document.querySelector('#cardNav [data-card="diagnosis"]') ||
+      document.querySelector('#cardNav [aria-pressed="true"]'))?.focus();
+  }
 }

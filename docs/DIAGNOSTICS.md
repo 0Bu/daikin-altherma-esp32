@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: e5e9f01d2b89587e9ceefc783404985cb0c1c53f55187cf0493e3ac1ab404e7a -->
+<!-- user-docs-contract: ca39ba9102f7147c393e8464fa0a307bd45cd2f30b6a0addf2ec4e505324c308 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -180,24 +180,33 @@ has no count label.
 <!-- user-docs: health_defrost -->
 ### Defrost events
 
-**In plain language:** The board counts observed defrost starts and the seconds spent defrosting
-while the compressor ran and both signals were readable.
-The detail can show the last start observed this boot, with the heating or hot-water route and
-outdoor air temperature when they were readable and qualified. Missing details remain unknown.
-This start detail expires after 24 hours; pausing diagnostics (`Off`) hides the card and does
-not carry a start transition across the pause. When a factory reset starts forgetting history,
-the board hides the detail for the rest of that boot, including if erasure fails.
+**In plain language:** Open **Defrost** on the outdoor unit to see its current state and trend. Tap
+the trend to read the selected interval and state below the chart. The chart shows observed
+activity in five-minute blocks. With current X10A diagnostics, the two rows below it show observed
+starts and the percentage of compressor running time spent defrosting while both states were
+readable. **Normal** explains the percentage in the card. A dash marks a missing value when the
+other is available. A current **NOTE** adds an amber warning triangle after the **Defrost** label.
+Its entry in Plant diagnostics opens the same card.
 
-**Meaning:** At least **three paired events** and more than **15%** defrost share produce **NOTE**.
-Both are project heuristics. Fewer events or no paired compressor runtime remain **MEASURED**;
-no readable defrost observation remains **CHECKING**.
-A reassuring assessment additionally needs a full day and 90% paired signal coverage.
+The API can report the last start observed this boot,
+including the heating or hot-water route and outdoor air temperature when qualified. This detail
+expires after 24 hours. Pausing diagnostics (`Off`) clears the start transition across the pause.
+When a factory reset starts forgetting history, the board hides the detail for the rest of that
+boot, including if erasure fails.
 
-**Important limit:** Temperature, humidity and coil icing affect normal defrost needs. These signals
-do not establish blocked airflow, refrigerant shortage or a sensor defect. Outdoor min/mean and the
-separate live de-icer temperature provide context, without changing the rule; geothermal two-phase
-sensors are not treated as an outdoor air coil, and coil temperature spread or post-defrost recovery
-are not evaluated.
+**Meaning:** The displayed count includes all observed starts. A start qualifies for the assessment
+when the compressor state is readable immediately before and at the start. The project rule
+produces **NOTE** at **three or more qualifying starts** and more than **15%** defrost share.
+With a readable defrost-state interval, fewer qualifying starts or no eligible runtime gives
+**MEASURED**. Supported profiles start in **CHECKING** while a readable interval is missing.
+A reassuring assessment requires a full day and 90% paired signal coverage. The inspector shows
+measurements as they become available. Profiles without an X10A defrost signal have no assessment.
+
+**Important limit:** Temperature, humidity and coil icing affect normal defrost needs. This assessment
+cannot establish blocked airflow, refrigerant shortage or a sensor defect. The API's outdoor
+minimum and mean and the separate live de-icer reading provide context. The assessment also leaves
+coil temperature spread and post-defrost recovery open. Geothermal two-phase sensors are distinct
+from outdoor air coils.
 The route describes the mode and valve signal reported by the controller. Physical valve position,
 water flow and tank charging require separate evidence.
 

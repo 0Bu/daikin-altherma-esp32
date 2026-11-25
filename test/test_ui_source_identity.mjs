@@ -22,7 +22,7 @@ const settings = read("settings");
 const schematic = read("schematic");
 const inspectorHistory = schematic.slice(schematic.indexOf("function renderInspectHist("),
   schematic.indexOf("function renderInspect("));
-vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
+vm.runInContext(read("app_state") + "\n" + read("history") + "\n" + read("dashboard") + "\n" +
   inspectorHistory + "\n" +
   settings.slice(settings.indexOf("const OTA_RENDER_CACHE_KEY"), settings.indexOf("function otaCacheStore()")) + `
 

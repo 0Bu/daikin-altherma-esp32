@@ -362,7 +362,6 @@ async function assertLivePollFullDashboard(page, server, context) {
       pollStop();
       pollSchedule = window.__browserPollSchedule;
       S.descOpen.clear();
-      S.descOpen.add("model:health_defrost");
       S.descOpen.add("service:refrigerant");
       S.dashboardCard = "diagnosis";
       pollNow();
@@ -377,7 +376,9 @@ async function assertLivePollFullDashboard(page, server, context) {
       navButtons: document.querySelectorAll("#cardNav [data-card]").length,
       valueRows: document.querySelectorAll("#valueGroups .vrow, #valueGroups .vdesc").length,
       hdrIp: document.getElementById("hdrIp").textContent,
-      defrostText: document.querySelector('[data-desc="model:health_defrost"]')?.closest(".vitem")?.textContent || "",
+      defrostNotice: !!document.querySelector('button[data-defrost-inspect]'),
+      defrostAlert: document.getElementById("gDefrostState").classList.contains("sc-defrost-alert"),
+      duplicateDefrost: !!document.querySelector('[data-desc="model:health_defrost"]'),
       serviceText: document.querySelector('[data-desc="service:refrigerant"]')?.closest(".vitem")?.textContent || "",
     }))()`);
     assert.equal(x10aObserved.pollFails, 0, `${context}/x10a: real poll must reset _pollFails`);
@@ -385,8 +386,8 @@ async function assertLivePollFullDashboard(page, server, context) {
     assert.ok(x10aObserved.navButtons >= 2, `${context}/x10a: #cardNav must be populated`);
     assert.ok(x10aObserved.valueRows > 0, `${context}/x10a: #valueGroups must render live rows`);
     assert.equal(x10aObserved.hdrIp, "192.0.2.99", `${context}/x10a: #hdrIp must show Ethernet net.ip`);
-    assert.ok(x10aObserved.defrostText.includes("-4.5") && x10aObserved.defrostText.includes("X10A"),
-      `${context}/x10a: defrost outdoor context must render through live HTTP poll`);
+    assert.ok(x10aObserved.defrostNotice && x10aObserved.defrostAlert && !x10aObserved.duplicateDefrost,
+      `${context}/x10a: live polling must show a defrost notice without recreating the duplicate details`);
     assert.ok(x10aObserved.serviceText.includes(await page.evaluate(`t("service.help.limited")`)),
       `${context}/x10a: refrigerant service state=limited must render help text`);
     assert.deepEqual(page.diagnostics, [], `${context}/x10a: live poll must emit no browser errors`);
@@ -1802,22 +1803,26 @@ async function assertPlantDiagnosis(page, context) {
       hist: new Map(S.hist), histPin: new Map(S.histPin),
       histHidden: new Map(S.histHidden), histEpoch: S.histEpoch,
       histIdentity: S.histIdentity, histUptime: S.histUptime, flowMinSelection: S.flowMinSelection,
+      inspFromDefrostNotice: S.inspFromDefrostNotice,
     };
     S.status = structuredClone(S.status);
     S.status.hp = { ...S.status.hp, connected: true };
     S.status.modbus = { ...S.status.modbus, enabled: true, connected: true };
-    S._values = S._values.filter(row => !/^water pressure$|flow (sensor|rate)/i.test(row.label) && row.concept !== "flow");
+    S._values = S._values.filter(row => !/^water pressure$|flow (sensor|rate)/i.test(row.label) &&
+      row.concept !== "flow" && row.label !== "Defrost Operation");
     S._values.push({ label: "Water Pressure", value: "1.5", unit: "bar", reg: 0x62, off: 11, conv: 105,
       group: "Water circuit", concept: "water_pressure" },
-    { label: "Flow Rate (l/min)", value: "16.1", unit: "L/min", reg: 0x61, group: "Water circuit", concept: "flow" });
+    { label: "Flow Rate (l/min)", value: "16.1", unit: "L/min", reg: 0x61, group: "Water circuit", concept: "flow" },
+    { label: "Defrost Operation", value: "0", binary: true, concept: "defrost_state", group: "Operation" });
     S._modbus = [...(S._modbus || []).filter(row => row.concept !== "flow" && row.concept !== "water_pressure"),
       { label: "Volume flow", value: "19.8", unit: "L/min", concept: "flow", off: 49 }];
     S.insp = null;
     S.status.history = {
       ...(S.status.history || {}),
       rows: [
-        ...((S.status.history?.rows || []).filter(row => row.id !== "water_pressure")),
+        ...((S.status.history?.rows || []).filter(row => !["water_pressure", "defrost_state"].includes(row.id))),
         { id: "water_pressure", label: "Water Pressure" },
+        { id: "defrost_state", label: "Defrost Operation" },
       ],
     };
     S.status.refrigerant_service = {
@@ -1897,6 +1902,12 @@ async function assertPlantDiagnosis(page, context) {
       at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: "bar", b0: 280,
       t0: 1791868800, held: [], v: [15, 15, 12, 9, 4, 8, 3, 15],
     });
+    S.hist.set("defrost_state", {
+      at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: "", b0: 280,
+      t0: 1791868800, held: [], v: [0, 10, 0, null, 0, 10, 0, 0],
+    });
+    S.insp = null;
+    S.inspFromDefrostNotice = false;
     S.descOpen.clear();
     renderApp();
     return true;
@@ -1906,11 +1917,67 @@ async function assertPlantDiagnosis(page, context) {
       !!document.querySelector('#valueGroups [data-dashboard-card="group:Operation"] .vrow-val')`), true,
     `${context}: live value cards render below the schematic with X10A defrost outdoor samples`);
     const selector = "[data-desc^='model:health_']";
-    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 6,
-      `${context}: six remaining diagnosis rows must render`);
+    const defrostAccordion = "[data-desc='model:health_defrost']";
+    const defrostHint = "button[data-defrost-inspect]";
+    const defrostPlot = "#inspHist [data-hist='defrost_state']";
+    const defrostWait = () => page.waitFor(`(() => {
+      const panel = document.getElementById('inspect');
+      return S.insp === 'defrost' && panel.classList.contains('open') &&
+        panel.querySelector(${JSON.stringify(defrostPlot)}) &&
+        panel.getAnimations({ subtree: true }).every(anim =>
+          !(anim instanceof CSSTransition) || anim.playState !== 'running');
+    })()`);
+    const hasElement = selector => page.evaluate(`!!document.querySelector(${JSON.stringify(selector)})`);
+    const expectDefrostPill = async (warning, state) => {
+      const actual = await page.evaluate(`(() => {
+        const pill = document.getElementById('gDefrostState');
+        const label = pill.querySelector('[data-i18n="schem.defrost_pill"]');
+        const triangle = pill.querySelector('.sc-defrost-warning');
+        const shape = pill.querySelector('rect.sc-pill');
+        const icon = triangle?.getBoundingClientRect();
+        const frame = shape.getBoundingClientRect();
+        const text = label.getBoundingClientRect();
+        const center = frame.left + frame.width / 2;
+        const labelCenter = text.left + text.width / 2;
+        const style = triangle && getComputedStyle(triangle);
+        const visible = !!icon?.width && !!icon.height && style.display !== 'none' &&
+          style.visibility !== 'hidden' && Number(style.opacity) > 0;
+        const gap = visible ? triangle.getStartPositionOfChar(1).matrixTransform(triangle.getScreenCTM()).x -
+          label.getEndPositionOfChar(label.getNumberOfChars() - 1).matrixTransform(label.getScreenCTM()).x : 0;
+        return {
+          plainLabel: label.textContent.trim() === t('schem.defrost_pill') && !/[❄❅❆]/.test(pill.textContent),
+          activeClass: pill.classList.contains('sc-defrost-alert'),
+          visible,
+          accessibleNotice: pill.getAttribute('aria-label').includes(t('check.defrost.notice')),
+          centered: Math.abs(labelCenter - center) <= 1,
+          fit: text.left >= frame.left - 0.5 && text.right <= frame.right + 0.5 && (!visible ||
+            (triangle.textContent.includes('⚠') && triangle.getAttribute('aria-hidden') === 'true' &&
+            gap >= -0.5 && gap <= 5 && icon.left >= center && icon.right <= frame.right + 0.5 &&
+            icon.top >= frame.top - 0.5 && icon.bottom <= frame.bottom + 0.5)),
+        };
+      })()`);
+      assert.deepEqual(actual, { plainLabel: true, activeClass: warning, visible: warning,
+        accessibleNotice: warning, centered: true, fit: true },
+      `${context}/${state}: the label stays centered and the accessible notice fits beside it`);
+    };
+    const defrostRows = () => page.evaluate(`Array.from(document.getElementById('inspRows').children, row => ({
+      standard: row.matches('div.inspect-row'),
+      cells: Array.from(row.children, cell => [cell.tagName, cell.childElementCount, cell.innerText]),
+    }))`);
+    const expectDefrostRows = async (count, share) => {
+      const labels = await page.evaluate(`[t('check.defrost.starts_label'), t('check.defrost.share')]`);
+      assert.deepEqual(await defrostRows(), labels.map((label, i) => ({
+        standard: true, cells: [["SPAN", 0, label], ["SPAN", 0, [count, share][i]]],
+      })), `${context}: the inspector ends with only the two standard defrost value rows`);
+    };
+    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 5,
+      `${context}: render the five remaining diagnosis disclosures`);
     assert.equal(await page.evaluate(`!!document.querySelector(
       "[data-desc='model:health_pressure'], [data-desc='model:health_flow']")`), false,
       `${context}: pressure and flow diagnoses belong in their inspectors`);
+    assert.equal(await hasElement(defrostAccordion), false, `${context}: the separate defrost disclosure is gone`);
+    assert.equal(await hasElement(defrostHint), false, `${context}: an observation needs no defrost shortcut`);
+    await expectDefrostPill(false, "observation");
     await activateDashboardCardForSelector(page, "[data-desc='model:health_fault']");
     await assertDiagnosisSummaryRows(page, `${context}/compact-summary`);
     await captureNativeEvidence(page, `${context}/overview`,
@@ -1949,7 +2016,7 @@ async function assertPlantDiagnosis(page, context) {
         normal: body.children[2]?.querySelector('.vdesc-n')?.innerText,
         text: Array.from(body.children, block => block.innerText) };
     })`);
-    assert.equal(blocks.length, 7, `${context}: include the independent refrigerant observation`);
+    assert.equal(blocks.length, 6, `${context}: include the independent refrigerant observation`);
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
       if (block.id === "model:health_cycling") continue;
@@ -2372,26 +2439,143 @@ async function assertPlantDiagnosis(page, context) {
       assert.ok(openedEnergy.includes(assumption), `${context}: energy assumptions retain ${assumption}`);
     assert.ok((await dhwText()).includes(discardedContext),
       `${context}: opened basis retains discarded reading-gap evidence for the NOTE`);
-    assert.deepEqual(await page.evaluate(`(() => {
+    const diagnosisBadge = () => page.evaluate(`(() => {
       const badge = document.querySelector("[data-desc='model:health_fault']").closest('.card').querySelector('.section-badge');
       return [badge?.innerText, badge?.classList.contains("err")];
-    })()`), [await page.evaluate("t('check.summary.notes', 3)"), false],
+    })()`);
+    assert.deepEqual(await diagnosisBadge(), [await page.evaluate("t('check.summary.notes', 3)"), false],
       `${context}: pressure is represented only by the schematic signal, not the diagnosis badge`);
-    assert.equal(await page.evaluate(`(() => {
-      const row = document.querySelector("[data-desc='model:health_defrost']")?.closest('.vitem');
-      return row?.innerText.includes(t("check.defrost.last_start", t("sys.nodata"),
-        t("check.defrost.route_dhw"), checkupFmt1(0) + " °C"));
-    })()`), true, `${context}: defrost start preserves zero and names the tank route`);
-    assert.equal(await page.evaluate(`(() => {
-      const detail = document.querySelector("[data-desc='model:health_defrost']")
-        .closest('.vitem').querySelector('.vdesc-body');
-      const format = new Intl.NumberFormat(LANG, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-      return detail.innerText.includes(t('check.outdoor_range', 'X10A', format.format(2), format.format(3)));
-    })()`), true, `${context}: defrost detail shows sampled X10A temperatures with their source`);
     await captureNativeEvidence(page, `${context}/expanded`);
-    for (const id of ["dhw_loss", "cycling", "defrost"])
+    for (const id of ["dhw_loss", "cycling"])
       await captureNativeEvidence(page, `${context}/${id}`,
         `[data-desc='model:health_${id}']`, ".vitem");
+    // A finding stays in the diagnosis count and opens the one inspector through native input.
+    await page.evaluate(`(() => {
+      const check = S.status.health.checks[3];
+      Object.assign(check, { verdict: 'info', evidence: 'heuristic', reason: null,
+        count: 6, paired_count: 6, defrost_s: 1440, share_pct: 20 });
+      renderApp(); return true;
+    })()`);
+    await page.waitFor(`document.querySelector(${JSON.stringify(defrostHint)})`);
+    assert.deepEqual(await diagnosisBadge(), [await page.evaluate("t('check.summary.notes', 4)"), false],
+      `${context}: removal of the duplicate details preserves the raised defrost finding`);
+    await expectDefrostPill(true, "fresh-X10A-note");
+    await page.evaluate("S.status.health.source_fresh = false; renderApp(); true");
+    await expectDefrostPill(false, "stale-X10A-note-with-live-link");
+    await page.evaluate("S.status.health.source_fresh = true; S.status.health.source = 'modbus'; renderApp(); true");
+    await expectDefrostPill(false, "Modbus-report-with-live-X10A");
+    await page.evaluate("S.status.health.source = 'x10a'; renderApp(); true");
+    await expectDefrostPill(true, "restored-X10A-note");
+    assert.equal(await hasElement(defrostAccordion), false, `${context}: a hint has no separate defrost disclosure`);
+    await clickElement(page, defrostHint);
+    await defrostWait();
+    assert.equal(await page.evaluate("document.getElementById('inspNow').innerText"),
+      await page.evaluate("t('state.off')"), `${context}: the live header remains distinct from the daily hint`);
+    assert.equal(await hasElement(`${defrostPlot} .vhist-state-on.defrost-on`), true,
+      `${context}: the shortcut opens the original defrost timeline with active samples`);
+    assert.equal(await hasElement(`${defrostPlot} .vhist-state-gap`), true,
+      `${context}: the defrost timeline retains missing samples`);
+    assert.deepEqual(await page.evaluate(`(() => {
+      const card = document.getElementById('inspCard');
+      const src = card.querySelector('#inspSrc');
+      const body = card.querySelector('#inspBody');
+      const desc = descFor('Defrost Operation');
+      const intro = descriptionCopy(desc)?.[0] ?? (LANG === 'de' ? desc.de?.what : desc.what);
+      const live = inspNowText(INSPECT.defrost, S.live);
+      const sections = [card.querySelector('.inspect-head'), src, body, card.querySelector('#inspHist'),
+        ...card.querySelectorAll('#inspRows .inspect-row')].map(node => node?.getBoundingClientRect());
+      return {
+        header: card.querySelector('#inspTitle').textContent === inspTitleText(INSPECT.defrost, S.live) &&
+          !src.hidden && src.innerText === 'Defrost Operation',
+        introduction: body.children[0]?.innerText === intro,
+        normal: body.children[1]?.innerText === t('normal.label') + ' ' + t('check.defrost.normal'),
+        live: !!live && body.children.length === 3 && body.children[2]?.innerText === live,
+        ordered: sections.every((box, i) => box?.height > 0 && (!i || sections[i - 1].bottom <= box.top + 1)),
+        valuesLast: Array.from(card.children).filter(node => !node.hidden).at(-1).id === 'inspRows',
+      };
+    })()`), { header: true, introduction: true, normal: true, live: true, ordered: true, valuesLast: true },
+    `${context}: original title, explanation and live state precede the graph and final readings`);
+    await expectDefrostRows("6", "20 %");
+    const activeBlocks = await page.evaluate(`(() => {
+      const range = document.querySelector('#inspHist .vhist-state .vhist-range');
+      return { text: range.innerText, visible: range.getBoundingClientRect().height > 0 };
+    })()`);
+    assert.deepEqual(activeBlocks, {
+      text: await page.evaluate("t('hist.defrost_total', (2).toLocaleString(LANG))"), visible: true,
+    },
+      `${context}: the chart shows observed five-minute blocks independently of the start count`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/defrost-hint`);
+    await assertAccessibility(page, `${context}/defrost-hint`, { nativeTree: true });
+    await captureNativeEvidence(page, `${context}/defrost-hint`, "inspCard");
+    assert.equal(await page.evaluate("document.activeElement?.id"), "inspClose",
+      `${context}: the diagnosis shortcut transfers focus to the inspector`);
+
+    const { activeSample, gapSample } = await page.evaluate(`(() => {
+      const plot = document.querySelector(${JSON.stringify(defrostPlot)});
+      plot.focus();
+      const values = scrubView(plot).v;
+      return { activeSample: values.indexOf(10), gapSample: values.indexOf(null) };
+    })()`);
+    assert.ok(activeSample > 0 && gapSample > 0, `${context}: the fixture contains an active sample and a gap`);
+    await page.key("Home", { code: "Home", keyCode: 36 });
+    for (let step = 0; step < activeSample; step++)
+      await page.key("ArrowRight", { code: "ArrowRight", keyCode: 39 });
+    await page.key("Enter", { code: "Enter", keyCode: 13 });
+    assert.deepEqual(await page.evaluate(`(() => {
+      const plot = document.querySelector(${JSON.stringify(defrostPlot)});
+      const graph = plot.parentElement;
+      const axis = graph.querySelector('.vhist-axis').getBoundingClientRect();
+      const time = graph.querySelector('.vhist-time.vhist-pinned');
+      const tip = graph.querySelector('.vhist-tip.vhist-pinned');
+      const tipBox = tip?.getBoundingClientRect();
+      const view = scrubView(plot);
+      const interval = scrubTime(view, ${activeSample}) + '–' + scrubTime(view, ${activeSample + 1});
+      return {
+        selectedTime: tip?.textContent.includes(interval),
+        selectedState: tip?.textContent.endsWith(t('hist.defrost_active')),
+        singleReadout: time && getComputedStyle(time).display === 'none',
+        belowScale: !!tipBox?.height && axis.height > 0 &&
+          tipBox.top >= Math.max(plot.getBoundingClientRect().bottom, axis.bottom) - 1,
+      };
+    })()`), { selectedTime: true, selectedState: true, singleReadout: true, belowScale: true },
+    `${context}: a native keyboard selection pins the active state and interval below the time scale`);
+    await captureNativeEvidence(page, `${context}/defrost-selected`, "inspCard");
+    await page.evaluate(`document.querySelector(${JSON.stringify(defrostPlot)}).focus({ preventScroll: true }); true`);
+    await page.key("Home", { code: "Home", keyCode: 36 });
+    for (let step = 0; step < gapSample; step++)
+      await page.key("ArrowRight", { code: "ArrowRight", keyCode: 39 });
+    assert.equal(await page.evaluate(`(() => {
+      const plot = document.querySelector(${JSON.stringify(defrostPlot)});
+      const tip = plot.parentElement.querySelector('.vhist-tip.vhist-live');
+      return !tip.hidden && tip.textContent === scrubTime(scrubView(plot), ${gapSample}) + ' · ' + t('hist.nm');
+    })()`), true, `${context}: a gap shows its selected time and no measurement`);
+    await page.key("Escape", { code: "Escape", keyCode: 27 });
+    await page.evaluate("document.getElementById('inspClose').focus(); true");
+    await page.key("Escape", { code: "Escape", keyCode: 27 });
+    assert.equal(await page.evaluate(`!S.insp && document.activeElement?.matches(${JSON.stringify(defrostHint)})`),
+      true, `${context}: Escape restores focus to the still-mounted notice`);
+    await page.key("Enter", { code: "Enter", keyCode: 13 });
+    await defrostWait();
+
+    // The live state and the timeline do not change when a new daily assessment is accepted.
+    await page.evaluate(`(() => {
+      window.__browserDefrostPlot = document.querySelector(${JSON.stringify(defrostPlot)});
+      Object.assign(S.status.health.checks[3], { verdict: 'ok', defrost_s: 360, share_pct: 5 });
+      renderApp(); return true;
+    })()`);
+    await defrostWait();
+    await expectDefrostRows("6", "5 %");
+    assert.equal(await page.evaluate(`window.__browserDefrostPlot === document.querySelector(${JSON.stringify(defrostPlot)})`),
+      true, `${context}: updating the diagnosis keeps the existing plot mounted`);
+    await page.waitFor("!S.clickHold");
+    await page.evaluate("renderApp(); true");
+    assert.equal(await hasElement(defrostHint), false, `${context}: completed OK has no shortcut in the overview`);
+    await expectDefrostPill(false, "completed-OK");
+    await captureNativeEvidence(page, `${context}/defrost-ok`, "inspCard");
+    await clickElement(page, "#inspClose");
+    await page.waitFor("!S.insp && !S.clickHold");
+    assert.equal(await page.evaluate(`document.activeElement?.matches('#cardNav [data-card="diagnosis"]')`),
+      true, `${context}: closing after the notice disappears restores focus to diagnosis navigation`);
     // Exercise the formerly blind band, then the exact no-window screenshot state, through the
     // real accordion. Ordinary use may explain the drop: it stays MEASURED, with a heat example.
     await page.evaluate(`(() => {
@@ -2504,13 +2688,12 @@ async function assertPlantDiagnosis(page, context) {
     // the day; a flow observation needs eligible pump runtime and must not inherit that wait.
     await page.evaluate(`(() => {
       S.status.health = {
-        status: 'collecting', full_span: false, span_s: 900,
+        source: 'x10a', status: 'collecting', full_span: false, span_s: 900,
         source_fresh: true, source_age_s: 1, available: 3, assessable: 1, evaluated: 0,
         checks: [
-          { id: 'defrost', verdict: 'collecting', evidence: 'observation', reason: 'day_incomplete',
-            count: 0, paired_count: 0, share_pct: null, defrost_s: 0, run_s: 900,
-            observed_s: 900, required_s: 0,
-            outdoor_source: 'x10a', outdoor_min_c: 2, outdoor_mean_c: 3, outdoor_samples: 10 },
+          { id: 'defrost', verdict: 'collecting', evidence: 'heuristic', reason: 'day_incomplete',
+            count: 3, paired_count: 3, share_pct: 2, defrost_s: 18, run_s: 900,
+            observed_s: 900, required_s: 77760 },
           { id: 'pressure', verdict: 'collecting', evidence: 'heuristic', reason: 'input_coverage',
             min_bar: 1.5, current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: false,
             confirmed_critical: false, observed_s: 900, required_s: 77760 },
@@ -2524,11 +2707,74 @@ async function assertPlantDiagnosis(page, context) {
     await page.frame();
     assertLayout(await page.evaluate(layoutAudit), `${context}/flow-waiting`);
     await assertAccessibility(page, `${context}/flow-waiting`, { nativeTree: true });
-    const missingDay = await page.evaluate("t('check.detail.horizon_wait', '23 h 45 min')");
-    const defrostDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_defrost']")
-      .closest('.vitem').innerText`);
-    assert.ok(defrostDetail.includes(missingDay),
-      `${context}: collecting daily check must retain its missing-day explanation`);
+    const missingDay = await page.evaluate("checkupDuration(85500)");
+    const waitingStatus = await page.evaluate("S.status");
+    await clickElement(page, '#gDefrostState');
+    await defrostWait();
+    await expectDefrostRows("3", "2 %");
+    assert.equal(await hasElement(defrostHint), false, `${context}: collecting has no hint shortcut`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/defrost-collecting`);
+    await captureNativeEvidence(page, `${context}/defrost-collecting`, "inspCard");
+    await page.evaluate(`Object.assign(S.status.health.checks[0], { share_pct: null, defrost_s: null, run_s: null });
+      renderApp(); true`);
+    await expectDefrostRows("3", "—");
+    await page.evaluate("S.status.health.checks[0].count = null; renderApp(); true");
+    assert.deepEqual(await defrostRows(), [], `${context}: two missing readings leave only the chart`);
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`Object.assign(S.status.health.checks[0], {
+      count: 6, paired_count: 6, defrost_s: 180, run_s: 900, share_pct: 20, verdict: 'info', reason: null,
+    }); S.status.diagnostics.enabled = false; renderApp(); true`);
+    assert.deepEqual(await defrostRows(), [], `${context}: opting out removes diagnosis values`);
+    assert.equal(await hasElement(defrostPlot), true, `${context}: opting out keeps the independent defrost history`);
+    await expectDefrostPill(false, "diagnostics-off-with-X10A-note");
+
+    await page.evaluate(`(() => {
+      const x10a = S.hist.get('defrost_state');
+      S.status.diagnostics.enabled = true;
+      Object.assign(S.status.health, { status: 'info', full_span: true, span_s: 86400, source_fresh: false });
+      Object.assign(S.status.health.checks[0], { verdict: 'info', reason: 'source_stale',
+        count: 6, paired_count: 6, share_pct: 20, defrost_s: 180, run_s: 900 });
+      S.status.hp.connected = false;
+      S.status.modbus = { ...S.status.modbus, enabled: true, connected: true };
+      S._modbus = [{ off: 35, label: 'Defrost / Restart', history: 'modbus_defrost_state', value: '1', binary: true }];
+      S.status.history.modbus_rows = [
+        ...(S.status.history.modbus_rows || []).filter(row => row.id !== 'modbus_defrost_state'),
+        { id: 'modbus_defrost_state', label: 'Defrost / Restart' },
+      ];
+      syncHistSources();
+      S.hist.set('defrost_state', { ...x10a, refreshFailed: true });
+      S.hist.set(histCacheKey('modbus_defrost_state', 'modbus'), {
+        at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: '', b0: 280,
+        t0: 1791868800, held: [], v: [0, 10, null, 0, 0, 10, 0, 0],
+      });
+      renderApp(); return true;
+    })()`);
+    await defrostWait();
+    assert.deepEqual(await defrostRows(), [], `${context}: a stale report supplies no current diagnosis values`);
+    assert.equal(await page.evaluate("document.getElementById('inspSrc').innerText"), "Defrost Operation",
+      `${context}: retained X10A history keeps its own source subtitle`);
+    assert.equal(await hasElement(`${defrostPlot} .vhist-state-track.x10a .vhist-retained`),
+      true, `${context}: retained X10A history stays with its assessment while Modbus is live`);
+    const modbusDefrostPlot = "#inspHist [data-hist='modbus_defrost_state'][data-source='modbus']";
+    assert.equal(await hasElement(modbusDefrostPlot), false,
+      `${context}: the retained X10A finding never borrows the live Modbus history`);
+    await page.evaluate("recoverOpenHistory(); true");
+    assert.equal(await hasElement(defrostPlot), true,
+      `${context}: refreshing an open inspector preserves the X10A source`);
+    assert.equal(await hasElement(modbusDefrostPlot), false,
+      `${context}: recovery cannot replace retained X10A with the Modbus chart`);
+
+    await page.evaluate(`S.status.diagnostics.effective_source = 'modbus';
+      S.status.health.source = 'modbus'; renderApp(); true`);
+    assert.equal(await hasElement(modbusDefrostPlot), true,
+      `${context}: Modbus fallback shows the independent defrost/restart history`);
+    assert.deepEqual(await defrostRows(), [], `${context}: the combined Modbus flag supplies no X10A values`);
+    assert.deepEqual(await page.evaluate(`(() => {
+      const text = document.getElementById('inspBody').innerText;
+      return [text.includes(t('check.defrost.modbus.about')), text.includes(t('check.defrost.modbus.normal')),
+        document.getElementById('inspNow').innerText];
+    })()`), [true, true, "—"], `${context}: fallback explains the combined flag and keeps the live X10A value unknown`);
+    await page.evaluate(`S.status = ${JSON.stringify(waitingStatus)}; renderApp(); true`);
     await assertFlowInspector(page, `${context}/flow-inspector`, missingDay);
   } finally {
     await page.evaluate(`(() => {
@@ -2546,7 +2792,9 @@ async function assertPlantDiagnosis(page, context) {
       S.histIdentity = window.__browserDiagnosisOriginal.histIdentity;
       S.histUptime = window.__browserDiagnosisOriginal.histUptime;
       S.flowMinSelection = window.__browserDiagnosisOriginal.flowMinSelection;
+      S.inspFromDefrostNotice = window.__browserDiagnosisOriginal.inspFromDefrostNotice;
       delete window.__browserDiagnosisOriginal;
+      delete window.__browserDefrostPlot;
       renderApp();
       return true;
     })()`);
@@ -3779,19 +4027,21 @@ try {
       await assertDhwTimeline(page, server, `${viewport.name}/dhw`, { locales: viewport.name === "phone" });
     }
     assert.deepEqual(page.diagnostics, [], "DHW timeline states must emit no browser errors");
-  } else if (process.argv.includes("--diagnosis-only")) {
+  } else if (process.argv.includes("--diagnosis-only") || process.argv.includes("--diagnosis-layout-only")) {
     // A focused rendering pass for diagnosis-copy iterations. The default full matrix below and
     // the supervisor's independent mutation controls remain unchanged.
     for (const viewport of viewports) {
       await page.viewport(viewport.width, viewport.height);
-      await activateLocale(page, "en");
-      await assertCyclingChart(page, server, `${viewport.name}/diagnosis/cycling`);
-      await assertDhwTimeline(page, server, `${viewport.name}/diagnosis/dhw`, { locales: viewport.name === "phone" });
-      await assertFaultChart(page, `${viewport.name}/diagnosis/fault/en`, viewport.name);
-      await activateLocale(page, "de");
-      await assertFaultChart(page, `${viewport.name}/diagnosis/fault/de`, viewport.name);
-      await activateLocale(page, "en");
-      await assertLivePollFullDashboard(page, server, `${viewport.name}/diagnosis/live-poll`);
+      if (!process.argv.includes("--diagnosis-layout-only")) {
+        await activateLocale(page, "en");
+        await assertCyclingChart(page, server, `${viewport.name}/diagnosis/cycling`);
+        await assertDhwTimeline(page, server, `${viewport.name}/diagnosis/dhw`, { locales: viewport.name === "phone" });
+        await assertFaultChart(page, `${viewport.name}/diagnosis/fault/en`, viewport.name);
+        await activateLocale(page, "de");
+        await assertFaultChart(page, `${viewport.name}/diagnosis/fault/de`, viewport.name);
+        await activateLocale(page, "en");
+        await assertLivePollFullDashboard(page, server, `${viewport.name}/diagnosis/live-poll`);
+      }
       for (const locale of browserLocales) {
         await activateLocale(page, locale);
         await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");

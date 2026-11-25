@@ -248,7 +248,8 @@
                 </g>
                 <g id="gDefrostState" class="sc-snow sc-hit" data-insp="defrost" role="button" tabindex="0">
                   <rect class="sc-pill sc-ou-mode-pill" x="62" y="348" width="104" height="22" rx="11"/>
-                  <text class="sc-val" x="114" y="363" text-anchor="middle" data-i18n="schem.defrost_pill">❄ defrost</text>
+                  <!-- A hidden twin balances the warning's width, keeping the translated label centred. -->
+                  <text class="sc-val" x="114" y="363" text-anchor="middle"><tspan class="sc-defrost-warning-spacer" aria-hidden="true">⚠︎ </tspan><tspan data-i18n="schem.defrost_pill">defrost</tspan><tspan class="sc-defrost-warning" aria-hidden="true"> ⚠︎</tspan></text>
                 </g>
                 <!-- Low-noise mode: a state OF the outdoor unit (fan/compressor capped), so it sits
                      on the outdoor unit like the defrost pill. Both remain visible while inactive. -->

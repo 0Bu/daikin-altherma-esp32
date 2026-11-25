@@ -71,6 +71,7 @@ const S = {
   // pin, not on a live value, and re-emitting a plot on every values-poll render would fight the
   // cursor on it.
   inspHistSig: "",
+  inspHistId: "",
   // OTA: the version a check found (drives the header version's tooltip), and whether a check or
   // download is running. Separate from S.busy — S.busy is the "a config write is landing" lock the
   // OTA flow also takes, otaBusy is what keeps a second tap from starting a parallel check.
@@ -144,6 +145,7 @@ function invalidateHistSources() {
   S.faultHoverIdx = null;
   cancelHistoryGesture();
   S.inspHistSig = "";
+  S.inspHistId = "";
   // Retire mounted charts even when a poll or click is holding their containers.
   if (typeof retireMountedHistory === "function") retireMountedHistory();
 }

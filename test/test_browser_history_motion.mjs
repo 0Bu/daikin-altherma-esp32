@@ -99,7 +99,8 @@ async function assertTouchReadout(page, selector, context) {
   await click(page, selector);
   await page.waitFor("S.histPin.has(" + JSON.stringify(id) + ") && !S.scrub");
   const selected = await evaluate(page, ({ selector }) => {
-    const graph = document.querySelector(selector)?.closest(".vhist");
+    const plot = document.querySelector(selector);
+    const graph = plot?.closest(".vhist");
     const visible = node => {
       if (!node || node.closest("[hidden]") || !node.textContent.trim()) return false;
       const rect = node.getBoundingClientRect();
@@ -111,10 +112,17 @@ async function assertTouchReadout(page, selector, context) {
       return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 &&
         rect.top < innerHeight && rect.left < innerWidth;
     };
-    return { tip: visible(graph?.querySelector(".vhist-tip.vhist-pinned")),
-      time: visible(graph?.querySelector(".vhist-time.vhist-pinned")) };
+    const tip = graph?.querySelector(".vhist-tip.vhist-pinned");
+    const time = graph?.querySelector(".vhist-time.vhist-pinned");
+    if (plot?.closest(".inspect-defrost")) {
+      const axis = graph.querySelector(".vhist-axis");
+      const readout = tip?.textContent.split(" · ");
+      return visible(tip) && !visible(time) && readout.length === 2 && readout.every(part => part.trim()) &&
+        tip.getBoundingClientRect().top >= axis.getBoundingClientRect().bottom - 1;
+    }
+    return visible(tip) && visible(time);
   }, { selector });
-  assert.ok(selected.tip && selected.time, context + ": trusted touch must pin a visible value and time readout");
+  assert.ok(selected, context + ": trusted touch must pin a visible value and time readout");
   await click(page, selector);
   await page.waitFor("!S.histPin.has(" + JSON.stringify(id) + ") && !S.scrub && !S.clickHold");
   await evaluate(page, ({ scroll }) => { window.scrollTo(scroll.x, scroll.y); return true; }, { scroll });

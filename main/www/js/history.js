@@ -1015,7 +1015,10 @@ const OU_EXTRA_OP_MODES = Object.freeze([
 const STATE_HIST = Object.freeze({
   tank_preheat_state: namedBinHist("x10a", "preheat-on", "preheat"),
   disinfection_state: namedBinHist("modbus", "disinfection-on", "disinfection"),
-  defrost_state: namedBinHist("x10a", "defrost-on", "defrost"),
+  defrost_state: namedBinHist("x10a", "defrost-on", "defrost", false, {
+    totalBlocks: true, readoutMissing: true,
+    compactValueLabel: (v) => v === 10 ? "hist.defrost_active" : v === 0 ? "hist.defrost_inactive" : "",
+  }),
   quiet_state: namedBinHist("x10a", "quiet-on", "quiet"),
   // BOOST itself is mode 2, but a Boost inspector that paints modes 0, 1 and 3 as one identical
   // "off" bar hides whether the controller was free, inhibited or forced on. Paint the complete
@@ -1040,7 +1043,10 @@ const STATE_HIST = Object.freeze({
     active: "hist.valve2_on", inactive: "hist.valve2_off", aria: "hist.valve2_aria" }),
   water_flow_switch: namedBinHist("x10a", "flow-switch-on", "flow_switch", true),
   compressor_state: namedBinHist("modbus", "comp-on", "comp", false, { showRuns: true }),
-  modbus_defrost_state: namedBinHist("modbus", "defrost-on", "mb_defrost"),
+  modbus_defrost_state: namedBinHist("modbus", "defrost-on", "mb_defrost", false, {
+    readoutMissing: true,
+    compactValueLabel: (v) => v === 10 ? "hist.mb_defrost_active" : v === 0 ? "hist.mb_defrost_inactive" : "",
+  }),
   pump_state: namedBinHist("modbus", "circulation-on", "pump"),
   ...Object.fromEntries([
     ["modbus", "heater-on", ["modbus_hot_start_state", "modbus_dhw_booster_state"]],
@@ -1352,7 +1358,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
           return sec ? `${levelText(level)} · ${histDuration(sec)}` : "";
         }).filter(Boolean).join(" · ")
       : (cfg.showRuns ? t(cfg.total, histDuration(total), active.length)
-                      : cfg.total ? t(cfg.total, histDuration(total))
+                      : cfg.total ? t(cfg.total, cfg.totalBlocks ? (total / view.dt).toLocaleString(LANG) : histDuration(total))
                                   : `${t(cfg.active)} · ${histDuration(total)}`) +
         (cfg.inactiveTotal ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "")
     : "";
@@ -2045,6 +2051,10 @@ function stateTipEntries(h, i, cfg) {
       label: s.source === "modbus" ? "Modbus" : s.name,
       text: phaseText(s, status),
     });
+  }
+  if (!rows.length && visible.length && cfg.readoutMissing) {
+    const when = scrubTime(h, i);
+    return { multi: false, rows: [{ text: [when, t("hist.nm")].filter(Boolean).join(" · ") }] };
   }
   return { multi: visible.length > 1, rows };
 }
@@ -2789,8 +2799,8 @@ const MODEL_DESCRIPTIONS = {
     what: "Gaps in the readings can leave some starts uncounted.",
     normal: "There is no fixed normal number of starts. With enough data, this check considers completed heating runs averaging at least 10 minutes long enough." },
   health_defrost: {
-    what: "Defrost starts and their share of compressor runtime with readable compressor and defrost states.",
-    normal: "Project hint: ≥3 paired events and >15%. Humidity and whole-coil temperature are unavailable; no Daikin fault limit." },
+    what: "Defrosting removes frost from the outdoor unit.",
+    normal: "The project flags a share above 15% if the compressor state was readable at three or more starts." },
   health_pressure: {
     what: "24-hour water-pressure curve in the sealed hydronic circuit (X10A, 5-minute minimums).",
     normal: "Chart guide: >1.0 bar normal, ≤1.0 bar low, ≤0.5 bar critical (diagnosis flags ≥60 continuous seconds). Permitted filling and operating pressure depends on the exact unit manual and system height; the reading alone does not identify leaks, air or vessel faults." },

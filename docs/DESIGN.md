@@ -343,14 +343,16 @@ concept.
 
 Categorical histories share one compact plot with distinct state colours, hatching only for missing
 samples, X10A active when available and paired Modbus active by default and toggleable in the legend; the bubble states
-the phase range and state while the selected instant appears on the lower time scale. Valve, Quiet,
+the phase range and state while the selected instant appears on the lower time scale. In the
+Defrost inspector, the selected interval and state appear below the time scale. Valve, Quiet,
 Thermostat, Pump, Space/DHW-operation, enable/reheat and multi-state operation-mode (`ou_op_mode`,
 `iu_op_mode`, `modbus_current_op_mode`, `modbus_op_mode`) timelines use latest sampled state, hiding
 unused optional enum levels; BSH, BUH stages, Defrost, Hot-start, DHW powerful/booster and
 Disinfection retain any observed activation in their open five-minute bucket, and HomeHub
 `modbus_abnormality_state` (`21`) folds by severity (Fault > Warning > Normal). Smart Grid retains all
-four states. Disinfection and X10A Tank preheat remain different facts. Totals are sampled raster
-time; events between sweeps may be missed.
+four states. Disinfection and X10A Tank preheat remain different facts. Totals reflect sampled
+blocks. Observed defrost starts are counted separately from the activity blocks. Events between
+sweeps may be missed.
 The tank-temperature chart distinguishes the Smart Grid “Recommended on” request from observed
 booster-heater operation. Phase bands, sampled-duration legend swatches, and readouts appear only
 for active intervals, identify X10A and Modbus separately, and follow visible source selection when
@@ -380,7 +382,7 @@ history alone leaves a live-state pin in place.
 The two views freeze while either is scrubbed. A recorded pin without a boot-relative bucket
 expires when the plotted series or its alignment changes.
 Closing the inspector preserves a pin for an open
-value row. Collapsing the value panel clears it. Bubbles float directly above the plot without
+value row. Collapsing the value panel clears it. Bubbles normally float directly above the plot without
 reserving vertical space when idle — overlaying header/legend content above — with one measurement
 per line, omitting series without a sample at the selected instant and hiding the bubble when no
 visible series was measured there. The moving bubble paints opaque over the frosted near-opaque
@@ -404,7 +406,7 @@ not establish identical readings. Translated Model rows have stable explanation 
 
 The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in and while the active
 source (`X10A` or `Modbus`) is live or has retained/confirmed window state. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
-Rows cover fault, tank loss, starts, defrost, heater runtime and retry changes. The observation-only
+Rows cover fault, tank loss, starts, heater runtime and retry changes. The observation-only
 flow result appears in the **Flow rate** inspector. The [water pressure finding](DIAGNOSTICS.md#water-pressure)
 follows any second-source pressure reading in its inspector. With the X10A assessment available and
 its trend visible, selecting a chart position opens the explanation below the time axis.
@@ -427,6 +429,15 @@ faint dotted horizontal gridlines with a left integer Y-axis column on the cumul
 starts are observed). Keep the observed start count available when classification inputs are
 unsupported. Distinguish unsupported inputs from temporarily insufficient readings. Label elapsed
 time as the observation window and reserve event timestamps for recorded events.
+
+The outdoor unit's **Defrost** inspector shows the current X10A state when readable,
+a description, **Normal** context and the 24-hour trend. The **Normal** text explains the runtime
+share. Current X10A diagnostics add two rows below the chart for observed starts and runtime
+share when either value is available. A retained X10A report can keep its available trend
+during a signal loss. The Modbus fallback uses its separate combined **Defrost / Restart**
+trend when X10A history is unavailable. A current X10A **NOTE** counts in the Plant diagnostics
+summary. Its entry opens the same inspector. An amber warning triangle appears directly after
+the centred **Defrost** label. The pill's active colour follows the current defrost state.
 
 The tank-cooling expander shows **Largest hourly drop at the tank sensor** in °C per hour when the
 aggregate has a rate. It shows the time and recorded circumstances of the most recent exact hour
