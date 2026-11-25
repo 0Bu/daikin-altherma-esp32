@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: b8779f56d71a82ae48b384e1d2200245804a2b390daf3c4bf9e247c77cddd1a5 -->
+<!-- user-docs-contract: 22e04b31905419fa037d8824c25668e271faa8ddc6d11b01ea294769594a364d -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -227,22 +227,25 @@ within the 24-hour window.
 ### Lowest water flow
 
 **In plain language:** Open **Flow rate** in the schematic for its current reading and 24-hour
-trend. When X10A is the active source for Plant diagnostics, the card can also show the lowest
-reading recorded after at least ten minutes of continuous space heating. When Modbus is active,
-the card explains that the heating minimum requires X10A.
+trend. The card can also show the lowest reading recorded after at least ten minutes of continuous
+space heating. It uses X10A when an eligible minimum is available and otherwise uses a supported
+HomeHub Modbus result. The label names the source of the reported minimum.
 
-**Meaning:** Shading under the X10A curve marks covered parts of recorded five-minute windows
-containing that minimum. Select a shaded area or use the legend to see when it occurred directly
-below the chart. The legend is available when a recorded window overlaps the dated chart and an
-X10A sample is visible. It can also open windows inside curve gaps. The summary at the bottom of
-the card can show the minimum even if older records lack a time. During quiescent pump-only X10A
-circulation (`>= 5.0 l/min` for at least `600 s` with compressor, defrost, and heaters off,
-unchanged 3-way valve, and `<= 0.5 K` drift over `300 s` on both sensors of a pair), the same
-inspector also separately shows 24-hour signed leaving water before the backup heater minus return
-water (`R1T−R4T`) and (when supported and readable) post-heater minus pre-heater (`R2T−R1T`)
-ranges, qualified duration, episode windows, and reading counts; switching to Modbus hides
-water-temperature agreement. It follows the available Modbus comparison, water pressure and
-requested pump percentage.
+**Meaning:** Shading under the matching source's curve marks covered parts of recorded five-minute
+windows containing the minimum. Select a shaded area or the legend to see the window below the chart.
+Select the legend again to close the explanation. Reopening it shows the next window. The legend also
+reaches windows inside gaps when the source has a visible reading elsewhere on the chart.
+The summary at the bottom of the card can show the minimum even
+if older X10A records lack a time. Modbus observations accumulate again after a restart.
+
+With X10A active for Plant diagnostics, the inspector also shows water-temperature agreement
+during settled pump-only circulation. It reports 24-hour ranges, qualified duration, episode
+windows and reading counts for the difference between leaving water before the backup heater and
+return water (`R1T−R4T`), and between water after and before the heater (`R2T−R1T`) when both
+sensors are readable.
+The pump must run at `>= 5.0 l/min` for at least `600 s` with the compressor, defrost and heaters
+off and the 3-way valve unchanged. The readings of both sensors in a pair must drift by no more
+than `0.5 K` over `300 s`.
 
 **Important limit:** The required flow depends on the model and operating mode. Shading gives the
 time window of a reading, with no claim about how long the flow stayed there. The `600 s`

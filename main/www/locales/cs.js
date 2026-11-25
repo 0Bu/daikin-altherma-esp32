@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -180,7 +180,7 @@ I18N.cs = localeValues([
   /* check.flow.show */ "Zobrazit nejnižší hodnotu v grafu",
   /* check.flow.readout */ (value) => `V tomto úseku byla alespoň jednou naměřena hodnota ${value}. Vytápění místností už běželo nejméně deset minut.`,
   /* check.flow.locations_missing */ "Čas starších měření této hodnoty nebyl uložen.",
-  /* check.flow.x10a_only */ "Minimum při vytápění se vyhodnocuje z měření X10A.",
+  /* check.flow.unavailable */ "Pro určení nejnižšího průtoku při vytápění chybí potřebné údaje.",
   /* check.flow.waiting */ "Čeká se na úsek vytápění vhodný k vyhodnocení.",
   /* check.heater */ "Topná tělesa",
   /* check.retries */ "Ochranné čítače",

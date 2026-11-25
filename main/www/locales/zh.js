@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -180,7 +180,7 @@ I18N.zh = localeValues([
   /* check.flow.show */ "在曲线上显示一个最低点",
   /* check.flow.readout */ (value) => `这一时间段内，至少有一次测得 ${value}。测量时，室内供暖已连续运行至少 10 分钟。`,
   /* check.flow.locations_missing */ "未保存此前测得该数值的具体时间。",
-  /* check.flow.x10a_only */ "供暖时的最低流量根据 X10A 的测量值计算。",
+  /* check.flow.unavailable */ "缺少确定供暖时最低流量所需的测量值。",
   /* check.flow.waiting */ "正在等待符合条件的供暖时段。",
   /* check.heater */ "电加热器",
   /* check.retries */ "保护计数器",

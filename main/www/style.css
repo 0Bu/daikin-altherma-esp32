@@ -1269,6 +1269,9 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   flex: 0 0 16px; border: 0;
   background: color-mix(in srgb, var(--vhist-colour) 42%, transparent);
 }
+.vhist-source.vhist-legend-flow-min[aria-expanded="true"] i {
+  background: color-mix(in srgb, var(--vhist-colour) 68%, transparent);
+}
 .vhist-source.vhist-legend-low i,
 .vhist-source.vhist-legend-crit i { border: none; border-top: 1.5px dashed var(--vhist-colour);
   border-radius: 0; background: transparent; height: 0; }

@@ -1644,6 +1644,9 @@ function inspectSig(e) {
 // Chart state has its own signature, independent of changing inspector readings. A new series
 // (`gen`), categorical live cap or pin updates its markup; ordinary scalar polls keep it mounted.
 function renderInspectHist(e, row, mode = "", flow = null) {
+  if (flow?.minimum == null || (S.flowMinSelection &&
+      (S.flowMinSelection.source !== flow.source || S.flowMinSelection.minimum !== flow.minimum)))
+    S.flowMinSelection = null;
   const mayFetch = mode === "open" ||
     (mode === "refresh" && (typeof _pollBusy === "undefined" || !_pollBusy));
   let started;
@@ -1719,7 +1722,7 @@ function renderInspectHist(e, row, mode = "", flow = null) {
     ? [typeof modbusFlowScaleUnverified === "function" && modbusFlowScaleUnverified(),
        !!S.histHidden?.has(id)].join(":")
     : "";
-  const flowReference = flow?.windows ? JSON.stringify([flow.minimum, flow.windows]) : "";
+  const flowReference = flow?.windows ? JSON.stringify([flow.source, flow.minimum, flow.windows]) : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh),
@@ -1763,7 +1766,6 @@ function renderInspect(mode = "") {
   ]) : "");
   if (sig === S.inspSig) return;
   S.inspSig = sig;
-  if (!flow || flow.minimum === null) S.flowMinSelection = null;
   $("inspFlowDiagnosis").hidden = !flow;
   setHtml("inspFlowDiagnosis", flow ? checkupFlowBriefHtml(flow) : "", false);
   // Use the same live-class accordion as the value/Settings tongues. The body stays mounted inside

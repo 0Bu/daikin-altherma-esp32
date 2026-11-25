@@ -2128,7 +2128,7 @@ function syncCheckupFaultPanel(panel) {
   }
 }
 
-// H1 is an independent dated population, not a new verdict or a replacement for min_l_min.
+// Hydronic evidence is an independent dated population with its own method and identity.
 function checkupHydronicKnown(h) {
   return h?.method === 2 && h.confirmed === true && h.dated === true &&
     typeof h.first_evidence_unix_s === "number" && Number.isFinite(h.first_evidence_unix_s) &&
@@ -2143,14 +2143,28 @@ function checkupFlowReport() {
   const health = S.status.health;
   if (health?.persist === "unknown" || !Array.isArray(health?.checks)) return null;
   const reported = health.checks.find(c => c?.id === "flow");
-  const source = health.source || S.status.diagnostics.effective_source || "x10a";
-  if (!reported || (source !== "x10a" && source !== "modbus")) return null;
+  if (!reported) return null;
+  // The selected minimum has its own source. The older fields belong to the active checkup.
+  const activeSource = health.source || S.status.diagnostics.effective_source || "x10a";
   const heating = reported.hydronic;
-  const value = heating?.flow_l_min?.min;
-  const minimum = source === "x10a" && checkupHydronicKnown(heating) &&
-    Number.isSafeInteger(heating.samples) && heating.samples > 0 &&
-    Number.isFinite(value) && value > 0 ? value : null;
-  const w = reported.minimum_windows;
+  const selected = reported.heating_minimum;
+  const hasSelected = Object.prototype.hasOwnProperty.call(reported, "heating_minimum");
+  if (hasSelected && !["observed", "collecting", "unsupported"].includes(selected?.reason)) return null;
+  const source = hasSelected ? selected.source : activeSource;
+  if (source !== "x10a" && source !== "modbus") return null;
+  let value, w, unsupported;
+  if (hasSelected) {
+    if (selected.reason === "observed") value = selected.min_l_min;
+    w = selected.minimum_windows;
+    unsupported = selected.reason === "unsupported";
+  } else {
+    if (source === "x10a" && checkupHydronicKnown(heating) &&
+        Number.isSafeInteger(heating.samples) && heating.samples > 0)
+      value = heating.flow_l_min?.min;
+    w = reported.minimum_windows;
+    unsupported = source !== "x10a" || heating?.reason === "unsupported";
+  }
+  const minimum = Number.isFinite(value) && value > 0 ? value : null;
   const windows = minimum !== null && Number.isSafeInteger(w?.t0) && w.t0 >= 0 &&
     w.t0 % 3600 === 0 && w.t0 <= 8640000000000 - 86400 && w.slot_s === 300 &&
     Array.isArray(w.hour_masks) && w.hour_masks.length === 24 &&
@@ -2158,7 +2172,7 @@ function checkupFlowReport() {
     ? w : null;
   const locationsMissing = minimum !== null &&
     (!windows || windows.locations_missing === true || !windows.hour_masks.some(Boolean));
-  const a = source === "x10a" && reported.water_agreement && typeof reported.water_agreement === "object" &&
+  const a = activeSource === "x10a" && reported.water_agreement && typeof reported.water_agreement === "object" &&
     reported.water_agreement.method === 2 ? reported.water_agreement : null;
   const agreement = a ? {
     known: checkupHydronicKnown(heating),
@@ -2166,7 +2180,7 @@ function checkupFlowReport() {
     saturated: heating?.population_saturated === true,
     data: a,
   } : null;
-  return { source, minimum, windows, locationsMissing, unsupported: heating?.reason === "unsupported", agreement };
+  return { source, minimum, windows, locationsMissing, unsupported, agreement };
 }
 
 function checkupWaterAgreementHtml(agreement) {
@@ -2219,10 +2233,10 @@ function checkupWaterAgreementHtml(agreement) {
 }
 
 function checkupFlowBriefHtml({ source, minimum, locationsMissing, unsupported, agreement }) {
-  if (source !== "x10a") return `<p>${esc(t("check.flow.x10a_only"))}</p>`;
+  const name = source === "modbus" ? "Modbus" : "X10A";
   const head = minimum === null
-    ? `<p>${esc(t(unsupported ? "check.status.unavailable" : "check.flow.waiting"))}</p>`
-    : `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · X10A</span>` +
+    ? `<p>${esc(t(unsupported ? "check.flow.unavailable" : "check.flow.waiting"))}</p>`
+    : `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · ${name}</span>` +
       `<strong class="num">${esc(histFmt1(minimum))} l/min</strong></div>` +
       `<p>${esc(t("check.flow.runup"))}</p>` +
       (locationsMissing ? `<p>${esc(t("check.flow.locations_missing"))}</p>` : "");

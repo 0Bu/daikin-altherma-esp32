@@ -849,6 +849,12 @@ static constexpr uint32_t MB_CACHE_MAX_AGE_S = logic::modbus_cache_max_age_s(
     logic::MB_FULL_CYCLE_TICKS, POLL_INTERVAL_S * 1000, MB_REQUEST_BUDGET_MS,
     logic::mb_plan_max_requests(MB_PLAN_ALTHERMA4.batch, MB_PLAN_ALTHERMA4.count, true),
     logic::mb_plan_max_requests(MB_PLAN_ALTHERMA4.batch, MB_PLAN_ALTHERMA4.count, false));
+static_assert(MB_CACHE_MAX_AGE_S >=
+                  logic::modbus_cache_max_age_s(
+                      logic::MB_FULL_CYCLE_TICKS, POLL_INTERVAL_S * 1000, MB_REQUEST_BUDGET_MS,
+                      logic::mb_plan_max_requests(MB_PLAN.batch, MB_PLAN.count, true),
+                      logic::mb_plan_max_requests(MB_PLAN.batch, MB_PLAN.count, false, true, true)),
+              "HomeHub heating sweep outgrew the full-cache age budget");
 } // namespace
 
 ModbusStatus mb_status() {
@@ -895,11 +901,13 @@ ModbusStatus mb_status() {
 // MBAP round-trips a second at a hub that also serves the Onecta app, the MMI and evcc — for a map
 // whose fastest-moving member is a water temperature.
 static void mb_poll_once() {
+    const int64_t  sweep_started_us        = esp_timer_get_time();
     const uint32_t cycle_target_generation = s_target_generation.load(std::memory_order_acquire);
     const uint32_t consent_epoch           = checkup_consent_epoch();
     struct ModbusTargetConfig {
         int     mb_port    = 0;
         uint8_t mb_unit_id = 0;
+        bool    diagnostics_enabled = false;
     };
     std::string        target;
     ModbusTargetConfig c;
@@ -907,6 +915,7 @@ static void mb_poll_once() {
         target       = config_modbus_host(cfg);
         c.mb_port    = cfg.mb_port;
         c.mb_unit_id = cfg.mb_unit_id;
+        c.diagnostics_enabled = cfg.diagnostics_enabled;
     });
     const uint32_t modbus_target_fp = logic::history_homehub_target_fingerprint(
         target.c_str(), static_cast<uint32_t>(c.mb_port), static_cast<uint32_t>(c.mb_unit_id));
@@ -982,6 +991,10 @@ static void mb_poll_once() {
         bool    space_route_active  = false;
         bool    heating_mode_known  = false;
         bool    heating_mode_active = false;
+        bool    defrost_clear       = false;
+        bool    hot_start_clear     = false;
+        bool    pump_running        = false;
+        bool    compressor_running  = false;
         int16_t flow_idx            = -1;
         int64_t plant_gate_ms       = -1;
         int64_t space_route_ms      = -1;
@@ -1024,6 +1037,10 @@ static void mb_poll_once() {
             gates.heating_mode_active = raw == 1;
             gates.heating_mode_ms     = observed_ms;
         }
+        if (r.space == MbFunc::ReadInput && r.offset == 35) gates.defrost_clear = raw == 0;
+        if (r.space == MbFunc::ReadInput && r.offset == 36) gates.hot_start_clear = raw == 0;
+        if (r.space == MbFunc::ReadInput && r.offset == 30) gates.pump_running = raw == 1;
+        if (r.space == MbFunc::ReadInput && r.offset == 31) gates.compressor_running = raw == 1;
         // Input 44's 40..45 batch is explicitly selected on every fast cycle by modbus_plan.hpp.
         // Decode the exact reply word here; the current-session half of freshness is applied after
         // the sweep, once it is known. It remains context only — selecting the batch is not a gate.
@@ -1076,6 +1093,9 @@ static void mb_poll_once() {
         MbRead io;
 
         const ModbusProfile   cur_prof      = s_active_profile.load(std::memory_order_acquire);
+        const bool            heating_observation =
+            c.diagnostics_enabled && cur_prof == ModbusProfile::HomeHub &&
+            s_probe_tracker.profile_basis == ModbusProfileBasis::Affirmative;
         const bool            use_altherma4 = (cur_prof == ModbusProfile::Altherma4);
         const int             plan_count = use_altherma4 ? MB_PLAN_ALTHERMA4.count : MB_PLAN.count;
         const logic::MbBatch* plan_batches =
@@ -1088,9 +1108,11 @@ static void mb_poll_once() {
         // for a single-register batch. `break`s on anything but an exception, for the reason the
         // batch loop does: every other failure closed or desynced the stream, so continuing would
         // only overwrite the original cause with "not connected".
-        const auto read_singly = [&](const logic::MbBatch& b) {
+        const auto read_singly = [&](const logic::MbBatch& b, bool heating_only) {
             for (uint8_t k = 0; k < b.count; k++) {
                 const def::HomeHubReg& r   = active_regs[plan_orders[b.row_first + k]];
+                if (heating_only && !logic::mb_offset_is_heating_witness(r.space, r.offset))
+                    continue;
                 uint16_t               pdu = 0;
                 if (!mb_pdu_address(r.offset, pdu)) continue;
                 MbFailure failure;
@@ -1122,17 +1144,19 @@ static void mb_poll_once() {
         MbFailure step_failure;
         for (int bi = 0; bi < plan_count && !link_broken; bi++) {
             const logic::MbBatch& b = plan_batches[bi];
-            if (!full && !logic::mb_batch_is_fast(b)) continue;
+            const bool            heating_only = !full && !logic::mb_batch_is_fast(b);
+            if (heating_only && !(heating_observation && logic::mb_batch_is_fast(b, true)))
+                continue;
             esp_task_wdt_reset(); // each request is a bounded LAN round-trip
 
             if (b.count <= 1 || s_batch_split[bi]) {
-                read_singly(b);
+                read_singly(b, heating_only);
                 continue;
             }
 
             uint16_t pdu = 0;
             if (!mb_pdu_address(b.first_offset, pdu)) {
-                read_singly(b);
+                read_singly(b, heating_only);
                 continue;
             }
             step_failure = MbFailure{};
@@ -1153,7 +1177,7 @@ static void mb_poll_once() {
                 diag_printf("modbus: batch %u..%u exception — reading singly\n",
                             static_cast<unsigned>(b.first_offset),
                             static_cast<unsigned>(b.first_offset + b.count - 1));
-                read_singly(b);
+                read_singly(b, heating_only);
                 continue;
             }
             for (uint8_t k = 0; k < b.count; k++) {
@@ -1273,19 +1297,33 @@ static void mb_poll_once() {
         outdoor_row_answered, current_session, outdoor_temperature_c);
     const auto report_cycle_result = [&](bool final_current_session) {
         if (first_failure.type != MbFailureType::None) {
-            status_error(std::string(failure_code(first_failure.type)),
-                         failure_message(first_failure), first_failure.detail, first_failure.reg,
-                         /*link_down=*/!final_current_session, cycle_target_generation);
+            const char* code = failure_code(first_failure.type);
+            {
+                Lock lk(s_mtx);
+                if (s_target_generation.load(std::memory_order_acquire) !=
+                        cycle_target_generation ||
+                    (!s_status.discovering && s_status.last_error_code == code &&
+                     s_status.last_error_detail == first_failure.detail &&
+                     s_status.last_error_register == first_failure.reg))
+                    return;
+            }
+            try {
+                status_error(std::string(code), failure_message(first_failure),
+                             first_failure.detail, first_failure.reg,
+                             /*link_down=*/!final_current_session, cycle_target_generation);
+            } catch (const std::bad_alloc&) {
+                // The readings already committed. Keep the previous error text and leave the
+                // completed cycle visible instead of routing this through the poll-gap handler.
+            }
         } else if (logic::mb_cycle_proves_recovery(full, final_current_session)) {
             // One status error represents the WHOLE map. A fast cycle did not re-read the remaining
             // rows and therefore cannot prove that their last failure recovered.
             status_recovered(cycle_target_generation);
         }
     };
-    // A FAST CYCLE COMMITS NO VALUE CACHE. It read fifteen of the map's registers, so its
-    // `fresh` is not a cache and its raster position is not a sample: committing it would publish a
-    // /values array of fifteen rows and hand the trend rings a bucket in which 22 of the 37 rows
-    // look like a failure to read. The cache and the rings stay with the last FULL cycle. Its age
+    // A FAST CYCLE COMMITS NO VALUE CACHE. Its partial sweep is not a history sample, and
+    // committing it would make unread rows look like failures. The cache and the rings stay with
+    // the last FULL cycle. Its age
     // includes both poll delays and bounded requests — and `values`/`connected` below still report
     // this cycle's link, so a hub that went away is visible within a second rather than within a
     // cadence.
@@ -1323,8 +1361,13 @@ static void mb_poll_once() {
         }
         // The writer itself rechecks target generation under s_mtx, closing the last window between
         // this status commit and a concurrent /set_hp.
-        report_cycle_result(final_current_session);
+        if (!final_current_session || !gates.plant_gate_active || !gates.space_route_active ||
+            !gates.heating_mode_active || !gates.defrost_clear || !gates.hot_start_clear ||
+            !gates.pump_running || !gates.compressor_running)
+            checkup_modbus_heating_break(cycle_target_generation, consent_epoch);
+        // A failed status allocation cannot repeat this tick after its data were committed.
         s_cycle_tick++;
+        report_cycle_result(final_current_session);
         return;
     }
 
@@ -1342,7 +1385,8 @@ static void mb_poll_once() {
         if (current_session && !link_broken && profile_settled) {
             checkup_modbus_confirm_source(resolved_prof, modbus_target_fp);
             checkup_record_modbus(fresh.data(), fresh.size(), resolved_prof,
-                                  cycle_target_generation, consent_epoch, true, resolved_basis);
+                                  cycle_target_generation, consent_epoch, true, resolved_basis,
+                                  sweep_started_us, cycle_generation);
         } else if (!current_session || link_broken) {
             checkup_record_modbus(nullptr, 0, resolved_prof, cycle_target_generation, consent_epoch,
                                   false, resolved_basis);
@@ -1410,8 +1454,8 @@ static void mb_poll_once() {
         s_heating_mode_ms            = final_current_session ? gates.heating_mode_ms : -1;
         s_plant_outdoor_ms           = final_current_session ? gates.plant_outdoor_ms : -1;
     }
-    report_cycle_result(final_current_session);
     s_cycle_tick = profile_promoted ? 0 : s_cycle_tick + 1;
+    report_cycle_result(final_current_session);
 }
 
 static void mb_task_start_if_enabled() noexcept;

@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: debff8c1261cff467c98b3cec6dbd60cef28f9ca8c5108e1d2add60ecfc3ffdd -->
+<!-- diagnostic-evidence-contract: 8fbe8d871de65ee7e46a20c1181979dda8b990448f32991f23341af4316c115b -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -631,8 +631,9 @@ cannot erase an earlier confirmed drop within the 24-hour window or explain its 
 **External evidence:** Minimum water flow is model-specific. [D1] states `12 l/min` and fault 7H for
 the listed Altherma 3 R W units (sections 6.4.3, 9.4.1, and 12.4). An Altherma 3 H HT F manual states
 `25 l/min` or `22 l/min`, depending on the variant ([D2], section 8.1.3). HomeHub EKRHH Modbus
-exposes leaving-water flow rate in input register 49 scaled by 1/100 to `l/min` ([D3], Modbus input
-registers). One firmware-wide good/bad limit would therefore be incorrect.
+exposes flow in input register 49 scaled by 1/100 to `l/min`, alongside pump, compressor, defrost,
+hot start, 3-way valve, operating mode and normal space operation ([D3], section 9.2.2). One
+firmware-wide good/bad limit would therefore be incorrect.
 
 The [Altherma 3 R W installer guide, 4P629085-1E, 2024.04][h1-split-guide], sections 6.5.1, 10.6.3
 and 16.2, distinguishes the heating controller difference (leaving-water setpoint minus return)
@@ -680,9 +681,26 @@ exposed separately. Each hour also retains the five-minute windows containing sa
 exact stored flow minimum. The report uses only windows from hours tied at the overall minimum.
 Compatible older `HYDR` v2 hours retain their minimum with unknown locations. The timing mask uses
 type-specific journal header bytes (`pad[8..9]`) covered by the record CRC, staying compatible with
-v2 headers that ignore these bytes. With X10A active for diagnostics, the inspector shows the
-qualified minimum when available. Its recorded windows can shade the visible, dated X10A trend
-independently of the plotted values.
+v2 headers that ignore these bytes.
+
+The independent HomeHub EKRHH heating minimum uses affirmative flow coverage and a positive
+reading from a completed Modbus sweep. Each eligible sweep must show the pump and compressor on
+(inputs 30 and 31), defrost and hot start off (35 and 36), the space-heating valve route (37),
+heating mode (38) and active normal space operation (53). The intervening fast sweeps must confirm
+all seven operating witnesses (30, 31, 35–38 and 53). Missing or invalid inputs, a sweep or gap longer
+than 15 seconds, or a link or consent interruption breaks continuity. After 600 continuous eligible
+seconds, dated readings in tenths of a litre per minute contribute to independent RAM-only hour
+buckets and five-minute minimum masks. The first dated sweep anchors the UTC projection from
+monotonic time. Wall time is checked to millisecond precision against that fixed projection.
+The report withholds the minimum when the deviation exceeds two seconds. A dated sweep outside that
+tolerance clears the accumulated hours and restarts qualification, including when smaller successive
+corrections add up to the deviation. Previously qualified hours can still report dated evidence
+after a link interruption. Reboot, a target or profile change, or a new diagnostics generation
+clears the Modbus window.
+
+The inspector prefers a qualified X10A minimum and uses the qualified HomeHub Modbus minimum when
+X10A has none. The two sources contribute separately, and the recorded windows can shade only the
+corresponding curve.
 
 Water-temperature agreement (`flow.water_agreement`) shares the same `HYDR` v2 hour slot and `15 s`
 gap / `observed_us` frame without altering H1 `candidate_us`, `qualified_us`, `spread`, `flow`, or
@@ -697,8 +715,7 @@ with peak-to-peak excursion `<= 0.5 K` on both sensors of a pair, samples enter 
 increments once per continuous quiescent run, including across UTC hour boundaries); otherwise
 settled samples report `not_stationary`. Absent/invalid/ambiguous `R2T` (`0x61/4/105`) resets only
 `r2_r1` (`AgreementR2tUnavailable`), `valve_dhw == On` sets `AgreementDhwRoute`, and Modbus or
-unconfirmed/suppressed X10A leaves `water_agreement` null. See [the API
-contract](API.md#qualified-water-circuit-observations).
+unconfirmed/suppressed X10A leaves `water_agreement` null. See [the API contract](API.md#qualified-water-circuit-observations).
 
 The optional secondary comparison additionally requires the exact ERRA08–12E + ELSH/X(B) ECH₂O
 profile, an unambiguous publishable EKMIK temperature at `0x65/4` and current main-zone pump
@@ -710,17 +727,19 @@ withholds the comparison when more than 15 seconds have elapsed since the start 
 accepted sweep, and Modbus diagnostics leaves it null. The live comparison adds no journal fields.
 No shipped profile currently provides this complete input set.
 
-**Project boundary:** Sixty seconds, 600 seconds, 300 seconds, `0.5 K`, `5.0 l/min`, and 15 seconds
-are project filters, not published Daikin thresholds (`4P629085-1E` §6.5.1 / §10.6.3 / §16.2 do not
-define a passive quiescent agreement tolerance). No validated
-active-zone controller target is available in current queryable profiles. No 900-second pattern
+**Project boundary:** The 60-second pump run-up, 600-second settling, 300-second stability window,
+`0.5 K` drift cap, `5.0 l/min` circulation floor, 15-second continuity limit and two-second Modbus
+clock tolerance all come from this project. No validated active-zone controller target is available
+in current queryable profiles. No 900-second pattern
 classifier, 9 K alarm or model minimum compressor speed is inferred. The secondary comparison
 keeps zone intent unknown even where multiple setpoints are visible.
 
 **Not established:** The 60-second pump minimum has no retained location or operating-mode
 context. The qualified heating minimum mask locates readings at five-minute resolution. It carries
 no per-reading timestamp or duration. The separate first and last accepted timestamps retain
-second resolution. Neither value establishes design flow, a general comparison
+second resolution. HomeHub's operating flags do not establish backup-heater state or inactive
+special phases beyond defrost and hot start, so the two heating populations have different input
+requirements. Neither value establishes design flow, a general comparison
 with commissioning limits, or a hydraulic restriction. The hydronic ranges do not establish steady operation,
 emitter output, bypass, restriction, sensor calibration or available pump head. Passive `r1_r4` and `r2_r1`
 agreement does not prove sensor accuracy or calibration, does not exclude external heat sources,
@@ -800,10 +819,11 @@ cannot be reconstructed from the retained flag.
 
 - **[D3]** Daikin, *EKRHH Daikin HomeHub – Installer reference guide*, model
   EKRHH, document **4P744838-1E**, revision 2026-01:
-  [official PDF][D3-pdf]. Sections used: Modbus input registers (unit fault 21, error code 22,
-  subcode 23, internal pump 30, compressor 31, tank booster heater BSH 32, 3-way valve 37,
-  operation mode 38, DHW sensor R5T 43, outdoor ambient 44, and leaving water flow rate 49 scaled
-  by 1/100).
+  [official PDF][D3-pdf]. Sections used: 9.2.2, pp. 42–43, input registers (unit fault 21,
+  error code 22, subcode 23, internal pump 30, compressor 31, tank booster heater BSH 32,
+  defrost 35, hot start 36, 3-way valve 37, operation mode 38, DHW sensor R5T 43, outdoor
+  ambient 44, flow 49 scaled by 1/100 and normal space operation 53), and 9.2.3, p. 44,
+  special return values. Checked 24 November 2026.
 
 <a id="source-d4"></a>
 

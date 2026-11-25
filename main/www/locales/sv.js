@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -180,7 +180,7 @@ I18N.sv = localeValues([
   /* check.flow.show */ "Visa ett lägsta värde i grafen",
   /* check.flow.readout */ (value) => `Under det här tidsavsnittet uppmättes ${value} minst en gång. Rumsuppvärmningen hade då pågått i minst tio minuter.`,
   /* check.flow.locations_missing */ "Tidpunkten för äldre mätningar med det här värdet sparades inte.",
-  /* check.flow.x10a_only */ "Det lägsta flödet vid uppvärmning beräknas från X10A-mätningar.",
+  /* check.flow.unavailable */ "De mätvärden som behövs för att fastställa det lägsta flödet vid uppvärmning saknas.",
   /* check.flow.waiting */ "Väntar på en uppvärmningsperiod som uppfyller mätvillkoren.",
   /* check.heater */ "Elpatroner",
   /* check.retries */ "Skyddsräknare",

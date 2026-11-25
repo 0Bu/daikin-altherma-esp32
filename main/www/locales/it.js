@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -180,7 +180,7 @@ I18N.it = localeValues([
   /* check.flow.show */ "Mostra un minimo nel grafico",
   /* check.flow.readout */ (value) => `In questo intervallo è stato misurato almeno un valore di ${value}. Il riscaldamento degli ambienti era attivo da almeno dieci minuti.`,
   /* check.flow.locations_missing */ "L’orario delle misure precedenti con questo valore non è stato salvato.",
-  /* check.flow.x10a_only */ "La portata minima in riscaldamento è calcolata a partire dalle misure X10A.",
+  /* check.flow.unavailable */ "Mancano le misure necessarie per determinare la portata minima in riscaldamento.",
   /* check.flow.waiting */ "In attesa di un periodo di riscaldamento che soddisfi le condizioni di misura.",
   /* check.heater */ "Resistenze",
   /* check.retries */ "Contatori protezione",

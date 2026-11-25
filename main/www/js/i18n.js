@@ -331,7 +331,7 @@ const I18N = {
     "check.flow.show": "Show a low point",
     "check.flow.readout": (value) => `In this period, at least one reading was ${value}. Room heating had already been running for at least ten minutes.`,
     "check.flow.locations_missing": "The time of older readings at this value was not saved.",
-    "check.flow.x10a_only": "The heating minimum is evaluated from X10A readings.",
+    "check.flow.unavailable": "The readings needed to determine the heating minimum are unavailable.",
     "check.flow.waiting": "Waiting for a qualifying heating period.",
     "check.heater": "Electric heaters",
     "check.retries": "Protection counters",

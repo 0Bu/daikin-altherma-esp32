@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -180,7 +180,7 @@ I18N.ja = localeValues([
   /* check.flow.show */ "グラフで最低点を表示",
   /* check.flow.readout */ (value) => `この区間では、${value} が少なくとも1回測定されました。その時点で室内暖房は10分以上続いていました。`,
   /* check.flow.locations_missing */ "この値を示した過去の測定の時刻は保存されていません。",
-  /* check.flow.x10a_only */ "暖房時の最低流量はX10Aの測定値から求めます。",
+  /* check.flow.unavailable */ "暖房時の最低流量を求めるために必要な測定値がありません。",
   /* check.flow.waiting */ "集計対象となる暖房運転を待っています。",
   /* check.heater */ "電気ヒーター",
   /* check.retries */ "保護カウンタ",

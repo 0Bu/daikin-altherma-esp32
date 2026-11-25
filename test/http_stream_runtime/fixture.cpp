@@ -84,6 +84,7 @@ inline unsigned                               scan_calls             = 0;
 inline size_t                                 scan_first_allocations = 0;
 inline daik::CheckupStopContextReport         stop_report{};
 inline daik::CheckupHydronicReport            hydronic_report{};
+inline daik::logic::ModbusHeatingFlowReport   modbus_heating_report{};
 inline int                                    flow_min_tenths = -1;
 inline daik::logic::DefrostStartReport        defrost_start{};
 inline daik::logic::CheckupOutdoorReport      defrost_outdoor{};
@@ -145,6 +146,7 @@ void reset() {
     scan_first_allocations       = 0;
     stop_report                  = {};
     hydronic_report              = {};
+    modbus_heating_report        = {};
     flow_min_tenths              = -1;
     defrost_start                = {};
     defrost_outdoor              = {};
@@ -595,6 +597,9 @@ logic::WorkingFigureReport checkup_working_figure_status(const Config&, Diagnost
 CheckupHydronicReport checkup_hydronic_report() {
     ++fixture::hydronic_report_calls;
     return fixture::hydronic_report;
+}
+logic::ModbusHeatingFlowReport checkup_modbus_heating_report() {
+    return fixture::modbus_heating_report;
 }
 CheckupFaultStatus checkup_fault_latest_status(DiagnosticsSource, bool source_fresh) {
     if (fixture::fault_trace_present) {
@@ -1548,6 +1553,10 @@ int main(int argc, char** argv) {
         hydronic_report.observation.totals.r1_r4_windows      = 1;
         hydronic_report.observation.totals.r1_r4_samples      = 2;
         hydronic_report.observation.totals.r1_r4              = {-500, -300, -100};
+        modbus_heating_report.supported                       = true;
+        modbus_heating_report.minimum_tenths                  = 52;
+        modbus_heating_report.windows.first_bucket            = 500000;
+        modbus_heating_report.windows.masks[23]               = 4;
         const unsigned before_stop_calls                      = stop_report_calls;
         const unsigned before_hydronic_calls                  = hydronic_report_calls;
         auto           req                                    = request();
@@ -1556,8 +1565,8 @@ int main(int argc, char** argv) {
         emit(req, "status-modbus-diagnostics");
         check(last_checkup_report_source == daik::DiagnosticsSource::Modbus &&
                   stop_report_calls == before_stop_calls &&
-                  hydronic_report_calls == before_hydronic_calls,
-              "modbus diagnostics view must read modbus slot without stop_context or hydronic");
+                  hydronic_report_calls == before_hydronic_calls + 1,
+              "modbus diagnostics must consult X10A only for the independent heating minimum");
         const size_t hydronic_pos = req.response.find("\"hydronic\":{\"confirmed\":false");
         const size_t hydronic_end =
             hydronic_pos == std::string::npos
@@ -1590,6 +1599,58 @@ int main(int argc, char** argv) {
                 req.response.find("\"pel_source\":\"modbus\"") != std::string::npos &&
                 req.response.find("\"limited_buh\":true") != std::string::npos,
             "status payload missing modbus working_figure or gas_comparison");
+    });
+    run("heating_minimum_status", [] {
+        current.mb_host                            = "192.0.2.50";
+        current.diagnostics_enabled                = true;
+        current.diagnostics_source                 = daik::DiagnosticsSource::X10a;
+        checkup_x10a_has_data                      = true;
+        flow_min_tenths                            = 65;
+        hydronic_report.reason                     = daik::logic::HydronicReason::Settling;
+        auto& obs                                  = hydronic_report.observation;
+        obs.confirmed                              = true;
+        obs.dated                                  = true;
+        modbus_heating_report.supported            = true;
+        modbus_heating_report.minimum_tenths       = 52;
+        modbus_heating_report.windows.first_bucket = 500000;
+        modbus_heating_report.windows.masks[23]    = 4;
+
+        auto read = [&](const char* name, bool redacted = false) {
+            next_request();
+            auto req = request();
+            check(invoke(req, redacted ? "/status?redact=1" : "/status", daik::h_status) == ESP_OK,
+                  "heating minimum status failed");
+            successful(req);
+            emit(req, name);
+            return req.response;
+        };
+        const auto fallback = read("heating-modbus-fallback");
+        check(fallback.find("\"heating_minimum\":{\"source\":\"modbus\",\"reason\":\"observed\","
+                            "\"min_l_min\":5.2,\"minimum_windows\":{") != std::string::npos,
+              "an unqualified X10A population hid the Modbus minimum");
+        const auto redacted = read("heating-modbus-redacted", true);
+        check(redacted.find("\"heating_minimum\":{\"source\":\"modbus\",\"reason\":\"observed\","
+                            "\"min_l_min\":5.2,\"minimum_windows\":null}") != std::string::npos,
+              "redacted status must keep the measured minimum and withhold its windows");
+
+        obs.totals.samples                = 2;
+        obs.totals.first_evidence_unix_us = 1800080000000000;
+        obs.totals.last_evidence_unix_us  = 1800082000000000;
+        obs.totals.flow                   = {15125, 7125, 8000};
+        obs.minimum_windows.first_bucket  = 500000;
+        obs.minimum_windows.masks[22]     = 16;
+        const auto preferred              = read("heating-x10a-priority");
+        check(preferred.find("\"heating_minimum\":{\"source\":\"x10a\",\"reason\":\"observed\","
+                             "\"min_l_min\":7.125,\"minimum_windows\":{") != std::string::npos,
+              "qualified X10A must take precedence over a lower Modbus result");
+
+        current.diagnostics_source = daik::DiagnosticsSource::Modbus;
+        read("heating-x10a-with-modbus-diagnostics");
+        current.diagnostics_source  = daik::DiagnosticsSource::X10a;
+        current.diagnostics_enabled = false;
+        hydronic_report             = {};
+        flow_min_tenths             = -1;
+        read("heating-disabled");
     });
     run("hydronic_status", [] {
         hydronic_report = {};

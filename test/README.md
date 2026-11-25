@@ -176,7 +176,7 @@ The contract runner executes additional compiled production consumers:
 
 | Contract | Scope |
 |---|---|
-| `test_modbus_runtime_contract.mjs` | Complete `hp_modbus.cpp`, real POSIX transport and SDK/task adapters: 31 cases and 30 targeted controls for parsing, polling, expiry, target cutover, retirement, 32/42-row profile ownership, native enums and automatic native promotion. [Evidence limits](modbus_runtime/README.md) include modeled scheduler/config/history and no physical HomeHub/NVS proof. |
+| `test_modbus_runtime_contract.mjs` | Complete `hp_modbus.cpp` with real POSIX transport and SDK/task adapters. Covers polling, cache expiry, target cutover, profile selection, heating witnesses, and allocation failure while reporting a completed poll. [Evidence limits](modbus_runtime/README.md) include modeled scheduler, configuration, and history behavior. |
 | `test_modbus_metadata_contract.mjs` | Current HTTP/MCP serializer and MQTT snapshot consumer: 16 cases and 10 controls for snapshot-owned row definitions, raw numeric enums/text, native keys/labels, quiet-selection exclusion from activity metadata and bounded exact flat-JSON reservation. Physical native Altherma 4 scaling/acceptance remains pending. |
 
 `scripts/run-contract-tests.sh` discovers every `test/test_*_contract.mjs`, refusing an empty set,
