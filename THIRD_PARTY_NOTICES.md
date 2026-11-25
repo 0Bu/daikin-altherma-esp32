@@ -56,11 +56,6 @@ License:
 
 ## Web tooling
 
-- The dashboard startup script and the device-local locale bundle each include the unmodified decompression-only
-  [LZMA-JS 2.3.2](https://github.com/LZMA-JS/LZMA-JS/tree/8f98fe85a1ef78ab6e9d26ab85ce338f50095a23)
-  decoder by Nathan Rugg under the MIT License. Its source, full license and exact upstream hashes
-  are retained in [`tools/web_asset/vendor/lzma-js/`](tools/web_asset/vendor/lzma-js/UPSTREAM.json).
-  The complete MIT notice also remains in both served resources.
 - Dashboard navigation embeds [Lucide](https://lucide.dev/) icon geometry under the ISC License;
   its power icon derives from Feather under the MIT License. The complete notices
   are retained in the license comment in `main/www/js/dashboard.js`, including in the embedded UI.
