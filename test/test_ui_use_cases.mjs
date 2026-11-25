@@ -5,120 +5,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
+import { createStrictDocument } from "../tools/ui/strict_dom.mjs";
 
-class ClassList {
-  constructor() { this.names = new Set(); }
-  add(...names) { for (const name of names) this.names.add(name); }
-  remove(...names) { for (const name of names) this.names.delete(name); }
-  contains(name) { return this.names.has(name); }
-  toggle(name, force) {
-    const on = force === undefined ? !this.names.has(name) : !!force;
-    if (on) this.names.add(name); else this.names.delete(name);
-    return on;
-  }
-}
-
-class Element {
-  constructor(id, doc) {
-    this.id = id;
-    this.doc = doc;
-    this._value = "";
-    this.checked = false;
-    this.disabled = false;
-    this.hidden = id.endsWith("Modal");
-    this.innerHTML = "";
-    this._textContent = "";
-    this.children = [];
-    this.dataset = {};
-    this.classList = new ClassList();
-    this.listeners = new Map();
-    this.onclick = null;
-  }
-  set value(value) { this._value = String(value ?? ""); }
-  get value() { return this._value; }
-  set textContent(value) { this._textContent = String(value ?? ""); this.children = []; }
-  get textContent() { return this._textContent; }
-  addEventListener(type, listener) {
-    const listeners = this.listeners.get(type) || [];
-    listeners.push(listener);
-    this.listeners.set(type, listeners);
-  }
-  async fire(type, init = {}) {
-    const event = {
-      type,
-      target: init.target || this,
-      currentTarget: this,
-      key: init.key,
-      pointerId: 1,
-      clientX: 0,
-      defaultPrevented: false,
-      preventDefault() { this.defaultPrevented = true; },
-    };
-    for (const listener of this.listeners.get(type) || []) await listener(event);
-    if (type === "click" && typeof this.onclick === "function") await this.onclick(event);
-    return event;
-  }
-  querySelector(selector) {
-    if (selector === '[role="dialog"]') return this;
-    const suffix = {
-      ".crash-title": "Title",
-      ".ota-alert-message": "Message",
-      ".ota-alert-close": "Close",
-    }[selector];
-    return suffix && this.id.startsWith("otaAlert")
-      ? this.doc.getElementById(this.id + suffix) : null;
-  }
-  querySelectorAll() {
-    return (this.doc.modalControls?.get(this.id) || []).map((id) => this.doc.getElementById(id));
-  }
-  focus() { this.doc.activeElement = this; }
-  blur() { if (this.doc.activeElement === this) this.doc.activeElement = null; }
-  setAttribute(name, value) { this[name] = String(value); }
-  getAttribute(name) { return this[name] ?? null; }
-  appendChild(child) { this.children.push(child); this.lastChild = child; return child; }
-  remove() {}
-  select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
-  setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
-  matches() { return false; }
-  closest() { return null; }
-  contains(child) { return this.doc.modalControls?.get(this.id)?.includes(child.id) || false; }
-  setPointerCapture() {}
-}
-
-class Document {
-  constructor() {
-    this.elements = new Map();
-    this.listeners = new Map();
-    this.activeElement = null;
-    this.documentElement = new Element("html", this);
-    this.body = new Element("body", this);
-  }
-  getElementById(id) {
-    if (!this.elements.has(id)) this.elements.set(id, new Element(id, this));
-    return this.elements.get(id);
-  }
-  createElement(tag) { return new Element(tag, this); }
-  querySelectorAll() { return []; }
-  addEventListener(type, listener) {
-    const listeners = this.listeners.get(type) || [];
-    listeners.push(listener);
-    this.listeners.set(type, listeners);
-  }
-  async fire(type, init = {}) {
-    const event = {
-      type,
-      target: init.target || this.activeElement || this.body,
-      currentTarget: this,
-      key: init.key,
-      pointerId: 1,
-      clientX: 0,
-      preventDefault() {},
-    };
-    for (const listener of this.listeners.get(type) || []) await listener(event);
-  }
-}
-
-const document = new Document();
+const document = createStrictDocument("main/www/index.html", { dynamicIds: ["e32Chan"] });
 const fetchState = { mode: "ok", calls: [] };
 const response = (ok, payload, status = ok ? 200 : 400) => ({
   ok,
@@ -307,13 +196,8 @@ const cases = [
 
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const htmlModals = [...html.matchAll(/<div class="modal" id="([^"]+Modal)"/g)].map((match) => match[1]).sort();
-document.modalControls = new Map();
-const modalStarts = [...html.matchAll(/<div class="modal" id="([^"]+Modal)"/g)];
-for (let i = 0; i < modalStarts.length; i++) {
-  const block = html.slice(modalStarts[i].index, modalStarts[i + 1]?.index ?? html.length);
-  document.modalControls.set(modalStarts[i][1],
-    [...block.matchAll(/<(?:button|input|select|textarea)\b[^>]*\bid="([^"]+)"/g)].map((match) => match[1]));
-}
+assert.deepEqual([...document.querySelectorAll(".modal")].map((m) => m.id).sort(), htmlModals,
+  "strict HTML DOM parser must preserve every modal in the shipped HTML");
 assert.deepEqual([...ui.MODALS].sort(), htmlModals, "MODALS must name every modal in the shipped HTML");
 assert.deepEqual(cases.map((item) => item.modal).sort(), [...ui.ROUTED_MODALS].sort(),
   "the settings interaction matrix must cover every routed modal");
@@ -546,7 +430,7 @@ const openOta = () => {
   assert.equal(document.getElementById("otaModal").hidden, false, "OTA decision must open");
   assert.equal(ui.S.stage, "dashboard", "OTA decision must retain the initiating screen");
   assert.equal(location.hash, "", "OTA decision must not invent a restorable route");
-  assert.equal(document.activeElement, document.getElementById("otaModal"),
+  assert.equal(document.activeElement, document.querySelector('#otaModal [role="dialog"]'),
     "OTA decision focus must land on its dialog container");
   assert.equal(document.getElementById("otaChanges").children.length, 2,
     "each changelog line must render as one list item");
@@ -595,7 +479,7 @@ assert.equal(dashOtaAlert.hidden, false, "the dashboard OTA card must appear");
 assert.equal(settingsOtaAlert.hidden, false, "the Settings OTA card must be ready for navigation");
 assert.equal(dashOtaAlert.querySelector(".ota-alert-message").textContent, otaMemoryError,
   "device error text must remain literal rather than becoming markup");
-assert.equal(dashOtaAlert.querySelector(".ota-alert-close")["aria-label"], "Schließen",
+assert.equal(dashOtaAlert.querySelector(".ota-alert-close").getAttribute("aria-label"), "Schließen",
   "the close glyph must have a localized accessible name");
 
 loadRoute("#settings");
@@ -620,12 +504,13 @@ loadRoute("");
 // The Settings cards are live-rendered and replace their controls. A disconnected initiator must
 // restore focus to the current stable channel control, not drop it onto body behind the modal.
 loadRoute("#settings");
-const replacedSettingsTrigger = new Element("oldSettingsOta", document);
-replacedSettingsTrigger.isConnected = true;
+const replacedSettingsTrigger = document.createElement("button");
+replacedSettingsTrigger.id = "oldSettingsOta";
+document.getElementById("settingsCards").appendChild(replacedSettingsTrigger);
 replacedSettingsTrigger.focus();
 otaDecision = ui.askOtaInstall(otaOffer, "Build note", false,
   replacedSettingsTrigger, "settings");
-replacedSettingsTrigger.isConnected = false;
+replacedSettingsTrigger.remove();
 await document.getElementById("otaCancel").onclick();
 assert.equal(await otaDecision, false);
 assert.equal(document.activeElement, document.getElementById("e32Chan"),

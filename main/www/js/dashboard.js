@@ -162,8 +162,11 @@ function renderCards(hold = true) {
   // follow the active diagnostics source (X10A or Modbus). Flow observations live in the Flow
   // inspector. Passive refrigerant observations can remain visible independently of the summary.
   const checkupSourceReady = checkupSourceReadyFor();
-  const checkup = S.status?.diagnostics?.enabled === true
-    ? checkupCardHtml(checkupSourceReady) : "";
+  let checkup = "";
+  if (S.status?.diagnostics?.enabled === true) {
+    try { checkup = checkupCardHtml(checkupSourceReady); }
+    catch (error) { console.error("Checkup card render failed", error); }
+  }
   const card = S.dashboardCard;
   setHtml("valueGroups", checkup + statusCardsHtml() +
     valueGroupsHtml(S._values || [], S.status?.hp?.connected), false);
@@ -1408,7 +1411,7 @@ function cyclingPeriodDetailsHtml(model, from, to) {
   const clockOptions = { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" };
   const fullClock = new Intl.DateTimeFormat(LANG, clockOptions);
   const shortClock = new Intl.DateTimeFormat(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-  const modeLabel = m => t({ space: "mode.heat", dhw: "mode.dhw" }[m] || "check.fault_unknown");
+  const modeLabel = m => t({ space: "mode.heat", dhw: "mode.dhw", cooling: "mode.cool" }[m] || "check.fault_unknown");
   const ongoing = (live, stale) => `<span class="checkup-run-live">${live}</span><span class="checkup-run-stale">${stale}</span>`;
   const unknownStop = esc(t("check.cycling.run_stop_unknown"));
 
@@ -1438,7 +1441,7 @@ function cyclingPeriodDetailsHtml(model, from, to) {
         `<p class="checkup-run-explain">${explain}</p></td></tr>`;
     }
     return `<tr class="checkup-run-row"${ctx ? ` data-run-row="${esc(rowKey)}" tabindex="0" aria-expanded="${isOpen}"` : ""}>` +
-      `<td><span class="checkup-run-start"><i class="mode-dot ${dotMode}" aria-hidden="true" title="${esc(modeLabel(dotMode))}"></i>` +
+      `<td><span class="checkup-run-start"><i class="mode-dot ${dotMode}" aria-hidden="true" title="${esc(modeLabel(rawMode))}"></i>` +
       `<time datetime="${fromD.toISOString()}">${esc(shortClock.format(fromD))}</time></span></td>` +
       `<td>${durHtml}</td>` +
       `<td><div class="checkup-stop-cell"><span class="checkup-stop-text">${stopCellHtml}</span>` +
@@ -2743,9 +2746,9 @@ function checkupMetricValue(c) {
       if (c.blocked === true) return "";
       if (!checkupDhwHasRate(c)) return Number.isFinite(c.windows) && c.windows > 0
         ? t("check.loss_windows", c.windows) : "";
-      const high = c.high_windows == null ? "" : t("check.loss_high", c.high_windows, c.windows || 0);
+      const high = c.high_windows == null ? "" : t("check.loss_high", c.high_windows, c.windows);
       // Circulation counts aggregate several hours; they cannot qualify the maximum hour.
-      return [t("check.loss_max", checkupFmt1(c.max_k_h)), high || t("check.loss_windows", c.windows || 0)].filter(Boolean).join(" · ");
+      return [t("check.loss_max", checkupFmt1(c.max_k_h)), high || t("check.loss_windows", c.windows)].filter(Boolean).join(" · ");
     }
     case "cycling":
       return Number.isInteger(c.starts) && c.starts >= 0
@@ -2811,7 +2814,7 @@ function checkupValue(c) {
     return share || (Number.isFinite(c.count) && c.count >= 0 ? t("check.cycles", c.count) : st);
   }
   if (c.id === "heater") return checkupHeaterValue(c) || st;
-  return (c.id === "fault" && c.verdict === "collecting") ? st : (checkupMetricValue(c) || st);
+  return checkupMetricValue(c) || st;
 }
 
 function checkupPressureHistoryHtml(id, unit, label) {
@@ -2934,7 +2937,7 @@ function refrigerantServiceRowHtml() {
   if (missing.length) detail.push(`${t("service.row.limits")} ${missing.join(" · ")}`);
   // Waiting/unsupported carry a blocker; partial windows name missing inputs in the explanation.
   // Recording and interrupted windows add their continuity consequence beside the time.
-  const helpKey = ["observing", "interrupted"].includes(state)
+  const helpKey = ["observing", "limited", "interrupted"].includes(state)
                 ? `service.help.${state}` : null;
   const status = state === "unsupported" ? t("check.status.unavailable")
                : state === "unknown" ? t("sys.nodata") : t(`service.state.${state}`);

@@ -109,7 +109,9 @@ async function assertCyclingAppearance(parent, server, context) {
   let isolated;
   const touch = parent.inputMode === "touch";
   const lock = touch ? undefined : process.env.DAIKIN_BROWSER_CYCLING_LOCK;
+  let sweepError = null;
   const sweep = async () => {
+    try {
     // Language caches, media overrides and polling belong to this disposable browser, never to
     // the page that will subsequently measure live history motion.
     isolated = await (touch
@@ -173,11 +175,15 @@ async function assertCyclingAppearance(parent, server, context) {
       }
     }
     assert.deepEqual(page.diagnostics, [], context + ": isolated appearance must emit no browser errors");
+    } catch (error) {
+      sweepError = error;
+      throw error;
+    }
   };
   const closeBrowser = async () => {
     // Failed startup may also have failed to stop Chromium. The supervisor ends both workers.
     if (!isolated) return false;
-    await isolated.close();
+    await isolated.close({ checkDiagnostics: !sweepError });
     return true;
   };
   await withCyclingCleanup(() => withChromiumAppearanceSlot(lock, sweep, closeBrowser),
@@ -1320,6 +1326,7 @@ export async function assertCyclingChart(page, server, context) {
       "No history yet.", context + ": a committed history forget withdraws cached precise run times");
     assert.deepEqual(await pinned(), [], context + ": a committed history forget withdraws the cached hour selection");
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
+    assert.deepEqual(page.diagnostics, [], `${context}: cycling chart checks must emit no unexpected browser errors`);
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {
     await page.evaluate("pollStop(); pollSchedule = () => {}; true");

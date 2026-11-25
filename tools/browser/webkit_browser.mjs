@@ -52,6 +52,7 @@ export async function launchWebKit({ viewport, allowedOrigin, timeoutMs = 30000 
     });
     const page = {
       inputMode: "touch", diagnostics,
+      clearDiagnostics() { diagnostics.length = 0; },
       evaluate: expression => native.evaluate(expression),
       async navigate(url) { await native.goto(url, { waitUntil: "load", timeout: timeoutMs }); },
       async waitFor(expression, { timeoutMs: waitMs = 10000, intervalMs = 40 } = {}) {
@@ -87,9 +88,16 @@ export async function launchWebKit({ viewport, allowedOrigin, timeoutMs = 30000 
       touchTimings: () => [...touchDurations],
     };
     let closing;
+    let enforceDiagnostics = true;
     return { page, product: "WebKit/" + browser.version(), descriptor: "iPad Pro 11",
-      close() {
-        closing ||= (async () => { try { await context.close(); } finally { await browser.close(); } })();
+      close({ checkDiagnostics = true } = {}) {
+        if (!checkDiagnostics) enforceDiagnostics = false;
+        closing ||= (async () => {
+          try { await context.close(); } finally { await browser.close(); }
+          if (enforceDiagnostics && diagnostics.length) {
+            throw new Error(`WebKit emitted unexpected diagnostics: ${diagnostics.join(" | ")}`);
+          }
+        })();
         return closing;
       } };
   } catch (error) {

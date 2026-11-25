@@ -85,11 +85,11 @@ const layoutAudit = `(() => {
   for (const el of document.querySelectorAll("body *")) {
     if (!shown(el) || el.closest(".schem-scroll")) continue;
     const rect = el.getBoundingClientRect();
-    // The mobile card picker intentionally clips offscreen names inside its own horizontal
-    // scroller. Audit their visible intersection; the scroller and page still obey viewport bounds.
-    const nav = el.closest("#cardNav");
-    const clip = nav && nav !== el && ["auto", "scroll"].includes(getComputedStyle(nav).overflowX)
-      ? nav.getBoundingClientRect() : null;
+    // Horizontal scrollers (#cardNav on mobile, <pre> code blocks on /mcp) intentionally clip
+    // overflowing descendants inside their own scrollbox while obeying viewport bounds themselves.
+    const scroller = el.closest("#cardNav, pre");
+    const clip = scroller && scroller !== el && ["auto", "scroll"].includes(getComputedStyle(scroller).overflowX)
+      ? scroller.getBoundingClientRect() : null;
     const left = clip ? Math.max(rect.left, clip.left) : rect.left;
     const right = clip ? Math.min(rect.right, clip.right) : rect.right;
     if (right < left) continue;
@@ -277,6 +277,176 @@ async function assertSetup(page, server, viewport) {
   assert.deepEqual(unexpected, [], `${context}: only the deliberately rejected HTTP resources may log errors`);
   page.clearDiagnostics();
   console.log(`browser setup checked: ${viewport.name}; exact gzip asset, rejected/accepted writes and native live feedback`);
+}
+
+async function assertMcpDashboard(page, server, viewport) {
+  await page.navigate(server.url + "mcp");
+  await page.viewport(viewport.width, viewport.height);
+  await page.waitFor("document.getElementById('endpoint-url')?.textContent.includes('/mcp')");
+  const context = `${viewport.name}/mcp`;
+  assertLayout(await page.evaluate(layoutAudit), context);
+  await assertAccessibility(page, context, { nativeTree: true });
+  const initial = await page.evaluate(`(() => ({
+    endpoint: document.getElementById("endpoint-url").textContent,
+    clientJson: document.getElementById("client-json").textContent,
+    curl: document.getElementById("curl-example").textContent,
+    buttons: [...document.querySelectorAll("[data-copy]")].map((b) => ({
+      target: b.dataset.copy,
+      label: b.textContent,
+    })),
+  }))()`);
+  const expectedUrl = `${new URL(server.url).origin}/mcp`;
+  assert.equal(initial.endpoint, expectedUrl, `${context}: endpoint URL must match page origin`);
+  const parsedJson = JSON.parse(initial.clientJson);
+  assert.equal(parsedJson?.mcpServers?.["daikin-altherma-esp32"]?.url, expectedUrl,
+    `${context}: client JSON must include exact MCP server URL`);
+  assert.ok(initial.curl.includes("2025-11-25") && initial.curl.includes(expectedUrl),
+    `${context}: curl snippet must include protocol version and exact URL`);
+  assert.equal(initial.buttons.length, 3, `${context}: three copy buttons expected`);
+  for (const { target, label } of initial.buttons) {
+    await page.evaluate(`document.querySelector('[data-copy="' + ${JSON.stringify(target)} + '"]').click(); true`);
+    await page.waitFor(`(() => {
+      const btn = document.querySelector('[data-copy="' + ${JSON.stringify(target)} + '"]');
+      return btn && (btn.textContent === "Copied" || btn.textContent === "Select and copy manually");
+    })()`);
+    assert.ok(label.length > 0, `${context}/${target}: initial button label must be non-empty`);
+  }
+  assert.deepEqual(page.diagnostics, [], `${context}: /mcp page must emit no console or page errors`);
+  console.log(`browser /mcp checked: ${viewport.name}; rendered JSON/curl snippets, layout, AX and copy feedback`);
+}
+
+async function assertLivePollFullDashboard(page, server, context) {
+  await page.evaluate(`window.__livePollSaved = {
+    status: JSON.parse(JSON.stringify(S.status)),
+    values: JSON.parse(JSON.stringify(S._values || [])),
+    modbus: JSON.parse(JSON.stringify(S._modbus || [])),
+    card: S.dashboardCard,
+    open: [...S.descOpen],
+  }; true`);
+  try {
+    const baseStatus = server.defaultStatus();
+    const fullChecks = [
+      { id: "cycling", verdict: "ok", evidence: "measured", starts: 2, observed_s: 86400, required_s: 86400 },
+      { id: "dhw_loss", verdict: "collecting", evidence: "measured", windows: 0, observed_s: 3600, required_s: 14400 },
+      {
+        id: "defrost", verdict: "info", evidence: "measured", count: 3, paired_count: 3, share_pct: 15,
+        defrost_s: 151, run_s: 1000, observed_s: 86400, required_s: 86400,
+        outdoor_source: "x10a", outdoor_min_c: -4.5, outdoor_mean_c: -2.0, outdoor_samples: 10,
+        last_observed_start: { unix_s: 2000000000, route: "space_heating", outdoor_c: -2.5 },
+      },
+      { id: "pressure", verdict: "ok", evidence: "measured", current_bar: 1.8, min_bar: 1.7, observed_s: 86400, required_s: 86400 },
+      { id: "flow", verdict: "ok", evidence: "measured", min_l_min: 14.2, observed_s: 86400, required_s: 86400 },
+      { id: "heater", verdict: "ok", evidence: "measured", buh_s: 0, bsh_s: 0, observed_s: 86400, required_s: 86400 },
+      { id: "retries", verdict: "ok", evidence: "measured", seen: false, observed_s: 86400, required_s: 86400 },
+      { id: "fault", verdict: "ok", evidence: "manufacturer", active: 0, observed_s: 86400 },
+    ];
+    const x10aStatus = {
+      ...baseStatus,
+      wifi: { ...baseStatus.wifi, connected: false, ip: "" },
+      net: {
+        ip: "192.0.2.99",
+        transport: "eth",
+        eth: { present: true, link: true, lease: true, speed_mbps: 100, full_duplex: true },
+      },
+      diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
+      health: {
+        status: "info", source: "x10a", source_fresh: true, full_span: true,
+        span_s: 86400, covered_s: 86400, persist: "fresh", checks: fullChecks,
+      },
+      refrigerant_service: {
+        state: "limited", continuous_s: 3600, samples: 120, blocker: "compressor_not_running",
+      },
+    };
+    server.setTelemetry({ status: x10aStatus, values: server.defaultValues(), histories: {} });
+    await page.evaluate(`(() => {
+      pollStop();
+      pollSchedule = window.__browserPollSchedule;
+      S.descOpen.clear();
+      S.descOpen.add("model:health_defrost");
+      S.descOpen.add("service:refrigerant");
+      S.dashboardCard = "diagnosis";
+      pollNow();
+      return true;
+    })()`);
+    await page.waitFor("S.status?.net?.ip === '192.0.2.99' && S.status?.diagnostics?.effective_source === 'x10a' && !_pollBusy");
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    await page.frame();
+    const x10aObserved = await page.evaluate(`(() => ({
+      pollFails: _pollFails,
+      browserHidden: document.getElementById("cardBrowser").hidden,
+      navButtons: document.querySelectorAll("#cardNav [data-card]").length,
+      valueRows: document.querySelectorAll("#valueGroups .vrow, #valueGroups .vdesc").length,
+      hdrIp: document.getElementById("hdrIp").textContent,
+      defrostText: document.querySelector('[data-desc="model:health_defrost"]')?.closest(".vitem")?.textContent || "",
+      serviceText: document.querySelector('[data-desc="service:refrigerant"]')?.closest(".vitem")?.textContent || "",
+    }))()`);
+    assert.equal(x10aObserved.pollFails, 0, `${context}/x10a: real poll must reset _pollFails`);
+    assert.equal(x10aObserved.browserHidden, false, `${context}/x10a: #cardBrowser must be visible`);
+    assert.ok(x10aObserved.navButtons >= 2, `${context}/x10a: #cardNav must be populated`);
+    assert.ok(x10aObserved.valueRows > 0, `${context}/x10a: #valueGroups must render live rows`);
+    assert.equal(x10aObserved.hdrIp, "192.0.2.99", `${context}/x10a: #hdrIp must show Ethernet net.ip`);
+    assert.ok(x10aObserved.defrostText.includes("-4.5") && x10aObserved.defrostText.includes("X10A"),
+      `${context}/x10a: defrost outdoor context must render through live HTTP poll`);
+    assert.ok(x10aObserved.serviceText.includes(await page.evaluate(`t("service.help.limited")`)),
+      `${context}/x10a: refrigerant service state=limited must render help text`);
+    assert.deepEqual(page.diagnostics, [], `${context}/x10a: live poll must emit no browser errors`);
+
+    const modbusStatus = {
+      ...baseStatus,
+      hp: { ...baseStatus.hp, connected: false },
+      modbus: { host: "192.0.2.50", port: 502, unit_id: 1, enabled: true, connected: true },
+      diagnostics: { enabled: true, source: "modbus", effective_source: "modbus", available_sources: ["x10a", "modbus"] },
+      health: {
+        status: "ok", source: "modbus", source_fresh: true, full_span: true,
+        span_s: 86400, covered_s: 86400, persist: "fresh", checks: fullChecks,
+      },
+    };
+    const modbusValues = {
+      values: [],
+      modbus: [
+        { label: "Leaving water temperature", value: "36.2", unit: "°C", concept: "lwt" },
+        { label: "Outdoor air temperature", value: "6.4", unit: "°C", concept: "outdoor_temp" },
+      ],
+    };
+    server.setTelemetry({ status: modbusStatus, values: modbusValues, histories: {} });
+    await page.evaluate(`(() => {
+      pollSchedule = window.__browserPollSchedule;
+      pollNow();
+      return true;
+    })()`);
+    await page.waitFor("S.status?.diagnostics?.effective_source === 'modbus' && S._modbus?.length === 2 && !_pollBusy");
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    await page.frame();
+    const modbusObserved = await page.evaluate(`(() => ({
+      pollFails: _pollFails,
+      browserHidden: document.getElementById("cardBrowser").hidden,
+      diagHeading: document.querySelector('[data-dashboard-card="diagnosis"] .section-label')?.textContent || "",
+      valueRows: document.querySelectorAll("#valueGroups .vrow").length,
+    }))()`);
+    assert.equal(modbusObserved.pollFails, 0, `${context}/modbus: real poll must reset _pollFails`);
+    assert.equal(modbusObserved.browserHidden, false, `${context}/modbus: #cardBrowser must remain visible`);
+    assert.ok(modbusObserved.diagHeading.includes("Modbus"), `${context}/modbus: diagnosis card must label Modbus`);
+    assert.ok(modbusObserved.valueRows > 0, `${context}/modbus: Modbus values must render in #valueGroups`);
+    assert.deepEqual(page.diagnostics, [], `${context}/modbus: live poll must emit no browser errors`);
+    console.log(`browser live-poll checked: ${context}; X10A + Modbus HTTP poll -> full dashboard & header IP`);
+  } finally {
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    await page.waitFor("!_pollBusy");
+    server.setTelemetry();
+    await page.evaluate(`(() => {
+      const saved = window.__livePollSaved;
+      if (saved) {
+        S.status = saved.status;
+        S._values = saved.values;
+        S._modbus = saved.modbus;
+        S.dashboardCard = saved.card;
+        S.descOpen = new Set(saved.open);
+        delete window.__livePollSaved;
+        renderApp();
+      }
+      return true;
+    })()`);
+  }
 }
 
 async function assertFlowSwitchWords(page, context) {
@@ -2924,6 +3094,7 @@ async function assertHistoryReadouts(page, context) {
 }
 
 let browser, server;
+let bodyError = null;
 try {
   server = await startFixtureServer({ pageFile, projectRoot: ROOT });
   browser = await launchBrowser();
@@ -3087,6 +3258,7 @@ try {
         console.log(`history readouts checked: ${viewport.name}/${locale}`);
       }
     }
+    assert.deepEqual(page.diagnostics, [], "history states must emit no browser errors");
     console.log(`focused history rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
   } else if (process.argv.includes("--room-only")) {
     for (const viewport of viewports) {
@@ -3128,6 +3300,8 @@ try {
     console.log(`focused card prototype rendering passed: 2 locales; 2 themes; ${focusedViewports.map(viewport => viewport.width).join("/")} px`);
   } else if (process.argv.includes("--setup-only")) {
     for (const viewport of viewports) await assertSetup(page, server, viewport);
+  } else if (process.argv.includes("--mcp-only")) {
+    for (const viewport of viewports) await assertMcpDashboard(page, server, viewport);
   } else if (process.argv.includes("--status-truth-only")) {
     for (const viewport of viewports) {
       await page.viewport(viewport.width, viewport.height);
@@ -3156,6 +3330,8 @@ try {
       await assertFaultChart(page, `${viewport.name}/diagnosis/fault/en`, viewport.name);
       await activateLocale(page, "de");
       await assertFaultChart(page, `${viewport.name}/diagnosis/fault/de`, viewport.name);
+      await activateLocale(page, "en");
+      await assertLivePollFullDashboard(page, server, `${viewport.name}/diagnosis/live-poll`);
       for (const locale of browserLocales) {
         await activateLocale(page, locale);
         await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
@@ -3194,6 +3370,10 @@ try {
     let routedKeyboardOpensInViewport =
       mutation === "history-flood" ? routedModalIds.length : 0;
     await page.viewport(viewport.width, viewport.height);
+    if (!mutation) {
+      await activateLocale(page, "en");
+      await assertLivePollFullDashboard(page, server, `${viewport.name}/live-poll`);
+    }
     for (const locale of browserLocales) {
       await activateLocale(page, locale);
       await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
@@ -3444,7 +3624,10 @@ try {
     "Hybrid room readings and their inspector must render in every shipped locale and viewport");
 
   assert.deepEqual(page.diagnostics, [], "real page must emit no console errors or uncaught exceptions");
-  for (const viewport of viewports) await assertSetup(page, server, viewport);
+  for (const viewport of viewports) {
+    await assertSetup(page, server, viewport);
+    await assertMcpDashboard(page, server, viewport);
+  }
   console.log(`browser render gate passed: ${browser.product}; ${browserLocales.length} locales; ` +
     `${viewports.length} viewports; native AX + keyboard on dashboard/settings/all routed modals; ` +
     "connected card tabs + single-row mobile swipe/wheel navigation + native pointer/keyboard selection; " +
@@ -3452,7 +3635,10 @@ try {
     "Hybrid room source + pointer-opened inspector + honest absence; " +
     "bounded real History roundtrips; reduced motion on dashboard/settings/WiFi/progress/disclosures");
   }
+} catch (error) {
+  bodyError = error;
+  throw error;
 } finally {
-  try { await browser.close(); }
+  try { await browser.close({ checkDiagnostics: !bodyError }); }
   finally { await server.close(); }
 }
