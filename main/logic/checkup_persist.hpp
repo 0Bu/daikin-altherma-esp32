@@ -23,6 +23,7 @@
 #include "logic/convert.hpp"
 #include "logic/config_store.hpp"     // config_crc32_* — the firmware's ONE CRC implementation
 #include "logic/history_persist.hpp"  // history_reset_preserves_ram — ONE answer to "did DRAM survive?"
+#include "logic/working_figure.hpp"   // EnergyBucket / EnergyRing / WORKING_FIGURE_METHOD_VERSION
 
 #include <algorithm> // std::rotate in checkup_journal_rebuild
 #include <cstddef>
@@ -38,8 +39,9 @@ inline constexpr uint32_t CHECKUP_MODBUS_PERSIST_MAGIC = 0x4d4b4843u; // "CHKM" 
 // adopted the window and have not completed an hour since (HIST-03/b): a v2 image cannot say
 // whether its newest hour was ever aged, so it is refused as a whole.
 // v4 binds the full X10A source; integrity permits only the separate scoped handoff.
+// v5 adds the 24 h working-figure energy buckets and electrical source identity to the journal.
 // Completed hours are reconstructed exclusively from absolute-age flash records.
-inline constexpr uint16_t CHECKUP_PERSIST_VERSION = 4;
+inline constexpr uint16_t CHECKUP_PERSIST_VERSION = 5;
 
 // ── The verdict ─────────────────────────────────────────────────────────────────────────────────
 // Internal integrity/refusal and public restoration vocabulary. Startup routes internal Accept
@@ -196,6 +198,9 @@ inline uint32_t checkup_layout_fingerprint() {
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(CHECKUP_BAR_WARN_TENTHS));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(CHECKUP_BAR_CRIT_TENTHS));
     crc = checkup_fp_u32(crc, CHECKUP_PRESSURE_CONFIRM_S);
+    crc = checkup_fp_u32(crc, WORKING_FIGURE_METHOD_VERSION);
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(EnergyBucket)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(EnergyRing)));
     return config_crc32_final(crc);
 }
 
@@ -376,20 +381,49 @@ inline uint32_t checkup_dhw_source_fingerprint(const char* broker, const char* t
     return checkup_nonzero_fp(crc);
 }
 
+// Stable non-zero identity for onboard X10A electrical power sources (CT clamps or INV+RPS),
+// using a domain tag distinct from checkup_modbus_pel_source_fingerprint() so X10A and Modbus
+// energy records never cross-admit. Returns 0 when the X10A profile provides neither source.
+inline uint32_t checkup_x10a_pel_source_fingerprint(bool has_ct, bool has_inv_rps) {
+    if (!has_ct && !has_inv_rps) return 0;
+    uint32_t crc = checkup_profile_name_crc("x10a-pel-v1");
+    crc          = checkup_fp_u32(crc, (has_ct ? 1u : 0u) | (has_inv_rps ? 2u : 0u));
+    return checkup_nonzero_fp(crc);
+}
+
+// Stable non-zero identity for HomeHub (EKRHH) Modbus electrical power estimation. Returns 0 for
+// Altherma4 (whose Input 49 flow scaling remains unverified) or Unknown.
+inline uint32_t checkup_modbus_pel_source_fingerprint(ModbusProfile profile) {
+    if (profile != ModbusProfile::HomeHub) return 0;
+    uint32_t crc = checkup_profile_name_crc("modbus-pel-v1");
+    crc          = checkup_fp_u32(crc, static_cast<uint32_t>(profile));
+    return checkup_nonzero_fp(crc);
+}
+
 // ── Durable hourly journal payload ───────────────────────────────────────────────────────────────
 // history_persist.hpp owns the common 256-byte slot/header protocol; this header owns what the
 // diagnostic bytes MEAN.  `end_unix_s` is the exact end of the measured one-hour interval, not only
 // floor(unix/3600): after a cold boot it lets full_span remain an elapsed-time statement and lets a
 // record older than the rolling day be rejected even when the board was powered off for weeks.
 struct CheckupJournalPayload {
-    uint32_t model_fp = 0;
+    uint32_t model_fp  = 0;
     uint32_t source_fp = 0; // full detected X10A profile/link identity; zero is unsupported legacy
     uint32_t dhw_source_fp          = 0; // independent circulation source/mapping/interpretation
     uint32_t diagnostics_generation = 0;
-    int64_t end_unix_s = -1;
+    int64_t  end_unix_s             = -1;
     CheckupBucket checkup;
     DhwLossBucket dhw;
+    uint32_t      pel_source_fp = 0; // independent electrical energy source identity
+    EnergyBucket  energy;
 };
+static_assert(sizeof(CheckupJournalPayload) == 160,
+              "CheckupJournalPayload must remain 160 bytes with zero padding");
+static_assert(offsetof(CheckupJournalPayload, pel_source_fp) == 124,
+              "pel_source_fp must occupy the 4-byte slot directly after dhw");
+static_assert(offsetof(CheckupJournalPayload, energy) == 128,
+              "energy must follow pel_source_fp cleanly");
+static_assert(sizeof(CheckupJournalPayload) <= HISTORY_JOURNAL_PAYLOAD_BYTES,
+              "CheckupJournalPayload must fit in one 192-byte history journal slot");
 
 struct CheckupJournalRecord {
     int64_t               bucket = INT64_MIN;
@@ -402,6 +436,7 @@ inline constexpr size_t CHECKUP_JOURNAL_WORDS =
     CHECKUP_JOURNAL_WORD_BYTES;
 inline constexpr size_t CHECKUP_JOURNAL_PAYLOAD_BYTES =
     CHECKUP_JOURNAL_WORDS * CHECKUP_JOURNAL_WORD_BYTES;
+static_assert(CHECKUP_JOURNAL_WORDS == 80, "CheckupJournalPayload must occupy 80 uint16 words");
 
 // The common journal version cannot name a change inside this source: its first three source ids
 // must remain compatible with already-written trend records.  Fold the diagnostic wire shape into
@@ -409,12 +444,15 @@ inline constexpr size_t CHECKUP_JOURNAL_PAYLOAD_BYTES =
 // The two original layouts shared one fingerprint. Layout 2 cannot supply independently
 // witnessed mode totals. Completed RAM hours retire at boot, and the DHW handoff stays compatible.
 // Layout 4 requires 60 s confirmation before low/critical water pressure enters min_bar.
-inline constexpr uint32_t CHECKUP_JOURNAL_LAYOUT_VERSION = 4;
+// Layout 5 embeds pel_source_fp and EnergyBucket (WORKING_FIGURE_METHOD_VERSION).
+inline constexpr uint32_t CHECKUP_JOURNAL_LAYOUT_VERSION = 5;
 
 inline uint32_t checkup_journal_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc          = checkup_fp_u32(crc, checkup_layout_fingerprint());
     crc          = checkup_fp_u32(crc, CHECKUP_JOURNAL_LAYOUT_VERSION);
+    crc          = checkup_fp_u32(crc, WORKING_FIGURE_METHOD_VERSION);
+    crc          = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(EnergyBucket)));
     crc          = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupJournalPayload)));
     crc          = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupBucket, defrosts)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupBucket, censored_runtime_s)));
@@ -428,6 +466,9 @@ inline uint32_t checkup_journal_fingerprint() {
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, end_unix_s)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, checkup)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, dhw)));
+    crc =
+        checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, pel_source_fp)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, energy)));
     return config_crc32_final(crc);
 }
 
@@ -622,6 +663,12 @@ inline constexpr bool checkup_journal_dhw_withheld(bool restart_armed, uint32_t 
                                 static_cast<int64_t>(restart_bucket);
 }
 
+inline constexpr bool checkup_journal_energy_withheld(bool restart_armed, uint32_t restart_bucket,
+                                                      uint32_t current, size_t age) {
+    return restart_armed && static_cast<int64_t>(current) - 1 - static_cast<int64_t>(age) <
+                                static_cast<int64_t>(restart_bucket);
+}
+
 // Boot index over checkup records visited newest-first. Every record appended before a record R is
 // at most CHECKUP_JOURNAL_REVISION_SPAN hours newer than R, as long as no backward clock step of
 // more than one bucket re-latched the labels (checkup_journal_latched_newest); a copy that such a
@@ -780,6 +827,13 @@ inline bool checkup_journal_dhw_identity_matches(const CheckupJournalPayload& p,
     return dhw_source_fp != 0 && p.dhw_source_fp == dhw_source_fp;
 }
 
+// A changed electrical meter/CT/INV identity retires only the energy buckets while preserving
+// unrelated checkup and DHW observations.
+inline bool checkup_journal_pel_identity_matches(const CheckupJournalPayload& p,
+                                                 uint32_t                     pel_source_fp) {
+    return pel_source_fp != 0 && p.pel_source_fp == pel_source_fp;
+}
+
 // Actual production admission for both stored and current-boot records. A cached startup scope
 // and a withdrawn source are expectations, never confirmation; absent clock uses the -1 sentinel.
 inline constexpr bool checkup_flash_source_ready(bool confirmed, uint32_t model_fp,
@@ -914,23 +968,24 @@ struct CheckupJournalSlotTimes {
     uint32_t restored_end_unix_s[CHECKUP_COMPLETED_BUCKETS] = {};
 };
 
-// Rebuild both completed-hour rings over [earliest, latest] IN PLACE. Selected live hours already
-// hold their buckets, so the window is first laid out where each of them keeps its slot and only
-// the other slots receive a stored hour or a gap; clearing the ring first would need every live
-// hour copied beforehand. Every slot gets its restore deadline and any restored wall-clock end.
-// The arrays are then rotated together so the window's oldest hour sits in slot 0
-// and `head` follows its newest: the layout of a cleared ring refilled in order, which
-// checkup_aggregate and dhw_loss_aggregate assume while a ring is not full. A reversed or
-// wider-than-ring window leaves both rings empty and every deadline zero. A circulation
-// reconfiguration retires the DHW bucket alone; true tells the caller to restart the DHW scope.
-inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
-                                    CheckupJournalSlotTimes&      times,
-                                    const CheckupJournalLiveSpan& live,
-                                    const CheckupJournalRecord* stored, size_t stored_count,
-                                    int64_t earliest, int64_t latest, int64_t now_unix_s,
-                                    int64_t now_us, bool confirmed, uint32_t model_fp,
-                                    uint32_t source_fp, uint32_t generation, bool reset_requested,
-                                    uint32_t dhw_source_fp, bool dhw_reset_requested) {
+// Rebuild all three completed-hour rings over [earliest, latest] IN PLACE. Selected live hours
+// already hold their buckets, so the window is first laid out where each of them keeps its slot and
+// only the other slots receive a stored hour or a gap; clearing the ring first would need every
+// live hour copied beforehand. Every slot gets its restore deadline and any restored wall-clock
+// end. The arrays are then rotated together so the window's oldest hour sits in slot 0 and `head`
+// follows its newest: the layout of a cleared ring refilled in order, which checkup_aggregate,
+// dhw_loss_aggregate and working_figure_evaluate assume while a ring is not full. A reversed or
+// wider-than-ring window leaves the rings empty and every deadline zero. A circulation or
+// electrical-source reconfiguration retires only its own bucket; `dhw_retired` (return value) and
+// `energy_retired` tell the caller to restart those independent scopes.
+inline bool
+checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw, CheckupJournalSlotTimes& times,
+                        const CheckupJournalLiveSpan& live, const CheckupJournalRecord* stored,
+                        size_t stored_count, int64_t earliest, int64_t latest, int64_t now_unix_s,
+                        int64_t now_us, bool confirmed, uint32_t model_fp, uint32_t source_fp,
+                        uint32_t generation, bool reset_requested, uint32_t dhw_source_fp,
+                        bool dhw_reset_requested, EnergyRing& energy, uint32_t pel_source_fp,
+                        bool energy_reset_requested, bool& energy_retired) {
     constexpr size_t kSlots = CHECKUP_COMPLETED_BUCKETS;
     auto&            expiry_us           = times.expiry_us;
     auto&            restored_end_unix_s = times.restored_end_unix_s;
@@ -947,6 +1002,7 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
         break;
     }
     bool dhw_retired = false;
+    energy_retired   = false;
     for (size_t j = 0; j < kSlots; ++j) {
         const size_t               p = (start + j) % kSlots;
         restored_end_unix_s[p]       = 0;
@@ -955,36 +1011,48 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
                                            stored_count, now_unix_s, confirmed, model_fp, source_fp,
                                            generation, reset_requested)
                   : CheckupJournalChoice{};
-        if (c.live != SIZE_MAX) { // already in slot p, under the current circulation identity
+        if (c.live !=
+            SIZE_MAX) { // already in slot p, under the current circulation/energy identity
             if (dhw_reset_requested || !dhw_source_fp) {
                 dhw.buf[p]  = DhwLossBucket{};
                 dhw_retired = true;
+            }
+            if (energy_reset_requested || !pel_source_fp) {
+                energy.buf[p]  = EnergyBucket{};
+                energy_retired = true;
             }
             // Keep the boot-local deadline or its gap/expired marker. The wall label used to
             // select this slot may have clamped its end into a different hour.
         } else if (c.stored) {
             const bool keep_dhw = !dhw_reset_requested && checkup_journal_dhw_identity_matches(
                                                               c.stored->payload, dhw_source_fp);
-            ring.buf[p] = c.stored->payload.checkup;
-            dhw.buf[p]  = keep_dhw ? c.stored->payload.dhw : DhwLossBucket{};
-            dhw_retired = dhw_retired || !keep_dhw;
+            const bool keep_energy =
+                !energy_reset_requested &&
+                checkup_journal_pel_identity_matches(c.stored->payload, pel_source_fp);
+            ring.buf[p]    = c.stored->payload.checkup;
+            dhw.buf[p]     = keep_dhw ? c.stored->payload.dhw : DhwLossBucket{};
+            energy.buf[p]  = keep_energy ? c.stored->payload.energy : EnergyBucket{};
+            dhw_retired    = dhw_retired || !keep_dhw;
+            energy_retired = energy_retired || !keep_energy;
             expiry_us[p] =
                 checkup_restore_expiry_us(c.stored->payload.end_unix_s, now_unix_s, now_us);
             const int64_t end = c.stored->payload.end_unix_s;
             restored_end_unix_s[p] =
                 end > 0 && end < UINT32_MAX ? static_cast<uint32_t>(end) : UINT32_MAX;
         } else {
-            ring.buf[p]  = CheckupBucket{};
-            dhw.buf[p]   = DhwLossBucket{};
-            expiry_us[p] = 0;
+            ring.buf[p]   = CheckupBucket{};
+            dhw.buf[p]    = DhwLossBucket{};
+            energy.buf[p] = EnergyBucket{};
+            expiry_us[p]  = 0;
         }
     }
     std::rotate(ring.buf, ring.buf + start, ring.buf + kSlots);
     std::rotate(dhw.buf, dhw.buf + start, dhw.buf + kSlots);
+    std::rotate(energy.buf, energy.buf + start, energy.buf + kSlots);
     std::rotate(expiry_us, expiry_us + start, expiry_us + kSlots);
     std::rotate(restored_end_unix_s, restored_end_unix_s + start, restored_end_unix_s + kSlots);
-    ring.count = dhw.count = static_cast<uint8_t>(n);
-    ring.head = dhw.head = static_cast<uint8_t>(n % kSlots);
+    ring.count = dhw.count = energy.count = static_cast<uint8_t>(n);
+    ring.head = dhw.head = energy.head = static_cast<uint8_t>(n % kSlots);
     return dhw_retired;
 }
 } // namespace daik::logic

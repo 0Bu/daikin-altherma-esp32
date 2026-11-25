@@ -205,9 +205,11 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // independent target/timestamp topics plus the optional fixed target, and v18 appends
 // the one-shot HomeHub discovery decision, and v19 appends the default-off diagnostics consent plus
 // a transition generation; v20 appends the independent room-history generation; v21 appends the
-// preferred plant-diagnostics display source byte (0 = X10A, 1 = Modbus). HomeHub enabled
-// derives solely from whether mb_host is empty;
-// v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
+// preferred plant-diagnostics display source byte (0 = X10A, 1 = Modbus). Gas-comparison tariffs
+// live in their own NVS entry ("gas", DKG1 v1) so older v21 builds still decode "cfg" on
+// downgrade or rollback without losing WiFi/MQTT/HomeHub settings. HomeHub enabled derives solely
+// from whether mb_host is empty; v5-v8 actuation bits decode OFF and every pre-v14 controller mode
+// migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
 // below still exact per version; OLDER blobs are ACCEPTED on read (see config_blob_deserialize)
 // because rejecting them would drop a user's WiFi and MQTT credentials on the OTA that introduced
@@ -333,6 +335,60 @@ inline bool link_blob_deserialize(const uint8_t* d, size_t n, LinkBlob& out) {
     return true;
 }
 
+// Independently persisted gas-comparison tariffs under NVS key "gas". Keeping these fields out
+// of the "cfg" blob leaves "cfg" at v21 so a rollback or downgrade to a pre-gas-comparison build
+// still reads the owner's WiFi, MQTT and HomeHub configuration.
+struct GasComparisonBlob {
+    uint32_t    elec_price_tenth_mill = 0;
+    uint32_t    gas_price_tenth_mill  = 0;
+    std::string tariff_currency       = "EUR";
+};
+
+inline constexpr uint8_t GAS_BLOB_VERSION      = 1;
+inline constexpr char    GAS_BLOB_MAGIC_TEXT[] = "DKG1";
+
+inline bool gas_comparison_blob_strings_fit(const GasComparisonBlob& g) {
+    return g.tariff_currency.size() <= CONFIG_BLOB_MAX_STR;
+}
+
+inline std::vector<uint8_t> gas_comparison_blob_serialize(const GasComparisonBlob& g) {
+    std::vector<uint8_t> v;
+    v.push_back('D');
+    v.push_back('K');
+    v.push_back('G');
+    v.push_back('1');
+    v.push_back(GAS_BLOB_VERSION);
+    detail::blob_put_u32(v, g.elec_price_tenth_mill);
+    detail::blob_put_u32(v, g.gas_price_tenth_mill);
+    detail::blob_put_str(v, g.tariff_currency);
+    detail::blob_put_u32(v, config_crc32(v.data(), v.size()));
+    return v;
+}
+
+inline bool gas_comparison_blob_deserialize(const uint8_t* d, size_t n, GasComparisonBlob& out) {
+    // magic(4) + version(1) + elec_tm(4) + gas_tm(4) + cur_len(2) + crc(4) = 19 bytes minimum.
+    if (d == nullptr || n < 5 + 4 + 4 + 2 + 4) return false;
+    if (d[0] != 'D' || d[1] != 'K' || d[2] != 'G' || d[3] != '1') return false;
+    if (d[4] != GAS_BLOB_VERSION) return false;
+    const uint32_t want = static_cast<uint32_t>(d[n - 4]) | (static_cast<uint32_t>(d[n - 3]) << 8) |
+                          (static_cast<uint32_t>(d[n - 2]) << 16) |
+                          (static_cast<uint32_t>(d[n - 1]) << 24);
+    if (config_crc32(d, n - 4) != want) return false;
+    const size_t body_end = n - 4;
+    const auto   get_u32  = [&](size_t p) {
+        return static_cast<uint32_t>(d[p]) | (static_cast<uint32_t>(d[p + 1]) << 8) |
+               (static_cast<uint32_t>(d[p + 2]) << 16) | (static_cast<uint32_t>(d[p + 3]) << 24);
+    };
+    const uint16_t len = static_cast<uint16_t>(d[13]) | (static_cast<uint16_t>(d[14]) << 8);
+    if (len > CONFIG_BLOB_MAX_STR || 15 + static_cast<size_t>(len) != body_end) return false;
+    GasComparisonBlob decoded;
+    decoded.elec_price_tenth_mill = get_u32(5);
+    decoded.gas_price_tenth_mill  = get_u32(9);
+    decoded.tariff_currency.assign(reinterpret_cast<const char*>(d + 15), len);
+    out = std::move(decoded);
+    return true;
+}
+
 inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     std::vector<uint8_t> v;
     v.push_back(CONFIG_BLOB_MAGIC0); v.push_back(CONFIG_BLOB_MAGIC1);
@@ -415,7 +471,7 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_u32(v, c.ref_temp_generation);
     // v21 block: preferred plant-diagnostics display source (0 = X10A, 1 = Modbus).
     v.push_back(c.diagnostics_source);
-    detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
+    detail::blob_put_u32(v, config_crc32(v.data(), v.size())); // CRC covers everything before it
     return v;
 }
 

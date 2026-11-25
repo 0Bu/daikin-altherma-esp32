@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 936, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1003, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -704,6 +704,6 @@ assert.match(status,
   /http_send_gzip\(req,\s*"text\/javascript; charset=utf-8",\s*asset\.start,\s*asset\.end\)/,
   "locale route must serve the checked gzip artifacts");
 assert.match(status, /"\/locale\.js", HTTP_GET, h_locale/);
-assert.match(server, /cfg\.max_uri_handlers = 38/);
+assert.match(server, /cfg\.max_uri_handlers = 39/);
 
 console.log(`UI locales: ${codes.length} catalogs × ${englishKeys.length} keys; lazy assets bounded and routed`);

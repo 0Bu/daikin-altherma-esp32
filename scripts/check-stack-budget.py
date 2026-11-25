@@ -948,9 +948,26 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
     status_decimal = ["http_send_status_json", "status_serializer", "status_fixed_double",
                       "sdk_snprintf", "sdk_vfprintf", "sdk_dtoa", "sdk_dtoa_mul_shift",
                       "sdk_dtoa_mul"]
+    status_decimal_tail = status_decimal[2:]
     expected = {
         "httpd_mcp_status": ["mcp_post", *status_decimal],
         "httpd_direct_status": status_decimal,
+        "httpd_mcp_status_gas_comparison": [
+            "mcp_post", "http_send_status_json", "status_serializer",
+            "status_gas_comparison_json", "status_g6", *status_decimal_tail,
+        ],
+        "httpd_direct_status_gas_comparison": [
+            "http_send_status_json", "status_serializer",
+            "status_gas_comparison_json", "status_g6", *status_decimal_tail,
+        ],
+        "httpd_mcp_status_working_figure": [
+            "mcp_post", "http_send_status_json", "status_serializer",
+            "status_working_figure_json", "status_g6", *status_decimal_tail,
+        ],
+        "httpd_direct_status_working_figure": [
+            "http_send_status_json", "status_serializer",
+            "status_working_figure_json", "status_g6", *status_decimal_tail,
+        ],
         **report_paths,
         "httpd_mcp_health_number": ["mcp_post", "http_send_status_json", "status_serializer",
                                     "status_health_number", "status_unsigned_number"],
@@ -1090,10 +1107,15 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                      r"std::snprintf\(buf,\s*sizeof\(buf\),\s*fmt,\s*value\);", formatter):
         raise BudgetError("diagnosis status source: fixed 48-byte floating-point buffer changed")
     # Other printf conversions may take a different libc branch.
+    g6 = stack_function_body(status, "append_status_g6")
+    if not re.fullmatch(
+            r'append_status_fmt_double\(\s*j\s*,\s*prefix\s*,\s*"%.6g"\s*,\s*valid\s*,\s*v\s*\)\s*;',
+            g6.strip()):
+        raise BudgetError("diagnosis status source: reviewed decimal formatter call sites changed")
     formats = re.findall(r'\bappend_status_fmt_double\s*\(\s*j\s*,\s*"(?:[^"\\]|\\.)*"\s*,\s*"([^"]+)"',
                          status)
     if (formats != ["%.2f", "%.2f", "%.2f", "%.6g"]
-            or len(re.findall(r"\bappend_status_fmt_double\s*\(", status)) != len(formats) + 1):
+            or len(re.findall(r"\bappend_status_fmt_double\s*\(", status)) != len(formats) + 2):
         raise BudgetError("diagnosis status source: reviewed decimal formatter call sites changed")
     if (len(re.findall(r"\bcheckup_report\s*\(", status)) != 1
             or not re.search(r"logic::CheckupCyclingHours\s+hrs\{\};\s*"
@@ -1819,7 +1841,7 @@ def validate_json_recursion(budgets: dict[str, Any], json_source: str,
         r"JSON_MAX_DEPTH\s*\);\s*\}")
     if not re.search(adapter, adapter_source):
         raise BudgetError("bounded cJSON adapter must bind JSON_MAX_DEPTH as its fourth argument")
-    for owner in ("hp", "mqtt", "board", "env3", "diagnostics", "circulation"):
+    for owner in ("hp", "mqtt", "board", "env3", "diagnostics", "circulation", "gas_comparison"):
         name = f"httpd_config_{owner}"
         rule = budgets["paths"].get(name)
         if rule is None or rule["multipliers"] != {"cjson_parse_value": 17, "cjson_delete": 17}:
@@ -2107,12 +2129,13 @@ def validate_mqtt_discovery_paths(budgets: dict[str, Any], mqtt_source: str,
 
 CONFIG_DOCUMENT_OWNERS = frozenset({
     "config_hp", "config_mqtt", "config_board", "config_env3",
-    "config_diagnostics", "config_circulation", "circulation_parser", "hp_query_probe",
+    "config_diagnostics", "config_circulation", "config_gas_comparison",
+    "circulation_parser", "hp_query_probe",
     "config_wifi", "config_syslog", "config_ntp",
 })
 CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_config_hp", "httpd_config_mqtt", "httpd_config_board", "httpd_config_env3",
-    "httpd_config_diagnostics", "httpd_config_circulation",
+    "httpd_config_diagnostics", "httpd_config_circulation", "httpd_config_gas_comparison",
     "httpd_hp_query_probe", "httpd_config_save", "httpd_config_save_link", "httpd_config_board_save",
     "httpd_mqtt_tls",
     "httpd_i2c_read", "httpd_i2c_write", "httpd_i2c_receive",
@@ -2135,7 +2158,7 @@ STAGED_STACK_LIMITS = {"config_document": 48, "http_values_snapshot": 208,
                        "mqtt_modbus_count": 80, "mqtt_modbus_emit": 48}
 CONFIG_DOCUMENT_CALLS = {
     "set_wifi": 512, "set_mqtt": 512,
-    "parse_circulation_request": 1280, "set_diagnostics": 128,
+    "parse_circulation_request": 1280, "set_diagnostics": 128, "set_gas_comparison": 512,
     "set_hp": 2048, "set_syslog": 512, "set_ntp": 256, "set_board": 512,
     "set_env3": 256, "set_ota": 128, "set_lang": 128, "hp_query_probe": 192,
 }
@@ -3150,6 +3173,8 @@ def self_test() -> None:
   16: 004136          entry a1, 1792
 00000018 <daik::set_diagnostics(httpd_req*)>:
   18: 004136          entry a1, 1536
+00000385 <daik::set_gas_comparison(httpd_req*)>:
+ 385: 004136          entry a1, 1280
 00000019 <daik::set_circulation(httpd_req*)>:
   19: 004136          entry a1, 976
 0000001a <daik::parse_circulation_request(httpd_req*, daik::CirculationRequest&)>:
@@ -3194,6 +3219,9 @@ def self_test() -> None:
         'daik::rfc3339_utc[abi:cxx11](long long, long)': 128,
         'void daik::append_status_rfc3339<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, long long)': 144,
         'void daik::append_status_fmt_double<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, char const*, bool, double)': 112,
+        'void daik::append_status_g6<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, double)': 32,
+        'void daik::append_status_gas_comparison_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&)': 64,
+        'void daik::append_status_working_figure_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::logic::WorkingFigureReport const&)': 64,
         'daik::logic::HeatingCurveBins::summary(daik::logic::OutdoorSource, unsigned int, long long) const': 80,
         'daik::logic::HeatingCurveBins::observe_clock(long long)': 32,
         'daik::logic::HeatingCurveBins::forget()': 32,
@@ -4210,6 +4238,10 @@ def self_test() -> None:
                          ("httpd_direct_status", "sdk_dtoa"),
                          ("httpd_direct_status", "sdk_dtoa_mul_shift"),
                          ("httpd_direct_status", "sdk_dtoa_mul"),
+                         ("httpd_mcp_status_gas_comparison", "status_gas_comparison_json"),
+                         ("httpd_direct_status_gas_comparison", "status_g6"),
+                         ("httpd_mcp_status_working_figure", "status_working_figure_json"),
+                         ("httpd_direct_status_working_figure", "status_g6"),
                          ("httpd_mcp_health_number", "status_health_number"),
                          ("httpd_mcp_health_number", "status_unsigned_number"),
                          ("httpd_direct_health_number", "status_health_number"),
@@ -4279,6 +4311,8 @@ def self_test() -> None:
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
         ("main/http_status.cpp", '"%.2f", env_fresh, env.temperature_c', '"%a", env_fresh, env.temperature_c'),
+        ("main/http_status.cpp", 'append_status_fmt_double(j, prefix, "%.6g", valid, v);',
+         'append_status_fmt_double(j, prefix, "%a", valid, v);'),
         ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist, diag_effective,",
          "other_report(&hrs, trace.get(), &persist, diag_effective,"),
         ("main/http_status.cpp", "&defrost_start, dhw_trace.get())", "&defrost_start, nullptr)"),

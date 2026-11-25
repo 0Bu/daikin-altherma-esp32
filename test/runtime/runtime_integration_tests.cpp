@@ -416,6 +416,40 @@ void test_config_save_failure_boundaries() {
         CHECK_EQ(link.rx_pin, 44);
         CHECK_EQ(link.identity_fp, uint32_t{1});
     }
+
+    // Gas comparison save: writes ONLY "gas", keeps "cfg" at v21 untouched, and preserves prior
+    // "gas" and RAM on NoSpace failure.
+    {
+        FakeNvs           nvs;
+        ConfigCoordinator coordinator(nvs, config_named("gas"));
+        seed_durable(coordinator);
+        const auto   cfg_before = nvs.get(daik::CONFIG_KEY_SERVICE);
+        const size_t cfg_sets   = nvs.sets(daik::CONFIG_KEY_SERVICE);
+        const size_t link_sets  = nvs.sets(daik::CONFIG_KEY_LINK);
+        CHECK(cfg_before.has_value());
+        CHECK_EQ((*cfg_before)[4], uint8_t{21});
+
+        const auto saved = coordinator.save_gas_comparison(3500, 1100, "CHF");
+        CHECK_EQ(saved.result, daik::ConfigSaveResult::Saved);
+        CHECK_EQ(saved.failed, daik::ConfigSaveStep::None);
+        CHECK_EQ(nvs.sets(daik::CONFIG_KEY_SERVICE), cfg_sets);
+        CHECK_EQ(nvs.sets(daik::CONFIG_KEY_LINK), link_sets);
+        CHECK(nvs.get(daik::CONFIG_KEY_SERVICE) == cfg_before);
+        daik::GasComparisonBlob gas_blob;
+        CHECK(ConfigPersistenceAdapter(nvs).load_gas_comparison(gas_blob));
+        CHECK_EQ(gas_blob.elec_price_tenth_mill, uint32_t{3500});
+        CHECK_EQ(gas_blob.gas_price_tenth_mill, uint32_t{1100});
+        CHECK_EQ(gas_blob.tariff_currency, std::string("CHF"));
+
+        nvs.fail_next_set_no_space(daik::CONFIG_KEY_GAS);
+        const auto failed = coordinator.save_gas_comparison(4000, 1400, "USD");
+        CHECK_EQ(failed.result, daik::ConfigSaveResult::Failed);
+        CHECK_EQ(failed.failed, daik::ConfigSaveStep::GasWrite);
+        CHECK_EQ(coordinator.snapshot().elec_price_tenth_mill, uint32_t{3500});
+        CHECK_EQ(coordinator.snapshot().tariff_currency, std::string("CHF"));
+        CHECK(ConfigPersistenceAdapter(nvs).load_gas_comparison(gas_blob));
+        CHECK_EQ(gas_blob.tariff_currency, std::string("CHF"));
+    }
 }
 
 void test_config_transactions_allocate_nothing_after_first_write(bool mutate_late_allocation) {
@@ -507,6 +541,17 @@ void test_config_transactions_allocate_nothing_after_first_write(bool mutate_lat
             s.coordinator.snapshot().runtime_revision, 16, 17, daik::Protocol::S, 0x77u);
         CHECK(out.committed);
         CHECK(!out.saved);
+        expect_quiet(s.coordinator, 1);
+    }
+    { // gas comparison save: success with non-SSO currency string and write failure
+        Scenario          s(mutate_late_allocation);
+        const std::string wide_cur(40, 'Z');
+        CHECK_EQ(s.coordinator.save_gas_comparison(3200, 1050, wide_cur).result,
+                 daik::ConfigSaveResult::Saved);
+        expect_quiet(s.coordinator, 1);
+        s.nvs.fail_next_set_no_space(daik::CONFIG_KEY_GAS);
+        CHECK_EQ(s.coordinator.save_gas_comparison(3300, 1150, std::string(40, 'Y')).result,
+                 daik::ConfigSaveResult::Failed);
         expect_quiet(s.coordinator, 1);
     }
 }

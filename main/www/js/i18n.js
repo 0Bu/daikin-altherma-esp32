@@ -119,7 +119,9 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private
 // Mutable, because the device's stored override can switch it at runtime. Seeded from a localStorage
 // cache of the last effective language so the FIRST paint doesn't flash the browser default before
 // the async /status lands, then reconciled with the device on every poll (setLangFromStatus).
-let LANG = (() => { const c = lsGet("uiLang"); return uiLangSupported(c) ? c : autoLang(); })();
+const INITIAL_AUTO_LANG = autoLang();
+let UI_LANG_MODE = (() => { const m = lsGet("uiLangMode"); return uiLangSupported(m) ? m : "auto"; })();
+let LANG = (() => { const c = lsGet("uiLang"); return uiLangSupported(c) ? c : INITIAL_AUTO_LANG; })();
 // English stays in the startup page as the guaranteed fallback. The other catalogs share one
 // lossless pre-compressed asset served by this ESP32. Its first load registers all languages;
 // the startup page stays independent of that request and the internet. One Promise per
@@ -951,6 +953,44 @@ const I18N = {
     "check.detail.source_stale_modbus": "No fresh Modbus sample; current state unknown. History retained.",
     "mb.flow_scale_help": "Unverified /100 flow scaling (probe pending/fallback); compare L/min with unit display. Excluded from pipe motion, ΔT, heat output and 24-hour check.",
     "hist.modbus_flow_unverified": "Unverified /100 Modbus scaling (pending/fallback); compare L/min with unit.",
+    "wf.label": "Performance factor", "wf.short.partial": "prov.", "wf.short.limited": "lim.",
+    "wf.state.unsupported": "Not supported", "wf.state.collecting": "Collecting", "wf.state.standby": "Standby",
+    "wf.verdict.cheaper": "cheaper than gas", "wf.verdict.similar": "like gas",
+    "wf.verdict.more_expensive": "costlier than gas", "wf.verdict.limited": "limited",
+    "wf.verdict.measured": "measured", "wf.verdict.partial": "provisional",
+    "wf.aria.estimate": (v) => `estimated ${v}`,
+    "wf.kpi.breakeven": (be) => `Break-even ${be}`, "wf.kpi.hp_cost": "Heat pump",
+    "wf.kpi.gas_cost": "Gas · 88%",
+    "wf.kpi.delta": "Delta", "wf.kpi.energy": "24 h heat",
+    "wf.kpi.heat_elec": (e) => `el. ${e} kWh`,
+    "wf.scope.est": "est.", "wf.scope.comp": "comp. only",
+    "wf.scale.label": "Break-even", "wf.scale.band": (p) => `±${p}%`,
+    "wf.scale.cheaper": "Cheaper →", "wf.scale.expensive": "← Costlier",
+    "wf.cta.tariffs": "Set tariffs", "wf.cta.edit_tariffs": "Edit tariffs",
+    "wf.desc.collecting": (o) => `First value after 2 h · ${o} so far`,
+    "wf.desc.standby": (o) => `Too little runtime for a value · ${o} observed`,
+    "wf.desc.unsupported": "Required flow, temperature, or electrical inputs unavailable.",
+    "wf.banner.stale": "Source signal stale — figure paused.",
+    "wf.banner.buh_limited": "Backup heater active outside electrical scope — figure limited.",
+    "wf.banner.buh_unpaired": "Backup heater active without outlet sensor — excluded.",
+    "wf.banner.bsh_excluded": (d) => `Tank booster ${d} excluded.`,
+    "wf.banner.ct_unwired": "Mains clamp at 0 A — using compressor only.",
+    "wf.ctx.window": "Period", "wf.ctx.power": "Power", "wf.ctx.outdoor": "Outdoor",
+    "wf.ctx.outdoor_range": (avg, min) => `avg ${avg} °C · min ${min} °C`,
+    "wf.ctx.defrost": "Defrost", "wf.ctx.buh": "Backup heater",
+    "wf.ctx.buh_inc": (d) => `${d} · included`,
+    "wf.ctx.cooling": "Cooling", "wf.ctx.excluded": (d) => `${d} excluded`,
+    "wf.src.x10a_ct": "Clamp · whole unit", "wf.src.x10a_inv": "Inverter · comp. only",
+    "wf.foot.base": "24 h heating & hot water · pure water · estimate.",
+    "wf.foot.gas": "24 h heating & hot water · pure water · gas 88% condensing boiler, no fixed fees · estimate.",
+    "wf.gas.row": "Gas comparison", "wf.gas.title": "Gas tariffs", "wf.not_configured": "No tariffs",
+    "wf.gas.detail.elec": "Electricity", "wf.gas.detail.gas": "Gas", "wf.gas.detail.breakeven": "Break-even",
+    "wf.gas.settings_help": "24 h HP vs. fixed 88% Hs modern condensing gas boiler (pure water 4.186 kJ/(L·K), no fixed fees).",
+    "wf.gas.elec_price": "Elec. / kWh", "wf.gas.gas_price": "Gas / kWh", "wf.gas.currency": "Currency",
+    "wf.gas.preview": (b) => `Break-even: ${b} (±20%)`, "wf.gas.preview_empty": "Enter prices for break-even.",
+    "wf.gas.hint": "Fixed 88% Hs modern condensing gas boiler & pure water (4.186 kJ/(L·K)), Heating + DHW, no fixed fees. Updates 24 h.",
+    "wf.gas.delete": "Clear", "wf.gas.deleting": "Clearing…", "wf.gas.saved": "Tariffs saved", "wf.gas.deleted": "Tariffs cleared",
+    "wf.gas.err_price": "0.0001–99.9999.", "wf.gas.err_currency": "Select a supported currency.",
   },
 };
 function t(k, ...a) {
@@ -1030,9 +1070,13 @@ function activateLang(next) {
   return true;
 }
 let _languageRequest = 0;
-function setLang(next, current = () => true) {
+function setLang(next, current = () => true, fromStatus = false) {
   const request = ++_languageRequest;
   const activate = (lang) => request === _languageRequest && current() ? activateLang(lang) : false;
+  if (!fromStatus) {
+    UI_LANG_MODE = uiLangSupported(next) ? next : "auto";
+    lsSet("uiLangMode", UI_LANG_MODE);
+  }
   if (!uiLangSupported(next)) next = autoLang();
   if (localeReady(next)) return activate(next);
   return loadLocale(next).then((loaded) => activate(loaded ? next : "en"));
@@ -1042,5 +1086,8 @@ function setLang(next, current = () => true) {
 // the choice back to the browser. Called from refreshStatus before the frame is painted.
 function setLangFromStatus(s, current = () => true) {
   const stored = s && s.ui && s.ui.lang;
-  return setLang(uiLangSupported(stored) ? stored : autoLang(), current);
+  const mode = uiLangSupported(stored) ? stored : "auto";
+  UI_LANG_MODE = mode;
+  lsSet("uiLangMode", mode);
+  return setLang(uiLangSupported(stored) ? stored : autoLang(), current, true);
 }

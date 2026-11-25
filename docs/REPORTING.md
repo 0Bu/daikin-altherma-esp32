@@ -51,9 +51,11 @@ or clipped records. Intact raw X10A records and error details remain. The crash 
 **Copy diagnostics** uses the redacted log. **Could not be read from the device** means missing
 evidence, not an empty log or proof that nothing happened.
 
-Version/build fingerprint, model, readings, uptime, memory and error counters remain so the issue
-can be diagnosed. Automatic redaction does not sanitize your description, screenshots or logs
-copied from an external server; review those separately.
+Version/build fingerprint, model, readings, uptime, memory, error counters, and non-identifying
+observation/tariff summaries (`gas_comparison` and, when active on X10A or Modbus,
+`working_figure` 24-hour aggregates) remain so the issue can be diagnosed. Automatic redaction does
+not sanitize your description, screenshots or logs copied from an external server; review those
+separately.
 
 <a id="the-one-exception-crash-dumps"></a>
 A **coredump contains raw task memory and can include credentials**. It is excluded from the report

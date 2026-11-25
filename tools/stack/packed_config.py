@@ -25,6 +25,7 @@ _RAW_NAMES = {
         "_ZN4daikL25parse_circulation_requestEP9httpd_reqRNS_18CirculationRequestE",
     "daik::set_board(httpd_req*)": "_ZN4daikL9set_boardEP9httpd_req",
     "daik::set_env3(httpd_req*)": "_ZN4daikL8set_env3EP9httpd_req",
+    "daik::set_gas_comparison(httpd_req*)": "_ZN4daikL18set_gas_comparisonEP9httpd_req",
     "daik::take_values_snapshot()": "_ZN4daikL20take_values_snapshotEv",
 }
 

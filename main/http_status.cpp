@@ -38,6 +38,8 @@
 #include "logic/detect_identity.hpp"
 #include "logic/json.hpp"
 #include "logic/query_flag.hpp"
+#include "logic/gas_comparison.hpp"
+#include "logic/working_figure.hpp"
 #include "logic/redact.hpp"
 #include "logic/heartbeat.hpp" // append_stack_bytes — ONE never-sampled rendering rule
 #include "logic/hydronic_payload.hpp"
@@ -676,6 +678,106 @@ append_status_fault_check_json(JsonOut& j, DiagnosticsSource source, bool source
 }
 
 template <typename JsonOut>
+[[gnu::noinline]] static void append_status_bfield(JsonOut& j, const char* prefix, bool v) {
+    j += prefix;
+    j += v ? "true" : "false";
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_status_ufield(JsonOut& j, const char* prefix, uint32_t v) {
+    j += prefix;
+    append_json_uint(j, v);
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_status_qfield(JsonOut& j, const char* prefix,
+                                                   std::string_view v) {
+    j += prefix;
+    json_append_quoted(j, v);
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_status_g6(JsonOut& j, const char* prefix, bool valid,
+                                               double v) {
+    append_status_fmt_double(j, prefix, "%.6g", valid, v);
+}
+
+[[gnu::noinline]] static double tariff_from_tenth_mill(uint32_t tm) {
+    return static_cast<double>(tm) * 1e-4;
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_status_gas_comparison_json(JsonOut& j, const Config& c) {
+    const std::string_view cur = tariff_currency_valid(c.tariff_currency)
+                                     ? std::string_view(c.tariff_currency)
+                                     : std::string_view("EUR");
+    const bool             configured =
+        (c.elec_price_tenth_mill > 0 && c.gas_price_tenth_mill > 0 &&
+         gas_comparison_config_valid(c.elec_price_tenth_mill, c.gas_price_tenth_mill, cur));
+    const double elec_price = tariff_from_tenth_mill(c.elec_price_tenth_mill);
+    const double gas_price  = tariff_from_tenth_mill(c.gas_price_tenth_mill);
+    const double break_even_az =
+        configured ? (elec_price * (static_cast<double>(GAS_EFFICIENCY_PCT) / 100.0)) / gas_price
+                   : 0.0;
+    append_status_bfield(j, "\"gas_comparison\":{\"configured\":", configured);
+    append_status_g6(j, ",\"elec_price\":", configured, elec_price);
+    append_status_g6(j, ",\"gas_price\":", configured, gas_price);
+    append_status_ufield(j, ",\"gas_efficiency_pct\":", GAS_EFFICIENCY_PCT);
+    append_status_qfield(j, ",\"currency\":", cur);
+    append_status_g6(j, ",\"break_even_az\":", configured, break_even_az);
+    j += "},";
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void
+append_status_working_figure_json(JsonOut& j, const logic::WorkingFigureReport& wf) {
+    const bool have_metrics = wf.supported && wf.state != logic::WorkingFigureState::Collecting &&
+                              wf.state != logic::WorkingFigureState::Standby;
+    const bool have_tariffs = wf.tariffs_configured;
+    const bool have_costs   = have_metrics && have_tariffs;
+
+    j += "\"working_figure\":{\"kind\":\"observation\"";
+    append_status_bfield(j, ",\"supported\":", wf.supported);
+    append_status_qfield(j, ",\"state\":", logic::working_figure_state_name(wf.state));
+    append_status_bfield(j, ",\"tariffs_configured\":", wf.tariffs_configured);
+    append_status_bfield(j, ",\"full_window\":", wf.full_window);
+    append_status_bfield(j, ",\"source_fresh\":", wf.source_fresh);
+    append_status_bfield(j, ",\"is_estimate\":", wf.is_estimate);
+    append_status_bfield(j, ",\"is_compressor_only\":", wf.is_compressor_only);
+    append_status_qfield(j, ",\"pel_source\":", logic::energy_pel_kind_name(wf.pel_kind));
+    append_status_ufield(j, ",\"span_s\":", wf.span_s);
+    append_status_ufield(j, ",\"observed_s\":", wf.observed_s);
+    append_status_ufield(j, ",\"unpairable_s\":", wf.unpairable_s);
+    append_status_ufield(j, ",\"defrost_s\":", wf.defrost_s);
+    append_status_ufield(j, ",\"buh_s\":", wf.buh_s);
+    append_status_ufield(j, ",\"bsh_excluded_s\":", wf.bsh_excluded_s);
+    append_status_ufield(j, ",\"cooling_excluded_s\":", wf.cooling_excluded_s);
+    append_status_ufield(j, ",\"coverage_pct\":", wf.coverage_pct);
+    append_status_ufield(j, ",\"neutral_band_pct\":", wf.neutral_band_pct);
+    append_status_g6(j, ",\"heat_kwh\":", wf.supported, wf.heat_kwh);
+    append_status_g6(j, ",\"elec_kwh\":", wf.supported, wf.elec_kwh);
+    append_status_g6(j, ",\"az\":", have_metrics, wf.az);
+    append_status_ufield(j, ",\"gas_efficiency_pct\":", wf.gas_efficiency_pct);
+    append_status_qfield(j, ",\"currency\":", std::string_view(wf.currency));
+    append_status_g6(j, ",\"elec_price\":", have_tariffs,
+                     tariff_from_tenth_mill(wf.elec_price_tenth_mill));
+    append_status_g6(j, ",\"gas_price\":", have_tariffs,
+                     tariff_from_tenth_mill(wf.gas_price_tenth_mill));
+    append_status_g6(j, ",\"break_even_az\":", have_tariffs, wf.break_even_az);
+    append_status_g6(j, ",\"gas_equiv_kwh\":", have_costs, wf.gas_equiv_kwh);
+    append_status_g6(j, ",\"cost_wp\":", have_costs, wf.cost_wp);
+    append_status_g6(j, ",\"cost_gas\":", have_costs, wf.cost_gas);
+    append_status_g6(j, ",\"cost_delta\":", have_costs, wf.cost_delta);
+    append_status_g6(j, ",\"cost_delta_pct\":", have_costs, wf.cost_delta_pct);
+    append_status_g6(j, ",\"outdoor_mean_c\":", wf.has_outdoor, wf.outdoor_mean_c);
+    append_status_g6(j, ",\"outdoor_min_c\":", wf.has_outdoor, wf.outdoor_min_c);
+    append_status_bfield(j, ",\"limited_buh\":", (wf.flags & logic::ENERGY_F_LIMITED_BUH) != 0);
+    append_status_bfield(j, ",\"unpaired_buh\":", (wf.flags & logic::ENERGY_F_UNPAIRED_BUH) != 0);
+    append_status_bfield(j, ",\"ct_unwired\":", (wf.flags & logic::ENERGY_F_CT_UNWIRED) != 0);
+    j += "},";
+}
+
+template <typename JsonOut>
 [[gnu::noinline]] static void append_cycling_run_contexts_json(JsonOut& j, uint32_t boot_s,
                                                                uint32_t timeline_unix_s) {
     constexpr auto source = DiagnosticsSource::X10a;
@@ -1070,6 +1172,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         if (!circulation.error.empty()) qfield(",\"error\":", circulation.error);
         j += "},";
     }
+    append_status_gas_comparison_json(j, c);
     {
         const SyslogStatus sy = syslog_status();
         bfield("\"syslog\":{\"configured\":", sy.configured);
@@ -1559,6 +1662,12 @@ static void append_status_json(JsonOut& j, bool redact) {
                                            refrigerant_service.sources.*(field.source));
             j += "}},";
         }
+    }
+    if (c.diagnostics_enabled &&
+        ((diag_effective == DiagnosticsSource::X10a && c.fp_valid) ||
+         (diag_effective == DiagnosticsSource::Modbus && modbus_diag_avail))) {
+        const logic::WorkingFigureReport wf = checkup_working_figure_status(c, diag_effective);
+        append_status_working_figure_json(j, wf);
     }
 
     // System health: heap headroom + why the device last booted, so both are visible from the LAN

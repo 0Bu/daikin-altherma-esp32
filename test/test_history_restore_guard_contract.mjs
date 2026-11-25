@@ -344,8 +344,11 @@ assert.match(cFlash, /logic::checkup_journal_choose\(/);
 assert.doesNotMatch(checkup, /s_restore_live/,
   "this boot's completed hours compete in place, never through a static copy");
 assert.match(cFlash,
-  /if \(logic::checkup_journal_rebuild\( ?P\(\)\.ring, P\(\)\.dhw, slot\.slot_times, live, records, count, earliest_bucket, latest_bucket, now_unix_s, now_us, slot\.source_confirmed, slot\.model_fp, slot\.source_fp, s_diagnostics_generation, reset_requested, slot\.dhw_source_fp, slot\.dhw_reset_requested\.load\(\)\)\) slot\.dhw_scope_us = now_us;/,
+  /if \(logic::checkup_journal_rebuild\( ?P\(\)\.ring, P\(\)\.dhw, slot\.slot_times, live, records, count, earliest_bucket, latest_bucket, now_unix_s, now_us, slot\.source_confirmed, slot\.model_fp, slot\.source_fp, s_diagnostics_generation, reset_requested, slot\.dhw_source_fp, slot\.dhw_reset_requested\.load\(\), P\(\)\.energy, slot\.pel_source_fp, energy_reset_pending, energy_retired\)\) slot\.dhw_scope_us = now_us;/,
   "a mismatched circulation mapping must retire DHW alone, while admitting dated checks");
+assert.match(cFlash,
+  /if \(energy_retired \|\| earliest_energy_stored_end == INT64_MAX\) \{ if \(energy_retired\) slot\.energy_scope_us = now_us;/,
+  "a mismatched electrical identity must retire energy alone while admitting dated checkup and DHW checks");
 assert.doesNotMatch(cFlash, /\.reset\(\);/, "the rebuild must not clear the live hours it keeps");
 const noMaterialized = cFlash.indexOf("if (!materialized)");
 assert.ok(noMaterialized >= 0 && noMaterialized < cFlash.indexOf("logic::checkup_journal_rebuild("),
@@ -353,14 +356,29 @@ assert.ok(noMaterialized >= 0 && noMaterialized < cFlash.indexOf("logic::checkup
 assert.match(cFlash, /\.stored; if \(!rec\) continue; \+\+materialized;/);
 assert.match(cFlash, /static_cast<unsigned>\(materialized\)/,
   "restoration count describes selected flash intervals, not admitted candidates");
+assert.match(persistCheckup,
+  /struct CheckupJournalPayload \{[\s\S]*?uint32_t\s+pel_source_fp\s*=\s*0;[\s\S]*?EnergyBucket\s+energy;\s*\};/,
+  "CheckupPersist must embed EnergyBucket inside CheckupJournalPayload with zero extra journal slots");
+const payloadSize = Number(persistCheckup.match(/static_assert\(sizeof\(CheckupJournalPayload\)\s*==\s*(\d+)/)?.[1]);
+assert.ok(Number.isInteger(payloadSize) && payloadSize <= 192,
+  `sizeof(CheckupJournalPayload) must remain <= 192 bytes (got ${payloadSize})`);
+assert.match(persistCheckup,
+  /static_assert\(sizeof\(CheckupJournalPayload\) <= HISTORY_JOURNAL_PAYLOAD_BYTES,/,
+  "CheckupJournalPayload must statically remain within one 192-byte history journal slot");
 const persistRebuild = body(code("main/logic/checkup_persist.hpp"), "inline bool checkup_journal_rebuild(");
 assert.match(persistRebuild, /checkup_restore_expiry_us/);
 assert.match(persistRebuild,
   /const bool keep_dhw = !dhw_reset_requested && checkup_journal_dhw_identity_matches\( ?c\.stored->payload, dhw_source_fp\);/,
   "a stored hour keeps DHW evidence only under the current circulation identity");
 assert.match(persistRebuild,
-  /std::rotate\(ring\.buf, ring\.buf \+ start, ring\.buf \+ kSlots\); std::rotate\(dhw\.buf, dhw\.buf \+ start, dhw\.buf \+ kSlots\); std::rotate\(expiry_us, expiry_us \+ start, expiry_us \+ kSlots\); std::rotate\(restored_end_unix_s, restored_end_unix_s \+ start, restored_end_unix_s \+ kSlots\); ring\.count = dhw\.count = static_cast<uint8_t>\(n\); ring\.head = dhw\.head = static_cast<uint8_t>\(n % kSlots\);/,
-  "a ring that is not full keeps its oldest hour in slot 0, which both aggregates read first");
+  /const bool keep_energy = !energy_reset_requested && checkup_journal_pel_identity_matches\( ?c\.stored->payload, pel_source_fp\);/,
+  "a stored hour keeps energy evidence only under the current electrical-source identity");
+assert.match(persistRebuild,
+  /ring\.buf\[p\] = c\.stored->payload\.checkup; dhw\.buf\[p\] = keep_dhw \? c\.stored->payload\.dhw : DhwLossBucket\{\}; energy\.buf\[p\] = keep_energy \? c\.stored->payload\.energy : EnergyBucket\{\}; dhw_retired = dhw_retired \|\| !keep_dhw; energy_retired = energy_retired \|\| !keep_energy;/,
+  "a pel_source_fp mismatch must retire only energy while retaining ring and dhw checkup hours");
+assert.match(persistRebuild,
+  /std::rotate\(ring\.buf, ring\.buf \+ start, ring\.buf \+ kSlots\); std::rotate\(dhw\.buf, dhw\.buf \+ start, dhw\.buf \+ kSlots\); std::rotate\(energy\.buf, energy\.buf \+ start, energy\.buf \+ kSlots\); std::rotate\(expiry_us, expiry_us \+ start, expiry_us \+ kSlots\); std::rotate\(restored_end_unix_s, restored_end_unix_s \+ start, restored_end_unix_s \+ kSlots\); ring\.count = dhw\.count = energy\.count = static_cast<uint8_t>\(n\); ring\.head = dhw\.head = energy\.head = static_cast<uint8_t>\(n % kSlots\);/,
+  "a ring that is not full keeps its oldest hour in slot 0, which all three aggregates read first");
 assert.match(persistRebuild,
   /const size_t p = \(start \+ j\) % kSlots; restored_end_unix_s\[p\] = 0;/,
   "unrestored slots start without a stored wall time");
@@ -446,7 +464,7 @@ assert.equal(count(checkup, /\.x10a_blind =/g), 2,
 // window cannot claim full-day coverage across that restart.
 assert.match(dhwReset, /slot\.dhw_scope_us = esp_timer_get_time\(\);/,
   "the DHW-only reset must stamp the DHW scope start");
-assert.match(cFlash, /slot\.dhw_reset_requested\.load\(\)\)\) slot\.dhw_scope_us = now_us;/,
+assert.match(cFlash, /energy_reset_pending, energy_retired\)\) slot\.dhw_scope_us = now_us;/,
   "a restore that refuses DHW identity must stamp the DHW scope at the restore instant");
 assert.match(persistRebuild, /dhw_retired = dhw_retired \|\| !keep_dhw;/);
 assert.match(persistRebuild, /if \(dhw_reset_requested \|\| !dhw_source_fp\) \{ dhw\.buf\[p\] = DhwLossBucket\{\}; dhw_retired = true; \}/,
@@ -527,6 +545,20 @@ assert.match(dhwReset, /slot\.dhw_restart_armed = true; slot\.dhw_restart_bucket
 assert.match(flashNext,
   /if \(logic::checkup_journal_dhw_withheld\(slot\.dhw_restart_armed, slot\.dhw_restart_bucket, current, age\)\) \{ payload\.dhw_source_fp = 0; payload\.dhw = kEmptyDhwLossBucket; \}/,
   "pre-restart hours carry no DHW identity");
+const energyReset = body(checkup, "bool apply_energy_reset_locked(");
+assert.match(energyReset, /slot\.P\(\)\.energy\.head = slot\.P\(\)\.ring\.head; slot\.P\(\)\.energy\.count = slot\.P\(\)\.ring\.count;/,
+  "energy-only reset keeps the shared hourly geometry so checkup and DHW persistence stay writable");
+assert.match(energyReset, /slot\.energy_restart_armed = true; slot\.energy_restart_bucket = logic::checkup_bucket\(slot\.energy_scope_us\);/,
+  "the energy-only reset records its monotonic hour");
+assert.match(flashNext,
+  /if \(logic::checkup_journal_energy_withheld\(slot\.energy_restart_armed, slot\.energy_restart_bucket, current, age\)\) \{ payload\.pel_source_fp = 0; payload\.energy = kEmptyEnergyBucket; \}/,
+  "pre-restart hours withhold old electrical identity while retaining ring and dhw buckets");
+assert.match(body(checkup, "bool sealed_flash_next_locked("),
+  /logic::checkup_journal_energy_withheld\( slot\.energy_restart_armed, slot\.energy_restart_bucket, slot\.state\.bucket \+ 1, 0\)\) \{ payload\.pel_source_fp = 0; payload\.energy = kEmptyEnergyBucket; \}/,
+  "sealed open hour withholds old electrical identity after an energy-only reset");
+assert.match(persistRebuild,
+  /if \(energy_reset_requested \|\| !pel_source_fp\) \{ energy\.buf\[p\] = EnergyBucket\{\}; energy_retired = true; \}/,
+  "a kept live hour loses only its energy bucket when the electrical identity is gone");
 assert.match(body(checkup, "void persist_wipe("), /slot\.dhw_restart_armed = false;/);
 const appendAt2 = body(history, "esp_err_t flash_append_record_at(");
 assert.match(appendAt2,

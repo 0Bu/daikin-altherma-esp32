@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 5891197ebc9f5af10cf2869960334bf4897a64038c6b45116f6b31e75c256a78 -->
+<!-- user-docs-contract: b8779f56d71a82ae48b384e1d2200245804a2b390daf3c4bf9e247c77cddd1a5 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -14,7 +14,9 @@ and circulation recording and hides the Diagnostics card. The Model card becomes
 available. Existing data ages out as usual. Re-enabling resumes the same 24 h history and starts
 any new run or candidate after the pause.
 In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, and passive
-**Refrigerant (heating)**) are unavailable and omitted from the card.
+**Refrigerant (heating)**) are unavailable and omitted from the card, while **Performance factor**
+switches to the independent affirmatively confirmed HomeHub (`EKRHH`) Modbus window (or shows
+**Not supported** on `Altherma4`, `Probing`, or `Fallback` sweeps).
 
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
 Open a row to see what was measured and what the result means. The lowest water flow appears
@@ -322,6 +324,57 @@ A controlled refrigerant test still requires the exact model's service procedure
 instruments.
 
 **Evidence and limits:** [Refrigerant circuit observation](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation)
+
+<a id="working-figure-observation"></a>
+## Performance factor
+
+This expandable row is a rolling 24-hour energy observation inside the active diagnostics card,
+**not a ninth verdict in `/status.health`**; it never changes the eight-row summary badge. It
+requires Plant diagnostics opt-in and runs independently on either **X10A** or **HomeHub (EKRHH)
+Modbus** (keeping separate 24-hour windows per bus without mixing them).
+
+The firmware integrates useful **Heating + DHW** heat using pure water's specific heat capacity
+(`4.186 kJ/(L·K)`) while excluding **Cooling** and passive pump-only standby circulation.
+Water–glycol loops have roughly 6–8% lower heat capacity, so pure water slightly overstates heat
+output on glycol systems. Signed temperature differences during active operation remain signed so
+defrost heat withdrawal and valve transitions stay in the net balance. When tariffs are configured,
+the observed working figure ($\text{AZ} = Q_{\text{th}} / E_{\text{el}}$) is compared against a
+reference gas boiler's break-even ratio:
+
+$$\text{AZ}_{\text{Break-Even}} = \frac{p_{\text{elec}}}{p_{\text{gas}}} \cdot \eta_{\text{Gas}}$$
+
+Efficiency $\eta_{\text{Gas}}$ is fixed at `88%` on the gross calorific value ($H_s$) basis of a
+modern condensing gas boiler (matching residential gas bills) alongside fixed pure water
+(`4.186 kJ/(L·K)`), and only **variable per-kWh energy prices** enter the comparison (fixed annual
+chimney sweep, meter rental and base standing charges are excluded). Updating tariffs or currency
+recalculates costs and status across existing 24-hour buckets immediately without discarding
+collected history.
+
+| Row status | Meaning |
+|---|---|
+| **Collecting** | Fewer than 2 hours (`7200 s`) of valid paired observations have been collected on the active bus. The collapsed row stays blank while the expanded panel shows elapsed progress toward 2 hours. |
+| **Standby** | At least 2 hours observed, but net heat is below `1.0 kWh` or electricity is below `0.2 kWh`. |
+| **Partial** (*prov.*) | Energy thresholds met, while span is under 24 hours or usable coverage is below 90% (`77760 s`). |
+| **Limited** (*lim.*) | Full 24-hour window reached, with tank booster (`BSH`) intervals excluded, mismatched backup-heater (`BUH`) electricity/heat boundaries on X10A, or a `> 1.5 K` post-BUH rise (`41 − 40`) during active flow on HomeHub Modbus. |
+| **Measured** | Full unlimited 24-hour window without configured tariffs; shows heat, electricity and ratio without a cost verdict. |
+| **Cheaper than gas** / **Like gas** / **Costlier than gas** | Full unlimited 24-hour window evaluated against break-even ratio with a uniform `±20%` neutral band across onboard X10A and HomeHub Modbus estimates. |
+| **Not supported** | Active X10A profile lacks required flow, water-temperature, valve/mode or electrical-power signals (or CT clamps were detected unwired with no inverter-current fallback), or Modbus runs native `Altherma4`, `Probing`, or `Fallback` sweeps (whose Input `49` flow scaling is unverified). |
+
+On **X10A**, electrical input comes either from X10A CT current sensors (`0x63/14–16`, `0.5 A` steps
+assuming `~230 V`, whole-unit scope) or, when unavailable or latched unwired, X10A inverter primary
+current (`0x21/0`, assuming `~230 V`, compressor-only scope gated by fresh compressor speed).
+On **HomeHub (`EKRHH`) Modbus**, the firmware pairs plate-heat-exchanger leaving/return
+temperatures (`LWT PHE 40 − RWT 42`) and water flow (`49` `/100`) with Input `51` electrical power
+(whose measurement boundary and heater inclusion are left unspecified in Daikin's EKRHH guide),
+compressor running (`31`), mode (`38`), 3-way valve (`37`), defrost (`35`), and outdoor air (`44`);
+tank booster `BSH` (`32`) intervals are excluded, and a `> 1.5 K` post-BUH rise (`41 − 40`) flags the
+window **Limited**.
+
+**Important limit:** This observation uses uncalibrated flow, temperature and onboard electrical
+estimates, does not account for glycol heat capacity, fixed utility charges or inverter power
+factor, and is neither a seasonal JAZ/SCOP rating nor a billing meter.
+
+**Evidence and limits:** [Performance factor observation](DIAGNOSTIC_EVIDENCE.md#working-figure-observation)
 
 ## What the diagnosis cannot do
 

@@ -1382,6 +1382,43 @@ void modbus_dual_source() {
                 !checkup_has_data(DiagnosticsSource::X10a) &&
                 !checkup_has_data(DiagnosticsSource::Modbus),
             "new_generation_clears_both_sources_and_advances_epoch");
+
+    // Verify HomeHub Modbus feeds EnergyPelKind::Modbus separately from X10A while Altherma 4 stays
+    // unsupported.
+    checkup_set_diagnostics(true, 25);
+    const uint32_t wf_epoch = checkup_consent_epoch();
+    checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x22334455U);
+    const std::vector<CachedValue> wf_rows{
+        mb_row(21, "0"),    mb_row(30, "1"),     mb_row(31, "1"),    mb_row(32, "0"),
+        mb_row(35, "0"),    mb_row(37, "0"),     mb_row(38, "1"),    mb_row(40, "36.0"),
+        mb_row(41, "38.0"), mb_row(42, "31.0"),  mb_row(43, "48.0"), mb_row(44, "5.0"),
+        mb_row(49, "15.0"), mb_row(51, "1.500"),
+    };
+    const int64_t wf_base_us = sdk::now_us + 10000000LL;
+    sdk::now_us              = wf_base_us;
+    checkup_record_modbus(wf_rows.data(), wf_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, wf_epoch, true);
+    sdk::now_us = wf_base_us + 10000000LL;
+    checkup_record_modbus(wf_rows.data(), wf_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, wf_epoch, true);
+    sdk::now_us = wf_base_us + 20000000LL;
+    checkup_record_modbus(wf_rows.data(), wf_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, wf_epoch, true);
+    const auto wf_mb   = checkup_working_figure_status(adapter::cfg, DiagnosticsSource::Modbus);
+    const auto wf_x10a = checkup_working_figure_status(adapter::cfg, DiagnosticsSource::X10a);
+    require(wf_mb.supported && wf_mb.pel_kind == EnergyPelKind::Modbus && wf_mb.observed_s == 10 &&
+                wf_mb.heat_kwh > 0.0 && wf_mb.elec_kwh > 0.0 &&
+                (wf_mb.flags & ENERGY_F_LIMITED_BUH) != 0 && wf_mb.buh_s == 0 &&
+                !checkup_has_data(DiagnosticsSource::X10a) && wf_x10a.observed_s == 0 &&
+                wf_x10a.heat_kwh == 0.0 && wf_x10a.elec_kwh == 0.0 &&
+                wf_x10a.pel_kind != EnergyPelKind::Modbus,
+            "modbus_working_figure_tracks_homehub_separately_from_x10a");
+
+    checkup_modbus_confirm_source(ModbusProfile::Altherma4, 0x55667788U);
+    const auto wf_a4 = checkup_working_figure_status(adapter::cfg, DiagnosticsSource::Modbus);
+    require(!wf_a4.supported && wf_a4.state == WorkingFigureState::Unsupported &&
+                wf_a4.pel_kind == EnergyPelKind::None,
+            "altherma4_working_figure_remains_unsupported");
 }
 
 void x10a_modbus_fault_trace_lifecycle() {

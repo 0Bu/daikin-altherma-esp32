@@ -418,7 +418,7 @@ void compatibility() {
             "core fingerprint refuses observation payload");
     require(HISTORY_JOURNAL_SOURCE_COUNT == 5 && HISTORY_JOURNAL_SLOT_BYTES == 256,
             "wire source count and physical slot unchanged");
-    require(sizeof(CheckupBucket) == 80 && sizeof(CheckupJournalPayload) == 128,
+    require(sizeof(CheckupBucket) == 80 && sizeof(CheckupJournalPayload) == 160,
             "core RAM and payload untouched");
     auto             clean        = payload(bucket);
     auto             poisoned     = clean;

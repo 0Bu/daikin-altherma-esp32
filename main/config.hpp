@@ -102,6 +102,12 @@ bool config_factory_seed_blob(std::vector<uint8_t>& out);
 // and the caller derives the request again from a fresh config().
 [[nodiscard]] ConfigSaveResult config_save_link(const Config& c);
 
+// Gas comparison /set_gas_comparison save: writes ONLY the independent "gas" NVS key (DKG1 v1)
+// so "cfg" stays v21 and concurrent detection/board/link state is preserved untouched.
+[[nodiscard]] bool config_save_gas_comparison(uint32_t           elec_price_tenth_mill,
+                                              uint32_t           gas_price_tenth_mill,
+                                              const std::string& tariff_currency);
+
 // Atomically commit the link proven by one detection sweep, but only if the live config still has
 // the revision captured before that sweep. The NVS link write and RAM publication are
 // serialized with every HTTP config save, closing the detect-vs-/set_hp TOCTOU. A failed NVS cache

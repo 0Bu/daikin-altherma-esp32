@@ -2484,6 +2484,28 @@
     },
     {
       "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 release-coverage Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 GCC 15 delta carried from x86-64"
+      },
+      "hosted_confirmation": "The x86-64 release-coverage Docker result is the hosted candidate. Authoritative GitHub CI must confirm it.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin and matching --coverage plus gcov -n -b -c invocations in Docker",
+      "scope": "Independent DKG1 v1 gas-comparison tariff blob, Config validation and NVS transactions (including OOM unwinding), 24h Wh EnergyRing checkpoint persistence, WorkingFigureReport observation evaluation, and post-main-merge alignment with retired heating-curve and weather sources.",
+      "sources": {
+        "main/logic/checkup.hpp": "ae1d7436a3a1aa1ea398c7ee84197d6cadc7316e5054c497e609f30ecf2c17bf",
+        "main/logic/checkup_persist.hpp": "4c3180c45708a636950b013a682a6bcc437b13d97808fc44e9e9a959959e4775",
+        "main/logic/config_model.hpp": "448f5f8955bb1de09fa35f872d51b1662c88dd3e2134189dce52627e8eaea09e",
+        "main/logic/config_store.hpp": "2757316f11a79e78f300225a5507d6805fe9ec8bd1fc6a557f5ab103112629d9",
+        "main/logic/config_transaction.hpp": "0c4db99c3e5058fccd2c14affe3132cabb7df8a4546e1401814a03de1c3eb1ac",
+        "main/logic/gas_comparison.hpp": "7db97d61238d8216ef01a24186445b4d326884b24ac1d2d62e565d9f88551729",
+        "main/logic/working_figure.hpp": "7e8b4316f8f2c4c67f66125157577b7909448dca9f1ae13192460aac3dba7db5"
+      },
+      "test_source_sha256": "ef3216d35ce3a7ad56b867ea158b7073403022e76c0429a128ee285c30d98e74",
+      "validation_boundary": "Directly measured on host Apple Clang 17 arm64, ESP-IDF v6.1.1 Docker GCC 13 aarch64, and release-coverage Ubuntu 26.04 Docker GCC 15 x86-64. Local arm64 ubuntu:26.04 is a bare base image without g++, so gcc-15-linux-ubuntu26 carries the identical measured GCC 15 x86-64 counts. Hardware behavior remains unverified by host tests."
+    },
+    {
+      "compilers": {
         "clang-17-darwin": "Apple Clang 17.0.0, arm64",
         "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, pinned ESP-IDF v6.1.1 Docker, aarch64",
         "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, release-coverage Docker, x86-64"
@@ -2541,11 +2563,11 @@
       },
       "main/logic/checkup.hpp": {
         "outcomes": 1387,
-        "taken": 1316
+        "taken": 1317
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 353,
-        "taken": 353
+        "outcomes": 361,
+        "taken": 361
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 272,
@@ -2556,16 +2578,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 298,
-        "taken": 258
+        "outcomes": 308,
+        "taken": 279
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 496,
-        "taken": 322
+        "outcomes": 542,
+        "taken": 375
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 100,
-        "taken": 73
+        "outcomes": 106,
+        "taken": 87
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 26,
@@ -2658,6 +2680,10 @@
       "main/logic/fixed_text.hpp": {
         "outcomes": 16,
         "taken": 12
+      },
+      "main/logic/gas_comparison.hpp": {
+        "outcomes": 20,
+        "taken": 18
       },
       "main/logic/ha_device.hpp": {
         "outcomes": 156,
@@ -2971,6 +2997,10 @@
         "outcomes": 10,
         "taken": 10
       },
+      "main/logic/working_figure.hpp": {
+        "outcomes": 525,
+        "taken": 439
+      },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,
         "taken": 52
@@ -3011,11 +3041,11 @@
       },
       "main/logic/checkup.hpp": {
         "outcomes": 1581,
-        "taken": 1496
+        "taken": 1497
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 415,
-        "taken": 415
+        "outcomes": 443,
+        "taken": 443
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -3026,16 +3056,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 336,
-        "taken": 300
+        "outcomes": 342,
+        "taken": 314
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 474,
-        "taken": 332
+        "outcomes": 516,
+        "taken": 388
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 96,
-        "taken": 72
+        "outcomes": 104,
+        "taken": 89
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -3128,6 +3158,10 @@
       "main/logic/fixed_text.hpp": {
         "outcomes": 14,
         "taken": 11
+      },
+      "main/logic/gas_comparison.hpp": {
+        "outcomes": 16,
+        "taken": 16
       },
       "main/logic/ha_device.hpp": {
         "outcomes": 180,
@@ -3441,6 +3475,10 @@
         "outcomes": 16,
         "taken": 16
       },
+      "main/logic/working_figure.hpp": {
+        "outcomes": 503,
+        "taken": 429
+      },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,
         "taken": 54
@@ -3481,11 +3519,11 @@
       },
       "main/logic/checkup.hpp": {
         "outcomes": 1581,
-        "taken": 1496
+        "taken": 1497
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 415,
-        "taken": 415
+        "outcomes": 443,
+        "taken": 443
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -3496,16 +3534,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 336,
-        "taken": 300
+        "outcomes": 342,
+        "taken": 314
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 474,
-        "taken": 332
+        "outcomes": 516,
+        "taken": 388
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 96,
-        "taken": 72
+        "outcomes": 104,
+        "taken": 89
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -3598,6 +3636,10 @@
       "main/logic/fixed_text.hpp": {
         "outcomes": 14,
         "taken": 11
+      },
+      "main/logic/gas_comparison.hpp": {
+        "outcomes": 16,
+        "taken": 16
       },
       "main/logic/ha_device.hpp": {
         "outcomes": 180,
@@ -3911,6 +3953,10 @@
         "outcomes": 16,
         "taken": 16
       },
+      "main/logic/working_figure.hpp": {
+        "outcomes": 503,
+        "taken": 429
+      },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,
         "taken": 54
@@ -3951,11 +3997,11 @@
       },
       "main/logic/checkup.hpp": {
         "outcomes": 1581,
-        "taken": 1496
+        "taken": 1497
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 415,
-        "taken": 415
+        "outcomes": 443,
+        "taken": 443
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -3966,16 +4012,16 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 336,
-        "taken": 300
+        "outcomes": 342,
+        "taken": 314
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 474,
-        "taken": 332
+        "outcomes": 516,
+        "taken": 388
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 96,
-        "taken": 72
+        "outcomes": 104,
+        "taken": 89
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -4068,6 +4114,10 @@
       "main/logic/fixed_text.hpp": {
         "outcomes": 14,
         "taken": 11
+      },
+      "main/logic/gas_comparison.hpp": {
+        "outcomes": 16,
+        "taken": 16
       },
       "main/logic/ha_device.hpp": {
         "outcomes": 180,
@@ -4380,6 +4430,10 @@
       "main/logic/wifi_rollback.hpp": {
         "outcomes": 16,
         "taken": 16
+      },
+      "main/logic/working_figure.hpp": {
+        "outcomes": 503,
+        "taken": 429
       },
       "main/logic/x10a_snapshot.hpp": {
         "outcomes": 62,

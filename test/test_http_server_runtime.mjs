@@ -98,7 +98,7 @@ const mutations = [
   { name: "oom-response-regression", file: "common", scenario: "exception_boundary",
     before: 'httpd_resp_sendstr(req, "out of memory")', after: 'httpd_resp_sendstr(req, "handler error")' },
   { name: "route-capacity-regression", file: "server", scenario: "registration_oracle",
-    before: "cfg.max_uri_handlers = 38;", after: "cfg.max_uri_handlers = 37;" },
+    before: "cfg.max_uri_handlers = 39;", after: "cfg.max_uri_handlers = 38;" },
   { name: "open-ap-mcp-exposure", file: "mcp", scenario: "registration_oracle",
     before: 'http_register_on(s, surface, "/mcp", HTTP_POST, mcp_post);',
     after: 'http_register(s, "/mcp", HTTP_POST, mcp_post);' },
@@ -271,7 +271,7 @@ try {
     claimLimits: [
       "Complete unextracted production http_common.cpp, http_server.cpp and mcp_server.cpp translation units execute.",
       "Only the four status/config/OTA/captive registration functions are extracted verbatim. Their service bodies are counted adapters; production body/config/OTA implementations are not exercised.",
-      "The SDK registration adapter invokes the production common trampoline; independent checked-in URI/method/order oracles assert AP5 and LAN38.",
+      "The SDK registration adapter invokes the production common trampoline; independent checked-in URI/method/order oracles assert AP5 and LAN39.",
       "MCP parser, version/notification/dispatch/catalog/framing and common HTTP headers/body/time/exception guards run against SDK-shaped adapters; snapshot serializers are controlled shared adapters.",
       "HTTP sockets, FreeRTOS scheduling, live device heap/stack, NVS, physical source truth, signing, OTA delivery and rendered browser behavior are separate evidence.",
     ] };

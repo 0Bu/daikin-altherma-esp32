@@ -54,7 +54,7 @@ vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   labelSchematicHits();
   wire();
   this.__ui = { S, t, esp32CardHtml, circulationSettingsCardHtml,
-                refrigerantServiceRowHtml, checkupCardHtml, checkupDetailHtml,
+                refrigerantServiceRowHtml, workingFigureRowHtml, checkupCardHtml, checkupDetailHtml,
                 checkupFlowReport, checkupFlowBriefHtml, connLinks, liveData,
                 renderApp, renderCards, histHtml, INSPECT };`, context,
   { filename: "main/www/app.sources" });
@@ -81,6 +81,8 @@ const HEALTHY = () => ({
     off_threshold_w: "1.0", confirm_s: 60, subscribed: true, has_value: true, power_w: 5.4,
     state: "on", age_s: 5, fresh: true, freshness_reason: "fresh", retained: false, messages: 5,
     errors: 0, rejections: 0 },
+  gas_comparison: { configured: true, elec_price: 0.32, gas_price: 0.105,
+    gas_efficiency_pct: 88, currency: "EUR", break_even_az: 2.68 },
   syslog: { configured: true, resolved: true, reachable: true, host: "192.0.2.5", port: 514 },
   hp: { proto: "I", rx: 1, tx: 2, connected: true, last_ok_s: 0, registers: 12, values: 99,
     crc_err: 0, timeout_err: 0 },
@@ -101,6 +103,15 @@ const HEALTHY = () => ({
   refrigerant_service: { kind: "observation", state: "waiting", continuous_s: 0, samples: 0,
     mode: "heating", blocker: "compressor_not_running", special_phases_known: true,
     load_proven: false, eev_feedback: false, limitations: [], metrics: {} },
+  working_figure: { kind: "observation", supported: true, state: "cheaper",
+    tariffs_configured: true, full_window: true, source_fresh: true, is_estimate: true,
+    is_compressor_only: false, pel_source: "x10a_ct", span_s: 86400, observed_s: 86400,
+    unpairable_s: 0, defrost_s: 0, buh_s: 0, bsh_excluded_s: 0, cooling_excluded_s: 0,
+    coverage_pct: 100, neutral_band_pct: 20, heat_kwh: 41.0, elec_kwh: 10.0, az: 4.10,
+    gas_efficiency_pct: 88, currency: "EUR", elec_price: 0.32, gas_price: 0.105,
+    break_even_az: 2.68, gas_equiv_kwh: 46.6, cost_wp: 3.20, cost_gas: 4.89,
+    cost_delta: -1.69, cost_delta_pct: -34.6, outdoor_mean_c: 4.2, outdoor_min_c: 1.1,
+    limited_buh: false, unpaired_buh: false, ct_unwired: false },
   sys: { free_heap: 120000, min_free_heap: 90000, max_alloc: 60000, reset_reason: "power_on",
     safe_mode: false },
   ntp: { server: "pool.ntp.org", synced: true, time: "2026-08-07T10:00:00Z" },
@@ -163,6 +174,7 @@ const REMOVE = {
     s.detect = { ...s.detect, valid: false, capacity_kw: null, capacity_kw_iu: null, ou_eeprom: "",
       candidates: [], families: [], ambiguous: false, model: null };
     delete s.refrigerant_service;
+    delete s.working_figure;
     // Only the BOARD's own trends survive an unresolved profile — history_record_board() owns them
     // and the poll task calls it before it decides whether to detect or to sweep.
     s.history.rows = s.history.rows.filter((r) => r.id === "free_heap" || r.id === "max_alloc");
@@ -193,6 +205,7 @@ const REMOVE = {
     s.detect = { ...s.detect, valid: false, capacity_kw: null, capacity_kw_iu: null, ou_eeprom: "",
       candidates: [], families: [], ambiguous: false, model: null };
     delete s.refrigerant_service;
+    delete s.working_figure;
     // mb_start() is never called, so the stack's own `enabled` flag is false even though an address
     // IS saved — the one place /status reports a task fact where its siblings report a config fact.
     s.modbus = { ...s.modbus, enabled: false, connected: false, plant_gate_known: false,
@@ -211,7 +224,6 @@ const REMOVE = {
 const SCENARIOS = [
   { name: "everything configured", remove: [] },
   { name: "no MQTT broker (circulation mapping stays saved)", remove: ["mqtt"] },
-
   { name: "no circulation witness", remove: ["circulation"] },
 
   { name: "no HomeHub", remove: ["homehub"] },
@@ -240,6 +252,7 @@ const RENDERERS = {
   esp32CardHtml: () => ui.esp32CardHtml(),
   circulationSettingsCardHtml: () => ui.circulationSettingsCardHtml(),
   refrigerantServiceRowHtml: () => ui.refrigerantServiceRowHtml(),
+  workingFigureRowHtml: () => ui.workingFigureRowHtml(),
 };
 
 const SETUP_COPY = [
@@ -292,6 +305,13 @@ for (const scenario of SCENARIOS) {
   if (!status.detect.valid) {
     assert.equal(rendered.refrigerantServiceRowHtml, "",
       `${scenario.name}: no detected X10A profile must render no refrigerant-service row`);
+    assert.equal(rendered.workingFigureRowHtml, "",
+      `${scenario.name}: no detected X10A profile must render no working-figure row`);
+    checks += 2;
+  }
+  if (status.gas_comparison.configured) {
+    assert.match(rendered.circulationSettingsCardHtml, /data-act="gas-comparison"[\s\S]*?>2[.,]68<\/span>/,
+      `${scenario.name}: Settings gas-comparison row must keep reading gas_comparison regardless of working_figure`);
     checks++;
   }
 
@@ -329,6 +349,13 @@ for (const scenario of SCENARIOS) {
       `${scenario.name}: an unreachable circulation witness must not render as a healthy row`);
     assert.ok(rendered.circulationSettingsCardHtml.includes(ui.t("circ.broker_off")),
       `${scenario.name}: the circulation row must name the missing broker, by its actual cause`);
+    checks++;
+  }
+  if (status.working_figure) {
+    assert.ok(["x10a_ct", "x10a_inv", "modbus"].includes(status.working_figure.pel_source)
+      && status.working_figure.is_estimate === true
+      && status.working_figure.neutral_band_pct === 20,
+      `${scenario.name}: working_figure must use an onboard estimated electrical source with +-20% band`);
     checks++;
   }
   if (status.sys.safe_mode || scenario.remove.includes("ntp")) {
@@ -453,6 +480,26 @@ for (const c of WIRED) {
 assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
   "no cable and no address are different problems and must read differently");
 
+// When X10A is absent while HomeHub Modbus carries the working_figure observation, the UI must
+// keep the refrigerant-service row hidden while rendering the Modbus estimate.
+{
+  const modbusOnly = REMOVE.x10a(JSON.parse(JSON.stringify(HEALTHY())));
+  modbusOnly.working_figure = {
+    ...HEALTHY().working_figure,
+    pel_source: "modbus",
+    is_estimate: true,
+    neutral_band_pct: 20,
+  };
+  ui.S.status = modbusOnly;
+  assert.equal(ui.refrigerantServiceRowHtml(), "",
+    "no detected X10A profile must keep the refrigerant-service row hidden even when Modbus answers");
+  const wfHtml = ui.workingFigureRowHtml();
+  assert.match(wfHtml, /~4[.,]10/, "HomeHub Modbus working_figure must keep rendering estimated AZ");
+  assert.doesNotMatch(wfHtml, /<span class="wf-fact-k">Power<\/span>/,
+    "HomeHub Modbus working_figure must omit duplicate Power row when card header states Modbus");
+  assert.match(wfHtml, /class="wf-foot"/);
+  checks += 2;
+}
 // Modbus-only diagnostics and unavailable flow never surface X10A hydronic observation details
 // or keep an unavailable flow row visible via a hydronic placeholder or stale X10A payload.
 {

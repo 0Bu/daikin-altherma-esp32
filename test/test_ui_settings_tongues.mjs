@@ -160,6 +160,15 @@ const labels = {
   "circ.detail.state": "Erkannter Zustand",
   "circ.detail.age": "Alter des Messwerts",
   "circ.settings_help": "Nur lesende Pumpendiagnose.",
+  "circ.broker_off": "MQTT-Broker deaktiviert",
+  "env.live": "Live",
+  "wf.not_configured": "Keine Tarife",
+  "wf.gas.title": "Gaspreis-Vergleich",
+  "wf.gas.row": "Gaspreis-Vergleich (Tarife)",
+  "wf.gas.detail.elec": "Strompreis",
+  "wf.gas.detail.gas": "Gaspreis",
+  "wf.gas.detail.breakeven": "Break-even-AZ",
+  "wf.gas.settings_help": "Nur lokale Tarifwerte für die Arbeitszahl-Auswertung (88 % Hs).",
 };
 const t = (key, ...args) => (labels[key] || key).replace(/\{(\d+)\}/g, (_, i) => args[Number(i)]);
 const esc = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
@@ -223,6 +232,32 @@ assert.match(circulationButton, /Example circulation pump/,
   "an MQTT outage must not replace the configured pump identity in the row header");
 assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Nicht verfügbar/,
   "an unavailable source without a power sample must still expose its current status inside");
+
+// Gas-comparison settings row shares the diagnostics card and split-tongue pattern.
+let gasButton = circulationHtml.match(/<button[^>]*data-act="gas-comparison"[\s\S]*?<\/button>/)?.[0] || "";
+let gasTongue = circulationHtml.match(/id="diagnostics-gas-comparison-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.match(gasButton, /<span>Keine Tarife<\/span>/,
+  "an unconfigured gas comparison must show its compact setup label");
+assert.match(gasButton, /\bdim\b/, "unconfigured tariffs stay subdued");
+assert.match(gasTongue, /Nur lokale Tarifwerte/,
+  "collapsed/unconfigured gas comparison still keeps its settings explanation in the tongue");
+
+S.status.gas_comparison = {
+  configured: true, elec_price: 0.32, gas_price: 0.11, gas_efficiency_pct: 88,
+  break_even_az: 2.56, currency: "EUR",
+};
+circulationHtml = sandbox.__renderCirculation();
+gasButton = circulationHtml.match(/<button[^>]*data-act="gas-comparison"[\s\S]*?<\/button>/)?.[0] || "";
+gasTongue = circulationHtml.match(/id="diagnostics-gas-comparison-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
+assert.match(gasButton, /<span>2,56<\/span>/,
+  "configured tariffs summarize break-even AZ without repeating 88% Hs");
+assert.match(gasButton, /\bok\b/, "configured tariffs carry ok tone");
+assert.doesNotMatch(gasTongue, /Wirkungsgrad/, "Settings tongue omits fixed efficiency note field");
+assert.match(gasTongue, /<span class="vdesc-n">Strompreis<\/span> 0,3200 EUR\/kWh/);
+assert.match(gasTongue, /<span class="vdesc-n">Gaspreis<\/span> 0,1100 EUR\/kWh/);
+assert.match(gasTongue, /<span class="vdesc-n">Break-even-AZ<\/span> 2,56/);
+assert.doesNotMatch(circulationHtml, /data-act="power-meter"/,
+  "power-meter row must no longer render in the diagnostics settings card");
 
 // Protocol and Firmware use the same info-tongue contract while keeping their independent controls.
 S.status = {

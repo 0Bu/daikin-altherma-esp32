@@ -98,13 +98,15 @@ inline unsigned                               dhw_snapshot_chunks = 0;
 inline daik::CheckupFaultStatus               fault_status{};
 inline daik::logic::CheckupFaultTrace         fault_trace{};
 inline bool                                   fault_trace_present = false;
-inline daik::logic::CheckupRestore checkup_persist         = daik::logic::CheckupRestore::NoRecord;
-inline bool                        reset_after_checkup     = false;
-inline unsigned                    stop_report_calls       = 0;
-inline unsigned                    hydronic_report_calls   = 0;
-inline bool                        checkup_x10a_has_data   = false;
-inline bool                        checkup_modbus_has_data = false;
-inline daik::DiagnosticsSource     last_checkup_report_source = daik::DiagnosticsSource::X10a;
+inline daik::logic::CheckupRestore      checkup_persist     = daik::logic::CheckupRestore::NoRecord;
+inline bool                             reset_after_checkup = false;
+inline unsigned                         stop_report_calls   = 0;
+inline unsigned                         hydronic_report_calls      = 0;
+inline bool                             checkup_x10a_has_data      = false;
+inline bool                             checkup_modbus_has_data    = false;
+inline daik::DiagnosticsSource          last_checkup_report_source = daik::DiagnosticsSource::X10a;
+inline daik::logic::WorkingFigureReport working_figure_x10a{};
+inline daik::logic::WorkingFigureReport working_figure_modbus{};
 inline daik::logic::RefrigerantServiceSnapshot refrigerant_report{};
 inline unsigned                                refrigerant_report_calls = 0;
 inline std::string                             log;
@@ -156,6 +158,8 @@ void reset() {
     dhw_snapshot_chunks                                                  = 0;
     fault_status                                                         = {};
     fault_trace.reset();
+    working_figure_x10a        = {};
+    working_figure_modbus      = {};
     fault_trace_present        = false;
     checkup_persist            = daik::logic::CheckupRestore::NoRecord;
     reset_after_checkup        = false;
@@ -583,6 +587,10 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
         fixture::cycling_hours   = {};
     }
     return report;
+}
+logic::WorkingFigureReport checkup_working_figure_status(const Config&, DiagnosticsSource source) {
+    return source == DiagnosticsSource::Modbus ? fixture::working_figure_modbus
+                                               : fixture::working_figure_x10a;
 }
 CheckupHydronicReport checkup_hydronic_report() {
     ++fixture::hydronic_report_calls;
@@ -1498,9 +1506,25 @@ int main(int argc, char** argv) {
               "OTA admission reached the scan service");
     });
     run("status_modbus_diagnostics", [] {
-        current.mb_host             = "192.0.2.50";
-        current.diagnostics_enabled = true;
-        current.diagnostics_source  = daik::DiagnosticsSource::X10a;
+        current.mb_host                 = "192.0.2.50";
+        current.diagnostics_enabled     = true;
+        current.diagnostics_source      = daik::DiagnosticsSource::X10a;
+        current.elec_price_tenth_mill   = 3000;
+        current.gas_price_tenth_mill    = 1000;
+        current.tariff_currency         = "CHF";
+        working_figure_modbus.supported = true;
+        working_figure_modbus.pel_kind  = daik::logic::EnergyPelKind::Modbus;
+        working_figure_modbus.state     = daik::logic::WorkingFigureState::Limited;
+        working_figure_modbus.flags     = daik::logic::ENERGY_F_LIMITED_BUH;
+        working_figure_modbus.heat_kwh  = 12.0;
+        working_figure_modbus.elec_kwh  = 3.0;
+        working_figure_modbus.az        = 4.0;
+        working_figure_x10a.supported   = true;
+        working_figure_x10a.pel_kind    = daik::logic::EnergyPelKind::X10aCt;
+        working_figure_x10a.state       = daik::logic::WorkingFigureState::Measured;
+        working_figure_x10a.heat_kwh    = 8.0;
+        working_figure_x10a.elec_kwh    = 2.0;
+        working_figure_x10a.az          = 4.0;
         rows.clear();
         checkup_x10a_has_data                                     = false;
         checkup_modbus_has_data                                   = true;
@@ -1557,6 +1581,15 @@ int main(int argc, char** argv) {
                 req.response.find("\"secondary_supply\":null", hydronic_end) != std::string::npos &&
                 req.response.find("\"water_agreement\":null", hydronic_end) != std::string::npos,
             "status payload missing modbus diagnostics provenance or empty stop_context/hydronic");
+        check(
+            req.response.find("\"gas_comparison\":{\"configured\":true,\"elec_price\":0.3,"
+                              "\"gas_price\":0.1,\"gas_efficiency_pct\":88,\"currency\":\"CHF\"") !=
+                    std::string::npos &&
+                req.response.find("\"working_figure\":{\"kind\":\"observation\",\"supported\":true,"
+                                  "\"state\":\"limited\"") != std::string::npos &&
+                req.response.find("\"pel_source\":\"modbus\"") != std::string::npos &&
+                req.response.find("\"limited_buh\":true") != std::string::npos,
+            "status payload missing modbus working_figure or gas_comparison");
     });
     run("hydronic_status", [] {
         hydronic_report = {};
@@ -1676,6 +1709,8 @@ int main(int argc, char** argv) {
     run("status_fault_timeline", [] {
         current.diagnostics_enabled = true;
         fault_trace.reset();
+        working_figure_x10a      = {};
+        working_figure_modbus    = {};
         fault_trace.window_end_s = daik::logic::CHECKUP_FAULT_WINDOW_S;
         fault_trace.unix_s       = 1795000000u;
         fault_trace.boot_s       = 500;
