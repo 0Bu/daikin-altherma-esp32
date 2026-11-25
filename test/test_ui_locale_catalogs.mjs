@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1010, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1004, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -228,8 +228,6 @@ assert.equal(catalog.it["check.cycling.runs"](1), "1 ciclo");
 assert.deepEqual([1, 2, 12].map(catalog.cs["check.cycling.runs"]), ["1 cyklus", "2 cykly", "12 cyklů"]);
 assert.deepEqual([1, 2, 12].map(catalog.pl["check.cycling.runs"]), ["1 cykl", "2 cykle", "12 cykli"]);
 assert.deepEqual([1, 2, 12].map(catalog.uk["check.cycling.runs"]), ["1 цикл", "2 цикли", "12 циклів"]);
-assert.equal(catalog.sv["check.summary.warnings"](1), "1 varning");
-assert.equal(catalog.sv["check.summary.warnings"](2), "2 varningar");
 assert.match(catalog.sv["check.detail.dhw_aborted"](1, "x", 20), /1 kandidat blev förkastad/);
 assert.match(catalog.sv["check.detail.dhw_aborted"](2, "x", 20), /2 kandidater blev förkastade/);
 assert.equal(catalog.sv["check.cycling.runs"](1), "1 körning");

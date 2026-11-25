@@ -359,7 +359,7 @@ function baseStatus() {
     "working_figure row must stay hidden when /status.working_figure is absent on modbus");
 }
 
-// ── 2. Card summary badge invariance across working_figure states ───────────────────────────────
+// ── 2. No header summary badge across working_figure or fault states ────────────────────────────
 {
   const s = baseStatus();
   for (const wfState of ["more_expensive", "limited", "cheaper", "partial", "collecting", "standby", "measured", "unsupported"]) {
@@ -373,21 +373,25 @@ function baseStatus() {
       },
     };
     const card = ui.checkupCardHtml(true);
-    assert.match(card, new RegExp(`<span class="section-badge ok">${ui.t("check.summary.ok")}</span>`),
-      `card badge must remain ${ui.t("check.summary.ok")} regardless of working_figure state (${wfState})`);
+    assert.doesNotMatch(card, /section-badge/,
+      `diagnosis card must render no header badge regardless of working_figure state (${wfState})`);
   }
 
   ui.S.status = {
     ...s,
     health: {
       ...s.health,
-      status: "warn",
       checks: [{ id: "fault", verdict: "warn", evidence: "manufacturer", active: 1 }],
     },
     working_figure: { ...s.working_figure, state: "more_expensive", limited_buh: true },
   };
-  assert.match(ui.checkupCardHtml(true), new RegExp(`<span class="section-badge err">${ui.t("check.summary.warnings", 1)}</span>`),
-    "card warning count must count health checks only, never working_figure");
+  const warnCard = ui.checkupCardHtml(true);
+  assert.doesNotMatch(warnCard, /section-badge/,
+    "diagnosis card must render no header badge even when fault verdict is warn");
+  assert.match(warnCard, /class="vrow-val checkup-val err"/,
+    "fault row must retain its err tone while working_figure renders independently");
+  assert.match(warnCard, /observation:working_figure/,
+    "working_figure row must render independently beside fault warn state");
 }
 
 // ── 3. All 9 working_figure states: text, ~ estimate prefix, tone, suffix, words-only ariaValue ─

@@ -286,7 +286,7 @@ void heater_case(const std::string& name) {
     require(h.b == want_bsh, "bsh_endpoint_truth");
     require(h.c == want_buh_seen, "buh_independent_clock");
     require(h.d == want_bsh_seen, "bsh_independent_clock");
-    require(r.overall != CheckupVerdict::Ok, "short_population_not_reassuring");
+    require(r.evaluated == 0, "short_population_not_reassuring");
 }
 void independent_heaters() {
     boot();

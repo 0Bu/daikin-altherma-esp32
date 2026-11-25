@@ -2930,7 +2930,7 @@ function valueGroupsHtml(vals, connected) {
     // at all and only the handful of unpaired ones would have survived, in the card below.
     if (mbLive() && (S._modbus || []).some((m) => m && m.value != null)) return modbusOnlyGroupHtml(true);
     return vcard(t("group.Values"), `<span class="empty">${esc(t("values.waiting"))}</span>`,
-                 "", "", "values");
+                 "values");
   }
   // Reading order is GROUP_ORDER (DESIGN.md §6), NOT the GROUPS array — that one is match
   // precedence, and the two stopped agreeing the moment a key had to be made more specific.
@@ -2956,11 +2956,10 @@ function valueGroupsHtml(vals, connected) {
   const emit = (name, rows) => {
     const prot   = name === "Protection";
     const shown  = prot ? rows.map((v) => (isLimiting(v) ? { ...v, state: "warn" } : v)) : rows;
-    const badge  = prot && rows.some(isLimiting) ? t("protect.limiting") : "";
     const label = grouped ? groupLabel(name) : t("group.Values");
     const navLabel = grouped && name === "Refrigerant / outdoor" ? t("nav.outdoor") : label;
     const key = `group:${name}`;
-    html += vcard(label, shown.map(v => vDescRow(v, key !== S.dashboardCard)).join(""), badge, "", key, navLabel);
+    html += vcard(label, shown.map(v => vDescRow(v, key !== S.dashboardCard)).join(""), key, navLabel);
   };
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups
@@ -3022,5 +3021,5 @@ function modbusOnlyGroupHtml(all) {
   // catalog happens to be in it this cycle. "Modbus only" tried to say the second thing and
   // was wrong half the time: with X10A down the paired rows fold in here too, so the card was
   // titled "only" over readings that are anything but.
-  return vcard(t("group.Modbus"), html, "", "", "modbus");
+  return vcard(t("group.Modbus"), html, "modbus");
 }

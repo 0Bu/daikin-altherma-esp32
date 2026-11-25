@@ -1,4 +1,4 @@
-// translation-source: c2571eea4c9e1b1557c03b1681258c3302a5a3ec6e3069de40751f5d837f74b1
+// translation-source: 9d5db6b481e895505e13600d42051d375612a2008f0d31e718bbfbe0f88e9a08
 const ukNoun = (n, a, b, c) => n % 10 === 1 && n % 100 !== 11 ? a
   : n % 10 >= 2 && n % 10 <= 4 && !(n % 100 >= 12 && n % 100 <= 14) ? b : c;
 const ukAria = (x) => (l, d) => `${l} — часова шкала ${x}. ${d}. Клавіші зі стрілками озвучують окремі зразки.`;
@@ -406,11 +406,6 @@ I18N.uk = localeValues([
   /* check.detail.minimum_time_label */ "≤0,5 bar критичний",
   /* check.detail.coverage_missing */ (a) => `Бракує читабельного часу: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: покриття ${b}`,
-  /* check.summary.warnings */ (n) => `${n} ${ukNoun(n, "попередження", "попередження", "попереджень")}`,
-  /* check.summary.notes */ (n) => `${n} ${ukNoun(n, "примітка", "примітки", "приміток")}`,
-  /* check.summary.ok */ "Без ознак в оцінених даних",
-  /* check.summary.collecting */ "Збір даних",
-  /* check.summary.observations */ "Спостереження",
   /* values.waiting */ "Очікування першого опитування…",
   /* values.sg_x10a_mode */ "Режим Smart Grid (контакти X10A)",
   /* group.Operation */ "Робота",
@@ -421,7 +416,6 @@ I18N.uk = localeValues([
   /* group.Device */ "Пристрій",
   /* group.Other values */ "Інші значення",
   /* group.Protection */ "Захист",
-  /* protect.limiting */ "обмеження зараз",
   /* group.Values */ "Значення",
   /* state.on */ "УВІМК.",
   /* state.off */ "ВИМК.",

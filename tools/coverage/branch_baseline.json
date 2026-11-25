@@ -2568,6 +2568,24 @@
       },
       "test_source_sha256": "da5062089094de38912c466e2cc83ffb38c0a51e97c9f67d4015d2069c9da4a6",
       "validation_boundary": "Host logic tests and pure codec/journal CHECKs cover main/logic/; target runtime, FreeRTOS concurrency and flash hardware are covered separately by runtime harnesses and ESP-IDF build checks."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang 17.0.0, arm64 Darwin",
+        "gcc-13-linux-ubuntu24": "GCC 13.3.0 in CI-pinned ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "GCC 15.2.0 in Ubuntu 26.04 release-coverage Docker, x86-64"
+      },
+      "hosted_confirmation": "The locally measured Ubuntu 26.04 x86-64 release-coverage Docker result supplies the hosted profile candidate; authoritative GitHub CI must confirm before merge.",
+      "measurement_limits": [
+        "gcc-15-linux-ubuntu26 carries the identical measured GCC 15 x86-64 counts pending a direct arm64 Ubuntu 26.04 GCC 15 container run."
+      ],
+      "runner": "scripts/run-mock-tests.sh --coverage across clang-17-darwin, espressif/idf:v6.1.1 Docker (--with-host-tests), and daikin-altherma-esp32-release-coverage x86-64 Docker",
+      "scope": "Remove checkup_worse() and CheckupReport::overall while keeping checkup_summarize(), available/assessable/evaluated, and per-check verdict semantics: main/logic/checkup.hpp 1317/1387->1312/1381 (Clang 17 Darwin) and 1497/1581->1492/1575 (GCC 13 aarch64 and GCC 15 x86-64), increasing both branch ratios and maintaining the 95-percent executable-line floor.",
+      "sources": {
+        "main/logic/checkup.hpp": "584c778dac458dda35b018677a839dcf0059ab5d60a25cce03042fe4f725863e"
+      },
+      "test_source_sha256": "61b97e648ac6fe17870a32a6b6d0e28f3fe4ff96bd4dbc8ea00f023f21905cd8",
+      "validation_boundary": "Host and container logic suites exercise synthetic inputs only; hosted CI confirmation and target hardware behavior remain separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2606,8 +2624,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1387,
-        "taken": 1317
+        "outcomes": 1381,
+        "taken": 1312
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 361,
@@ -3112,8 +3130,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1581,
-        "taken": 1497
+        "outcomes": 1575,
+        "taken": 1492
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 443,
@@ -3618,8 +3636,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1581,
-        "taken": 1497
+        "outcomes": 1575,
+        "taken": 1492
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 443,
@@ -4124,8 +4142,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1581,
-        "taken": 1497
+        "outcomes": 1575,
+        "taken": 1492
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 443,

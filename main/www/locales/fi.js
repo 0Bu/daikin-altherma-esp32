@@ -1,4 +1,4 @@
-// translation-source: c2571eea4c9e1b1557c03b1681258c3302a5a3ec6e3069de40751f5d837f74b1
+// translation-source: 9d5db6b481e895505e13600d42051d375612a2008f0d31e718bbfbe0f88e9a08
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -402,11 +402,6 @@ I18N.fi = localeValues([
   /* check.detail.minimum_time_label */ "≤0,5 bar kriittinen",
   /* check.detail.coverage_missing */ (a) => `Puuttuva luettava aika: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: kattavuus ${b}`,
-  /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "varoitus" : "varoitusta"}`,
-  /* check.summary.notes */ (n) => `${n} ${n === 1 ? "huomautus" : "huomautusta"}`,
-  /* check.summary.ok */ "Ei vihjeitä arvioiduissa tiedoissa",
-  /* check.summary.collecting */ "Tietojen keruu",
-  /* check.summary.observations */ "Havainnot",
   /* values.waiting */ "Odotetaan ensimmäistä kyselyä…",
   /* values.sg_x10a_mode */ "Smart-Grid-tila (X10A-koskettimet)",
   /* group.Operation */ "Toiminta",
@@ -417,7 +412,6 @@ I18N.fi = localeValues([
   /* group.Device */ "Laite",
   /* group.Other values */ "Muut arvot",
   /* group.Protection */ "Suojaus",
-  /* protect.limiting */ "rajoittaa nyt",
   /* group.Values */ "Arvot",
   /* state.on */ "PÄÄLLÄ",
   /* state.off */ "POIS",
