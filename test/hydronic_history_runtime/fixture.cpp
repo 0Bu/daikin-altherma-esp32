@@ -197,19 +197,27 @@ void crc(FlashJournalRecord& r) {
         history_journal_crc_bytes(r.header, r.payload, history_journal_payload_bytes(r.header));
 }
 FlashJournalRecord hydronic_record(int64_t bucket, uint64_t sequence, uint32_t samples = 1,
-                                   bool legacy = false) {
-    const uint32_t family = legacy ? 3266505973u : hydronic_fingerprint();
-    auto           r      = record(family, legacy ? 62 : HYDRONIC_WORDS, bucket, sequence);
+                                   bool legacy_minimum = false) {
+    auto r = record(hydronic_fingerprint(), HYDRONIC_WORDS, bucket, sequence);
     hydronic_encode(hydronic_payload(bucket, samples), r.payload, r.header);
-    if (legacy) r.header.pad[8] = r.header.pad[9] = 0xff;
+    if (legacy_minimum) r.header.pad[8] = r.header.pad[9] = 0xff;
     crc(r);
     return r;
 }
-bool matches_legacy_hydronic_envelope(const FlashJournalRecord& r) {
+FlashJournalRecord legacy_v1_hydronic_record(int64_t bucket, uint64_t sequence) {
+    auto r = record(3266505973u, 62, bucket, sequence);
+    hydronic_encode(hydronic_payload(bucket, 1), r.payload, r.header);
+    std::memset(r.payload + 123, 0, sizeof(r.payload) - 123);
+    r.header.pad[8] = r.header.pad[9] = 0xff;
+    crc(r);
+    return r;
+}
+bool matches_hydronic_envelope(const FlashJournalRecord& r) {
     const auto& h = r.header;
     return h.source == static_cast<uint8_t>(HistoryJournalSource::Checkup) &&
-           history_journal_header_matches(h, 3266505973u, 62, 3600) &&
-           h.crc == history_journal_crc_bytes(h, r.payload, 124) && r.payload[123] == 0;
+           history_journal_header_matches(h, hydronic_fingerprint(), HYDRONIC_WORDS, 3600) &&
+           h.crc == history_journal_crc_bytes(h, r.payload, HYDRONIC_PAYLOAD_BYTES) &&
+           r.payload[176] == 0 && r.payload[177] == 0;
 }
 FlashJournalRecord stop_record(int64_t bucket, uint64_t sequence) {
     auto r = record(observation_fingerprint(), OBSERVATION_WORDS, bucket, sequence);
@@ -267,16 +275,22 @@ void tick(int64_t from_s, int64_t to_s) {
     d.accepted                                      = true;
     d.spread_milli                                  = 6000;
     d.flow_milli                                    = 10000;
+    d.r1_r4_qualified_us                            = d.observed_us;
+    d.r1_r4_milli                                   = 150;
+    d.r1_r4_accepted                                = true;
+    d.r1_r4_window_started                          = true;
+    d.agree_limitations                             = AgreementR2tUnavailable;
     hydronic_observation_record(d);
 }
 void mixed_scan() {
-    put(1, hydronic_record(hour() - 2, 1, 1, true));
-    put(2, core_record(hour() - 1, 4));
-    put(3, hydronic_record(hour() - 1, 2, 9, true));
-    put(9, stop_record(hour() - 1, 3));
-    put(15, hydronic_record(hour() - 1, 7, 2));
+    put(0, legacy_v1_hydronic_record(hour() - 3, 1));
+    put(1, hydronic_record(hour() - 2, 2, 1, true));
+    put(2, core_record(hour() - 1, 5));
+    put(3, hydronic_record(hour() - 1, 3, 9, true));
+    put(9, stop_record(hour() - 1, 4));
+    put(15, hydronic_record(hour() - 1, 8, 2));
     boot(false); // journal hooks may precede Store startup
-    require(s_flash_next_sequence == 8 && s_flash_next_slot == 16,
+    require(s_flash_next_sequence == 9 && s_flash_next_slot == 16,
             "shared_head_includes_hydronic_sequence");
     require(journal_sdk::core_restore == 1 && journal_sdk::core_restored_records == 1,
             "core_restore_only_core_record");
@@ -345,20 +359,20 @@ void corrupt_scan(const std::string& name) {
     else if (name == "corrupt_width")
         --damaged.header.value_count;
     else if (name == "corrupt_payload") {
-        damaged.payload[123] = 1;
+        damaged.payload[177] = 1;
         crc(damaged);
     } else if (name == "corrupt_minimum_metadata_crc") {
         damaged.header.pad[9] ^= 0x10;
         HydronicHourlyPayload valid_body;
         require(
             hydronic_decode(damaged.payload, HYDRONIC_PAYLOAD_BYTES, damaged.header, valid_body) &&
-                !matches_legacy_hydronic_envelope(damaged),
+                !matches_hydronic_envelope(damaged),
             "metadata_change_is_valid_by_shape_but_fails_original_crc");
     } else if (name == "corrupt_minimum_metadata_span" || name == "corrupt_minimum_metadata_bits") {
         damaged.header.pad[9] = name == "corrupt_minimum_metadata_span" ? 1 : 0x80;
         crc(damaged);
-        require(matches_legacy_hydronic_envelope(damaged),
-                "legacy_envelope_accepts_inner_metadata_bytes_after_crc_refresh");
+        require(matches_hydronic_envelope(damaged),
+                "envelope_accepts_inner_metadata_bytes_after_crc_refresh");
     } else if (name == "torn_commit")
         damaged.header.commit = HISTORY_JOURNAL_ERASED;
     else
@@ -634,8 +648,10 @@ void seed(const std::string& name) {
         require(
             flash_record_physically_valid(retry) &&
                 hydronic_decode(retry.payload, HYDRONIC_PAYLOAD_BYTES, retry.header, new_payload) &&
-                new_payload.samples == 2 && retry.header.bucket == original.header.bucket &&
-                journal_sdk::erased_ranges.empty(),
+                new_payload.samples == 2 && new_payload.r1_r4_samples == 1 &&
+                new_payload.r1_r4_windows == 1 && new_payload.r1_r4.sum_milli == 150 &&
+                (new_payload.agree_limitations & AgreementR2tUnavailable) &&
+                retry.header.bucket == original.header.bucket && journal_sdk::erased_ranges.empty(),
             "both_hydronic_revisions_and_prior_core_bytes_survive_retry");
         const auto core_record_after = get(0);
         require(std::memcmp(&prior_core, &core_record_after, sizeof(prior_core)) == 0,
@@ -654,10 +670,9 @@ void seed(const std::string& name) {
     const uint16_t data_slot = s_flash_next_slot;
     require(history_flash_service_journal(12, 0) == 1, "seed_uses_real_shared_journal_append");
     const auto data = get(data_slot);
-    require(matches_legacy_hydronic_envelope(data) && data.header.pad[8] == 1 &&
-                data.header.pad[9] == 0 && data.payload[121] == 1 && data.header.pad[7] == 0xff &&
-                data.header.pad[10] == 0xff,
-            "new_data_uses_legacy_envelope_and_payload_with_crc_protected_minimum");
+    require(matches_hydronic_envelope(data) && data.header.pad[8] == 1 && data.header.pad[9] == 0 &&
+                data.payload[121] == 1 && data.header.pad[7] == 0xff && data.header.pad[10] == 0xff,
+            "new_data_uses_v2_envelope_and_payload_with_crc_protected_minimum");
     if (name == "seed_reset" || name == "seed_uncommitted_reset") {
         hydronic_observation_reset();
         hydronic_observation_bind(101, 202, 303, 7);
@@ -666,9 +681,9 @@ void seed(const std::string& name) {
             require(history_flash_service_journal(12, 0) == 1,
                     "reset_fence_reaches_real_committed_journal");
             const auto fence = get(fence_slot);
-            require(matches_legacy_hydronic_envelope(fence) && fence.header.pad[8] == 0 &&
+            require(matches_hydronic_envelope(fence) && fence.header.pad[8] == 0 &&
                         fence.header.pad[9] == 0 && fence.payload[121] == 2,
-                    "new_reset_fence_uses_legacy_envelope_payload_and_crc");
+                    "new_reset_fence_uses_v2_envelope_payload_and_crc");
         }
     } else if (name != "seed_data")
         throw std::runtime_error("unknown_case");

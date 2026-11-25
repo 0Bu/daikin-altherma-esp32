@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -360,6 +360,10 @@ I18N.fi = localeValues([
   /* service.metric.eev */ "Paisuntaventtiilin ohjaus",
   /* service.metric.hp */ "Korkeapaine",
   /* service.metric.lp */ "Matalapaine",
+  /* check.hydronic.agree_labels */ "Vain pumppu R1T−R4T|Vain pumppu R2T−R1T|Vastaavuustila|Vastaavuusrajoitteet",
+  /* check.hydronic.agree_reasons */ "Virtaus alle 5,0 l/min|Kompressori käy|Lämmitin päällä tai epäselvä|3-tieventtiili vaihtui|Lämpötilat eivät vakaat",
+  /* check.hydronic.agree_limits */ "R2T ei saatavilla|Käyttövesireitti mukana",
+  /* check.hydronic.agree_meta */ "jaksoa|lukemaa|Vain passiivinen vertailu; ei kalibrointi; ulkoinen lämpö ei poissuljettu.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · keskiarvo ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `Hyväksyttyjä lukemia: ${n}`,
   /* service.metric.input_none */ "Ei valittua tuloa",

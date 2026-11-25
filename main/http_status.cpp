@@ -500,18 +500,24 @@ append_hydronic_status(JsonOut& j, DiagnosticsSource diag_effective, bool redact
     j += ",\"secondary_supply\":";
     if (!report.current || !secondary.samples || !secondary.source.conv) {
         j += "null";
+    } else {
+        auto sink = detail::json_output(j);
+        j += "{\"delta_k\":";
+        hydronic_json_decimal(sink, secondary.sum_milli, secondary.samples, true);
+        j += ",\"duration_s\":";
+        hydronic_json_seconds(sink, secondary.duration_us, true);
+        append_status_opt_uint(j, ",\"samples\":", true, secondary.samples);
+        append_status_opt_uint(j, ",\"source\":{\"reg\":", true, secondary.source.reg);
+        append_status_opt_uint(j, ",\"offset\":", true, secondary.source.off);
+        append_status_opt_uint(j, ",\"conv\":", true, secondary.source.conv);
+        j += "},\"zone_context\":\"unknown\"}";
+    }
+    j += ",\"water_agreement\":";
+    if (diag_effective == DiagnosticsSource::Modbus || !report.observation.confirmed) {
+        j += "null";
         return;
     }
-    auto sink = detail::json_output(j);
-    j += "{\"delta_k\":";
-    hydronic_json_decimal(sink, secondary.sum_milli, secondary.samples, true);
-    j += ",\"duration_s\":";
-    hydronic_json_seconds(sink, secondary.duration_us, true);
-    append_status_opt_uint(j, ",\"samples\":", true, secondary.samples);
-    append_status_opt_uint(j, ",\"source\":{\"reg\":", true, secondary.source.reg);
-    append_status_opt_uint(j, ",\"offset\":", true, secondary.source.off);
-    append_status_opt_uint(j, ",\"conv\":", true, secondary.source.conv);
-    j += "},\"zone_context\":\"unknown\"}";
+    append_hydronic_agreement_json(j, report);
 }
 
 template <typename JsonOut>

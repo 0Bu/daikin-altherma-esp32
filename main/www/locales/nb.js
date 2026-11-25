@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -360,6 +360,10 @@ I18N.nb = localeValues([
   /* service.metric.eev */ "Ekspansjonsventilkommando",
   /* service.metric.hp */ "Høytrykk",
   /* service.metric.lp */ "Lavtrykk",
+  /* check.hydronic.agree_labels */ "Kun pumpe R1T−R4T|Kun pumpe R2T−R1T|Samsvarstatus|Samsvarsbegrensning",
+  /* check.hydronic.agree_reasons */ "Strømning under 5,0 l/min|Kompressor i gang|Varmer aktiv eller uklar|3-veisventil endret|Temperaturer ikke stasjonære",
+  /* check.hydronic.agree_limits */ "R2T utilgjengelig|Varmtvannsrute inkludert",
+  /* check.hydronic.agree_meta */ "vinduer|målinger|Kun passivt samsvar; ikke kalibrering; ekstern varme ikke utelukket.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · snitt ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "inkludert måling" : "inkluderte målinger"}`,
   /* service.metric.input_none */ "Ingen valgt inngang",

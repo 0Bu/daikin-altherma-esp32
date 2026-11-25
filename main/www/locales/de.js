@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -360,6 +360,10 @@ I18N.de = localeValues([
   /* service.metric.eev */ "Expansionsventil-Befehl",
   /* service.metric.hp */ "Hochdruck",
   /* service.metric.lp */ "Niederdruck",
+  /* check.hydronic.agree_labels */ "Nur Pumpe R1T−R4T|Nur Pumpe R2T−R1T|Abgleichstatus|Abgleichgrenzen",
+  /* check.hydronic.agree_reasons */ "Durchfluss unter 5,0 l/min|Verdichter läuft|Heizer aktiv oder unklar|3-Wege-Ventil gewechselt|Temperaturen nicht stationär",
+  /* check.hydronic.agree_limits */ "R2T nicht verfügbar|Warmwasserpfad enthalten",
+  /* check.hydronic.agree_meta */ "Fenster|Messwerte|Nur passiver Abgleich; keine Kalibrierung; Fremdwärme nicht ausgeschlossen.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · Mittel ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "berücksichtigter Messwert" : "berücksichtigte Messwerte"}`,
   /* service.metric.input_none */ "Kein gewählter Eingang",

@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -365,6 +365,10 @@ I18N.pl = localeValues([
   /* service.metric.eev */ "Polecenie zaworu rozprężnego",
   /* service.metric.hp */ "Wysokie ciśnienie",
   /* service.metric.lp */ "Niskie ciśnienie",
+  /* check.hydronic.agree_labels */ "Tylko pompa R1T−R4T|Tylko pompa R2T−R1T|Stan zgodności|Ograniczenia zgodności",
+  /* check.hydronic.agree_reasons */ "Przepływ poniżej 5,0 l/min|Sprężarka pracuje|Grzałka aktywna lub niejasna|Zmiana zaworu 3-drożnego|Temperatury niestacjonarne",
+  /* check.hydronic.agree_limits */ "R2T niedostępny|Uwzględniono obieg CWU",
+  /* check.hydronic.agree_meta */ "okna|odczyty|Tylko zgodność pasywna; nie kalibracja; obce ciepło niewykluczone.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · średnia ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `Liczba przyjętych odczytów: ${n}`,
   /* service.metric.input_none */ "Brak wybranego wejścia",

@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -360,6 +360,10 @@ I18N.it = localeValues([
   /* service.metric.eev */ "Comando valvola di espansione",
   /* service.metric.hp */ "Alta pressione",
   /* service.metric.lp */ "Bassa pressione",
+  /* check.hydronic.agree_labels */ "Solo pompa R1T−R4T|Solo pompa R2T−R1T|Stato concordanza|Limiti concordanza",
+  /* check.hydronic.agree_reasons */ "Portata sotto 5,0 l/min|Compressore attivo|Riscaldatore attivo o ambiguo|Valvola 3 vie cambiata|Temperature non stazionarie",
+  /* check.hydronic.agree_limits */ "R2T non disponibile|Percorso ACS incluso",
+  /* check.hydronic.agree_meta */ "finestre|letture|Solo concordanza passiva; nessuna calibrazione; calore esterno non escluso.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · media ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "lettura ammessa" : "letture ammesse"}`,
   /* service.metric.input_none */ "Nessun ingresso selezionato",

@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 83e109e89b856b2eed3c31ea1aace9c1a0ed0a8fa3c06c1b6c98b93fc9be62fd -->
+<!-- diagnostic-evidence-contract: debff8c1261cff467c98b3cec6dbd60cef28f9ca8c5108e1d2add60ecfc3ffdd -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -634,9 +634,10 @@ the listed Altherma 3 R W units (sections 6.4.3, 9.4.1, and 12.4). An Altherma 3
 exposes leaving-water flow rate in input register 49 scaled by 1/100 to `l/min` ([D3], Modbus input
 registers). One firmware-wide good/bad limit would therefore be incorrect.
 
-The [Altherma 3 R W installer guide, 4P629085-1E, 2024.04][h1-split-guide], sections 10.6.3 and
-16.2, distinguishes the heating controller difference (leaving-water setpoint minus return)
-from a measured difference. Its 10 K radiator case and startup, backup-heater and zone-priority
+The [Altherma 3 R W installer guide, 4P629085-1E, 2024.04][h1-split-guide], sections 6.5.1, 10.6.3
+and 16.2, distinguishes the heating controller difference (leaving-water setpoint minus return)
+from a measured difference and documents the sensor roles without defining a passive pump-only
+sensor-agreement tolerance. Its 10 K radiator case and startup, backup-heater and zone-priority
 exceptions are tied to the listed ERGA04–08E and EHBH/EHBX04–08E models. The split-unit drawing
 places R1T at the water outlet of the plate heat exchanger and R4T at its inlet, with R2T after
 the backup heater. The [Altherma 3 M manual, 4P620239-1B, 2022.05][h1-mono-guide], section 11,
@@ -672,15 +673,32 @@ Toggling diagnostics off and back on within the same diagnostics generation pres
 The first sample after 600 continuous eligible seconds enters the ranges. Qualified time requires
 two qualified endpoints. The signed spread is measured leaving water minus return. Water ranges
 are sample-weighted. Effort is 100 minus a valid, finite 0–100 pump command, with its own sample
-count. Dated hours use the shared journal with independent method, schema, model, source and
-consent identity. Clock loss and incomplete replay are exposed separately. Each hour also retains
-the five-minute windows containing samples tied at its exact stored flow minimum. The report uses
-only windows from hours tied at the overall minimum. Compatible older hours retain their minimum
-with unknown locations. The timing mask uses type-specific journal header bytes covered by the
-record CRC. The payload and identity stay compatible with firmware that ignores these bytes.
-With X10A active for diagnostics, the inspector shows the qualified minimum when available. Its
-recorded windows can shade the visible, dated X10A trend independently of the plotted values.
-See [the API contract](API.md#qualified-water-circuit-observations).
+count. Dated hours use the shared `HYDR` v2 journal (`method: 2`, `178 B` / `89` words inside the
+256-byte `HistoryJournalSource::Checkup` slot, with automatic fail-closed v1 `124 B` migration) with
+independent method, schema, model, source and consent identity. Clock loss and incomplete replay are
+exposed separately. Each hour also retains the five-minute windows containing samples tied at its
+exact stored flow minimum. The report uses only windows from hours tied at the overall minimum.
+Compatible older `HYDR` v2 hours retain their minimum with unknown locations. The timing mask uses
+type-specific journal header bytes (`pad[8..9]`) covered by the record CRC, staying compatible with
+v2 headers that ignore these bytes. With X10A active for diagnostics, the inspector shows the
+qualified minimum when available. Its recorded windows can shade the visible, dated X10A trend
+independently of the plotted values.
+
+Water-temperature agreement (`flow.water_agreement`) shares the same `HYDR` v2 hour slot and `15 s`
+gap / `observed_us` frame without altering H1 `candidate_us`, `qualified_us`, `spread`, `flow`, or
+`pump_command_pct`. Its shared pump-only quiescent gate requires readable valid base witnesses
+(`observed == true`), `pump == On`, `flow >= 5.0 l/min`, `rps == 0`, `buh1 == Off`, `buh2 == Off`,
+`defrost == Off`, `(!bsh_supported || bsh == Off)` (`bsh_supported && bsh == Unknown` ->
+`missing_witness`; `bsh_ambiguous && valve_dhw == On` -> `heater_active`), and readable unchanged
+`valve_dhw` (flip -> `valve_changed`), while allowing `Restart standby` (`0x10/1/306`) and
+`IuOperationMode == Stop`/`Other`. `r1_r4` (`R1T - R4T`) and `r2_r1` (`R2T - R1T`) use independent
+10 x 30 s sub-buckets; after `600 s` quiescent settling and `>= 300 s` continuous sub-bucket span
+with peak-to-peak excursion `<= 0.5 K` on both sensors of a pair, samples enter that pair (`windows`
+increments once per continuous quiescent run, including across UTC hour boundaries); otherwise
+settled samples report `not_stationary`. Absent/invalid/ambiguous `R2T` (`0x61/4/105`) resets only
+`r2_r1` (`AgreementR2tUnavailable`), `valve_dhw == On` sets `AgreementDhwRoute`, and Modbus or
+unconfirmed/suppressed X10A leaves `water_agreement` null. See [the API
+contract](API.md#qualified-water-circuit-observations).
 
 The optional secondary comparison additionally requires the exact ERRA08–12E + ELSH/X(B) ECH₂O
 profile, an unambiguous publishable EKMIK temperature at `0x65/4` and current main-zone pump
@@ -692,7 +710,9 @@ withholds the comparison when more than 15 seconds have elapsed since the start 
 accepted sweep, and Modbus diagnostics leaves it null. The live comparison adds no journal fields.
 No shipped profile currently provides this complete input set.
 
-**Project boundary:** Sixty seconds, 600 seconds and 15 seconds are project filters. No validated
+**Project boundary:** Sixty seconds, 600 seconds, 300 seconds, `0.5 K`, `5.0 l/min`, and 15 seconds
+are project filters, not published Daikin thresholds (`4P629085-1E` §6.5.1 / §10.6.3 / §16.2 do not
+define a passive quiescent agreement tolerance). No validated
 active-zone controller target is available in current queryable profiles. No 900-second pattern
 classifier, 9 K alarm or model minimum compressor speed is inferred. The secondary comparison
 keeps zone intent unknown even where multiple setpoints are visible.
@@ -702,7 +722,9 @@ context. The qualified heating minimum mask locates readings at five-minute reso
 no per-reading timestamp or duration. The separate first and last accepted timestamps retain
 second resolution. Neither value establishes design flow, a general comparison
 with commissioning limits, or a hydraulic restriction. The hydronic ranges do not establish steady operation,
-emitter output, bypass, restriction, sensor calibration or available pump head. The secondary
+emitter output, bypass, restriction, sensor calibration or available pump head. Passive `r1_r4` and `r2_r1`
+agreement does not prove sensor accuracy or calibration, does not exclude external heat sources,
+stratification, or valve leakage, and never adjusts or subtracts raw telemetry. The secondary
 temperature difference alone establishes neither flow through a separator nor heat lost from a
 buffer or extra electricity use.
 

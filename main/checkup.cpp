@@ -249,18 +249,21 @@ uint32_t                           s_hydronic_generation    = 0;
 bool                               s_hydronic_allow_restore = true;
 int64_t                            s_hydronic_read_fence_us = -1;
 uint8_t                            s_hydronic_limitations   = 0;
-constexpr logic::HydronicTracker   kFreshHydronic{};
+uint8_t                            s_agree_limitations      = 0;
 constexpr logic::HydronicInputPlan kEmptyHydronicInputs{};
 
 __attribute__((noinline)) void clear_hydronic_runtime_locked() {
-    s_hydronic = kFreshHydronic;
+    s_hydronic.reset();
     // A selected capable plan is waiting for witnesses; it is not an unsupported model merely
     // because no sweep has arrived. Use the same collector's capability rules as admission.
     const auto empty = logic::hydronic_collect(
         s_hydronic_inputs, static_cast<const CachedValue*>(nullptr), 0, false, false);
-    s_hydronic.reason        = logic::hydronic_decide(empty).reason;
-    s_hydronic_read_fence_us = -1;
-    s_hydronic_limitations   = 0;
+    const auto base             = logic::hydronic_decide(empty);
+    s_hydronic.reason           = base.reason;
+    s_hydronic.agreement.reason = logic::agreement_decide(empty, base).reason;
+    s_hydronic_read_fence_us    = -1;
+    s_hydronic_limitations      = 0;
+    s_agree_limitations         = 0;
 }
 
 void expire_hydronic_locked(int64_t now_us) {
@@ -271,6 +274,7 @@ void expire_hydronic_locked(int64_t now_us) {
         logic::hydronic_poll_gap(s_hydronic);
         s_hydronic_read_fence_us = now_us;
         s_hydronic_limitations   = 0;
+        s_agree_limitations      = 0;
     }
 }
 
@@ -995,6 +999,7 @@ __attribute__((noinline)) void record_hydronic_locked(const CachedValue* values,
         logic::hydronic_poll_gap(s_hydronic);
         s_hydronic_read_fence_us = accepted_us;
         s_hydronic_limitations   = 0;
+        s_agree_limitations      = 0;
     } else {
         const auto sample =
             logic::hydronic_collect(s_hydronic_inputs, values, count, rps_known, rps_running);
@@ -1002,6 +1007,7 @@ __attribute__((noinline)) void record_hydronic_locked(const CachedValue* values,
             s_hydronic, sample, accepted_us, accepted_us - sweep_started_us, source_generation,
             s_diagnostics_generation, s_diagnostics_enabled.load(std::memory_order_acquire));
         s_hydronic_limitations = delta.limitations;
+        s_agree_limitations    = delta.agree_limitations;
         hydronic_observation_record(delta);
     }
 }
@@ -1206,11 +1212,17 @@ __attribute__((noinline)) void set_hydronic_diagnostics_locked(bool enabled, uin
         s_hydronic.reset_continuity();
         s_hydronic_read_fence_us = -1;
         s_hydronic_limitations   = 0;
-        const auto empty_decide  = logic::hydronic_decide(logic::hydronic_collect(
-            s_hydronic_inputs, static_cast<const CachedValue*>(nullptr), 0, false, false));
-        s_hydronic.reason        = empty_decide.reason == logic::HydronicReason::Unsupported
-                                       ? logic::HydronicReason::Unsupported
-                                       : logic::HydronicReason::PollGap;
+        s_agree_limitations      = 0;
+        const auto empty_sample  = logic::hydronic_collect(
+            s_hydronic_inputs, static_cast<const CachedValue*>(nullptr), 0, false, false);
+        const auto empty_decide     = logic::hydronic_decide(empty_sample);
+        s_hydronic.reason           = empty_decide.reason == logic::HydronicReason::Unsupported
+                                          ? logic::HydronicReason::Unsupported
+                                          : logic::HydronicReason::PollGap;
+        s_hydronic.agreement.reason = logic::agreement_decide(empty_sample, empty_decide).reason ==
+                                              logic::AgreementReason::Unsupported
+                                          ? logic::AgreementReason::Unsupported
+                                          : logic::AgreementReason::PollGap;
     }
     hydronic_observation_set_diagnostics(enabled, generation);
     if (s_x10a.source_confirmed && (generation_changed || s_hydronic_allow_restore))
@@ -2065,6 +2077,7 @@ CheckupHydronicReport checkup_hydronic_report() {
     if (hydronic_observation_suppressed()) {
         r.observation.restore_pending = false;
         r.reason                      = logic::HydronicReason::Forgotten;
+        r.agree_reason                = logic::AgreementReason::Forgotten;
         return r;
     }
     if (!s_mtx) {
@@ -2075,40 +2088,53 @@ CheckupHydronicReport checkup_hydronic_report() {
     if (hydronic_observation_suppressed()) {
         r.observation.restore_pending = false;
         r.reason                      = logic::HydronicReason::Forgotten;
+        r.agree_reason                = logic::AgreementReason::Forgotten;
         return r;
     }
     if (!lk) return r;
     if (!s_diagnostics_enabled.load(std::memory_order_acquire) || s_x10a.reset_requested.load()) {
         r.observation           = hydronic_observation_report();
         r.observation.confirmed = false;
-        r.reason                = !s_diagnostics_enabled.load(std::memory_order_acquire)
-                                      ? logic::HydronicReason::NoConsent
-                                      : logic::HydronicReason::NoSource;
+        const bool no_consent   = !s_diagnostics_enabled.load(std::memory_order_acquire);
+        r.reason = no_consent ? logic::HydronicReason::NoConsent : logic::HydronicReason::NoSource;
+        r.agree_reason =
+            no_consent ? logic::AgreementReason::NoConsent : logic::AgreementReason::NoSource;
         return r;
     }
     // Invalidation bumps the poll epoch before its caller can acquire this owner for reset.
     // A reader in that gap must not present the previous population as current. Leave retained
     // storage untouched; the admitted reset/new producer owns its durable identity barrier.
     if (s_x10a.source_confirmed && !hp_poll_generation_matches(s_hydronic_generation)) {
-        r.reason = logic::HydronicReason::SourceChanged;
+        r.reason       = logic::HydronicReason::SourceChanged;
+        r.agree_reason = logic::AgreementReason::SourceChanged;
         return r;
     }
     const int64_t now = esp_timer_get_time();
     expire_hydronic_locked(now);
     r.observation = hydronic_observation_report();
     r.reason      = s_x10a.source_confirmed ? s_hydronic.reason : logic::HydronicReason::NoSource;
+    r.agree_reason =
+        s_x10a.source_confirmed ? s_hydronic.agreement.reason : logic::AgreementReason::NoSource;
     r.source_generation = s_x10a.source_confirmed ? s_hydronic_generation : 0;
     r.schema_fp         = s_x10a.source_confirmed ? s_hydronic_inputs.schema_fp : 0;
     r.current           = s_x10a.source_confirmed && s_x10a.seal_bucket == INT64_MIN &&
                 s_hydronic.last_us >= 0 && now >= s_hydronic.last_us &&
                 now - s_hydronic.last_us <= logic::HYDRONIC_MAX_GAP_US;
-    r.limitations = r.current ? s_hydronic_limitations : 0;
+    r.limitations       = r.current ? s_hydronic_limitations : 0;
+    r.agree_limitations = r.current ? s_agree_limitations : 0;
+    r.r1_r4_supported =
+        s_x10a.source_confirmed && logic::hydronic_plan_supported(s_hydronic_inputs);
+    r.r2_r1_supported =
+        r.r1_r4_supported && s_hydronic_inputs.post_buh_state == logic::InstrumentState::Supported;
     if (r.current && s_hydronic.secondary.current(now)) {
         const auto& sample = s_hydronic.secondary;
         r.secondary        = {sample.sum_milli, sample.duration_us, sample.samples,
                               s_hydronic_inputs.secondary_supply};
     }
-    if (s_x10a.seal_bucket != INT64_MIN) r.reason = logic::HydronicReason::PollGap;
+    if (s_x10a.seal_bucket != INT64_MIN) {
+        r.reason       = logic::HydronicReason::PollGap;
+        r.agree_reason = logic::AgreementReason::PollGap;
+    }
     if (r.current && r.reason == logic::HydronicReason::Settling &&
         s_hydronic.eligible_since_us >= 0 && now >= s_hydronic.eligible_since_us) {
         const int64_t elapsed = now - s_hydronic.eligible_since_us;
@@ -2116,10 +2142,19 @@ CheckupHydronicReport checkup_hydronic_report() {
             r.settling_remaining_s =
                 static_cast<uint32_t>((logic::HYDRONIC_SETTLE_US - elapsed + 999999) / 1000000);
     }
+    if (r.current && r.agree_reason == logic::AgreementReason::Settling &&
+        s_hydronic.agreement.eligible_since_us >= 0 &&
+        now >= s_hydronic.agreement.eligible_since_us) {
+        const int64_t elapsed = now - s_hydronic.agreement.eligible_since_us;
+        if (elapsed < logic::AGREEMENT_SETTLE_US)
+            r.agree_settling_remaining_s =
+                static_cast<uint32_t>((logic::AGREEMENT_SETTLE_US - elapsed + 999999) / 1000000);
+    }
     if (hydronic_observation_suppressed()) {
         r                             = {};
         r.observation.restore_pending = false;
         r.reason                      = logic::HydronicReason::Forgotten;
+        r.agree_reason                = logic::AgreementReason::Forgotten;
     }
     return r;
 }

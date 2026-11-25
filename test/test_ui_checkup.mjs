@@ -79,9 +79,10 @@ for (const key of [
   "observed_s", "candidate_s", "qualified_s", "samples", "command_samples",
   "first_evidence_unix_s", "last_evidence_unix_s", "first_accepted_unix_s", "last_accepted_unix_s",
   "target_delta_k", "target_supported",
+  "stable_window_s", "max_drift_k", "min_flow_l_min", "r1_r4", "r2_r1", "supported", "windows", "delta_k",
 ]) {
   assert.match(hydronicSource,
-               new RegExp(`(?:w\\.(?:flag|u64|sec|ts|key)|\\{)\\s*\\(?\\s*"${key}"`),
+               new RegExp(`(?:w\\.(?:flag|u64|sec|ts|key)|pw\\.(?:flag|u64|sec|range)|emit_pair|\\{)\\s*\\(?\\s*"${key}"`),
                `missing hydronic serializer key ${key}`);
 }
 assert.match(hydronicSource,
@@ -904,7 +905,7 @@ const hydronicFlow = {
   hydronic: {
     confirmed: true, current: true, dated: true, coverage_partial: false,
     restore_pending: false, persistence_pending: false, dropped: 0, observed_hours: 1,
-    method: 1, window_s: 86400, settling_s: 600, max_gap_s: 15,
+    method: 2, window_s: 86400, settling_s: 600, max_gap_s: 15,
     reason_code: 0, reason: "none", scope: "unit_water_heat_exchanger", weighting: "sample",
     settling_remaining_s: null, source_generation: 3, schema_fp: 0x12345678,
     current_limitations_mask: 0, population_limitations_mask: 0, population_saturated: false,
@@ -917,6 +918,88 @@ const hydronicFlow = {
     target_delta_k: null, target_supported: false,
   },
 };
+const waterAgreement = {
+  method: 2, settling_s: 600, stable_window_s: 300, max_drift_k: 0.5, min_flow_l_min: 5,
+  max_gap_s: 15, reason_code: 0, reason: "qualified", settling_remaining_s: null,
+  current_limitations_mask: 2, population_limitations_mask: 3,
+  r1_r4: {
+    supported: true, qualified_s: 35.000001, windows: 1, samples: 4,
+    delta_k: { min: -0.3, mean: -0.25, max: -0.1 },
+  },
+  r2_r1: {
+    supported: true, qualified_s: 15, windows: 2, samples: 3,
+    delta_k: { min: 0.2, mean: 0.3, max: 0.4 },
+  },
+};
+const savedFlowStatus = context.S.status;
+const agreeBrief = (agreePatch = {}, hydroPatch = {}, statusPatch = {}) => {
+  const hydro = { ...hydronicFlow.hydronic, ...hydroPatch };
+  const source = statusPatch.health?.source || statusPatch.diagnostics?.effective_source || "x10a";
+  context.S.status = {
+    diagnostics: { enabled: true, source, effective_source: source, available_sources: [source] },
+    ...statusPatch,
+    health: {
+      source, status: "ok", persist: "flash",
+      checks: [{
+        ...hydronicFlow,
+        hydronic: hydro,
+        water_agreement: agreePatch === null ? null : { ...waterAgreement, ...agreePatch },
+      }],
+      ...(statusPatch.health || {}),
+    },
+  };
+  return ui.flowBrief(ui.flowReport());
+};
+const agreeHtml = agreeBrief();
+assert.match(agreeHtml, /Pump-only R1T−R4T:<\/span> <span class="num">min -0\.3 · mean -0\.25 · max -0\.1 K · 35\.000001 s · 1 windows · 4 readings<\/span>/);
+assert.match(agreeHtml, /Pump-only R2T−R1T:<\/span> <span class="num">min 0\.2 · mean 0\.3 · max 0\.4 K · 15 s · 2 windows · 3 readings<\/span>/);
+assert.match(agreeHtml, /Agreement status:<\/span> <span class="num">OK · DHW route included<\/span>/);
+assert.match(agreeHtml, /Agreement limits:<\/span> <span class="num">R2T unavailable · DHW route included<\/span>/);
+assert.match(agreeHtml, /Passive agreement only; not calibration; external heat not excluded\./);
+assert.doesNotMatch(agreeHtml, /<details|<strong>min -0\.3/);
+assert.match(agreeBrief({ r2_r1: { supported: false, qualified_s: 0, windows: 0, samples: 0, delta_k: { min: null, mean: null, max: null } } }),
+  /Pump-only R1T−R4T:<\/span> <span class="num">min -0\.3 .*Pump-only R2T−R1T:<\/span> <span class="num">No data<\/span>/s);
+assert.match(agreeBrief({ population_limitations_mask: 4 }, { population_saturated: false }),
+  /Pump-only R1T−R4T:<\/span> <span class="num">min -0\.3 · mean -0\.25 · max -0\.1 K · ≥35\.000001 s · ≥1 windows · ≥4 readings<\/span>/);
+assert.doesNotMatch(agreeBrief({ population_limitations_mask: 4 }, { population_saturated: false }),
+  /Agreement limits:/);
+assert.match(agreeBrief({ population_limitations_mask: 0 }, { population_saturated: true }),
+  /Pump-only R1T−R4T:<\/span> <span class="num">min -0\.3 · mean -0\.25 · max -0\.1 K · ≥35\.000001 s · ≥1 windows · ≥4 readings<\/span>/);
+assert.match(agreeBrief({ reason_code: 12, settling_remaining_s: 120 }),
+  /Agreement status:<\/span> <span class="num">WAITING 120 s · DHW route included<\/span>/);
+assert.doesNotMatch(agreeBrief({ reason_code: 12, settling_remaining_s: 120 }, { current: false }),
+  /WAITING|120 s/);
+assert.match(agreeBrief({ reason_code: 12, settling_remaining_s: 120, current_limitations_mask: null }, { current: false }),
+  /Agreement status:<\/span> <span class="num">No data<\/span>/);
+assert.match(agreeBrief({ reason_code: 14, current_limitations_mask: null }, { current: false }),
+  /Agreement status:<\/span> <span class="num">The X10A connection was interrupted or intentionally paused\.<\/span>/);
+assert.match(agreeBrief({ reason_code: 13 }), /Temperatures not stationary/);
+assert.match(agreeBrief({ reason_code: 11 }), /3-way valve changed/);
+assert.match(agreeBrief({ reason_code: 9 }), /Heater active or ambiguous/);
+assert.match(agreeBrief({ reason_code: 8 }), /Compressor running/);
+assert.match(agreeBrief({ reason_code: 7 }), /Flow below 5\.0 l\/min/);
+assert.doesNotMatch(agreeBrief({ method: 1 }), /Pump-only R1T−R4T/);
+assert.doesNotMatch(agreeBrief(null), /Pump-only R1T−R4T/);
+assert.equal(agreeBrief({}, {}, { diagnostics: { enabled: true, source: "modbus", effective_source: "modbus" }, health: { source: "modbus" } }),
+  `<p>${ui.text("en", "check.flow.x10a_only")}</p>`);
+assert.equal(ui.flowReport().agreement, null, "Modbus flow report must omit X10A water agreement");
+assert.match(agreeBrief({}, { dated: false }), /Pump-only R1T−R4T:<\/span> <span class="num">No data<\/span>/);
+assert.doesNotMatch(agreeBrief({
+  current_limitations_mask: NaN, population_limitations_mask: NaN,
+  r1_r4: { supported: true, qualified_s: -1, windows: NaN, samples: Infinity, delta_k: { min: NaN, mean: 0, max: 0 } },
+}), /undefined|NaN|Infinity|-1\b/);
+for (const lang of locales) {
+  ui.setLang(lang);
+  for (let code = 0; code <= 20; code++) {
+    const agreeBody = agreeBrief({ reason_code: code, reason: "raw_reason_must_not_leak", settling_remaining_s: 45 });
+    assert.ok(agreeBody.includes(escapeText(ui.text(lang, "check.hydronic.agree_labels").split("|")[0])),
+      `${lang}/agree/${code}: localized agreement label rendered`);
+    assert.doesNotMatch(agreeBody, /check\.hydronic|service\.reason|raw_reason_must_not_leak|undefined|NaN|Infinity/,
+      `${lang}/agree/${code}: raw key or non-finite leak`);
+  }
+}
+context.S.status = savedFlowStatus;
+ui.setLang("en");
 // Water pressure uses 24-hour curve-first diagnosis when X10A history is available, and falls back
 // cleanly to concise threshold state labels when no history buffer is advertised.
 const pressure = {
@@ -1074,7 +1157,7 @@ for (const lang of locales) {
   assert.doesNotMatch(brief, /check\.flow\.|NaN|Infinity|undefined|Water spread/);
 }
 ui.setLang("en");
-for (const patch of [{ method: 2 }, { confirmed: false }, { dated: false }, { samples: 0 },
+for (const patch of [{ method: 1 }, { method: 3 }, { confirmed: false }, { dated: false }, { samples: 0 },
   { first_evidence_unix_s: null }, ...[null, "5.9", 0, -1, NaN, Infinity].map(min => ({ flow_l_min: { min } }))]) {
   context.S.status.health.checks = [{ ...heatingFlowCheck, hydronic: { ...heatingFlowCheck.hydronic, ...patch } }];
   assert.equal(ui.flowReport().minimum, null, "unadmitted heating evidence has no minimum");

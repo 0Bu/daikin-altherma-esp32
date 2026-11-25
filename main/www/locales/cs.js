@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -360,6 +360,10 @@ I18N.cs = localeValues([
   /* service.metric.eev */ "Povel expanzního ventilu",
   /* service.metric.hp */ "Vysoký tlak",
   /* service.metric.lp */ "Nízký tlak",
+  /* check.hydronic.agree_labels */ "Jen čerpadlo R1T−R4T|Jen čerpadlo R2T−R1T|Stav shody|Omezení shody",
+  /* check.hydronic.agree_reasons */ "Průtok pod 5,0 l/min|Kompresor běží|Ohřívač aktivní nebo nejasný|3cestný ventil přepnut|Teploty nejsou ustálené",
+  /* check.hydronic.agree_limits */ "R2T nedostupné|Včetně okruhu TUV",
+  /* check.hydronic.agree_meta */ "oken|měření|Pouze pasivní shoda; ne kalibrace; cizí teplo není vyloučeno.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · průměr ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `Počet přijatých odečtů: ${n}`,
   /* service.metric.input_none */ "Žádný zvolený vstup",

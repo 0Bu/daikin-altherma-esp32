@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const ukNoun = (n, a, b, c) => n % 10 === 1 && n % 100 !== 11 ? a
   : n % 10 >= 2 && n % 10 <= 4 && !(n % 100 >= 12 && n % 100 <= 14) ? b : c;
 const ukAria = (x) => (l, d) => `${l} — часова шкала ${x}. ${d}. Клавіші зі стрілками озвучують окремі зразки.`;
@@ -364,6 +364,10 @@ I18N.uk = localeValues([
   /* service.metric.eev */ "Команда розширювального клапана",
   /* service.metric.hp */ "Високий тиск",
   /* service.metric.lp */ "Низький тиск",
+  /* check.hydronic.agree_labels */ "Лише насос R1T−R4T|Лише насос R2T−R1T|Стан узгодження|Межі узгодження",
+  /* check.hydronic.agree_reasons */ "Потік нижче 5,0 л/хв|Компресор працює|Нагрівач активний або неясний|Триходовий клапан перемкнуто|Температури не усталені",
+  /* check.hydronic.agree_limits */ "R2T недоступний|Шлях ГВП включено",
+  /* check.hydronic.agree_meta */ "вікон|показів|Лише пасивне узгодження; не калібрування; зовнішнє тепло не виключено.",
   /* service.metric.range */ (a, b, c, d) => `мін. ${a} · середнє ${b} · макс. ${c} ${d}`,
   /* service.metric.samples */ n => `Кількість прийнятих показів: ${n}`,
   /* service.metric.input_none */ "Вхід не вибрано",

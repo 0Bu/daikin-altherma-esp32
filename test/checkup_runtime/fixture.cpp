@@ -1599,7 +1599,7 @@ void hydronic_case(const std::string& name) {
                 name == "hydronic_expiry" || name == "hydronic_consent_lock" ||
                 name == "hydronic_source_lock" || name == "hydronic_shared_witness" ||
                 name == "hydronic_reader_generation" || name == "hydronic_shutdown" ||
-                name == "hydronic_pause_resume",
+                name == "hydronic_pause_resume" || name == "hydronic_agreement",
             "unknown_case");
     boot();
     const auto cov  = coverage();
@@ -1607,10 +1607,65 @@ void hydronic_case(const std::string& name) {
     if (name == "hydronic_waiting") {
         const auto r = checkup_hydronic_report();
         require(!r.current && r.reason == HydronicReason::MissingWitness && r.schema_fp != 0 &&
-                    r.source_generation == 7 && r.observation.confirmed,
+                    r.source_generation == 7 && r.observation.confirmed && r.r1_r4_supported &&
+                    r.agree_reason == AgreementReason::MissingWitness,
                 "hydronic_capable_waits_for_first_witness");
-        require(r.observation.totals.samples == 0 && r.observation.totals.observed_us == 0,
+        require(r.observation.totals.samples == 0 && r.observation.totals.observed_us == 0 &&
+                    r.observation.totals.r1_r4_samples == 0 &&
+                    r.observation.totals.r2_r1_samples == 0,
                 "hydronic_waiting_has_no_fabricated_population");
+        return;
+    }
+    if (name == "hydronic_agreement") {
+        const auto plan = hydronic_input_plan(HYDR_PROFILE, def::lookup_view(HYDR_PROFILE));
+        rows[0].value   = "25.1"; // R1T
+        rows[1].value   = "24.9"; // R4T
+        rows[2].value   = "8.0";  // flow >= 5.0 l/min
+        rows[5].value   = "0";    // rps == 0
+        rows[6].value   = "Stop"; // IuOperationMode == Stop allowed
+        rows[11].value  = "1";    // Restart standby (0x10/1/306) allowed
+        if (plan.bsh_state == InstrumentState::Supported) rows.push_back(row(plan.bsh, "0"));
+        if (plan.post_buh_state == InstrumentState::Supported)
+            rows.push_back(row(plan.post_buh_leaving, "25.3"));
+        for (int64_t t = 1; t <= 586; t += 15)
+            hydronic_sample(t * HYDR_SECOND, rows, cov, t * HYDR_SECOND, true, false);
+        auto r = checkup_hydronic_report();
+        require(r.current && r.agree_reason == AgreementReason::Settling &&
+                    r.agree_settling_remaining_s == 15 && r.observation.totals.r1_r4_samples == 0 &&
+                    r.observation.totals.samples == 0 && r.observation.totals.candidate_us == 0,
+                "hydronic_agreement_settles_without_polluting_h1");
+        hydronic_sample(601 * HYDR_SECOND, rows, cov, 601 * HYDR_SECOND, true, false);
+        hydronic_sample(616 * HYDR_SECOND, rows, cov, 616 * HYDR_SECOND, true, false);
+        r = checkup_hydronic_report();
+        require(r.current && r.agree_reason == AgreementReason::None &&
+                    r.observation.totals.r1_r4_samples == 2 &&
+                    r.observation.totals.r1_r4_windows == 1 &&
+                    r.observation.totals.r1_r4_qualified_us == 15 * HYDR_SECOND &&
+                    r.observation.totals.samples == 0 && r.observation.totals.candidate_us == 0,
+                "hydronic_agreement_admits_r1_r4_independently");
+        if (plan.post_buh_state == InstrumentState::Supported) {
+            require(r.r2_r1_supported && r.observation.totals.r2_r1_samples == 2 &&
+                        r.observation.totals.r2_r1_windows == 1 &&
+                        r.observation.totals.r2_r1_qualified_us == 15 * HYDR_SECOND,
+                    "hydronic_agreement_admits_r2_r1_when_supported");
+        }
+        sdk::now_us = 617 * HYDR_SECOND;
+        checkup_set_diagnostics(false, 23);
+        r = checkup_hydronic_report();
+        require(!r.current && r.agree_reason == AgreementReason::NoConsent &&
+                    !r.observation.confirmed,
+                "hydronic_agreement_hides_while_paused");
+        sdk::now_us = 620 * HYDR_SECOND;
+        checkup_set_diagnostics(true, 23);
+        r = checkup_hydronic_report();
+        require(!r.current && r.agree_reason == AgreementReason::PollGap &&
+                    r.observation.confirmed && r.observation.totals.r1_r4_samples == 2,
+                "hydronic_agreement_same_gen_resume_keeps_population");
+        hydronic_sample(621 * HYDR_SECOND, rows, cov, 621 * HYDR_SECOND, true, false);
+        r = checkup_hydronic_report();
+        require(r.current && r.agree_reason == AgreementReason::Settling &&
+                    r.agree_settling_remaining_s == 600 && r.observation.totals.r1_r4_samples == 2,
+                "hydronic_agreement_pause_resets_settling_and_stability");
         return;
     }
     if (name == "hydronic_population") {

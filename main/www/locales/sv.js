@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -360,6 +360,10 @@ I18N.sv = localeValues([
   /* service.metric.eev */ "Expansionsventilkommando",
   /* service.metric.hp */ "Högtryck",
   /* service.metric.lp */ "Lågtryck",
+  /* check.hydronic.agree_labels */ "Endast pump R1T−R4T|Endast pump R2T−R1T|Överensstämmelse|Begränsningar",
+  /* check.hydronic.agree_reasons */ "Flöde under 5,0 l/min|Kompressor igång|Värmare aktiv eller oklar|3-vägsventil ändrad|Temperaturer ej stabila",
+  /* check.hydronic.agree_limits */ "R2T ej tillgänglig|VV-väg inkluderad",
+  /* check.hydronic.agree_meta */ "fönster|mätvärden|Endast passiv jämförelse; ej kalibrering; extern värme ej utesluten.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · medel ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "inkluderad avläsning" : "inkluderade avläsningar"}`,
   /* service.metric.input_none */ "Ingen vald ingång",

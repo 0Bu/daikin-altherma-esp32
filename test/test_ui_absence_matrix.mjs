@@ -55,7 +55,8 @@ vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   wire();
   this.__ui = { S, t, esp32CardHtml, circulationSettingsCardHtml,
                 refrigerantServiceRowHtml, workingFigureRowHtml, checkupCardHtml, checkupDetailHtml,
-                connLinks, liveData, renderApp, renderCards, histHtml, INSPECT };`, context,
+                checkupFlowReport, checkupFlowBriefHtml, connLinks, liveData,
+                renderApp, renderCards, histHtml, INSPECT };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -504,7 +505,7 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
 {
   const hydronicPlaceholder = {
     confirmed: false, current: false, dated: false, coverage_partial: false,
-    restore_pending: false, persistence_pending: false, method: 1, reason_code: 0,
+    restore_pending: false, persistence_pending: false, method: 2, reason_code: 0,
     reason: "none", spread_k: { min: null, mean: null, max: null },
   };
   const modbusOnly = build(["x10a"]);
@@ -513,7 +514,7 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
   modbusOnly.health = { source: "modbus", status: "ok", persist: "no_record", source_fresh: true,
     covered_s: 3600, span_s: 3600, full_span: false, available: 4, assessable: 4, evaluated: 4,
     checks: [{ id: "flow", verdict: "unavailable", observed_s: 0, min_l_min: null,
-      hydronic: hydronicPlaceholder }] };
+      hydronic: hydronicPlaceholder, water_agreement: null }] };
   ui.S.status = modbusOnly;
   assert.ok(!ui.checkupCardHtml(true).includes("health_flow"),
     "Modbus diagnostics must hide unavailable flow even with hydronic placeholder");
@@ -522,10 +523,22 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
   const modbusOkFlow = { id: "flow", verdict: "ok", evidence: "observation", min_l_min: 11.4,
     hydronic: { ...hydronicPlaceholder, confirmed: true, dated: true,
       first_evidence_unix_s: 1791880000, last_evidence_unix_s: 1791880020,
-      samples: 4, spread_k: { min: 1.0, mean: 2.0, max: 3.0 } } };
+      samples: 4, spread_k: { min: 1.0, mean: 2.0, max: 3.0 } },
+    water_agreement: { method: 2, reason_code: 0, reason: "qualified",
+      r1_r4: { supported: true, qualified_s: 35, windows: 1, samples: 2, delta_k: { min: -0.3, mean: -0.2, max: -0.1 } },
+      r2_r1: { supported: false, qualified_s: 0, windows: 0, samples: 0, delta_k: { min: null, mean: null, max: null } } } };
   modbusOnly.health.checks = [modbusOkFlow];
-  assert.ok(!ui.checkupDetailHtml(modbusOkFlow, false, modbusOnly.health).includes("Water spread"),
+  const agreeLabel = ui.t("check.hydronic.agree_labels").split("|")[0];
+  const modbusDetailHtml = ui.checkupDetailHtml(modbusOkFlow, false, modbusOnly.health);
+  assert.ok(!modbusDetailHtml.includes("Water spread"),
     "Modbus flow detail must omit X10A hydronic population rows");
+  assert.ok(!modbusDetailHtml.includes(agreeLabel),
+    "Modbus flow detail must omit X10A water agreement rows");
+  const modbusFlowReport = ui.checkupFlowReport();
+  assert.equal(modbusFlowReport?.agreement, null,
+    "Modbus flow report must omit X10A water agreement");
+  assert.ok(!ui.checkupFlowBriefHtml(modbusFlowReport).includes(agreeLabel),
+    "Modbus flow inspector must omit X10A water agreement rows");
   checks++;
 }
 

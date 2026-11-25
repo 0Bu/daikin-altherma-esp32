@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -360,6 +360,10 @@ I18N.es = localeValues([
   /* service.metric.eev */ "Orden de válvula de expansión",
   /* service.metric.hp */ "Alta presión",
   /* service.metric.lp */ "Baja presión",
+  /* check.hydronic.agree_labels */ "Solo bomba R1T−R4T|Solo bomba R2T−R1T|Estado de concordancia|Límites de concordancia",
+  /* check.hydronic.agree_reasons */ "Caudal menor de 5,0 l/min|Compresor en marcha|Calentador activo o ambiguo|Válvula de 3 vías cambiada|Temperaturas no estacionarias",
+  /* check.hydronic.agree_limits */ "R2T no disponible|Ruta ACS incluida",
+  /* check.hydronic.agree_meta */ "ventanas|lecturas|Solo concordancia pasiva; no es calibración; calor externo no excluido.",
   /* service.metric.range */ (a, b, c, d) => `mín. ${a} · media ${b} · máx. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "lectura admitida" : "lecturas admitidas"}`,
   /* service.metric.input_none */ "Ninguna entrada seleccionada",

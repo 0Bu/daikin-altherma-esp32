@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -360,6 +360,10 @@ I18N.ja = localeValues([
   /* service.metric.eev */ "膨張弁指令",
   /* service.metric.hp */ "高圧",
   /* service.metric.lp */ "低圧",
+  /* check.hydronic.agree_labels */ "ポンプのみ R1T−R4T|ポンプのみ R2T−R1T|一致状態|一致制限",
+  /* check.hydronic.agree_reasons */ "流量 5.0 l/min 未満|圧縮機運転中|ヒーター作動または不明|三方弁切替|温度非定常",
+  /* check.hydronic.agree_limits */ "R2T利用不可|給湯経路含む",
+  /* check.hydronic.agree_meta */ "区間|測定|受動的温度一致のみ・校正不可・外部熱源は未除外。",
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
   /* service.metric.samples */ n => `採用した測定値 ${n} 件`,
   /* service.metric.input_none */ "選択された入力なし",

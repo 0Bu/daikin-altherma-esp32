@@ -1,4 +1,4 @@
-// translation-source: c3d1088b0c670de198cea04e81cc383813a5caccf073c2f3165a6a06a1fda277
+// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -360,6 +360,10 @@ I18N.zh = localeValues([
   /* service.metric.eev */ "膨胀阀指令",
   /* service.metric.hp */ "高压",
   /* service.metric.lp */ "低压",
+  /* check.hydronic.agree_labels */ "仅水泵 R1T−R4T|仅水泵 R2T−R1T|一致状态|一致限制",
+  /* check.hydronic.agree_reasons */ "流量低于 5.0 l/min|压缩机运行中|电辅热启用或不明|三通阀已切换|温度未稳态",
+  /* check.hydronic.agree_limits */ "R2T 不可用|含生活热水路径",
+  /* check.hydronic.agree_meta */ "窗口|读数|仅被动温差一致；非传感器校准；未排除外部热源。",
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
   /* service.metric.samples */ n => `已纳入读数：${n}`,
   /* service.metric.input_none */ "未选定输入",
