@@ -550,6 +550,7 @@ try {
       assert.equal(flow?.water_agreement,null,name);
     }
     if(name==="status-x10a-defrost-outdoor") {
+      assert.equal(doc.health.source_fresh,true,name);
       const defrost=doc.health.checks.find(check=>check.id==="defrost");
       assert.equal(defrost?.verdict,"info",name);
       assert.equal(defrost?.outdoor_source,"x10a",name);
