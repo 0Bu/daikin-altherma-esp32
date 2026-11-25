@@ -101,7 +101,7 @@ assert.doesNotMatch(app,
   "the diagnostics explainer must stay focused on what the feature enables");
 assert.match(httpConfig, /static esp_err_t set_diagnostics[\s\S]*diagnostics_next_generation[\s\S]*checkup_set_diagnostics[\s\S]*mqtt_circulation_reconfigure/,
   "the master route must start a fresh generation and reconfigure every dependent producer live");
-assert.match(app, /const checkup = S\.status\?\.diagnostics\?\.enabled === true\s*\? checkupCardHtml\(checkupSourceReady\) : "";/,
+assert.match(app, /if \(S\.status\?\.diagnostics\?\.enabled === true\)\s*\{\s*try\s*\{\s*checkup = checkupCardHtml\(checkupSourceReady\);/,
   "the whole dashboard diagnosis card must share the Firmware master opt-in");
 assert.doesNotMatch(app, /function statusCardsHtml\(\)[\s\S]*vcard\(t\("env\.card"\)/,
   "ENV III must not retain a standalone outdoor-climate dashboard card");

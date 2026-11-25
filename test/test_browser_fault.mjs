@@ -212,6 +212,7 @@ export async function assertFaultChart(page, context, viewportName) {
     assert.equal(okRow.display, "none", `${context}: empty healthy fault value must hide .vrow-val`);
     assert.ok(okRow.aria.includes(await page.evaluate(`t("check.fault_none")`)),
       `${context}: healthy fault row must preserve accessible state label (${okRow.aria})`);
+    assert.deepEqual(page.diagnostics, [], `${context}: fault chart must emit no unexpected browser errors`);
   } finally {
     await page.evaluate(`(() => {
       const o = window.__faultOriginal;

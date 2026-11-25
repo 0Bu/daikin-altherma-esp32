@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { spliceInlineAssets } from "../tools/ui/inline_page.mjs";
+import { createStrictDocument } from "../tools/ui/strict_dom.mjs";
 
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8");
 const html = read("../main/www/mcp_dashboard.html");
@@ -154,6 +155,59 @@ assert.match(server, /http_accepts_media_type\(accept, "text\/event-stream"\)/,
   assert.equal(timers.length, 1, "failure replaces the previous restore timer");
   for (const timer of timers.splice(0)) timer.fn();
   assert.equal(copyButton.textContent, pristine, "failure guidance also restores the pristine label");
+}
+
+// Part D.4: insecure-context fallback (HTTP LAN) uses legacyCopy() + execCommand("copy").
+for (const execResult of [true, false]) {
+  const doc = createStrictDocument("main/www/mcp_dashboard.html");
+  const timers = [];
+  let nextTimerId = 1;
+  let appendedField = null;
+  let execCount = 0;
+  let selectionAtCopy = null;
+  const origAppend = doc.body.append.bind(doc.body);
+  doc.body.append = (...nodes) => {
+    appendedField = nodes[0];
+    return origAppend(...nodes);
+  };
+  doc.execCommand = (cmd) => {
+    assert.equal(cmd, "copy", "legacy fallback must invoke document.execCommand('copy')");
+    execCount++;
+    selectionAtCopy = [appendedField.selectionStart, appendedField.selectionEnd];
+    return execResult;
+  };
+  const ctx = {
+    document: doc,
+    location: { origin: "http://daikin-altherma-esp32.local", pathname: "/mcp" },
+    navigator: {},
+    isSecureContext: false,
+    setTimeout(fn, ms) { timers.push({ id: nextTimerId, fn, ms }); return nextTimerId++; },
+    clearTimeout(id) {
+      const idx = timers.findIndex((t) => t.id === id);
+      if (idx >= 0) timers.splice(idx, 1);
+    },
+  };
+  ctx.window = ctx;
+  vm.runInContext(js, vm.createContext(ctx), { filename: "main/www/mcp_dashboard.js" });
+
+  const btn = doc.querySelector('[data-copy="endpoint-url"]');
+  assert.ok(btn, "strict MCP HTML must provide endpoint copy button");
+  const initialLabel = btn.textContent;
+  await btn.fire("click");
+  assert.equal(execCount, 1, "insecure context must use legacyCopy()");
+  assert.equal(appendedField.tagName, "TEXTAREA");
+  assert.equal(appendedField.value, "http://daikin-altherma-esp32.local/mcp");
+  assert.equal(appendedField.hasAttribute("readonly"), true);
+  assert.equal(appendedField.style.position, "fixed");
+  assert.equal(appendedField.style.opacity, "0");
+  assert.deepEqual(selectionAtCopy, [0, "http://daikin-altherma-esp32.local/mcp".length]);
+  assert.equal(doc.body.children.includes(appendedField), false, "temporary textarea must be removed");
+  assert.equal(btn.textContent, execResult ? "Copied" : "Select and copy manually");
+  assert.equal(btn.classList.contains("copied"), execResult);
+  assert.equal(timers.length, 1);
+  for (const timer of timers.splice(0)) timer.fn();
+  assert.equal(btn.textContent, initialLabel);
+  assert.equal(btn.classList.contains("copied"), false);
 }
 
 console.log("MCP page: local assets, static setup help, GET response and copy-button contract pass");

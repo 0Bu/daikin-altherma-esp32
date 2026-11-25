@@ -1546,4 +1546,113 @@ assert.equal(ui.ready({
     "cycling timeline with zero starts must omit Y gridlines and left Y-axis column");
 }
 
+// Checkup enum matrix: exercise all verdict/edge combinations across cycling (including cooling mode
+// label + dotMode separation), defrost (all outdoor sources, equality vs range, routes), fault,
+// dhw_loss (blocked, candidate/settling, rate, stale), heater, retries, and flow.
+{
+  ui.setLang("en");
+  // cycling: cooling mode must show localized Cooling label while keeping 3-color mode-dot parity.
+  const coolTimeline = {
+    unix_s: 1791900000, window_end_s: 86400, observed_end_s: 86400, boot_s: 86400, live: true, run_edges: true,
+    records: [
+      [1, 1],
+      [79260, 5], [79260, 2], [79560, 1], [79560, 6],
+      [79800, 5], [79800, 4], [80100, 1], [80100, 6],
+      [82900, 5], [82900, 3], [83200, 1], [83200, 6],
+    ].map(([at, kind]) => at * 8 + kind),
+  };
+  const coolCheck = {
+    id: "cycling", verdict: "ok", evidence: "measured", starts: 3, observed_s: 86400, required_s: 86400,
+    timeline: coolTimeline,
+    run_contexts: [
+      { at: 79260, mode: "cooling", start_kind: "normal", stop: 79560, stop_kind: "normal", start_lwt_c: 18.0 },
+      { at: 79800, mode: "dhw", start_kind: "dhw_start", stop: 80100, stop_kind: "normal" },
+      { at: 82900, mode: "space", start_kind: "normal", stop: 83200, stop_kind: "normal" },
+    ],
+  };
+  const coolDetails = ui.periodDetails(coolTimeline, coolCheck, 22, 23);
+  assert.match(coolDetails, /mode-dot other"[^>]*title="Cooling"/,
+    "cooling run must label tooltip as Cooling while preserving mode-dot other legend class");
+  assert.match(coolDetails, /mode-dot dhw"[^>]*title="Hot water"/);
+  assert.match(coolDetails, /mode-dot space"[^>]*title="Heating"/);
+  assert.equal(ui.value({ id: "cycling", verdict: "unavailable", starts: 2 }), "N/A");
+  assert.equal(ui.value({ id: "cycling", verdict: "collecting", starts: null }), "CHECKING");
+  assert.equal(ui.value({ id: "cycling", verdict: "ok", starts: 0 }), "0");
+  assert.equal(ui.value({ id: "cycling", verdict: "warn", starts: 14 }), "≥14");
+
+  // defrost: outdoor_source variants (homehub, x10a, env3, unknown), equal vs distinct temperatures, routes.
+  for (const [src, label] of [["homehub", "Modbus"], ["x10a", "X10A"], ["env3", "ENV III"], ["other", "—"]]) {
+    const out = ui.metric({
+      id: "defrost", verdict: "info", count: 3, paired_count: 3, share_pct: 12,
+      outdoor_source: src, outdoor_min_c: -5.0, outdoor_mean_c: -2.5, outdoor_samples: 8,
+    });
+    assert.ok(out.includes(label) && out.includes("-5.0") && out.includes("-2.5"),
+      `defrost outdoor metric for ${src} must format ${label} range`);
+  }
+  const singleTemp = ui.metric({
+    id: "defrost", verdict: "collecting", count: 1,
+    outdoor_source: "env3", outdoor_min_c: 1.5, outdoor_mean_c: 1.5, outdoor_samples: 4,
+  });
+  assert.ok(singleTemp.includes("ENV III") && singleTemp.includes("1.5"),
+    "defrost equal min/mean outdoor temperature must use single-value wording");
+  assert.equal(ui.metric({
+    id: "defrost", verdict: "ok", count: 2, paired_count: 2, share_pct: 5,
+    outdoor_source: "x10a", outdoor_min_c: -1, outdoor_mean_c: 0, outdoor_samples: 0,
+  }).includes("X10A"), false, "zero outdoor samples must suppress outdoor suffix");
+  assert.equal(ui.value({ id: "defrost", verdict: "collecting", count: 2 }), "2 cycles");
+  assert.equal(ui.value({ id: "defrost", verdict: "collecting", count: null }), "CHECKING");
+  assert.equal(ui.value({ id: "defrost", verdict: "unavailable", count: 2 }), "N/A");
+  for (const [route, expectedRoute] of [
+    ["space_heating", ui.text("en", "check.defrost.route_space")],
+    ["dhw_route", ui.text("en", "check.defrost.route_dhw")],
+    [null, ui.text("en", "sys.nodata")],
+  ]) {
+    const det = ui.detail({
+      id: "defrost", verdict: "info", evidence: "measured", count: 3, paired_count: 3, share_pct: 15,
+      defrost_s: 120, run_s: 800,
+      last_observed_start: { unix_s: route ? 1791900000 : 0, route, outdoor_c: route ? -1.5 : null },
+    }, true, { span_s: 86400 });
+    assert.ok(det.includes(expectedRoute), `defrost route ${route} must render ${expectedRoute}`);
+  }
+
+  // fault: every verdict + active combination with and without latest fault code.
+  assert.equal(ui.value({ id: "fault", verdict: "unavailable" }), "N/A");
+  assert.equal(ui.value({ id: "fault", verdict: "collecting", active: 1 }), "CHECKING");
+  assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "");
+  assert.equal(ui.value({ id: "fault", verdict: "ok", active: null }), "Unknown");
+  assert.equal(ui.value({ id: "fault", verdict: "info", active: 1 }), "Warning active");
+  assert.equal(ui.value({ id: "fault", verdict: "info", active: 0 }), "Previously active");
+  assert.equal(ui.value({ id: "fault", verdict: "info", active: null }), "Past · unknown");
+  assert.equal(ui.value({ id: "fault", verdict: "warn", active: 1 }), "Fault active");
+  assert.ok(ui.value({ id: "fault", verdict: "warn", active: 1, latest: { code: "E5", duration_s: 60 } }).includes("E5"));
+  assert.ok(ui.value({ id: "fault", verdict: "info", active: 0, latest: { code: "U4", age_s: 120 } }).includes("U4"));
+  assert.ok(ui.value({ id: "fault", verdict: "info", active: null, latest: { code: "H9" } }).includes("H9"));
+
+  // dhw_loss: blocked (blind vs mixed), collecting branches, completed rate + stale reason.
+  const dhwBlockedLink = ui.detail({
+    id: "dhw_loss", verdict: "collecting", blocked: true, aborts: 2,
+    abort_reasons: ["blind"], best_aborted_s: 900, required_s: 14400,
+  }, false, { source: "x10a" });
+  assert.match(dhwBlockedLink, /2/);
+  const dhwBlockedMixed = ui.detail({
+    id: "dhw_loss", verdict: "collecting", blocked: true, aborts: 1,
+    abort_reasons: ["blind", "heating"], best_aborted_s: 600, required_s: 14400,
+  }, false, { source: "modbus" });
+  assert.match(dhwBlockedMixed, /Modbus/);
+  assert.ok(ui.detail({ id: "dhw_loss", verdict: "collecting", windows: 0, required_s: 14400, settle_remaining_s: 120 }, false, {}).length > 0);
+  assert.ok(ui.detail({ id: "dhw_loss", verdict: "collecting", windows: 0, required_s: 14400, candidate_s: 600 }, false, {}).length > 0);
+  assert.equal(ui.value({ id: "dhw_loss", verdict: "ok", max_k_h: 0.4, windows: 3, high_windows: 1 }), "0.4 K/h");
+  assert.equal(ui.value({ id: "dhw_loss", verdict: "collecting", windows: 1 }), "CHECKING");
+  assert.equal(ui.value({ id: "dhw_loss", verdict: "warn", blocked: true, max_k_h: 2.5 }), "NO WINDOW");
+
+  // heater, retries, and flow edge inputs.
+  assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: 30, bsh_s: 120 }), "Aux <1 · Tank 2 min");
+  assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: -5, bsh_min: NaN }), "OK");
+  assert.equal(ui.value({ id: "retries", verdict: "info", seen: true }), "Increase");
+  assert.equal(ui.value({ id: "retries", verdict: "ok", seen: false }), "No increase");
+  assert.equal(ui.value({ id: "retries", verdict: "collecting", seen: null }), "CHECKING");
+  assert.equal(ui.value({ id: "flow", verdict: "ok", min_l_min: 13.4 }), "13.4 l/min");
+  assert.equal(ui.value({ id: "flow", verdict: "collecting", min_l_min: null }), "CHECKING");
+}
+
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

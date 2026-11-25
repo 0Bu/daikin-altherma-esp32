@@ -17,6 +17,80 @@ if (mutation && ![...HISTORY_MOTION_MUTATIONS, "history-paint-freeze"].includes(
   throw new Error("unknown WebKit selftest mutation: " + mutation);
 const viewports = { "ipad-portrait": { width: 834, height: 1194 },
   "ipad-landscape": { width: 1194, height: 834 } };
+
+async function assertWebKitDashboardDiagnosis(page, server, context) {
+  await page.evaluate(`window.__webkitDiagSaved = {
+    status: JSON.parse(JSON.stringify(S.status)),
+    values: JSON.parse(JSON.stringify(S._values || [])),
+    modbus: JSON.parse(JSON.stringify(S._modbus || [])),
+    card: S.dashboardCard,
+    open: [...S.descOpen],
+  }; true`);
+  try {
+    const base = server.defaultStatus();
+    const diagStatus = {
+      ...base,
+      diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
+      health: {
+        status: "info", source: "x10a", source_fresh: true, full_span: true,
+        span_s: 86400, covered_s: 86400, persist: "fresh",
+        checks: [
+          { id: "cycling", verdict: "ok", evidence: "measured", starts: 2, observed_s: 86400, required_s: 86400 },
+          {
+            id: "defrost", verdict: "info", evidence: "measured", count: 3, paired_count: 3, share_pct: 15,
+            defrost_s: 151, run_s: 1000, observed_s: 86400, required_s: 86400,
+            outdoor_source: "x10a", outdoor_min_c: -4.5, outdoor_mean_c: -2.0, outdoor_samples: 10,
+            last_observed_start: { unix_s: 2000000000, route: "space_heating", outdoor_c: -2.5 },
+          },
+          { id: "fault", verdict: "ok", evidence: "manufacturer", active: 0, observed_s: 86400 },
+        ],
+      },
+      refrigerant_service: { state: "limited", continuous_s: 3600, samples: 120, blocker: "compressor_not_running" },
+    };
+    server.setTelemetry({ status: diagStatus, values: server.defaultValues(), histories: {} });
+    await page.evaluate(`(() => {
+      pollSchedule = window.__browserPollSchedule;
+      S.descOpen.clear();
+      S.descOpen.add("model:health_defrost");
+      S.descOpen.add("service:refrigerant");
+      S.dashboardCard = "diagnosis";
+      pollNow();
+      return true;
+    })()`);
+    await page.waitFor("S.status?.diagnostics?.enabled === true && S.status?.refrigerant_service?.state === 'limited' && !_pollBusy");
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    await page.frame();
+    const observed = await page.evaluate(`(() => ({
+      browserHidden: document.getElementById("cardBrowser").hidden,
+      navCount: document.querySelectorAll("#cardNav [data-card]").length,
+      valueRows: document.querySelectorAll("#valueGroups .vrow, #valueGroups .vdesc").length,
+      diagText: document.querySelector('[data-dashboard-card="diagnosis"]')?.textContent || "",
+    }))()`);
+    assert.equal(observed.browserHidden, false, `${context}: #cardBrowser must be visible`);
+    assert.ok(observed.navCount >= 2, `${context}: #cardNav must be populated`);
+    assert.ok(observed.valueRows > 0, `${context}: #valueGroups must render diagnosis and value rows`);
+    assert.ok(observed.diagText.includes("-4.5") && observed.diagText.includes("X10A"),
+      `${context}: X10A defrost outdoor context must render on WebKit`);
+    assert.deepEqual(page.diagnostics, [], `${context}: WebKit full dashboard diagnosis must emit no errors`);
+  } finally {
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    await page.waitFor("!_pollBusy");
+    server.setTelemetry();
+    await page.evaluate(`(() => {
+      const saved = window.__webkitDiagSaved;
+      if (saved) {
+        S.status = saved.status;
+        S._values = saved.values;
+        S._modbus = saved.modbus;
+        S.dashboardCard = saved.card;
+        S.descOpen = new Set(saved.open);
+        delete window.__webkitDiagSaved;
+        renderApp();
+      }
+      return true;
+    })()`);
+  }
+}
 const index = process.argv.indexOf("--viewport");
 const selected = index < 0 ? Object.keys(viewports) : [process.argv[index + 1]];
 assert.ok(selected.every(name => viewports[name]), "unknown WebKit iPad viewport: " + selected.join(","));
@@ -30,6 +104,7 @@ for (const name of selected) {
     console.error("WebKit render setup: " + error.message);
     process.exit(2);
   }
+  let bodyError = null;
   try {
     const { page } = browser;
     page.historyMotionEvidence = [];
@@ -45,13 +120,18 @@ for (const name of selected) {
       const { assertCyclingChart } = await import("./test_browser_cycling.mjs");
       await assertCyclingChart(page, server, "webkit/" + name + "/diagnosis/cycling");
       await assertDhwTimeline(page, server, "webkit/" + name + "/diagnosis/dhw");
+      await assertWebKitDashboardDiagnosis(page, server, "webkit/" + name + "/diagnosis/dashboard");
       assert.deepEqual(page.diagnostics, [], "WebKit cycling diagnosis must emit no browser errors");
       continue;
     }
     if (!mutation || mutation === "history-paint-freeze")
       page.assertFlowPaint = context => assertWebKitFlowPaint(page, context);
     await assertHistoryMotion(page, server, "webkit/" + name + "/history-motion");
-    if (!mutation) await assertDhwTimeline(page, server, "webkit/" + name + "/dhw");
+    if (!mutation) {
+      await assertDhwTimeline(page, server, "webkit/" + name + "/dhw");
+      if (!process.env.WEBKIT_SCOPE_RECORD)
+        await assertWebKitDashboardDiagnosis(page, server, "webkit/" + name + "/dashboard");
+    }
     const touch = await page.touchWitness();
     assert.ok(touch.touchstart >= 2 && touch.touchend === touch.touchstart &&
       touch.pointerdown === touch.touchstart && touch.pointerup === touch.touchstart,
@@ -72,10 +152,13 @@ for (const name of selected) {
       maxFocusSetupMs: Math.max(...page.historyMotionEvidence.map(row => row.focusSetupMs)),
       focusAlreadySetCases: page.historyMotionEvidence.filter(row => row.focusWasAlready).length,
       maxNativeTouchMs: maxTouch, trustedTouch: touch, budgetMs: 250 }));
+  } catch (error) {
+    bodyError = error;
+    throw error;
   } finally {
     if (process.env.DAIKIN_WEBKIT_DIAGNOSTICS === "1")
       console.log("WebKit history diagnostics: " + JSON.stringify({ viewport: name,
         observations: browser.page.historyMotionEvidence, touchDurationsMs: browser.page.touchTimings() }));
-    try { await browser.close(); } finally { await server.close(); }
+    try { await browser.close({ checkDiagnostics: !bodyError }); } finally { await server.close(); }
   }
 }

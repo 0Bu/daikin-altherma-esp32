@@ -66,25 +66,27 @@ inline daik::Config                           current;
 inline std::vector<daik::CachedValue>         rows, modbus_rows;
 inline daik::HpValuesIdentity                 identity{"generic", 0x1234, 7, 11};
 inline bool                                   ota = false, modbus_live = false;
-inline bool                                   ota_brief_busy            = false;
-inline const char*                            ota_brief_state           = "idle";
-inline bool                                   clock_synced              = true;
-inline httpd_req_t*                           active_request            = nullptr;
-inline bool                             config_unreadable         = false;
-inline bool                             change_history_epoch      = false;
-inline bool                             history_restored          = false;
-inline uint32_t                         epoch                     = 42;
-inline int                              failure = 0, stage_race = 0;
-inline unsigned                         stack_samples = 0;
-inline unsigned                         wifi_calls    = 0;
-inline daik::WifiScanEntry              scan_rows[20]{};
-inline int                              scan_count = 0, scan_failure = 0;
-inline unsigned                         scan_calls             = 0;
-inline size_t                           scan_first_allocations = 0;
-inline daik::CheckupStopContextReport   stop_report{};
-inline daik::CheckupHydronicReport      hydronic_report{};
-inline int                              flow_min_tenths = -1;
-inline daik::logic::DefrostStartReport  defrost_start{};
+inline bool                                   ota_brief_busy       = false;
+inline const char*                            ota_brief_state      = "idle";
+inline bool                                   clock_synced         = true;
+inline httpd_req_t*                           active_request       = nullptr;
+inline bool                                   config_unreadable    = false;
+inline bool                                   change_history_epoch = false;
+inline bool                                   history_restored     = false;
+inline bool                                   hp_connected         = false;
+inline uint32_t                               epoch                = 42;
+inline int                                    failure = 0, stage_race = 0;
+inline unsigned                               stack_samples = 0;
+inline unsigned                               wifi_calls    = 0;
+inline daik::WifiScanEntry                    scan_rows[20]{};
+inline int                                    scan_count = 0, scan_failure = 0;
+inline unsigned                               scan_calls             = 0;
+inline size_t                                 scan_first_allocations = 0;
+inline daik::CheckupStopContextReport         stop_report{};
+inline daik::CheckupHydronicReport            hydronic_report{};
+inline int                                    flow_min_tenths = -1;
+inline daik::logic::DefrostStartReport        defrost_start{};
+inline daik::logic::CheckupOutdoorReport      defrost_outdoor{};
 inline daik::logic::CheckupCyclingHours       cycling_hours{};
 inline daik::logic::CheckupCyclingTrace       cycling_trace{};
 inline daik::logic::CheckupRunContextSnapshot cycling_run_contexts{};
@@ -93,9 +95,9 @@ inline daik::logic::DhwLossTimeline           dhw_timelines[2]{};
 inline unsigned                               dhw_snapshot_calls[2]{}, checkup_report_calls = 0;
 inline bool                                   dhw_evidence_case   = false;
 inline unsigned                               dhw_snapshot_chunks = 0;
-inline daik::CheckupFaultStatus         fault_status{};
-inline daik::logic::CheckupFaultTrace   fault_trace{};
-inline bool                             fault_trace_present = false;
+inline daik::CheckupFaultStatus               fault_status{};
+inline daik::logic::CheckupFaultTrace         fault_trace{};
+inline bool                                   fault_trace_present = false;
 inline daik::logic::CheckupRestore      checkup_persist     = daik::logic::CheckupRestore::NoRecord;
 inline bool                             reset_after_checkup = false;
 inline unsigned                         stop_report_calls   = 0;
@@ -127,24 +129,25 @@ void reset() {
     sdk::after_chunk                        = nullptr;
     fail_trace_snapshot                     = false;
     fail_trace_size = trace_caps_calls = trace_caps_failures = largest_caps_allocation = 0;
-    current                                 = {};
-    current.profile                         = "generic";
-    current.wifi_ssid                       = "Café \"quoted\"\\line\n";
-    current.mqtt_base                       = "daikin-altherma-esp32";
-    ota = modbus_live = change_history_epoch = history_restored = false;
-    clock_synced                         = true;
-    active_request                       = nullptr;
-    config_unreadable                    = false;
-    epoch                                = 42;
+    current                                                                            = {};
+    current.profile                                                                    = "generic";
+    current.wifi_ssid = "Café \"quoted\"\\line\n";
+    current.mqtt_base = "daikin-altherma-esp32";
+    ota = modbus_live = change_history_epoch = history_restored = hp_connected = false;
+    clock_synced                                                               = true;
+    active_request                                                             = nullptr;
+    config_unreadable                                                          = false;
+    epoch                                                                      = 42;
     failure = stage_race = 0;
     stack_samples = wifi_calls = 0;
-    scan_count = scan_failure = 0;
-    scan_calls                = 0;
-    scan_first_allocations    = 0;
-    stop_report               = {};
-    hydronic_report            = {};
-    flow_min_tenths            = -1;
+    scan_count = scan_failure    = 0;
+    scan_calls                   = 0;
+    scan_first_allocations       = 0;
+    stop_report                  = {};
+    hydronic_report              = {};
+    flow_min_tenths              = -1;
     defrost_start                = {};
+    defrost_outdoor              = {};
     cycling_hours                = {};
     cycling_trace                = {};
     cycling_run_contexts         = {};
@@ -153,7 +156,7 @@ void reset() {
     dhw_snapshot_calls[0] = dhw_snapshot_calls[1] = checkup_report_calls = 0;
     dhw_evidence_case                                                    = false;
     dhw_snapshot_chunks                                                  = 0;
-    fault_status                              = {};
+    fault_status                                                         = {};
     fault_trace.reset();
     working_figure_x10a        = {};
     working_figure_modbus      = {};
@@ -211,12 +214,12 @@ esp_err_t invoke(httpd_req_t& req, const char* uri, esp_err_t (*handler)(httpd_r
     sdk::fail_allocation    = fail_at;
     trace_caps_calls = trace_caps_failures = largest_caps_allocation = 0;
     dhw_snapshot_chunks                                              = 0;
-    sdk::track_allocations  = true;
+    sdk::track_allocations                                           = true;
     active_request                                                   = &req;
-    const auto result       = daik::handle_then_settle_body(&req);
-    active_request          = nullptr;
-    sdk::track_allocations  = false;
-    sdk::fail_allocation    = 0;
+    const auto result      = daik::handle_then_settle_body(&req);
+    active_request         = nullptr;
+    sdk::track_allocations = false;
+    sdk::fail_allocation   = 0;
     return result;
 }
 void next_request() {
@@ -356,11 +359,11 @@ void chunk_sweep(const char* uri, esp_err_t (*handler)(httpd_req_t*)) {
 } // namespace fixture
 
 namespace daik {
-Config      config() { return fixture::current; }
-std::string config_profile() { return fixture::current.profile; }
-bool        config_stored_blob_unreadable() { return fixture::config_unreadable; }
-bool        hw_octal_spi() { return false; }
-bool        provisioning_ap_active() { return false; }
+Config         config() { return fixture::current; }
+std::string    config_profile() { return fixture::current.profile; }
+bool           config_stored_blob_unreadable() { return fixture::config_unreadable; }
+bool           hw_octal_spi() { return false; }
+bool           provisioning_ap_active() { return false; }
 bool           ota_download_active() { return fixture::ota; }
 bool           ota_busy() { return fixture::ota; }
 OtaStatusBrief ota_status_brief() {
@@ -369,11 +372,11 @@ OtaStatusBrief ota_status_brief() {
     out.state = fixture::ota_brief_state;
     return out;
 }
-size_t      heap_largest_internal_block() { return 32768; }
-uint8_t     heap_guard_restarts() { return 0; }
-void        stack_watch_sample(StackWatch) noexcept { ++fixture::stack_samples; }
-uint32_t    stack_watch_min_free_bytes(StackWatch) noexcept { return 0; }
-WifiInfo    wifi_info() {
+size_t   heap_largest_internal_block() { return 32768; }
+uint8_t  heap_guard_restarts() { return 0; }
+void     stack_watch_sample(StackWatch) noexcept { ++fixture::stack_samples; }
+uint32_t stack_watch_min_free_bytes(StackWatch) noexcept { return 0; }
+WifiInfo wifi_info() {
     ++fixture::wifi_calls;
     if (fixture::failure == 2 || (fixture::failure == 1 && fixture::wifi_calls >= 2))
         throw std::runtime_error("injected status snapshot failure");
@@ -391,17 +394,17 @@ int wifi_scan(WifiScanEntry* out, int max) {
     std::copy_n(fixture::scan_rows, n, out);
     return n;
 }
-EthInfo                     net_eth_info() { return {}; }
-EthPins                     net_eth_pins() { return {}; }
-ReservedPins                net_eth_reserved_pins() { return {}; }
-NetLink                     net_kind() { return NetLink::Wifi; }
-bool                        safe_mode_active() { return false; }
-const char*                 safe_mode_cause() { return nullptr; }
-CrashInfo                   diag_crash_info() { return {}; }
-CrashInfo                   diag_crash_info_live() { return {}; }
-bool                        diag_crash_coredump_present() { return false; }
-void                        diag_printf(const char*, ...) {}
-Env3Status                  env3_status() {
+EthInfo      net_eth_info() { return {}; }
+EthPins      net_eth_pins() { return {}; }
+ReservedPins net_eth_reserved_pins() { return {}; }
+NetLink      net_kind() { return NetLink::Wifi; }
+bool         safe_mode_active() { return false; }
+const char*  safe_mode_cause() { return nullptr; }
+CrashInfo    diag_crash_info() { return {}; }
+CrashInfo    diag_crash_info_live() { return {}; }
+bool         diag_crash_coredump_present() { return false; }
+void         diag_printf(const char*, ...) {}
+Env3Status   env3_status() {
     if (!fixture::current.env3_enabled) return {};
     Env3Status sample;
     sample.started       = true;
@@ -414,19 +417,23 @@ Env3Status                  env3_status() {
     sample.error         = "";
     return sample;
 }
-MqttStatus                  mqtt_status() { return {}; }
-MqttSkipStats               mqtt_skip_stats() { return {}; }
-uint32_t                    mqtt_retirement_evidence() noexcept { return 0; }
-CirculationSourceStatus     circulation_source_status(const Config&) { return {}; }
-CirculationPumpSample       circulation_pump_sample() { return {}; }
-SyslogStatus syslog_status() { return {}; }
-HpStats      hp_stats() { return {}; }
-uint32_t     hp_skipped_cycles() { return 0; }
+MqttStatus              mqtt_status() { return {}; }
+MqttSkipStats           mqtt_skip_stats() { return {}; }
+uint32_t                mqtt_retirement_evidence() noexcept { return 0; }
+CirculationSourceStatus circulation_source_status(const Config&) { return {}; }
+CirculationPumpSample   circulation_pump_sample() { return {}; }
+SyslogStatus            syslog_status() { return {}; }
+HpStats                 hp_stats() {
+    HpStats s;
+    s.connected = fixture::hp_connected;
+    return s;
+}
+uint32_t                          hp_skipped_cycles() { return 0; }
 logic::RefrigerantServiceSnapshot refrigerant_service_status() {
     ++fixture::refrigerant_report_calls;
     return fixture::refrigerant_report;
 }
-ModbusStatus                      mb_status() {
+ModbusStatus mb_status() {
     ModbusStatus s;
     s.enabled   = fixture::modbus_live;
     s.connected = fixture::modbus_live;
@@ -555,12 +562,18 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     }
     if (source == DiagnosticsSource::X10a) {
         if (defrost_context) *defrost_context = fixture::defrost_start;
-        auto& defrost = report.checks[static_cast<size_t>(logic::CheckupCheck::Defrost)];
-        defrost.a     = 3;
-        defrost.e     = 3;
-        defrost.b     = 15;
-        defrost.c     = 151;
-        defrost.d     = 1000;
+        report.defrost_outdoor = fixture::defrost_outdoor;
+        auto& defrost          = report.checks[static_cast<size_t>(logic::CheckupCheck::Defrost)];
+        defrost.a              = 3;
+        defrost.e              = 3;
+        defrost.b              = 15;
+        defrost.c              = 151;
+        defrost.d              = 1000;
+        if (fixture::defrost_outdoor.samples > 0) {
+            defrost.verdict    = logic::CheckupVerdict::Info;
+            defrost.reason     = logic::CheckupReason::None;
+            defrost.observed_s = 86400;
+        }
         if (fixture::flow_min_tenths >= 0)
             report.checks[static_cast<size_t>(logic::CheckupCheck::Flow)].a =
                 fixture::flow_min_tenths;
@@ -1073,6 +1086,18 @@ int main(int argc, char** argv) {
                                     "\"defrost_s\":151,\"run_s\":1000") != std::string::npos,
                   "defrost start changed the legacy ratio fields");
         }
+        current.diagnostics_enabled = true;
+        hp_connected                = true;
+        defrost_outdoor             = {daik::logic::OutdoorSource::X10a, -45, -20, 12};
+        auto outdoor_req            = request();
+        check(invoke(outdoor_req, "/status", daik::h_status) == ESP_OK,
+              "defrost outdoor status failed");
+        successful(outdoor_req);
+        check(outdoor_req.response.find(
+                  "\"outdoor_source\":\"x10a\",\"outdoor_min_c\":-4.5,\"outdoor_mean_c\":-2.0,"
+                  "\"outdoor_samples\":12") != std::string::npos,
+              "defrost outdoor fields missing or malformed");
+        emit(outdoor_req, "status-x10a-defrost-outdoor");
     });
     run("refrigerant_metadata", [] {
         configure_refrigerant();
@@ -1513,10 +1538,10 @@ int main(int argc, char** argv) {
         hydronic_report.observation.totals.first_evidence_unix_us = 2000000000000000;
         hydronic_report.observation.totals.spread                 = {6500, 3000, 3500};
         hydronic_report.current                                   = true;
-        hydronic_report.secondary        = {-1750, 15000001, 2, {0x65, 4, 105}};
-        const unsigned before_stop_calls = stop_report_calls;
-        const unsigned before_hydronic_calls                      = hydronic_report_calls;
-        auto           req                                        = request();
+        hydronic_report.secondary            = {-1750, 15000001, 2, {0x65, 4, 105}};
+        const unsigned before_stop_calls     = stop_report_calls;
+        const unsigned before_hydronic_calls = hydronic_report_calls;
+        auto           req                   = request();
         check(invoke(req, "/status", daik::h_status) == ESP_OK, "modbus diagnostics status failed");
         successful(req);
         emit(req, "status-modbus-diagnostics");
