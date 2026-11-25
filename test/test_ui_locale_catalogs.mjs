@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1002, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1008, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -421,6 +421,8 @@ assert.equal(vm.runInContext(`(() => {
   FAULT_CODE_I18N.de = saved;
   return ready;
 })()`, catalogContext), false, "German must not mark ready without its external fault-code table");
+const pressureDescriptionIndex = descriptionSchema.findIndex(row => row.what === "Water pressure in the sealed hydronic circuit.");
+assert.ok(pressureDescriptionIndex >= 0, "the shared water pressure description must exist");
 for (const code of codes.slice(2)) {
   const inspect = catalogContext.__inspectCopy[code];
   assert.ok(inspect, `${code} specialist inspector copy did not register itself`);
@@ -429,8 +431,12 @@ for (const code of codes.slice(2)) {
   for (const key of inspectKeys) {
     assert.ok(["string", "function"].includes(typeof inspect[key].t),
       `${code}/INSPECT.${key}.t is missing`);
-    assert.ok(["string", "function"].includes(typeof inspect[key].what),
-      `${code}/INSPECT.${key}.what is missing`);
+    if (key === "wp") {
+      assert.equal(inspect[key].what, undefined, `${code} must use the shared pressure description`);
+    } else {
+      assert.ok(["string", "function"].includes(typeof inspect[key].what),
+        `${code}/INSPECT.${key}.what is missing`);
+    }
     assert.equal(typeof inspect[key].aria, "string", `${code}/INSPECT.${key}.aria is missing`);
     if (inspectNowKeys.has(key)) assert.equal(typeof inspect[key].now, "function",
       `${code}/INSPECT.${key}.now is missing`);
@@ -448,6 +454,8 @@ for (const code of codes.slice(2)) {
 
   checkLocalizedRows(code, catalogContext.__descriptionCopy[code], descriptionSchema,
     "value-description");
+  assert.equal(catalogContext.__descriptionCopy[code][pressureDescriptionIndex].length, 2,
+    `${code} pressure copy needs separate description and normal text`);
   const modelCopy = catalogContext.__modelDescriptionCopy[code] || {};
   const modelRows = Object.values(modelCopy);
   checkLocalizedRows(code, modelRows, Object.values(modelSchema), "model-description");

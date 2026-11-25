@@ -560,6 +560,20 @@ function updateSchematicStateA11y(d) {
       !d || d.valve2On == null ? "—" : t(d.valve2On ? "state.on" : "state.off"));
   set("gFlowSwitch", concept("flow_switch", t("schem.flow_switch")),
       !d || d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));
+  const pressure = pressureDiagnosis(d);
+  const signal = $("svWpSignal");
+  if (signal) {
+    const critical = pressure?.finding?.critical === true;
+    signal.classList.toggle("on", !critical && pressure?.pending === true);
+    const label = [inspTitleText(INSPECT.wp, d),
+      critical ? [t("check.pressure.finding"), t("check.detail.pressure.warn"), t("hist.title")].join(" · ")
+        : pressure?.pending ? t("check.pressure.pending") : ""].filter(Boolean).join(" · ");
+    const pill = $("gWaterPressure");
+    pill.classList.toggle("sc-pressure-critical", critical);
+    pill.setAttribute("aria-label", label);
+    const title = pill.querySelector?.("title");
+    if (title) title.textContent = label;
+  }
 }
 
 // ENV III is independent of both liveData sources: an X10A outage must not blank a fresh outdoor
@@ -685,7 +699,7 @@ function renderLive() {
   // ΔT only means something with water moving (d.dtStale, decided in liveData so the explainer
   // gates on the very same fact). Same reasoning as the derived kW/COP, which already gate.
   setTxt("svDt", d.dtStale ? "—" : fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow ?? d.provisionalFlow));
-  setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt0(d.pump));
+  setTxt("svWp", Number.isFinite(d.wp) ? histFmt1(d.wp) : "—"); setTxt("svPump", fmt0(d.pump));
   setTxt("svTank", fmt1(d.tank)); setTxt("svTankSet", fmt1(d.tankSet));
   setTxt("svRoom", fmt1(d.room)); setTxt("svRoomSet", fmt1(d.roomSet));
   // Blanks with the ΔT it is computed from (d.dtStale) — the pill two places to its left already
@@ -1594,6 +1608,54 @@ const inspNowText = (e, d) => {
 // stop repainting when the scope flipped.
 const inspTitleText = (e, d) => inspFieldText(e, "t", d);
 
+// The schematic can show a Modbus reading, while the retained finding belongs only to X10A.
+function pressureDiagnosis(d = S.live) {
+  const settings = S.status?.diagnostics;
+  const report = S.status?.health;
+  const source = report?.source || settings?.effective_source || settings?.source || "x10a";
+  if (S.otaCached || S.transportUnavailable === "status" || settings?.enabled !== true ||
+      settings.effective_source === "modbus" || source !== "x10a" ||
+      report?.persist === "unknown" || !Array.isArray(report?.checks)) return null;
+  const check = report.checks.find(c => c.id === "pressure");
+  if (!check || !["ok", "collecting", "info", "warn"].includes(check.verdict)) return null;
+
+  const fresh = report.source_fresh !== false && check.reason !== "source_stale";
+  const current = fresh && Number.isFinite(check.current_bar) && Number.isFinite(d?.wp) &&
+    !d.mbFields?.has("wp") && !histX10aDown() ? d.wp : null;
+  const bar = check.min_bar;
+  const critical = check.verdict === "warn" && check.confirmed_critical === true && bar <= PRESSURE_CRIT_BAR;
+  const low = check.verdict === "info" && check.confirmed_low === true &&
+    bar > PRESSURE_CRIT_BAR && bar <= PRESSURE_LOW_BAR;
+  const at = check.min_unix_s;
+  const time = Number.isSafeInteger(at) && at > 0 && at <= 0xffffffff ? at : null;
+  const finding = Number.isFinite(bar) && bar >= 0 && (critical || low) ? { bar, at: time, critical } : null;
+  return { finding, current, pending: !finding?.critical && current !== null && current <= PRESSURE_CRIT_BAR,
+           assessed: fresh && check.verdict === "ok" };
+}
+
+function pressureFindingHtml(pressure) {
+  const finding = pressure?.finding;
+  if (!finding) {
+    const state = !pressure ? "check.pressure.unavailable" : pressure.pending ? "check.pressure.pending"
+      : pressure.assessed ? "check.pressure.clear" : "check.detail.collecting_unknown";
+    return `<p>${esc(t(state))}</p>`;
+  }
+  const band = t(finding.critical ? "check.detail.pressure.warn" : "check.detail.pressure.info");
+  const time = finding.at === null ? "" :
+    new Date(finding.at * 1000).toLocaleString(LANG, { dateStyle: "short", timeStyle: "short" });
+  return inspectDiagnosisResultHtml(`${t("check.pressure.finding")} · X10A`, `${histFmt1(finding.bar)}\u00a0bar`) +
+    `<p>${esc([band, time].filter(Boolean).join(" · "))}</p>`;
+}
+
+function pressureExplanationHtml(pressure) {
+  if (!pressure) return "";
+  const finding = pressure.finding;
+  const threshold = finding?.critical ? PRESSURE_CRIT_BAR : PRESSURE_LOW_BAR;
+  const rules = finding ? t("check.pressure.sustained", `${histFmt1(threshold)}\u00a0bar`)
+    : modelDescriptionCopy("health_pressure")?.[1] || MODEL_DESCRIPTIONS.health_pressure.normal;
+  return `<div class="vdesc-n">${esc(`X10A · ${t("check.pressure.rules")}`)}</div><p>${esc(rules)}</p>`;
+}
+
 // Everything the panel would draw, as one string — the change key for the render guard above. It
 // covers the selection, the headline, the live sentence and every member reading, so a value moving
 // still repaints while an idle second does not.
@@ -1614,6 +1676,7 @@ function inspectSig(e) {
             env.temperature_c, env.humidity_pct, env.pressure_hpa].join("|");
   }
   const d = S.live;
+  const pressureSig = S.insp === "wp" ? JSON.stringify(pressureDiagnosis(d)) : "";
   const row = d ? inspCurRow(e) : null;
   // The fallback headline is a value like any other and moves like any other, so it is in the key.
   const fb = row ? null : mbForInspect(S.insp);
@@ -1633,7 +1696,7 @@ function inspectSig(e) {
           d && e.head ? e.head(d) : "",
           inspFieldText(e, "what", d) || "",
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "",
-          inspUnknownAge(e, d) ? "unknown_age" : "", rows].join("|");
+          inspUnknownAge(e, d) ? "unknown_age" : "", rows, pressureSig].join("|");
 }
 
 // The trend under the inspector: the same chart the value list draws. A resolved X10A row chooses
@@ -1723,10 +1786,13 @@ function renderInspectHist(e, row, mode = "", flow = null) {
        !!S.histHidden?.has(id)].join(":")
     : "";
   const flowReference = flow?.windows ? JSON.stringify([flow.source, flow.minimum, flow.windows]) : "";
+  const pressureChart = S.insp === "wp" && id === "water_pressure";
+  const pressure = pressureChart ? pressureDiagnosis() : null;
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh),
-               liveGen, auxGen, sourceDefault, flowScaleKey, flowReference, JSON.stringify(pin ?? null)].join("|");
+               liveGen, auxGen, sourceDefault, flowScaleKey, flowReference, JSON.stringify(pin ?? null),
+               pressureChart ? JSON.stringify([!!pressure, pressure?.finding]) : ""].join("|");
   if (sig === S.inspHistSig) return started;
   S.inspHistSig = sig;
   const el = $("inspHist");
@@ -1737,6 +1803,9 @@ function renderInspectHist(e, row, mode = "", flow = null) {
   const chartName = DERIVED[id] && e && e.aria ? inspFieldText(e, "aria", null) : null;
   const history = (unit, name) => histHtml(id, unit, name, trendSource, false, flow);
   replaceHistoryHtml(el, !id ? ""
+    : pressureChart ? histHtml(id, "bar", inspTitleText(e, null), trendSource, true, null,
+                              { pressureDiagnosis: true, finding: pressure?.finding,
+                                findingExplanation: pressureExplanationHtml(pressure) })
     : mbHist ? history(typeof displayUnit === "function" ? displayUnit(mbHist) : (mbHist.unit || ""),
                        typeof displayHomeHubLabel === "function" ? displayHomeHubLabel(mbHist) : (mbHist.label || id))
     : row ? history(displayUnit(row), chartName || displayReadingLabel(row.label, row))
@@ -1773,6 +1842,8 @@ function renderInspect(mode = "") {
   // here painted the full infobox immediately and could never reproduce their pull-out motion.
   const inspect = $("inspect");
   const card = $("inspCard");
+  const pressurePanel = $("inspPressure");
+  if (pressurePanel) pressurePanel.hidden = S.insp !== "wp";
   inspect.classList.toggle("open", !!e);
   if (e) {
     card.removeAttribute("aria-hidden");
@@ -1828,6 +1899,7 @@ function renderInspect(mode = "") {
   // and invisible to anyone who cannot separate the two hues — DESIGN.md's own rule is that colour
   // never carries a fact by itself. Everywhere else the badge already appears beside a gateway
   // reading; this was the one place it did not.
+  const isPressure = S.insp === "wp";
   const srcName = isFlow ? [t("check.flow.live"), fb ? "Modbus" : row ? "X10A" : ""].filter(Boolean).join(" · ")
                 : fb ? displayHomeHubLabel(fb)
                      : displayReadingLabel(row ? row.label : (e.sample || ""), row);
@@ -1846,7 +1918,7 @@ function renderInspect(mode = "") {
   if (hasHead) {
     const explicitHead = d && e.head ? e.head(d) : null;
     setTxt("inspNow", explicitHead != null ? explicitHead
-                     : row ? inspVal(row, d)
+                     : row ? (isPressure && Number.isFinite(d?.wp) ? `${histFmt1(d.wp)}\u00a0bar` : inspVal(row, d))
                      : fb ? displayValue(fb) + (fbUnit ? " " + fbUnit : "")
                      : "—");
   }
@@ -1873,8 +1945,7 @@ function renderInspect(mode = "") {
   // together after the chart in the divided value list below.
   // The inspector records its signature immediately, so its writes cannot wait for clickHold.
   // setHtml still preserves identical prose while a values poll changes the headline number.
-  setHtml("inspBody", what + (sentence ? descParaHtml(esc(sentence)) : "")
-    + inspHeldHtml(e, d), false);
+  setHtml("inspBody", what + (sentence ? descParaHtml(esc(sentence)) : "") + inspHeldHtml(e, d), false);
   let rows = !d ? "" : inspValues(e, row, fb)
     // A member reading with a twin gets the gateway's value as its OWN row, labelled "(Modbus)" and
     // petrol throughout — never appended to the X10A value in the same cell, which is what this did
@@ -1899,6 +1970,7 @@ function renderInspect(mode = "") {
     })
     .join("");
   setHtml("inspRows", rows, false);
+  if (isPressure) setHtml("inspPressureFinding", pressureFindingHtml(pressureDiagnosis(d)), false);
 }
 
 // Name every schematic hit target from its INSPECT entry. An SVG <title> is BOTH the native hover

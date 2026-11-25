@@ -609,7 +609,8 @@ function wireTrendScrub(gv) {
       const low = label === "flow" && i >= 0 && Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) <= 8 &&
         selectFlowMinimum(plot, e.clientX, e.clientY, e.pointerType === "touch" ? 18 : 4);
       scrubEnd(plot);
-      if (i >= 0 && !low) histPinToggle(label, i, plot.dataset.source || "");
+      if (i >= 0 && !low)
+        histPinToggle(label, i, plot.dataset.source || "", undefined, plot.dataset.pressureAssessment !== undefined);
     });
   }
   // Keyboard: the plot is focusable, so arrow keys step through samples and the tooltip is the
@@ -630,7 +631,7 @@ function wireTrendScrub(gv) {
       const view = scrubView(plot);
       if (!view) return renderTrendHosts();
       const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
-      return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "", view);
+      return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "", view, plot.dataset.pressureAssessment !== undefined);
     }
     const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
     const next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : cur + step;

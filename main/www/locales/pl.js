@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -392,6 +392,12 @@ I18N.pl = localeValues([
   /* check.detail.pressure.info */ "Niskie",
   /* check.detail.pressure.warn */ "Krytyczne",
   /* check.detail.pressure.ok */ "W normie",
+  /* check.pressure.finding */ "Potwierdzony wynik",
+  /* check.pressure.sustained */ (a) => `Ciśnienie ${a} lub niższe przez co najmniej 60 sekund bez przerwy.`,
+  /* check.pressure.clear */ "Nie potwierdzono utrzymującego się niskiego ciśnienia.",
+  /* check.pressure.rules */ "Jak ocenia się ciśnienie?",
+  /* check.pressure.unavailable */ "Diagnostyka ciśnienia X10A jest niedostępna.",
+  /* check.pressure.pending */ "Odczyt w zakresie krytycznym. Czas trwania jest jeszcze nieznany.",
   /* check.detail.defrost_events_insufficient */ "Mniej niż trzy powiązane odszraniania; bez oceny udziału.",
   /* check.detail.source_stale */ "Brak świeżego odczytu X10A; bieżący stan nieznany. Historia zachowana.",
   /* check.detail.no_paired_runtime */ "Brak powiązanego czytelnego czasu; tylko liczba.",
@@ -1114,7 +1120,7 @@ INSPECT_I18N.pl = inspectValues(
     ["Przewód powrotny do PHE", 0, "Wspólny powrót do R4T po połączeniu gałęzi zbiornika i domu. W ogrzewaniu jest zwykle chłodniejszy od R1T, w aktywnym chłodzeniu cieplejszy; R4T nie jest czujnikiem przy odbiornikach.", (d) => waterMoving(d) ? `Powrót: ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Pompa i przepływ nie potwierdzają cyrkulacji w przewodzie powrotnym."], // wret
     ["Przepływ wody", 0, "Przepływ wspólnego obiegu; wymagane minimum zależy od modelu i trybu."], // flow
     ["Stan styku przepływu", 0, "Stan binarny X10A; nie mierzy l/min ani nie potwierdza minimum modelu.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A WŁ.; porównaj z pompą i ${fmt1(d.flow)} l/min.` : `X10A WYŁ.; przy pracy pompy porównaj ${fmt1(d.flow)} l/min i błąd 7H/C0.`], // flow_switch
-    ["Ciśnienie wody", 0, "Ciśnienie w zamkniętym obiegu hydraulicznym. Dozwolony zakres zależy od modelu, wysokości instalacji i naczynia przeponowego; porównaj z instrukcją urządzenia."], // wp
+    ["Ciśnienie wody", 0], // wp
   ],
 );
 
@@ -1196,7 +1202,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["R1T mierzy wodę z PHE przed BUH; tryb, R4T i przepływ określają sens i szacunek mocy."], // 34
   ["R4T jest wspólnym powrotem do PHE; R1T−R4T to ΔT PHE, nie odbiorników."], // 35
   ["Szybkość obiegu wody we wspólnym układzie ogrzewania/chłodzenia i CWU."], // 36
-  ["Ciśnienie wody; zakres zależy od modelu, przy ≤1,0 bar sprawdź jego instrukcję."], // 37
+  ["Ciśnienie wody w zamkniętym obiegu hydraulicznym.","Dopuszczalny zakres ciśnienia zależy od modelu, wysokości instalacji i naczynia przeponowego. Przy 1,0 bar lub mniej sprawdź instrukcję konkretnego urządzenia."], // 37
   ["Odwrócone polecenie X10A: 0 = maks, 100 = stop ([0, 100] → 100–0 %). Nie mierzy RPM ani nie dowodzi obrotów, wysokości czy przepływu; czytaj WŁ./WYŁ. i przepływ osobno."], // 38
   ["Praca pompy obiegowej nie dowodzi przekazywania ciepła; potwierdź przepływem."], // 39
   ["Stan pompy solarnej, niezależnej od pompy obiegowej układu pompy ciepła."], // 40

@@ -116,6 +116,10 @@ main { flex: 1; }
   position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; border-radius: 50%;
   background: var(--err); border: 2px solid var(--bg);
 }
+.sc-pressure-dot { display: none; fill: var(--warn); stroke: var(--bg); stroke-width: 2px; pointer-events: none; }
+.sc-pressure-dot.on { display: inline; }
+.sc-pressure-warning { display: none; fill: var(--err); font-size: 10px; }
+.sc-pressure-critical .sc-pressure-warning { display: inline; }
 
 /* Header brand icon: source-faithful three-blade fan mark, shown at 48 px so its full silhouette
    holds its own beside the device name. The image itself already carries the blue ground. */
@@ -441,14 +445,14 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 /* A source comparison belongs to the Modbus value immediately above it, not to the description.
    It therefore gets no divider of its own; the next reading supplies the next list line. */
 .inspect-rows > .mb-delta { margin: -1px 0 0; padding: 0 0 5px; }
-.inspect-flow-diagnosis { margin-top: 10px; }
-.inspect-flow-result {
+.inspect-flow-diagnosis, #inspPressure { margin-top: 10px; }
+.inspect-diagnosis-result {
   display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px;
   color: var(--fg);
 }
-.inspect-flow-result span { min-width: 0; overflow-wrap: anywhere; }
-.inspect-flow-result strong { white-space: nowrap; }
-.inspect-flow-diagnosis p { margin: 3px 0 0; }
+.inspect-diagnosis-result span { min-width: 0; overflow-wrap: anywhere; }
+.inspect-diagnosis-result strong { white-space: nowrap; }
+.inspect-flow-diagnosis p, #inspPressure p, .vhist-pressure-explanation p { margin: 3px 0 0; }
 
 /* Models without a DHW tank / room sensor: hide those schematic parts instead of dangling "—".
    The derived PHE pills are different: every supported profile can compute them at a valid working
@@ -926,7 +930,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .checkup-dhw-window-details button { align-self: stretch; min-height: 40px; padding: 0; border: 0; background: none;
   color: var(--muted); font: inherit; font-size: 1.5em; cursor: pointer; border-radius: var(--r-tile); }
 .checkup-dhw-window-details button:hover { color: var(--brand-strong); background: var(--soft); }
-.checkup-dhw-window-details button:focus-visible, .checkup-dhw-disclosure > summary:focus-visible {
+.checkup-dhw-window-details button:focus-visible,
+.checkup-dhw-disclosure > summary:focus-visible {
   outline: 2px solid var(--brand-strong); outline-offset: -2px; }
 .checkup-dhw-window-details button:disabled { opacity: .35; cursor: default; }
 .checkup-dhw-disclosure { border-top: 1px solid var(--line); margin-top: 11px; }
@@ -1041,8 +1046,10 @@ button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong);
    colour — a trend is not a state. */
 .vhist { --vhist-surface: var(--card); margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--line); }
 .vdesc-body .vhist, .inspect-card .vhist { --vhist-surface: var(--brand-tint); }
+.inspect-card .vhist.vhist-pressure-diagnosis { padding-top: 0; border-top: 0; }
 .vhist.vhist-flat { display: flex; align-items: center; min-height: 20px; }
 .vhist-note { color: var(--muted); font-size: 12.5px; }
+.vhist-pressure-explanation { margin-top: 7px; }
 .vhist-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
   font-size: 12px; margin-bottom: 7px; }
 .vhist-t { color: var(--fg); font-weight: 600; }
@@ -1259,6 +1266,12 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-area.err { fill: var(--err); opacity: .24; }
 .vhist-pt.err { fill: var(--err); }
 .vhist-now.err, .vhist-mark.err { background: var(--err); }
+.vhist-pressure-finding { position: absolute; bottom: 0; width: 1px; color: var(--warn);
+  background: currentColor; transform: translateX(-50%); pointer-events: none; }
+.vhist-pressure-finding.err { color: var(--err); }
+.vhist-pressure-finding::before { content: ""; position: absolute; left: 50%; width: 9px; height: 9px;
+  box-sizing: border-box; border: 2px solid currentColor; border-radius: 50%;
+  background: var(--brand-tint); transform: translate(-50%, -50%); }
 .vhist-source.vhist-legend-low { --vhist-colour: var(--warn); }
 .vhist-source.vhist-legend-crit { --vhist-colour: var(--err); }
 .vhist-source.vhist-legend-flow-min {

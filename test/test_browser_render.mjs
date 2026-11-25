@@ -755,9 +755,10 @@ async function clickElement(page, selector, { touch = false, yFraction = .5 } = 
     const button = document.querySelector(${JSON.stringify(selector)});
     const rect = button.getBoundingClientRect();
     if (!rect.width || !rect.height) throw new Error("hidden pointer target: " + ${JSON.stringify(selector)});
-    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height * ${yFraction} };
-    if (document.elementFromPoint(point.x, point.y)?.closest("button, [role=button]") !==
-        button.closest("button, [role=button]"))
+    const point = { x: rect.left + (button.matches("summary") ? Math.min(20, rect.width / 2) : rect.width / 2),
+      y: rect.top + rect.height * ${yFraction} };
+    const control = "button, [role=button], summary";
+    if (document.elementFromPoint(point.x, point.y)?.closest(control) !== button.closest(control))
       throw new Error("pointer target is obstructed: " + ${JSON.stringify(selector)});
     return point;
   })()`);
@@ -1528,6 +1529,12 @@ async function assertFlowInspector(page, context, missingDay) {
     undatedMinimum.includes(await statusCopy("check.flow.locations_missing")) &&
     !undatedMinimum.includes(await page.evaluate("histFmt1(5.9) + ' l/min'")),
   `${context}: older reports retain the heating minimum and explain the missing recorded times`);
+  assert.equal(await page.evaluate(`(() => {
+    const result = document.querySelector("#inspFlowDiagnosis > .inspect-diagnosis-result");
+    return result?.firstElementChild.textContent === t("check.flow.lowest") + " · X10A" &&
+      result.querySelector("strong.num")?.textContent === histFmt1(11) + " l/min" &&
+      document.getElementById("inspPressure").hidden;
+  })()`), true, `${context}: flow retains its labeled minimum in the shared result style`);
   assert.equal(await bandCount(), 0, `${context}: the plot cannot infer locations from an older report or curve samples`);
 
   await page.evaluate(`S.status.health.checks.find(c => c.id === "flow").minimum_windows =
@@ -1797,6 +1804,15 @@ async function assertPlantDiagnosis(page, context) {
       histIdentity: S.histIdentity, histUptime: S.histUptime, flowMinSelection: S.flowMinSelection,
     };
     S.status = structuredClone(S.status);
+    S.status.hp = { ...S.status.hp, connected: true };
+    S.status.modbus = { ...S.status.modbus, enabled: true, connected: true };
+    S._values = S._values.filter(row => !/^water pressure$|flow (sensor|rate)/i.test(row.label) && row.concept !== "flow");
+    S._values.push({ label: "Water Pressure", value: "1.5", unit: "bar", reg: 0x62, off: 11, conv: 105,
+      group: "Water circuit", concept: "water_pressure" },
+    { label: "Flow Rate (l/min)", value: "16.1", unit: "L/min", reg: 0x61, group: "Water circuit", concept: "flow" });
+    S._modbus = [...(S._modbus || []).filter(row => row.concept !== "flow" && row.concept !== "water_pressure"),
+      { label: "Volume flow", value: "19.8", unit: "L/min", concept: "flow", off: 49 }];
+    S.insp = null;
     S.status.history = {
       ...(S.status.history || {}),
       rows: [
@@ -1822,7 +1838,7 @@ async function assertPlantDiagnosis(page, context) {
       }
     };
     S.status.health = {
-      status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
+      status: "warn", source: "x10a", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
       available: 8, assessable: 2, evaluated: 2,
       checks: [
         { id: "fault", verdict: "info", evidence: "manufacturer", active: 0 },
@@ -1861,9 +1877,9 @@ async function assertPlantDiagnosis(page, context) {
           share_pct: null, defrost_s: 30, run_s: 7200,
           outdoor_source: "x10a", outdoor_min_c: 2, outdoor_mean_c: 3, outdoor_samples: 10,
           last_observed_start: { unix_s: null, route: "dhw_route", outdoor_c: 0 } },
-        { id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0.8,
-          current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: true,
-          confirmed_critical: false, observed_s: 77760, required_s: 77760 },
+        { id: "pressure", verdict: "warn", evidence: "heuristic", min_bar: 0.4,
+          current_bar: 1.5, min_unix_s: 1791869910, confirmed_low: true,
+          confirmed_critical: true, observed_s: 77760, required_s: 77760 },
         { id: "flow", verdict: "ok", evidence: "observation", min_l_min: 10.7,
           observed_s: 60, required_s: 0 },
         { id: "heater", verdict: "ok", evidence: "observation", buh_s: 43200,
@@ -1873,11 +1889,13 @@ async function assertPlantDiagnosis(page, context) {
           observed_s: 7200, required_s: 0 }
       ]
     };
-    S.status.diagnostics = { ...(S.status.diagnostics || {}), enabled: true };
+    S.status.diagnostics = { ...(S.status.diagnostics || {}), enabled: true, effective_source: "x10a" };
+    S.status.uptime_s = 86400;
+    S.status.ntp = { ...S.status.ntp, synced: true, time: new Date(1791870900 * 1000).toISOString() };
     syncHistSources();
     S.hist.set("water_pressure", {
       at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: "bar", b0: 280,
-      t0: 1791868800, held: [], v: [15, 15, 12, 9, 4, 8, 15, 15],
+      t0: 1791868800, held: [], v: [15, 15, 12, 9, 4, 8, 3, 15],
     });
     S.descOpen.clear();
     renderApp();
@@ -1888,12 +1906,15 @@ async function assertPlantDiagnosis(page, context) {
       !!document.querySelector('#valueGroups [data-dashboard-card="group:Operation"] .vrow-val')`), true,
     `${context}: live value cards render below the schematic with X10A defrost outdoor samples`);
     const selector = "[data-desc^='model:health_']";
-    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 7,
-      `${context}: seven remaining diagnosis rows must render`);
-    await activateDashboardCardForSelector(page, "[data-desc='model:health_pressure']");
+    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 6,
+      `${context}: six remaining diagnosis rows must render`);
+    assert.equal(await page.evaluate(`!!document.querySelector(
+      "[data-desc='model:health_pressure'], [data-desc='model:health_flow']")`), false,
+      `${context}: pressure and flow diagnoses belong in their inspectors`);
+    await activateDashboardCardForSelector(page, "[data-desc='model:health_fault']");
     await assertDiagnosisSummaryRows(page, `${context}/compact-summary`);
     await captureNativeEvidence(page, `${context}/overview`,
-      "[data-desc='model:health_pressure']", ".card");
+      "[data-desc='model:health_fault']", ".card");
     await page.evaluate(`(() => {
       window.__browserDiagnosisSummaryOriginal = S.status.health.checks;
       S.status.health.checks = structuredClone(S.status.health.checks);
@@ -1928,10 +1949,10 @@ async function assertPlantDiagnosis(page, context) {
         normal: body.children[2]?.querySelector('.vdesc-n')?.innerText,
         text: Array.from(body.children, block => block.innerText) };
     })`);
-    assert.equal(blocks.length, 8, `${context}: include the independent refrigerant observation`);
+    assert.equal(blocks.length, 7, `${context}: include the independent refrigerant observation`);
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
-      if (block.id === "model:health_cycling" || block.id === "model:health_pressure") continue;
+      if (block.id === "model:health_cycling") continue;
       if (block.id === "model:health_dhw_loss") {
         const dhw = await page.evaluate(`(() => {
           const body = document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').querySelector('.vdesc-body');
@@ -2077,41 +2098,183 @@ async function assertPlantDiagnosis(page, context) {
         })()`);
       }
     }
-    const pressureExpanded = await page.evaluate(`(() => {
-      const row = document.querySelector("[data-desc='model:health_pressure']").closest(".vitem");
-      const body = row.querySelector(".vdesc-body");
+    await page.evaluate('S.histPin.delete("water_pressure"); true');
+    await clickElement(page, "#gWaterPressure .sc-pill");
+    await page.waitFor(`S.insp === 'wp' && !S.clickHold &&
+      document.getElementById("inspect").getAnimations({subtree:true})
+        .every(animation => !(animation instanceof CSSTransition) || animation.playState !== "running")`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/schematic-pressure`);
+    const expandedPressure = await page.evaluate(`(() => {
+      const trend = document.querySelector("#inspHist .vhist");
+      const marker = trend.querySelector(".vhist-pressure-finding");
+      const plotRect = trend.querySelector(".vhist-plot").getBoundingClientRect();
+      const yRects = Array.from(trend.querySelectorAll(".vhist-y-label"), label => label.getBoundingClientRect());
+      const thresholdRects = Array.from(trend.querySelectorAll(".vhist-thresh-label"),
+        label => label.getBoundingClientRect());
+      const pill = document.getElementById("gWaterPressure");
+      const dot = document.getElementById("svWpSignal");
+      const finding = document.getElementById("inspPressureFinding");
+      const result = finding.querySelector(".inspect-diagnosis-result");
+      const value = result.querySelector("strong.num");
+      const valueRange = document.createRange();
+      valueRange.selectNodeContents(value);
+      const valueBox = valueRange.getBoundingClientRect();
+      const body = document.getElementById("inspBody");
+      const rows = document.getElementById("inspRows");
+      const description = descFor("Water pressure");
+      const face = pill.querySelector(".sc-pill");
+      const warning = pill.querySelector(".sc-pressure-warning");
+      const label = pill.querySelector("[data-i18n='schem.water_press']");
+      const probe = document.createElement("span");
+      probe.style.color = "var(--err)";
+      probe.style.backgroundColor = "var(--card)";
+      document.body.append(probe);
+      const symbolBox = warning.getBoundingClientRect();
+      const labelBox = label.getBoundingClientRect();
+      // The leading narrow space can overlap the label's SVG bounds by a fraction of a pixel.
+      const glyphStart = warning.getStartPositionOfChar(1).matrixTransform(warning.getScreenCTM());
+      const warningPill = {
+        symbolAfterLabel: warning.previousElementSibling === label && symbolBox.width > 0 &&
+          glyphStart.x >= labelBox.right - 0.5 &&
+          symbolBox.bottom < face.getBoundingClientRect().top && label.textContent === t("schem.water_press"),
+        redSymbol: getComputedStyle(warning).fill === getComputedStyle(probe).color,
+        neutralFill: getComputedStyle(face).fill === getComputedStyle(probe).backgroundColor,
+        hiddenDot: getComputedStyle(dot).display === "none",
+      };
+      probe.remove();
       return {
-        count: body.children.length,
-        firstIsChart: body.children[0]?.hasAttribute("data-chart"),
-        hasPlot: !!body.children[0]?.querySelector(".vhist svg"),
-        hasGrid: body.children[0]?.querySelectorAll(".vhist-grid").length >= 1,
-        hasYLabels: body.children[0]?.querySelectorAll(".vhist-y .vhist-y-label").length >= 1,
-        plotHasNoYLabels: body.children[0]?.querySelectorAll(".vhist-plot .vhist-y-label").length === 0,
-        yLeftOfPlot: (() => {
-          const p = body.children[0].querySelector(".vhist-plot").getBoundingClientRect();
-          const yRects = [...body.children[0].querySelectorAll(".vhist-y-label")].map(el => el.getBoundingClientRect());
-          return yRects.length >= 1 && yRects.every(yr => yr.right <= p.left - 2);
-        })(),
-        noThreshOverlap: (() => {
-          const yRects = [...body.children[0].querySelectorAll(".vhist-y-label")].map(el => el.getBoundingClientRect());
-          const tRects = [...body.children[0].querySelectorAll(".vhist-thresh-label")].map(el => el.getBoundingClientRect());
-          return yRects.every(yr => tRects.every(tr => yr.bottom <= tr.top || yr.top >= tr.bottom));
-        })(),
-        hasLowThresh: !!body.children[0]?.querySelector(".vhist-thresh.low"),
-        hasCritThresh: !!body.children[0]?.querySelector(".vhist-thresh.crit"),
-        hasWarnCurve: !!body.children[0]?.querySelector(".vhist-line.warn"),
-        hasErrCurve: !!body.children[0]?.querySelector(".vhist-line.err"),
-        hasLowLegend: !!body.children[0]?.querySelector(".vhist-legend-low"),
-        hasCritLegend: !!body.children[0]?.querySelector(".vhist-legend-crit"),
-        secondNormal: body.children[1]?.querySelector(".vdesc-n")?.innerText,
+        current: document.getElementById("inspNow").innerText,
+        expectedCurrent: histFmt1(1.5) + "\\u00a0bar",
+        caption: body.firstElementChild?.textContent,
+        expectedCaption: descriptionCopy(description)?.[0] ?? (LANG === "de" ? description.de.what : description.what),
+        normal: body.lastElementChild?.querySelector(".vdesc-n")?.textContent === t("normal.label"),
+        cardOrder: body.nextElementSibling?.id === "inspHist" &&
+          body.nextElementSibling.nextElementSibling === rows &&
+          rows.nextElementSibling?.matches("#inspFlowDiagnosis[hidden]") &&
+          rows.nextElementSibling.nextElementSibling === finding.parentElement,
+        noHeading: !trend.querySelector(".vhist-head, .vhist-range"),
+        hasGrid: trend.querySelectorAll(".vhist-grid").length >= 1,
+        hasYLabels: trend.querySelectorAll(".vhist-y .vhist-y-label").length >= 1,
+        plotHasNoYLabels: trend.querySelectorAll(".vhist-plot .vhist-y-label").length === 0,
+        yLeftOfPlot: yRects.length >= 1 && yRects.every(rect => rect.right <= plotRect.left - 2),
+        noThreshOverlap: yRects.every(label => thresholdRects.every(threshold =>
+          label.bottom <= threshold.top || label.top >= threshold.bottom)),
+        hasLowThresh: !!trend.querySelector(".vhist-thresh.low"),
+        hasCritThresh: !!trend.querySelector(".vhist-thresh.crit"),
+        hasWarnCurve: !!trend.querySelector(".vhist-line.warn"),
+        hasErrCurve: !!trend.querySelector(".vhist-line.err"),
+        hasLowLegend: !!trend.querySelector(".vhist-legend-low"),
+        hasCritLegend: !!trend.querySelector(".vhist-legend-crit"),
+        marker: marker && [marker.style.left, marker.classList.contains("err"), getComputedStyle(marker).pointerEvents],
+        warningPill,
+        flagInName: pill.getAttribute("aria-label").includes(t("check.detail.pressure.warn")),
+        findingLabel: result.querySelector("span").textContent === t("check.pressure.finding") + " · X10A",
+        findingValue: value.textContent === histFmt1(0.4) + "\\u00a0bar",
+        findingSeverity: finding.querySelector("p").textContent.split(" · ")[0] === t("check.detail.pressure.warn"),
+        findingTime: finding.querySelector("p").textContent.split(" · ").slice(1).join(" · ") ===
+          new Date(1791869910 * 1000).toLocaleString(LANG, { dateStyle: "short", timeStyle: "short" }),
+        findingValueFits: valueRange.getClientRects().length === 1 &&
+          valueBox.right <= result.getBoundingClientRect().right + 1 &&
+          valueBox.left >= result.querySelector("span").getBoundingClientRect().right,
+        explanationClosed: !document.querySelector("#inspPressureExplanation"),
+        relatedRowsEmpty: rows.childElementCount === 0,
       };
     })()`);
-    assert.deepEqual(pressureExpanded, {
-      count: 2, firstIsChart: true, hasPlot: true, hasGrid: true, hasYLabels: true,
-      plotHasNoYLabels: true, yLeftOfPlot: true, noThreshOverlap: true,
-      hasLowThresh: true, hasCritThresh: true, hasWarnCurve: true, hasErrCurve: true,
-      hasLowLegend: true, hasCritLegend: true, secondNormal: normalLabel,
-    }, `${context}/model:health_pressure: graph first with Low/Critical thresholds and only Normal below`);
+    const { expectedCurrent, expectedCaption, ...shownPressure } = expandedPressure;
+    assert.deepEqual(shownPressure, {
+      current: expectedCurrent, caption: expectedCaption, normal: true, cardOrder: true,
+      noHeading: true, hasGrid: true, hasYLabels: true, plotHasNoYLabels: true,
+      yLeftOfPlot: true, noThreshOverlap: true, hasLowThresh: true, hasCritThresh: true,
+      hasWarnCurve: true, hasErrCurve: true, hasLowLegend: true, hasCritLegend: true,
+      marker: ["57.14%", true, "none"],
+      warningPill: { symbolAfterLabel: true, redSymbol: true, neutralFill: true, hiddenDot: true },
+      flagInName: true,
+      findingLabel: true, findingValue: true, findingSeverity: true, findingTime: true,
+      findingValueFits: true, explanationClosed: true, relatedRowsEmpty: true,
+    }, `${context}: schematic pressure retains the critical X10A finding alongside a normal current reading`);
+    const pressureTwin = nativeAltherma4Rows.find(row => row.off === 79);
+    const flowTwin = nativeAltherma4Rows.find(row => row.off === 49);
+    const showsOnlyPressureTwin = await page.evaluate(`(() => {
+      const oldStatus = S.status.modbus;
+      const oldRows = S._modbus;
+      const twin = { ...${JSON.stringify(pressureTwin)}, concept: "water_pressure", profile: "altherma4" };
+      S.status.modbus = { ...oldStatus, profile: "altherma4" };
+      S._modbus = [twin, { ...${JSON.stringify(flowTwin)}, concept: "flow", profile: "altherma4" }];
+      try {
+        renderInspect();
+        const rows = Array.from(document.querySelectorAll("#inspRows .inspect-row"));
+        return rows.length === 1 && rows[0].matches(".mb-row") &&
+          rows[0].querySelector(".mb-tag")?.textContent === t("src.modbus_tag") &&
+          rows[0].lastElementChild.textContent === displayValue(twin) + " " + displayUnit(twin) &&
+          document.getElementById("inspRows").getBoundingClientRect().bottom <=
+            document.getElementById("inspPressureFinding").getBoundingClientRect().top;
+      } finally {
+        S.status.modbus = oldStatus;
+        S._modbus = oldRows;
+        renderInspect();
+      }
+    })()`);
+    assert.equal(showsOnlyPressureTwin, true,
+      `${context}: the matching Altherma 4 pressure reading is the only table row and precedes the finding`);
+    const pressurePlot = "#inspHist [data-pressure-assessment]";
+    await clickElement(page, pressurePlot);
+    await page.waitFor('!!document.getElementById("inspPressureExplanation")');
+    const explanation = await page.evaluate(`(() => {
+      const plot = document.querySelector("#inspHist [data-pressure-assessment]");
+      const detail = document.getElementById("inspPressureExplanation");
+      return detail.previousElementSibling.matches(".vhist-graph") &&
+        !!detail.previousElementSibling.querySelector(".vhist-axis") &&
+        detail.closest("#inspHist").nextElementSibling.id === "inspRows" &&
+        plot.getAttribute("aria-describedby") === detail.id &&
+        detail.firstElementChild.matches(".vdesc-n") &&
+        detail.firstElementChild.textContent === "X10A · " + t("check.pressure.rules") &&
+        detail.lastElementChild.matches("p") &&
+        detail.lastElementChild.textContent === t("check.pressure.sustained", histFmt1(0.5) + "\\u00a0bar");
+    })()`);
+    assert.equal(explanation, true, `${context}: tapping the plot reveals the rule below the chart and before the related readings`);
+    await captureNativeEvidence(page, `${context}/schematic-pressure`, "#inspPressure", "#inspCard");
+    if (/\/(en|de)\//.test(context)) {
+      const lifecycle = await page.evaluate(`(() => {
+        const plot = document.querySelector("#inspHist [data-hist='water_pressure']");
+        const explanation = document.getElementById("inspPressureExplanation");
+        const reading = S._values.find(row => row.concept === "water_pressure");
+        const c = S.status.health.checks.find(c => c.id === "pressure");
+        const original = { ...c };
+        reading.value = "1.6"; c.current_bar = 1.6;
+        renderApp();
+        const retained = plot === document.querySelector("#inspHist [data-hist='water_pressure']") &&
+          explanation === document.getElementById("inspPressureExplanation");
+        c.min_unix_s = null;
+        renderApp();
+        const pill = document.getElementById("gWaterPressure");
+        const dot = document.getElementById("svWpSignal");
+        const warning = pill.querySelector(".sc-pressure-warning");
+        const undated = !document.querySelector("#inspHist .vhist-pressure-finding") &&
+          getComputedStyle(warning).display !== "none" && !!document.getElementById("inspPressureExplanation");
+        Object.assign(c, { verdict: "collecting", current_bar: 0.4, confirmed_critical: false, confirmed_low: false });
+        reading.value = "0.4";
+        renderApp();
+        const pending = getComputedStyle(dot).display !== "none" && getComputedStyle(warning).display === "none" &&
+          document.getElementById("inspPressureFinding").textContent === t("check.pressure.pending");
+        S.status.diagnostics.effective_source = "modbus";
+        renderApp();
+        const modbus = getComputedStyle(dot).display === "none" && getComputedStyle(warning).display === "none" &&
+          !document.getElementById("inspPressureExplanation") &&
+          document.getElementById("inspPressureFinding").textContent === t("check.pressure.unavailable");
+        S.status.diagnostics.effective_source = "x10a";
+        Object.assign(c, original); reading.value = "1.5";
+        renderApp();
+        return { retained, undated, pending, modbus };
+      })()`);
+      assert.deepEqual(lifecycle, { retained: true, undated: true, pending: true, modbus: true },
+        `${context}: the pressure plot survives scalar updates and scopes the alert to the X10A assessment`);
+    }
+    await clickElement(page, pressurePlot);
+    await page.waitFor('!document.getElementById("inspPressureExplanation")');
+    assert.equal(await page.evaluate('!document.getElementById("inspPressureFinding").parentElement.hidden'), true,
+      `${context}: clearing the selected sample keeps the finding visible`);
+    await clickElement(page, "#inspClose");
+    await page.waitFor("S.insp === null");
     const cyclingDetail = () => page.evaluate(`(() => {
       const row = document.querySelector("[data-desc='model:health_cycling']").closest(".vitem");
       const body = row.querySelector(".vdesc-body");
@@ -2209,10 +2372,11 @@ async function assertPlantDiagnosis(page, context) {
       assert.ok(openedEnergy.includes(assumption), `${context}: energy assumptions retain ${assumption}`);
     assert.ok((await dhwText()).includes(discardedContext),
       `${context}: opened basis retains discarded reading-gap evidence for the NOTE`);
-    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
-      .closest('.card').querySelector('.section-badge')?.innerText || ''`),
-      await page.evaluate("t('check.summary.notes', 4)"),
-      `${context}: badge counts findings rather than assessed fractions`);
+    assert.deepEqual(await page.evaluate(`(() => {
+      const badge = document.querySelector("[data-desc='model:health_fault']").closest('.card').querySelector('.section-badge');
+      return [badge?.innerText, badge?.classList.contains("err")];
+    })()`), [await page.evaluate("t('check.summary.notes', 3)"), false],
+      `${context}: pressure is represented only by the schematic signal, not the diagnosis badge`);
     assert.equal(await page.evaluate(`(() => {
       const row = document.querySelector("[data-desc='model:health_defrost']")?.closest('.vitem');
       return row?.innerText.includes(t("check.defrost.last_start", t("sys.nodata"),
@@ -2225,7 +2389,7 @@ async function assertPlantDiagnosis(page, context) {
       return detail.innerText.includes(t('check.outdoor_range', 'X10A', format.format(2), format.format(3)));
     })()`), true, `${context}: defrost detail shows sampled X10A temperatures with their source`);
     await captureNativeEvidence(page, `${context}/expanded`);
-    for (const id of ["pressure", "dhw_loss", "cycling", "defrost"])
+    for (const id of ["dhw_loss", "cycling", "defrost"])
       await captureNativeEvidence(page, `${context}/${id}`,
         `[data-desc='model:health_${id}']`, ".vitem");
     // Exercise the formerly blind band, then the exact no-window screenshot state, through the
@@ -2363,12 +2527,8 @@ async function assertPlantDiagnosis(page, context) {
     const missingDay = await page.evaluate("t('check.detail.horizon_wait', '23 h 45 min')");
     const defrostDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_defrost']")
       .closest('.vitem').innerText`);
-    const pressureDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
-      .closest('.vitem').innerText`);
     assert.ok(defrostDetail.includes(missingDay),
       `${context}: collecting daily check must retain its missing-day explanation`);
-    assert.ok(!pressureDetail.includes(missingDay),
-      `${context}: collecting graph-first pressure keeps detail free of missing-day prose`);
     await assertFlowInspector(page, `${context}/flow-inspector`, missingDay);
   } finally {
     await page.evaluate(`(() => {
@@ -2575,9 +2735,10 @@ async function assertWorkingFigure(page, context) {
 }
 
 async function assertNativeAltherma4(page, context, locale = "en") {
-  const expectedFlow = new Intl.NumberFormat(locale, {
+  const readingFormat = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 1, maximumFractionDigits: 1,
-  }).format(12.3);
+  });
+  const expectedFlow = readingFormat.format(12.3);
   try {
     await page.evaluate(`(() => {
       window.__browserNativeAltherma4Original = { ...S };
@@ -2758,12 +2919,17 @@ async function assertNativeAltherma4(page, context, locale = "en") {
           throw error;
         }
         const helpId = connected ? "inspRows" : "inspBody";
+        const expectLocalizedPressure = connected && target === "wp";
+        const expectedHeadline = expectLocalizedPressure
+          ? `${readingFormat.format(2.5)}\u00a0bar`
+          : connected ? "2.5" : nativeValue;
         assert.deepEqual(await page.evaluate(`(() => {
           const help = document.getElementById(${JSON.stringify(helpId)});
+          const headline = document.getElementById("inspNow").innerText;
           return { help: help.getBoundingClientRect().height > 0 && help.innerText.includes(t(${JSON.stringify(key)})),
-            headline: document.getElementById("inspNow").innerText.split(" ")[0],
+            headline: ${expectLocalizedPressure} ? headline : headline.split(" ")[0],
             deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length };
-        })()`), {help: true, headline: connected ? "2.5" : nativeValue, deltas: 0},
+        })()`), {help: true, headline: expectedHeadline, deltas: 0},
         `${context}/${target}/${connected}: real inspector click retains the native limit`);
         assertLayout(await page.evaluate(layoutAudit), `${context}/${target}/native-inspector`);
         await captureNativeEvidence(page,

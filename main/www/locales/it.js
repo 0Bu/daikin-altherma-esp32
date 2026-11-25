@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -387,6 +387,12 @@ I18N.it = localeValues([
   /* check.detail.pressure.info */ "Bassa",
   /* check.detail.pressure.warn */ "Critica",
   /* check.detail.pressure.ok */ "Normale",
+  /* check.pressure.finding */ "Esito confermato",
+  /* check.pressure.sustained */ (a) => `Pressione pari o inferiore a ${a} per almeno 60 secondi consecutivi.`,
+  /* check.pressure.clear */ "Nessuna pressione bassa prolungata confermata.",
+  /* check.pressure.rules */ "Come viene valutata la pressione?",
+  /* check.pressure.unavailable */ "Diagnosi della pressione X10A non disponibile.",
+  /* check.pressure.pending */ "Valore nella fascia critica. La durata è ancora sconosciuta.",
   /* check.detail.defrost_events_insufficient */ "Meno di tre sbrinamenti associati; nessun giudizio sulla quota.",
   /* check.detail.source_stale */ "Nessuna lettura X10A recente; stato attuale sconosciuto. Storia conservata.",
   /* check.detail.no_paired_runtime */ "Nessuna durata leggibile associata; solo conteggio.",
@@ -1106,7 +1112,7 @@ INSPECT_I18N.it = inspectValues(
     ["Tubo ingresso PHE", "Tubo di ingresso PHE", "Ritorno comune al PHE tramite R4T dopo l’unione dei rami. In riscaldamento è normalmente più freddo di R1T, in raffrescamento attivo più caldo; R4T non è un sensore dedicato sugli emettitori.", (d) => waterMoving(d) ? `Ritorno a ${degC(d.ret)}, ${fmt1(d.flow)} l/min e ${fmt1(d.wp)} bar.` : "Pompa e portata non dimostrano circolazione nel ritorno."], // wret
     ["Portata", "Portata acqua", "Portata del circuito comune. Il minimo dipende dal modello; leggerla con pompa e pressione."], // flow
     ["Stato flussostato", 0, "Ingresso binario X10A; non misura l/min né conferma la portata minima.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A attivo; confrontare con pompa e ${fmt1(d.flow)} l/min.` : `X10A inattivo; con pompa attiva confrontare ${fmt1(d.flow)} l/min e guasti 7H/C0.`], // flow_switch
-    ["Pressione acqua", 0, "Pressione del circuito idraulico, non del refrigerante. L’intervallo ammesso dipende da modello e impianto; consultare il manuale esatto."], // wp
+    ["Pressione acqua", 0], // wp
   ],
 );
 
@@ -1188,7 +1194,7 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["R1T esce dal PHE prima di BUH; con R4T e portata stima la potenza per modo, ma la posizione dipende dall’unità."], // 34
   ["Temperatura R4T in ingresso PHE sul ritorno comune; il ΔT va valutato col modo, non con 5 K universali."], // 35
   ["Portata nel circuito idronico comune; il minimo dipende da modello e modo e una portata bassa può causare 7H."], // 36
-  ["Pressione del circuito idronico; molti manuali richiedono >1 bar, ma a ≤1,0 bar va consultato il modello esatto."], // 37
+  ["Pressione dell’acqua nel circuito idraulico chiuso.","Molti manuali Altherma richiedono più di 1 bar all’ingresso della pompa. L’intervallo ammesso dipende dal modello, dall’altezza dell’impianto e dal vaso di espansione. A 1,0 bar o meno, consultare il manuale dell’unità esatta."], // 37
   ["Comando X10A invertito: 0 = max, 100 = stop ([0, 100] → 100–0 %). Non misura RPM né prova rotazione, prevalenza o portata; leggere ON/OFF e portata a parte."], // 38
   ["Stato della pompa idronica; il funzionamento non prova da solo uno scambio termico utile."], // 39
   ["Stato della pompa di un circuito solare termico, distinta dalla pompa idronica della pompa di calore."], // 40

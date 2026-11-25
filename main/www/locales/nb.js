@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -387,6 +387,12 @@ I18N.nb = localeValues([
   /* check.detail.pressure.info */ "Lavt",
   /* check.detail.pressure.warn */ "Kritisk",
   /* check.detail.pressure.ok */ "Normalt",
+  /* check.pressure.finding */ "Bekreftet funn",
+  /* check.pressure.sustained */ (a) => `Trykk på ${a} eller lavere i minst 60 sammenhengende sekunder.`,
+  /* check.pressure.clear */ "Det er ikke bekreftet vedvarende lavt trykk.",
+  /* check.pressure.rules */ "Hvordan vurderes trykket?",
+  /* check.pressure.unavailable */ "X10A-trykkdiagnose er utilgjengelig.",
+  /* check.pressure.pending */ "Målingen er i kritisk område. Varigheten er fortsatt ukjent.",
   /* check.detail.defrost_events_insufficient */ "Færre enn tre parede avriminger; ingen andelsdom.",
   /* check.detail.source_stale */ "Ingen fersk X10A-prøve; aktuell tilstand ukjent. Historikk beholdt.",
   /* check.detail.no_paired_runtime */ "Ingen paret lesbar kjøretid; bare antall.",
@@ -1121,7 +1127,7 @@ INSPECT_I18N.nb = inspectValues(
     ["PHE-innløpsrør", "Innløpsrør til PHE", "Felles retur til PHE via R4T etter at grenene møtes. Vanligvis kaldere enn R1T ved varme og varmere ved aktiv kjøling; R4T sitter ikke ved avgiverne.", (d) => waterMoving(d) ? `Retur ${degC(d.ret)}, ${fmt1(d.flow)} l/min og ${fmt1(d.wp)} bar.` : "Pumpe og vannmengde bekrefter ikke retursirkulasjon."], // wret
     ["Vannmengde", "Vannmengde", "Vannmengde i felleskretsen. Minstekravet avhenger av modell; tolk med pumpe og trykk."], // flow
     ["Strømningsbryter", 0, "Binær X10A-status; måler ikke l/min og bekrefter ikke minste vannmengde.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A aktiv; sammenlign med pumpe og ${fmt1(d.flow)} l/min.` : `X10A inaktiv; med aktiv pumpe, sammenlign ${fmt1(d.flow)} l/min og feil 7H/C0.`], // flow_switch
-    ["Vanntrykk", 0, "Trykk i vannkretsen, ikke kjølemediet. Tillatt område avhenger av modell/anlegg; bruk riktig håndbok."], // wp
+    ["Vanntrykk", 0], // wp
   ],
 );
 
@@ -1203,7 +1209,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["R1T ut av PHE før BUH; med R4T/vannmengde anslås moduseffekt, men plasseringen er modellavhengig."], // 34
   ["R4T-retur til PHE; vurder ΔT med vannmengde, kompressor og modus, ikke en universell 5 K-regel."], // 35
   ["Vannmengde i felleskretsen; minimum avhenger av modell/modus, og lav verdi kan utløse 7H."], // 36
-  ["Hydraulikktrykk: mange håndbøker krever >1 bar; ved ≤1,0 bar, bruk håndboken for nøyaktig modell."], // 37
+  ["Vanntrykk i den lukkede vannkretsen.","Mange Altherma-håndbøker krever over 1 bar ved pumpeinnløpet. Tillatt trykkområde avhenger av modell, installasjonshøyde og ekspansjonskar. Ved 1,0 bar eller lavere, sjekk håndboken for den nøyaktige enheten."], // 37
   ["Invertert X10A-kommando: 0 = maks, 100 = stopp ([0, 100] → 100–0 %). Måler ingen RPM og beviser ikke rotasjon, løftehøyde eller vannmengde; les PÅ/AV og mengde hver for seg."], // 38
   ["Pumpestatus; beviser ikke nyttig varme og kan være aktiv uten kompressor. Sammenlign vannmengde."], // 39
   ["Status for pumpen i en konfigurert solvarmekrets."], // 40
