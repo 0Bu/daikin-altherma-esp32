@@ -153,6 +153,7 @@ vm.runInContext(
      metric: checkupMetricValue,
      status: checkupStatusText,
      detail: checkupDetailHtml,
+     heaterContext: checkupHeaterContextHtml,
      flowReport: checkupFlowReport,
      flowBrief: checkupFlowBriefHtml,
      defrostInspector: (c, health = {}, statusStale = false) => checkupDefrostInspectorRows({
@@ -1771,6 +1772,102 @@ assert.equal(ui.ready({
   assert.equal(ui.value({ id: "retries", verdict: "collecting", seen: null }), "CHECKING");
   assert.equal(ui.value({ id: "flow", verdict: "ok", min_l_min: 13.4 }), "13.4 l/min");
   assert.equal(ui.value({ id: "flow", verdict: "collecting", min_l_min: null }), "CHECKING");
+}
+
+// Independent heater populations must remain visible on X10A even when legacy runtime is absent,
+// and remain hidden in Modbus mode. Bind category IDs to the shared C++ serializer.
+{
+  const heaterPayloadSource = fs.readFileSync(
+    new URL("../main/logic/heater_context_payload.hpp", import.meta.url), "utf8");
+  const heaterCategories = ["emergency", "error", "defrost_recovery", "dhw_route", "silent",
+    "cold_outdoor", "mild_outdoor", "compressor_off", "quiet_mild_heating"];
+  for (const id of heaterCategories) assert.ok(heaterPayloadSource.includes(`"${id}"`), id);
+  const heaterChannel = () => ({ supported: true, on_s: 30, union_s: 10, overlap_s: 5,
+    unknown_context_s: 20, unclassified_s: 20, readable_s: 120, saturated: false,
+    quiet_mild_notice: false, categories: Object.fromEntries(heaterCategories.map(id =>
+      [id, { supported: true, positive_s: 0, evaluable_on_s: 30, positive_samples: 0 }])) });
+  const heaterContext = { confirmed: true, dated: true, coverage_partial: true,
+    restore_pending: false, persistence_pending: true, archive_incomplete: false,
+    clock_uncertain: false, storage_loss: false, dropped: 0,
+    buh: heaterChannel(), bsh: heaterChannel() };
+  heaterContext.bsh.categories.emergency = { supported: true, positive_s: 5,
+    evaluable_on_s: 10, positive_samples: 2 };
+  const heaterRow = { id: "heater", verdict: "collecting", evidence: "observation",
+    buh_s: null, bsh_s: null, context: heaterContext };
+  ui.setLang("en");
+  assert.equal(ui.heaterContext({}), "", "older firmware must not gain invented context");
+  const heaterHtml = ui.heaterContext(heaterRow);
+  assert.match(heaterHtml, /0 s \/ 30 s · 0/);
+  assert.match(heaterHtml, /5 s \/ 10 s · 2/);
+  assert.equal((heaterHtml.match(/scope="col"/g) || []).length, 4);
+  assert.equal((heaterHtml.match(/scope="row"/g) || []).length, 30);
+  assert.match(ui.detail(heaterRow, false, { source: "x10a" }), /class="heater-context"/,
+    "legacy missing runtime cannot hide independent current flag context on X10A");
+  assert.doesNotMatch(ui.detail(heaterRow, false, { source: "modbus" }), /class="heater-context"/,
+    "Modbus diagnostics must hide X10A heater context");
+  assert.match(heaterHtml, /Categories overlap per heater/);
+  assert.doesNotMatch(heaterHtml, /OK|WARNING|kWh|3–4/);
+  const renderHeater = value => ui.heaterContext({ ...heaterRow, context: value });
+  assert.doesNotMatch(renderHeater({ ...heaterContext, confirmed: false }), /<table|5 s \/ 10 s/,
+    "unconfirmed sources cannot leak cached numeric populations");
+  assert.doesNotMatch(renderHeater({ ...heaterContext, buh: { supported: false },
+    bsh: { supported: false } }), /<table/);
+  const unknownHeater = structuredClone(heaterContext);
+  for (const channel of [unknownHeater.buh, unknownHeater.bsh])
+    for (const category of Object.values(channel.categories))
+      Object.assign(category, { positive_s: null, evaluable_on_s: null, positive_samples: null });
+  assert.doesNotMatch(renderHeater(unknownHeater), /0 s \/ 0 s/,
+    "unread categories remain unknown instead of false negatives");
+  assert.equal((renderHeater(unknownHeater).match(/<td>No data<\/td>/g) || []).length, 18,
+    "each wholly unknown context has one readable cell, without repeating all three missing leaves");
+  const partialHeater = structuredClone(unknownHeater);
+  partialHeater.buh.categories.error.evaluable_on_s = 10;
+  assert.match(renderHeater(partialHeater), /No data \/ 10 s · No data/,
+    "a partial value must not be hidden by the compact wholly unknown presentation");
+  const shortHeater = structuredClone(heaterContext);
+  shortHeater.buh.categories.silent.positive_samples = 1;
+  assert.match(renderHeater(shortHeater), /&lt;1 s \/ 30 s · 1/,
+    "positive sample without a whole elapsed second must remain visible");
+  shortHeater.buh.categories.silent.positive_samples = Infinity;
+  assert.doesNotMatch(renderHeater(shortHeater), /&lt;1 s|Infinity|NaN|undefined/,
+    "an invalid sample count cannot manufacture positive subsecond evidence");
+  const saturatedHeater = structuredClone(heaterContext);
+  saturatedHeater.bsh.saturated = true;
+  assert.match(renderHeater(saturatedHeater), /≥5 s \/ ≥10 s · ≥2/);
+  const unavailableHeater = { ...heaterContext, archive_incomplete: true, restore_pending: true,
+    clock_uncertain: true, dated: false, storage_loss: true, dropped: 4 };
+  assert.match(renderHeater(unavailableHeater),
+    /Archive unavailable: damaged or unread records \(≥4\)/);
+  assert.doesNotMatch(renderHeater(unavailableHeater), /Archive not yet validated/,
+    "a failed archive cannot be presented as an ordinary wait");
+  const escapeHeater = text => String(text).replace(/[&<>"]/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  for (const lang of locales) {
+    ui.setLang(lang);
+    const body = renderHeater({ ...unavailableHeater,
+      bsh: { ...unavailableHeater.bsh, quiet_mild_notice: true } });
+    const labels = ui.text(lang, "check.heater_context.categories").split("|");
+    assert.equal(labels.length, 9, `${lang} has all separate operating contexts`);
+    assert.equal(ui.text(lang, "check.heater_context.totals").split("|").length, 6);
+    assert.equal(ui.text(lang, "check.heater_context.states").split("|").length, 9);
+    for (const label of labels) assert.ok(body.includes(escapeHeater(label)), `${lang}: ${label}`);
+    for (const key of ["title", "counts", "notice", "rule", "limits"]) {
+      const text = ui.text(lang, `check.heater_context.${key}`);
+      assert.ok(body.includes(escapeHeater(text)), `${lang}: ${key}`);
+      if (lang !== "en") assert.notEqual(text, ui.copy.en[`check.heater_context.${key}`]);
+    }
+    assert.doesNotMatch(body, /check\.heater_context\.|undefined|NaN|Infinity/);
+  }
+  ui.setLang("en");
+  assert.equal(renderHeater([]), "", "array context payload must be ignored");
+  const savedCats = ui.copy.en["check.heater_context.categories"];
+  try {
+    ui.copy.en["check.heater_context.categories"] = "broken|only";
+    const truncated = renderHeater(heaterContext);
+    assert.equal(truncated, "", "truncated locale pipe segments must degrade safely without undefined");
+  } finally {
+    ui.copy.en["check.heater_context.categories"] = savedCats;
+  }
 }
 
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

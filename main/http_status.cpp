@@ -2,6 +2,7 @@
 #include "http_handlers.hpp"
 #include "http_chunks.hpp"
 #include "checkup.hpp"
+#include "heater_context_store.hpp"
 #include "config.hpp"
 #include "env3.hpp"
 #include "logic/board_pins.hpp"
@@ -42,6 +43,7 @@
 #include "logic/working_figure.hpp"
 #include "logic/redact.hpp"
 #include "logic/heartbeat.hpp" // append_stack_bytes — ONE never-sampled rendering rule
+#include "logic/heater_context_payload.hpp"
 #include "logic/hydronic_payload.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
@@ -563,6 +565,18 @@ append_hydronic_status(JsonOut& j, DiagnosticsSource diag_effective, bool enable
         return;
     }
     append_hydronic_agreement_json(j, report);
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void append_heater_context_status(JsonOut&          j,
+                                                           DiagnosticsSource diag_effective) {
+    logic::HeaterContextPayloadFields fields{};
+    if (diag_effective != DiagnosticsSource::Modbus) {
+        checkup_heater_context_expire();
+        heater_context_payload(fields);
+    }
+    j += std::string_view(",\"context\":");
+    append_heater_context_json(j, fields);
 }
 
 template <typename JsonOut>
@@ -1623,6 +1637,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 num("bsh_s", ck.b);
                 num("buh_observed_s", ck.c);
                 num("bsh_observed_s", ck.d);
+                append_heater_context_status(j, diag_effective);
                 break;
             case logic::CheckupCheck::Fault:
                 num("active", ck.a);

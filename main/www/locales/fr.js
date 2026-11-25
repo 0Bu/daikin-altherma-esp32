@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -313,6 +313,15 @@ I18N.fr = localeValues([
   /* check.cycling.e_ongoing */ "Actif au dernier relevé.",
   /* check.cycling.cause_unavailable */ "Sans détails",
   /* check.cycling.cause_older_unavailable */ "Aucun détail enregistré sur le démarrage ou l’arrêt n’est disponible pour ces anciens cycles.",
+  /* check.heater_context.title */ "Contexte des indicateurs de chauffage électrique signalés",
+  /* check.heater_context.columns */ "Contexte|BUH|BSH",
+  /* check.heater_context.counts */ "Durée positive / durée ON évaluable · échantillons positifs",
+  /* check.heater_context.categories */ "indicateur de secours|état d’erreur|dégivrage/récupération|circuit d’eau chaude|indicateur Silent Mode|extérieur ≤+2°C|extérieur >+2°C|compresseur signalé arrêté|Silent Mode + chauffage par temps doux",
+  /* check.heater_context.totals */ "ON signalé|union des contextes|chevauchement|contexte inconnu|aucune catégorie positive|durée d’indicateur lisible",
+  /* check.heater_context.states */ "Source non confirmée|Observations non datées|24 h incomplètes|Archive non encore validée|Stockage en attente|Archive indisponible : enregistrements endommagés ou non lus|Horloge incertaine|Saturation : bornes inférieures|Non pris en charge",
+  /* check.heater_context.notice */ "Au moins 15 minutes de chauffage électrique signalé avec Silent Mode, chauffage et temps doux : indication provisoire du projet.",
+  /* check.heater_context.rule */ "Extrémités lisibles, lacunes ≤15 s. La récupération est limitée à 300 s après une fin de dégivrage observée en chauffage. La séparation à +2°C et l’indication à 900 s sont des heuristiques du projet.",
+  /* check.heater_context.limits */ "Les catégories se chevauchent séparément pour chaque chauffage électrique. Le contexte manquant reste inconnu. Ni énergie, ni cause de fonctionnement, ni bivalence, ni nécessité ne sont établies. Un avertissement n’est pas un secours ; Low noise control reste non classé. Les états entre les échantillons restent inconnus.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `ballon ${d}`,
   /* check.buh_runtime */ (d) => `appoint ${d}`,

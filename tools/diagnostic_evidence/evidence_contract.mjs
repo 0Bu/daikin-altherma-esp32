@@ -24,6 +24,16 @@ export const OBSERVATION_SOURCE_FILES = Object.freeze([
   "main/logic/gas_comparison.hpp",
 ]);
 
+export const HEATER_CONTEXT_SOURCE_FILES = Object.freeze([
+  "main/logic/heater_context.hpp", "main/logic/heater_context_input.hpp",
+  "main/logic/heater_context_hourly.hpp", "main/logic/heater_context_cohort.hpp",
+  "main/logic/heater_independent_hour.hpp",
+  "main/logic/heater_context_payload.hpp", "main/logic/history_persist.hpp",
+  "main/logic/json_output.hpp",
+  "main/heater_context_store.hpp", "main/heater_context_store.cpp",
+  "main/hp_poll.cpp", "main/http_status.cpp", "main/mqtt_ha.cpp",
+]);
+
 function occurrences(text, needle) {
   return text.split(needle).length - 1;
 }
@@ -48,10 +58,10 @@ export function auditEvidenceContract(evidence, rowIds, evidenceArg = "docs/DIAG
 
   const sourcesAt = evidence.indexOf("\n## Sources");
   const citedSourceIds = new Set();
-  // A new diagnosis is conservative by default: only the two direct device-reporting rows are
+  // A new diagnosis is conservative by default: only the direct fault-reporting row is
   // exempt from an explicit project/experimental boundary. Extending this allow-list is therefore
   // a deliberate gate change, not something a new row gets for free.
-  const boundaryExemptIds = new Set(["fault", "heater"]);
+  const boundaryExemptIds = new Set(["fault"]);
 
   for (let i = 0; i < headings.length; i++) {
     const heading = headings[i];

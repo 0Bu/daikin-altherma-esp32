@@ -2407,6 +2407,9 @@
         "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, x86_64",
         "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
       },
+      "measurement_limits": [
+        "The optional GCC 15 aarch64 full-profile check reports the previously pending MQTT inventory mismatch. mqtt_publish_gate.hpp measured 39/40 against 35/36."
+      ],
       "runner": "scripts/run-mock-tests.sh --coverage compiler flags and gcov invocation, with isolated outputs",
       "scope": "Exercise exact DHW flash page encoding and validation, monotonic restore, overlap and expiry, and retirement of restored windows under clock correction.",
       "sources": {
@@ -2415,9 +2418,6 @@
         "main/logic/history_persist.hpp": "94c9a36c4f22d4a53a31fdbbdd2e1f9a325f03047ac3cd883c889f312b68c555"
       },
       "test_source_sha256": "c40442d421b0b6e47bb6e7040f9af3a959e905523b760ddab1dc2a82fe6e4aee",
-      "measurement_limits": [
-        "The optional GCC 15 aarch64 full-profile check reports the previously pending MQTT inventory mismatch. mqtt_publish_gate.hpp measured 39/40 against 35/36."
-      ],
       "validation_boundary": "Four local compiler-profile measurements, including the Ubuntu 26.04 x86-64 release-coverage container as the hosted candidate. Hosted confirmation and physical restart acceptance remain separate."
     },
     {
@@ -2471,15 +2471,15 @@
         "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2.0, Ubuntu 26.04 Docker, aarch64"
       },
       "hosted_confirmation": "The x86-64 release-coverage Docker result is the hosted candidate. Authoritative GitHub CI confirmation remains separate.",
+      "measurement_limits": [
+        "Before the source retirement, the GCC 15 aarch64 profile reported a prior MQTT mismatch of 39/40 against 35/36 for mqtt_publish_gate.hpp."
+      ],
       "runner": "scripts/run-mock-tests.sh --coverage compiler flags and gcov invocation, with isolated outputs",
       "scope": "Verify five-minute minimum bins, equal and lower claims across nonoverlapping revisions, and CRC-guarded minimum metadata in the unchanged legacy hourly envelope.",
       "sources": {
         "main/logic/hydronic_hourly.hpp": "b109f07b18def6d9ffe8d9456da0a32c0716f275750bc2429ecaa91987889a26"
       },
       "test_source_sha256": "0546a5f227ab6cc9d47594515b6e738f0dd1d11b672332712161fecad1166bb2",
-      "measurement_limits": [
-        "Before the source retirement, the GCC 15 aarch64 profile reported a prior MQTT mismatch of 39/40 against 35/36 for mqtt_publish_gate.hpp."
-      ],
       "validation_boundary": "Hydronic coverage was measured with synthetic inputs on all four local compiler profiles before the source retirement was integrated."
     },
     {
@@ -2545,6 +2545,29 @@
       },
       "test_source_sha256": "67486aca4f053129f1d145853096514333cf67dc3176333c5328f84f24099458",
       "validation_boundary": "Local host and container tests exercise synthetic inputs. These measurements do not establish hosted CI or hardware behavior."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang 17.0.0, arm64 Darwin",
+        "gcc-13-linux-ubuntu24": "GCC 13.3.0 in CI-pinned ESP-IDF v6.1 container, aarch64",
+        "gcc-15-github-linux-ubuntu26": "GCC 15.2.0 in Ubuntu 26.04 coverage container, x86-64 local candidate",
+        "gcc-15-linux-ubuntu26": "GCC 15.2.0 in Ubuntu 26.04 container candidate"
+      },
+      "hosted_confirmation": "Local Darwin Clang 17, ESP-IDF v6.1 GCC 13 and Ubuntu 26.04 GCC 15 x86-64 container results are local candidates; authoritative GitHub CI must confirm before merge.",
+      "runner": "scripts/run-mock-tests.sh --coverage across clang-17-darwin, espressif/idf:v6.1.1 Docker and daikin-altherma-esp32-release-coverage Docker",
+      "scope": "Independent reported electric heater operational context headers, standalone header includes, direct json_output serialization, and 72h heater flash future-reservation capacity: Clang line coverage 98.82% (14946/15125), GCC 13 98.00% (14025/14311), GCC 15 x86-64 97.95% (14024/14317); every modified and added header maintains >= 95% line floor and monotonic branch ratios.",
+      "sources": {
+        "main/logic/heater_context.hpp": "fa76df258f19c897ecba972351e7f289ede91a52154310c9e269a40fbfd09748",
+        "main/logic/heater_context_cohort.hpp": "f91a1f24bbb6bd374cb4fe201c3f734c25d8866bf40b2fb8afa2ca4d6a51e82a",
+        "main/logic/heater_context_hourly.hpp": "7ffb77681d4b9a888682de1f29c3c39656c06c3527f69063b85666ee586717f0",
+        "main/logic/heater_context_input.hpp": "0bc793854883867ccad76824c81e7bc12e89b2c07b3332043d234a93274178ec",
+        "main/logic/heater_context_payload.hpp": "fe0c296c4e1972f814f70e9bceb66ef52e2bdcdce8125797d91dc82301021735",
+        "main/logic/heater_independent_hour.hpp": "69fbd3d8430c0601b55fed0263d5a988be00c9ea2092be55daafa4e078fed099",
+        "main/logic/history_persist.hpp": "67fee1fccbc0f18f936e5961859fe236b5892969f99750640f5113aadae3c6db",
+        "main/logic/mqtt_retirement_identity.hpp": "bc10fdd6814eeb7e23799e2cb20443dd6434c29586512bdd63b98111c05e25e5"
+      },
+      "test_source_sha256": "da5062089094de38912c466e2cc83ffb38c0a51e97c9f67d4015d2069c9da4a6",
+      "validation_boundary": "Host logic tests and pure codec/journal CHECKs cover main/logic/; target runtime, FreeRTOS concurrency and flash hardware are covered separately by runtime harnesses and ESP-IDF build checks."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2722,6 +2745,30 @@
         "outcomes": 374,
         "taken": 231
       },
+      "main/logic/heater_context.hpp": {
+        "outcomes": 174,
+        "taken": 174
+      },
+      "main/logic/heater_context_cohort.hpp": {
+        "outcomes": 534,
+        "taken": 529
+      },
+      "main/logic/heater_context_hourly.hpp": {
+        "outcomes": 196,
+        "taken": 196
+      },
+      "main/logic/heater_context_input.hpp": {
+        "outcomes": 220,
+        "taken": 212
+      },
+      "main/logic/heater_context_payload.hpp": {
+        "outcomes": 80,
+        "taken": 80
+      },
+      "main/logic/heater_independent_hour.hpp": {
+        "outcomes": 56,
+        "taken": 55
+      },
       "main/logic/hexdump.hpp": {
         "outcomes": 14,
         "taken": 14
@@ -2731,8 +2778,8 @@
         "taken": 436
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 510,
-        "taken": 460
+        "outcomes": 516,
+        "taken": 466
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 70,
@@ -2871,8 +2918,8 @@
         "taken": 40
       },
       "main/logic/mqtt_retirement_identity.hpp": {
-        "outcomes": 64,
-        "taken": 59
+        "outcomes": 62,
+        "taken": 58
       },
       "main/logic/mqtt_retirement_store.hpp": {
         "outcomes": 62,
@@ -3204,6 +3251,30 @@
         "outcomes": 498,
         "taken": 316
       },
+      "main/logic/heater_context.hpp": {
+        "outcomes": 194,
+        "taken": 194
+      },
+      "main/logic/heater_context_cohort.hpp": {
+        "outcomes": 598,
+        "taken": 584
+      },
+      "main/logic/heater_context_hourly.hpp": {
+        "outcomes": 214,
+        "taken": 214
+      },
+      "main/logic/heater_context_input.hpp": {
+        "outcomes": 276,
+        "taken": 261
+      },
+      "main/logic/heater_context_payload.hpp": {
+        "outcomes": 300,
+        "taken": 200
+      },
+      "main/logic/heater_independent_hour.hpp": {
+        "outcomes": 76,
+        "taken": 74
+      },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
         "taken": 16
@@ -3213,8 +3284,8 @@
         "taken": 523
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 591,
-        "taken": 536
+        "outcomes": 599,
+        "taken": 545
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 82,
@@ -3686,6 +3757,30 @@
         "outcomes": 418,
         "taken": 258
       },
+      "main/logic/heater_context.hpp": {
+        "outcomes": 194,
+        "taken": 194
+      },
+      "main/logic/heater_context_cohort.hpp": {
+        "outcomes": 598,
+        "taken": 584
+      },
+      "main/logic/heater_context_hourly.hpp": {
+        "outcomes": 214,
+        "taken": 214
+      },
+      "main/logic/heater_context_input.hpp": {
+        "outcomes": 276,
+        "taken": 261
+      },
+      "main/logic/heater_context_payload.hpp": {
+        "outcomes": 300,
+        "taken": 200
+      },
+      "main/logic/heater_independent_hour.hpp": {
+        "outcomes": 76,
+        "taken": 74
+      },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
         "taken": 16
@@ -3695,8 +3790,8 @@
         "taken": 521
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 589,
-        "taken": 534
+        "outcomes": 597,
+        "taken": 543
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 82,
@@ -4168,6 +4263,30 @@
         "outcomes": 498,
         "taken": 316
       },
+      "main/logic/heater_context.hpp": {
+        "outcomes": 194,
+        "taken": 194
+      },
+      "main/logic/heater_context_cohort.hpp": {
+        "outcomes": 598,
+        "taken": 584
+      },
+      "main/logic/heater_context_hourly.hpp": {
+        "outcomes": 214,
+        "taken": 214
+      },
+      "main/logic/heater_context_input.hpp": {
+        "outcomes": 276,
+        "taken": 261
+      },
+      "main/logic/heater_context_payload.hpp": {
+        "outcomes": 300,
+        "taken": 200
+      },
+      "main/logic/heater_independent_hour.hpp": {
+        "outcomes": 76,
+        "taken": 74
+      },
       "main/logic/hexdump.hpp": {
         "outcomes": 16,
         "taken": 16
@@ -4177,8 +4296,8 @@
         "taken": 521
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 589,
-        "taken": 534
+        "outcomes": 597,
+        "taken": 543
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 82,

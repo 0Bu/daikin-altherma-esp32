@@ -74,6 +74,26 @@ uint32_t              circulation_source_generation() { return 1; }
 CirculationPumpSample circulation_pump_sample() { return {}; }
 void                  checkup_stop_context_expire(int64_t) { ++journal_sdk::stop_expiry; }
 void                  checkup_hydronic_expire(int64_t) { ++journal_sdk::hydronic_expiry; }
+void                  checkup_heater_context_expire() {}
+bool                  heater_context_flash_scan_begin() { return false; }
+void heater_context_flash_scan_slot(uint16_t, const logic::heater_cohort::View&, bool) {}
+void heater_context_flash_scan_finish() {}
+void heater_context_flash_index_invalidate() {}
+void heater_context_flash_sector_erased(uint16_t) {}
+void heater_context_flash_service(HeaterContextReader, size_t) {}
+bool heater_context_flash_next(HeaterContextReader, uint64_t, HeaterContextFlashPiece&, uint8_t*,
+                               size_t) {
+    return false;
+}
+void                         heater_context_flash_appended(const HeaterContextFlashPiece&, uint16_t,
+                                                           const logic::heater_cohort::View&) {}
+void                         heater_context_flash_failed(const HeaterContextFlashPiece&) {}
+void                         heater_context_flash_deferred(const HeaterContextFlashPiece&) {}
+bool                         heater_context_flash_claim_pending() { return false; }
+HeaterContextErasePermission heater_context_flash_erase_permission(HeaterContextReader, uint16_t) {
+    return HeaterContextErasePermission::Allowed;
+}
+void heater_context_forget() {}
 bool checkup_flash_next(int64_t, int64_t, int64_t& bucket, logic::CheckupJournalPayload& payload,
                         DiagnosticsSource source) {
     if (source == DiagnosticsSource::Modbus || !journal_sdk::core_pending) return false;
@@ -233,7 +253,7 @@ FlashJournalRecord stop_record(int64_t bucket, uint64_t sequence) {
 }
 FlashJournalRecord core_record(int64_t bucket, uint64_t sequence) {
     auto r = record(checkup_journal_fingerprint(), CHECKUP_JOURNAL_WORDS, bucket, sequence);
-    const CheckupJournalPayload p{202, 101, 0, 11, bucket * 3600};
+    const CheckupJournalPayload p{202, 101, 0, 11, bucket * 3600, {}, {}};
     std::memcpy(r.payload, &p, sizeof(p));
     crc(r);
     return r;

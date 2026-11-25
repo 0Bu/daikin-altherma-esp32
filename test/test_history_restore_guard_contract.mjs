@@ -299,17 +299,33 @@ assert.match(explicitReset, /s_x10a\.source_fp = 0;/);
 assert.match(explicitReset, /s_x10a\.model_fp = 0;/);
 const detect = body(checkup, "void checkup_reset_on_detect(");
 assert.match(detect, /s_x10a\.source_confirmed = source_fp != 0 && fp != 0;/);
-// One immutable structural catalog view binds both the core identity and the independent stop
-// input plan. Inlining a second lookup here would no longer prove that both consume that view.
-const detectView = detect.match(/const auto ([A-Za-z_]\w*) = def::lookup_view\(profile_id\);/);
+// Resolve the shared immutable view before acquiring the owner locks. Detection binds its POD
+// result; core identity and all independent input plans must use that same catalog view.
+const profileLayout = body(checkup, "void checkup_profile_layout(");
+const detectView = profileLayout.match(/const auto ([A-Za-z_]\w*) = def::lookup_view\(profile_id\);/);
 assert.ok(detectView, "detection must resolve an immutable structural view for the selected profile");
-assert.equal(count(detect, /def::lookup_view\(/g), 1,
-  "core identity and stop-input planning must share exactly one catalog lookup");
+assert.equal(count(profileLayout, /def::lookup_view\(/g), 1,
+  "core identity and all independent input plans must share exactly one catalog lookup");
 const coreFingerprint = `logic::checkup_model_fingerprint(profile_id, ${detectView[1]})`;
 const stopInputPlan = `logic::stop_context_input_plan(profile_id, ${detectView[1]})`;
-assert.ok(detect.indexOf(`const uint32_t fp = ${coreFingerprint};`) > detectView.index &&
-  detect.indexOf(`const auto stop_inputs = ${stopInputPlan};`) > detectView.index,
-  "both core fingerprint and stop-input plan must consume the same resolved structural view");
+const heaterInputPlan = `logic::heater_context_input::resolve_layout(profile_id, ${detectView[1]})`;
+const hydronicInputPlan = `logic::fill_hydronic_input_plan(out.hydronic, profile_id, ${detectView[1]})`;
+for (const [field, expression] of [["model_fp", coreFingerprint], ["stop", stopInputPlan],
+  ["heater", heaterInputPlan]]) {
+  assert.ok(profileLayout.indexOf(`out.${field} = ${expression};`) > detectView.index,
+    `${field} must consume the same resolved structural view`);
+}
+assert.ok(profileLayout.indexOf(`${hydronicInputPlan};`) > detectView.index,
+  "hydronic input plan must consume the same resolved structural view");
+assert.doesNotMatch(profileLayout, /(?:Lock|SemGuard)\s/,
+  "profile traversal must remain outside the HP/checkup critical sections");
+assert.doesNotMatch(detect,
+  /lookup_view|checkup_model_fingerprint|stop_context_input_plan|resolve_layout|fill_hydronic_input_plan/,
+  "locked detection consumes the prepared layout without resolving another profile");
+assert.match(detect, /const uint32_t fp\s*=\s*layout\.model_fp;/);
+assert.match(detect, /const auto&\s+stop_inputs\s*=\s*layout\.stop;/);
+assert.match(detect, /reset_hydronic_on_detect_locked\(layout\.hydronic,/);
+assert.match(detect, /bind_heater_locked\(layout\.heater, s_stop_generation,/);
 assert.match(detect, /s_x10a\.model_fp = fp;/,
   "the core identity derived from the shared view must become the active model fingerprint");
 assert.match(detect, /s_stop_inputs = stop_inputs;/,
@@ -444,7 +460,7 @@ const gapCallback = body(poll, "static void checkup_record_poll_gap(");
 assert.match(gapCallback, /bool profile_confirmed = false\)/,
   "temporary gap callbacks preserve capabilities unless their caller explicitly withdraws them");
 assert.match(gapCallback,
-  /checkup_record\(nullptr, 0, false, false, logic::CheckupCoverage\{\}, generation, checkup_consent_epoch\(\), profile_confirmed\);/,
+  /(?:static constexpr logic::CheckupCoverage kEmptyCoverage\{\};\s*)?checkup_record\(nullptr, 0, false, false, (?:kEmptyCoverage|logic::CheckupCoverage\{\}), generation, checkup_consent_epoch\(\), profile_confirmed\);/,
   "the gap helper forwards its caller's capability decision and captures the current consent");
 assert.equal(count(task, /checkup_record_poll_gap\(generation\);/g), 3,
   "the TLS hold and both OOM handlers preserve resolved profile capabilities");

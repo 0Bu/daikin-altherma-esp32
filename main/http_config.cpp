@@ -948,6 +948,9 @@ static esp_err_t set_hp(httpd_req_t* req) {
         if (reset_checkup && c.profile != "auto")
             c.x10a_identity_fp = history_x10a_identity(c.profile.c_str(), c.rx_pin, c.tx_pin,
                                                        static_cast<char>(c.proto));
+        CheckupProfileLayout checkup_layout{};
+        if (reset_checkup && c.x10a_identity_fp != 0)
+            checkup_profile_layout(c.profile.c_str(), checkup_layout);
         // Stage every HomeHub value needed after persistence while the handler may still report an
         // OOM honestly. The post-save path below accepts only POD and is noexcept: a successful
         // durable write can therefore never become a false 503 or lose predecessor cleanup to a
@@ -980,7 +983,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
             dwell_reset();
             history_reset();
             if (c.x10a_identity_fp != 0) {
-                checkup_reset_on_detect(c.profile.c_str(), c.x10a_identity_fp);
+                checkup_reset_on_detect(checkup_layout, c.x10a_identity_fp);
                 dwell_reset_on_detect(c.profile.c_str());
                 history_reset_on_detect(c.x10a_identity_fp);
             }

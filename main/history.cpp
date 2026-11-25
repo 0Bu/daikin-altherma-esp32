@@ -5,6 +5,7 @@
 #include "checkup.hpp"                // fourth journal source: exact hourly diagnostic buckets
 #include "stop_observation_store.hpp" // independent logical hourly source, same physical envelope
 #include "hydronic_observation_store.hpp"
+#include "heater_context_store.hpp" // separate committed BUH/BSH cohorts, same physical slots
 #include "logic/cycling_persist.hpp"
 #include "logic/cycling_run_persist.hpp"
 #include "logic/dhw_loss_persist.hpp"
@@ -480,8 +481,9 @@ inline bool x10a_rings_have_samples() {
     return false;
 }
 
-// Start this boot with nothing. REQUIRED rather than defensive: the region is uninitialised storage,
-// so without this every count, head and label would be whatever the last firmware left in DRAM.
+// Start this boot with nothing. REQUIRED rather than defensive: the region is uninitialised
+// storage, so without this every count, head and label would be whatever the last firmware left in
+// DRAM.
 inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t mb_target_fp,
                          uint32_t circulation_fp, bool env3_live) {
     std::memset(&P(), 0, sizeof(PersistedHistory));
@@ -641,10 +643,11 @@ inline BoardSample sample_board() {
     return b;
 }
 
-// A BOARD trend has no row to resolve: its label and unit are fixed, it is never absent, and no page
-// can hold it over. A SPOT sample, folded like any other — the 5-minute bucket keeps the last one, so
-// a transient dip between samples is not captured. That is the right shape for the question these
-// answer (is the heap DRIFTING), and /status.sys.min_free_heap still carries the since-boot floor.
+// A BOARD trend has no row to resolve: its label and unit are fixed, it is never absent, and no
+// page can hold it over. A SPOT sample, folded like any other — the 5-minute bucket keeps the last
+// one, so a transient dip between samples is not captured. That is the right shape for the question
+// these answer (is the heap DRIFTING), and /status.sys.min_free_heap still carries the since-boot
+// floor.
 inline void fold_board_locked(const BoardSample& board) {
     for (size_t t = 0; t < TREND_COUNT; t++) {
         const logic::TrendDef& d = logic::TRENDS[t];
@@ -770,11 +773,11 @@ inline void fold_circulation_locked(const CirculationPumpSample& circulation) {
         // NO SOURCE CONFIGURED -> no label, and /status.history.rows therefore omits the row
         // entirely, which is how every other optional source states its absence (modbus_rows and
         // env3_rows are gated on their stack being enabled). Labelling it unconditionally offered a
-        // trend the device can never fill, so the Diagnostics card drew "no readings yet" under a row
-        // that says "not configured" — an absent feature reported as an empty chart, which is exactly
-        // what logic/history.hpp's rule refuses. The ring is left untouched: the raster still commits
-        // it, so the pending NO_READING becomes an honest gap and a source configured LATER starts on
-        // the same 24-hour axis as every other series.
+        // trend the device can never fill, so the Diagnostics card drew "no readings yet" under a
+        // row that says "not configured" — an absent feature reported as an empty chart, which is
+        // exactly what logic/history.hpp's rule refuses. The ring is left untouched: the raster
+        // still commits it, so the pending NO_READING becomes an honest gap and a source configured
+        // LATER starts on the same 24-hour axis as every other series.
         if (!circulation.configured) {
             if (tr.label[0] || tr.unit[0]) s_persist_dirty = true;
             tr.label[0] = '\0';
@@ -857,9 +860,9 @@ bool homehub_event_ring(size_t idx) {
     return idx < HOMEHUB_HISTORY_COUNT && logic::HOMEHUB_HISTORIES[idx].event;
 }
 
-// The ABSOLUTE (wall-clock) bucket of a source's newest committed sample, or INT64_MIN when there is
-// none or the clock has never synced. This is the anchor everything that outlives the boot hangs on:
-// the ring's own bucket index is monotonic-since-boot and means nothing to the next boot, so a
+// The ABSOLUTE (wall-clock) bucket of a source's newest committed sample, or INT64_MIN when there
+// is none or the clock has never synced. This is the anchor everything that outlives the boot hangs
+// on: the ring's own bucket index is monotonic-since-boot and means nothing to the next boot, so a
 // snapshot without this is a curve with no position on the axis — and there is no honest default,
 // which is why the whole path is skipped rather than guessed at.
 int64_t wall_bucket_of_instant_locked(int64_t instant_us) {
@@ -934,7 +937,8 @@ constexpr size_t kHydronicObservationSource = kJournalSources + 6;
 constexpr size_t kDhwTraceSource            = kJournalSources + 7;
 constexpr size_t kDhwModbusTraceSource      = kJournalSources + 8;
 constexpr size_t kCyclingRunSource          = kJournalSources + 9;
-constexpr size_t kJournalServiceSources     = kJournalSources + 10;
+constexpr size_t kHeaterContextSource       = kJournalSources + 10;
+constexpr size_t kJournalServiceSources     = kJournalSources + 11;
 constexpr size_t kRestoreRingsPerTick       = 4;
 
 // Flash-owner only. Readers, indexers, builders and readback use it in disjoint transactions;
@@ -1116,9 +1120,13 @@ uint16_t s_flash_restore_slot_count[kJournalSources]                     = {};
 logic::CheckupJournalIndex s_flash_checkup_index;
 static_assert(logic::CHECKUP_JOURNAL_INDEX_CAP <= HISTORY_SAMPLES,
               "checkup index candidates share the per-source restore slot list");
-size_t   s_flash_restore_ring = 0;
-size_t   s_flash_restored_rings = 0;
-size_t   s_flash_service_source = 0;
+size_t                  s_flash_restore_ring   = 0;
+size_t                  s_flash_restored_rings = 0;
+size_t                  s_flash_service_source = 0;
+HeaterContextFlashPiece s_flash_heater_piece;
+bool                    s_flash_heater_pinned   = false;
+bool                    s_flash_retention_yield = false;
+bool                    s_flash_seq_rejected    = false;
 
 struct FlashManifestCache {
     bool     valid;
@@ -1449,15 +1457,16 @@ void history_reset() {
 // A board WITHOUT a bus never reaches this call — the profile stays "auto" — which is why the bench
 // board showed a complete restore and could not have caught it. The absence of the bus hid it.
 //
-// So the first detection after an ADOPTED boot defers to a better-informed check instead of guessing.
-// The adopted rings still carry the previous identity in their labels, and history_record() already
-// compares those against the newly resolved ones per row (history_row_identity_changed) and wipes if
-// and only if the unit really is a different one — the same rule that protects a running board from
-// a mid-session model change, now simply allowed to answer for a reboot too. A generic fallback or a
-// swapped unit spells its rows differently and is still wiped; a re-detect of the same unit is not.
+// So the first detection after an ADOPTED boot defers to a better-informed check instead of
+// guessing. The adopted rings still carry the previous identity in their labels, and
+// history_record() already compares those against the newly resolved ones per row
+// (history_row_identity_changed) and wipes if and only if the unit really is a different one — the
+// same rule that protects a running board from a mid-session model change, now simply allowed to
+// answer for a reboot too. A generic fallback or a swapped unit spells its rows differently and is
+// still wiped; a re-detect of the same unit is not.
 //
-// ONE boot, ONE detection: every later call resets exactly as before, so a genuine re-detect, a link
-// rewire or a /set_hp model change is unaffected.
+// ONE boot, ONE detection: every later call resets exactly as before, so a genuine re-detect, a
+// link rewire or a /set_hp model change is unaffected.
 void history_reset_on_detect(uint32_t identity_fp) {
     if (!s_mtx || identity_fp == 0) return;
     Lock flash_lk(s_flash_mtx);
@@ -1491,7 +1500,8 @@ void history_modbus_reset(uint32_t target_fp) noexcept {
     // cycle, so the Modbus task clears and reseeds its rings before folding the new identity. Bump
     // generation and arm that reset under the SAME mutex as the fold: an old cycle either completes
     // entirely before this boundary (and readers are then hidden by the pending flag), or observes
-    // the new generation and is refused. It can never consume B's reset and fold A as B's first row.
+    // the new generation and is refused. It can never consume B's reset and fold A as B's first
+    // row.
     if (!s_mtx) return;
     // Flash service takes flash -> history while assembling records. Use the same order so a target
     // change cannot race an old scoped record into the journal or restore index.
@@ -1616,8 +1626,8 @@ void history_record_board() {
     }
     // OUTSIDE the lock, and that is not a style choice: the restore takes the same non-recursive
     // mutex through history_splice_snapshot, so calling it from inside this critical section would
-    // deadlock the task that owns the X10A UART. It rides this tick because this is the one producer
-    // that runs unconditionally, on every cycle, whether or not the bus ever answers.
+    // deadlock the task that owns the X10A UART. It rides this tick because this is the one
+    // producer that runs unconditionally, on every cycle, whether or not the bus ever answers.
     history_service_flash_restore();
     history_flash_service_journal(/*max_records=*/3, /*wait_ticks=*/0);
 }
@@ -1647,10 +1657,10 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
     if (!s_mtx) return;
     if (!v) n = 0;
 
-    // Views for the pure pickers. Bounded by the profile row count; the poll cache holds at most one
-    // entry per ValueDef row (logic/profile_view.hpp sizes both). A trend addresses its row by
-    // (reg, off, unit, optional converter) — the label rides along only to be reported and to detect
-    // a model change.
+    // Views for the pure pickers. Bounded by the profile row count; the poll cache holds at most
+    // one entry per ValueDef row (logic/profile_view.hpp sizes both). A trend addresses its row by
+    // (reg, off, unit, optional converter) — the label rides along only to be reported and to
+    // detect a model change.
     //
     // These five live on the POLL TASK's stack, so their width is not a detail: as `unsigned`
     // the page and offset views would cost 2 KB between them instead of 512 B, for two values that
@@ -1697,10 +1707,11 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
     const SweepDerivedSamples            derived     = evaluate_sweep_derived(
         v, labels, regs, offs, convs, rows, derived_cov, rps_known, rps_running, rps_tenths);
 
-    // Smart-Grid mode is one state assembled from TWO contact bits. Resolve both by their structural
-    // semantics, never their labels; the generated catalog spells labels for humans, while these
-    // converter-backed ids are the same contract /values uses. Presence and readability stay
-    // separate: a timed-out contact leaves a gap but does not make the profile lose the feature.
+    // Smart-Grid mode is one state assembled from TWO contact bits. Resolve both by their
+    // structural semantics, never their labels; the generated catalog spells labels for humans,
+    // while these converter-backed ids are the same contract /values uses. Presence and readability
+    // stay separate: a timed-out contact leaves a gap but does not make the profile lose the
+    // feature.
     bool sg_c1_supported = false, sg_c2_supported = false;
     bool sg_c1_known = false, sg_c2_known = false;
     bool sg_c1_on = false, sg_c2_on = false;
@@ -1792,9 +1803,9 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
         }
 
         // A BOARD trend is recorded by history_record_board() alone, on the poll task's
-        // unconditional top-of-cycle tick. It must NOT also be folded here: this function is reached
-        // only through poll_once(), i.e. only once a profile is resolved, and folding it in both
-        // places is what let a single owner look like two (see history_record_board).
+        // unconditional top-of-cycle tick. It must NOT also be folded here: this function is
+        // reached only through poll_once(), i.e. only once a profile is resolved, and folding it in
+        // both places is what let a single owner look like two (see history_record_board).
         if (board_trend(d)) continue;
 
         if (d.kind == logic::TrendKind::CirculationState) continue;
@@ -1848,8 +1859,8 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
     if (s_flash_forgotten.load()) return;
-    // A /set_hp target change can land while this cycle is reading the old HomeHub. Never consume the
-    // pending reset or fold that old sample into the freshly-reset identity.
+    // A /set_hp target change can land while this cycle is reading the old HomeHub. Never consume
+    // the pending reset or fold that old sample into the freshly-reset identity.
     if (identity_generation == 0 || identity_generation != s_mb_identity_generation.load()) return;
     if (!s_mb_have_bucket) {
         const size_t completed = logic::history_completed_samples(bucket);
@@ -1924,7 +1935,8 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
     s_env3_bucket = bucket;
     s_env3_have_bucket = true;
     // An intermittent error later in a bucket must not erase an earlier complete observation. If
-    // the whole bucket has no valid sample, its untouched pending sentinel commits as an honest gap.
+    // the whole bucket has no valid sample, its untouched pending sentinel commits as an honest
+    // gap.
     if (accepted) {
         for (size_t t = 0; t < ENV3_HISTORY_COUNT; ++t) P().env3_ring[t].fold(sample[t]);
     }
@@ -1960,7 +1972,8 @@ size_t history_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoc
     if (t >= TREND_COUNT || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
     if (lk.acquired() && epoch) *epoch = history_epoch();
-    // Do not expose the old physical identity while its deferred reset is waiting for the poll task.
+    // Do not expose the old physical identity while its deferred reset is waiting for the poll
+    // task.
     if (!lk.acquired() || s_flash_forgotten.load() ||
         (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
         (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
@@ -2011,8 +2024,8 @@ static size_t copy_under_lock(const char* src, char* out, size_t max) noexcept {
 namespace {
 
 // Replace a ring's committed contents, keeping the bucket currently being folded. `pending` is not
-// part of the splice: it belongs to a bucket that has not closed, and the older snapshot has nothing
-// to say about it.
+// part of the splice: it belongs to a bucket that has not closed, and the older snapshot has
+// nothing to say about it.
 [[gnu::noinline]] void ring_replace_locked(logic::TrendRingView r, const HistorySample* v,
                                            size_t n) noexcept {
     if (!r) return;
@@ -2352,6 +2365,8 @@ bool flash_record_valid(const FlashJournalRecord& r) {
     // Its physical envelope remains visible to older head discovery, but these bytes can never
     // reach core Checkup restore/append handlers or share their cursor.
     if (logic::observation_header_matches(h) || logic::hydronic_header_matches(h) ||
+        logic::heater_cohort::kind(h) != logic::heater_cohort::Kind::Unknown ||
+        logic::heater_independent::kind(h) != logic::heater_cohort::Kind::Unknown ||
         flash_cycling_owned(h) || flash_fault_owned(h) || flash_dhw_owned(h, false) ||
         flash_dhw_owned(h, true) || flash_modbus_checkup_owned(h))
         return false;
@@ -2626,6 +2641,10 @@ bool flash_journal_scan() {
     flash_manifest_cache_reset();
     stop_observation_flash_index_reset();
     hydronic_observation_flash_index_reset();
+    s_flash_heater_piece    = {};
+    s_flash_heater_pinned   = false;
+    s_flash_retention_yield = false;
+    s_flash_seq_rejected    = false;
     s_flash_cycling.reset_for_scan();
     s_flash_cycling_modbus.reset_for_scan();
     s_flash_cycling_runs.reset_for_scan();
@@ -2679,9 +2698,8 @@ bool flash_journal_scan() {
         }
     }
 
-    s_flash_next_sequence = highest_sequence ? highest_sequence + 1 : 1;
-    s_flash_next_slot = highest_sequence
-        ? (head_slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT : 0;
+    s_flash_next_sequence = logic::history_journal_next_sequence(highest_sequence);
+    s_flash_next_slot = highest_sequence ? (head_slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT : 0;
 
     bool   done[kJournalSources] = {};
     size_t remaining             = kJournalSources + 1;
@@ -2791,7 +2809,7 @@ bool flash_journal_scan() {
     return true;
 }
 
-esp_err_t flash_region_erased(size_t offset, size_t bytes, bool& erased) {
+[[gnu::noinline]] esp_err_t flash_region_erased(size_t offset, size_t bytes, bool& erased) {
     if (bytes > sizeof(s_flash_sector)) return ESP_ERR_INVALID_SIZE;
     const esp_err_t e = esp_partition_read(s_flash_part, offset, s_flash_sector, bytes);
     if (e != ESP_OK) return e;
@@ -2802,33 +2820,61 @@ esp_err_t flash_region_erased(size_t offset, size_t bytes, bool& erased) {
     return ESP_OK;
 }
 
-esp_err_t flash_prepare_next_slot(size_t& slot) {
-    slot = s_flash_next_slot;
-    bool erased = false;
-    if (slot % logic::HISTORY_JOURNAL_SLOTS_PER_SECTOR == 0) {
-        const size_t sector_offset = logic::history_journal_slot_offset(slot);
-        esp_err_t e = flash_region_erased(sector_offset, logic::HISTORY_FLASH_ERASE_BYTES, erased);
-        if (e != ESP_OK) return e;
-        if (!erased)
-            return esp_partition_erase_range(s_flash_part, sector_offset,
-                                             logic::HISTORY_FLASH_ERASE_BYTES);
-        return ESP_OK;
+bool flash_read_heater_context(uint16_t slot, logic::heater_cohort::View& view) {
+    // The same exclusive physical reader scratch, distinct from the Store's decode/claim staging.
+    // A borrowed view ends before the next Reader call. No nested read retains this record.
+    auto& record = *new (s_flash_sector) FlashJournalRecord;
+    if (flash_read_record(slot, record) != ESP_OK) {
+        view = {};
+        return false;
     }
+    view = {&record.header, record.payload, sizeof(record.payload),
+            flash_record_physically_valid(record)};
+    return true;
+}
 
-    esp_err_t e = flash_region_erased(logic::history_journal_slot_offset(slot),
-                                      logic::HISTORY_JOURNAL_SLOT_BYTES, erased);
-    if (e != ESP_OK) return e;
-    if (erased) return ESP_OK;
+void flash_progress_heater_context() {
+    // Exactly one positive-budget call from the unconditional board tick. Writer/shutdown
+    // service calls settle receipts only, so a tick cannot multiply an archive scan or replay.
+    heater_context_flash_service(flash_read_heater_context, HEATER_CONTEXT_FLASH_MAX_READS);
+}
 
-    // A non-erased slot after the head is a torn program. Never erase its sector: it also contains
-    // the last committed records. Sacrifice the remaining slots and continue at the next sector.
-    slot = logic::history_journal_write_slot(slot, erased);
-    s_flash_next_slot = slot;
+esp_err_t flash_prepare_next_slot(size_t& slot) {
+    s_flash_retention_yield = false;
+    slot                    = s_flash_next_slot;
+    bool      erased        = false;
+    esp_err_t e             = ESP_OK;
+    if (slot % logic::HISTORY_JOURNAL_SLOTS_PER_SECTOR != 0) {
+        e = flash_region_erased(logic::history_journal_slot_offset(slot),
+                                logic::HISTORY_JOURNAL_SLOT_BYTES, erased);
+        if (e != ESP_OK || erased) return e;
+        // A non-erased slot after the head is a torn program. Never erase its sector: it also
+        // contains the last committed records. Sacrifice the remaining slots and continue at the
+        // next sector.
+        slot              = logic::history_journal_next_sector_slot(slot);
+        s_flash_next_slot = slot;
+    }
     const size_t sector_offset = logic::history_journal_slot_offset(slot);
     e = flash_region_erased(sector_offset, logic::HISTORY_FLASH_ERASE_BYTES, erased);
     if (e != ESP_OK) return e;
-    return erased ? ESP_OK : esp_partition_erase_range(s_flash_part, sector_offset,
-                                                        logic::HISTORY_FLASH_ERASE_BYTES);
+    if (erased) return ESP_OK;
+    const auto permission = heater_context_flash_erase_permission(flash_read_heater_context,
+                                                                  static_cast<uint16_t>(slot));
+    if (permission != HeaterContextErasePermission::Allowed) {
+        // A pending bounded proof keeps the cursor; a proven protected sector is skipped once.
+        // No program was attempted, and neither path spends the I/O-abandon failure budget.
+        if (permission == HeaterContextErasePermission::Protected)
+            s_flash_next_slot = logic::history_journal_next_sector_slot(slot);
+        s_flash_retention_yield = true;
+        return ESP_ERR_NOT_FINISHED;
+    }
+    e = esp_partition_erase_range(s_flash_part, sector_offset, logic::HISTORY_FLASH_ERASE_BYTES);
+    // Retire only confirmed erased references; a partial failure still invalidates proof.
+    if (e == ESP_OK)
+        heater_context_flash_sector_erased(static_cast<uint16_t>(slot));
+    else
+        heater_context_flash_index_invalidate();
+    return e;
 }
 
 // What a builder found out about a cursor that is ahead of its clock. A builder only REPORTS it: it
@@ -3398,14 +3444,65 @@ void flash_dhw_appended(const logic::HistoryJournalHeader& h, bool is_modbus) {
 
 void flash_hydronic_appended(const FlashJournalRecord& verify, uint16_t slot);
 
+[[gnu::noinline]] bool flash_build_next_heater_context(FlashJournalRecord& out) {
+    std::memset(&out, 0xff, sizeof(out));
+    if (!heater_context_flash_next(flash_read_heater_context, s_flash_next_sequence,
+                                   s_flash_heater_piece, out.payload, sizeof(out.payload))) {
+        // A pending proof can temporarily hide an immutable reserved claim.
+        s_flash_heater_pinned = heater_context_flash_claim_pending();
+        return false;
+    }
+    const auto&    piece      = s_flash_heater_piece;
+    const uint32_t catalog_fp = logic::heater_independent::fingerprint(piece.kind);
+    if (!catalog_fp ||
+        !logic::history_journal_sequence_reservable(s_flash_next_sequence, piece.remaining) ||
+        piece.sequence != s_flash_next_sequence || !piece.bytes || piece.bytes % 2 ||
+        piece.bytes > sizeof(out.payload)) {
+        heater_context_flash_failed(piece);
+        s_flash_heater_pinned = false;
+        return false;
+    }
+    auto& h               = out.header;
+    h.magic               = logic::HISTORY_JOURNAL_MAGIC;
+    h.version             = logic::HISTORY_JOURNAL_VERSION;
+    h.source              = static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
+    h.flags               = 0;
+    h.catalog_fp          = catalog_fp;
+    h.crc                 = 0;
+    h.commit              = logic::HISTORY_JOURNAL_ERASED;
+    h.value_count         = static_cast<uint16_t>(piece.bytes / 2);
+    h.slot_bytes          = static_cast<uint16_t>(logic::HISTORY_JOURNAL_SLOT_BYTES);
+    h.sequence            = piece.sequence;
+    h.bucket              = piece.bucket;
+    h.dt_s                = logic::CHECKUP_DT_S;
+    h.rings[0]            = static_cast<uint16_t>(TREND_COUNT);
+    h.rings[1]            = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+    h.rings[2]            = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+    h.reserved            = 0xffff;
+    h.crc                 = logic::history_journal_crc_bytes(h, out.payload, piece.bytes);
+    s_flash_heater_pinned = piece.remaining > 1;
+    return true;
+}
+
 // One attempt to append `r`. After sequence admission, `slot` identifies the targeted slot even
 // on failure, so the caller can account for it. Invalid or exhausted sequences perform no I/O.
 esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
-    slot = 0;
-    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence))
+    slot                    = 0;
+    s_flash_retention_yield = false;
+    s_flash_seq_rejected    = false;
+    if (!logic::history_journal_sequence_reservable(s_flash_next_sequence, 1)) {
+        s_flash_seq_rejected = true;
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence)) {
+        s_flash_seq_rejected = true;
         return ESP_ERR_INVALID_ARG;
+    }
     esp_err_t e = flash_prepare_next_slot(slot);
-    if (e != ESP_OK) return e;
+    if (e != ESP_OK) {
+        if (s_flash_retention_yield) --s_flash_next_sequence;
+        return e;
+    }
     const size_t offset     = logic::history_journal_slot_offset(slot);
     const size_t body_bytes = sizeof(r.header) + logic::history_journal_payload_bytes(r.header);
     e                       = esp_partition_write(s_flash_part, offset, &r, body_bytes);
@@ -3446,6 +3543,12 @@ esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
         flash_fault_appended(flash_modbus_fault_owned(verify.header));
     } else if (flash_dhw_owned(verify.header, false) || flash_dhw_owned(verify.header, true)) {
         flash_dhw_appended(verify.header, flash_dhw_owned(verify.header, true));
+    } else if (logic::heater_cohort::kind(verify.header) != logic::heater_cohort::Kind::Unknown ||
+               logic::heater_independent::kind(verify.header) !=
+                   logic::heater_cohort::Kind::Unknown) {
+        const logic::heater_cohort::View view{&verify.header, verify.payload,
+                                              sizeof(verify.payload), true};
+        heater_context_flash_appended(s_flash_heater_piece, static_cast<uint16_t>(slot), view);
     } else if (flash_modbus_checkup_owned(verify.header)) {
         s_flash_mb_checkup.last_bucket   = r.header.bucket;
         s_flash_mb_checkup.newest_bucket = r.header.bucket;
@@ -3536,28 +3639,54 @@ void flash_note_append_success(size_t slot) {
     s_flash_fail_last_us = INT64_MIN;
 }
 
+[[gnu::noinline]] bool flash_is_heater_owned(const logic::HistoryJournalHeader& h) noexcept {
+    return logic::heater_cohort::kind(h) != logic::heater_cohort::Kind::Unknown ||
+           logic::heater_independent::kind(h) != logic::heater_cohort::Kind::Unknown;
+}
+
+[[gnu::noinline]] void flash_heater_append_outcome(bool deferred) {
+    if (deferred) {
+        heater_context_flash_deferred(s_flash_heater_piece);
+        s_flash_heater_pinned = true;
+    } else {
+        heater_context_flash_failed(s_flash_heater_piece);
+        s_flash_heater_pinned = false;
+    }
+}
+
 esp_err_t flash_append_record(FlashJournalRecord& r) {
-    const bool      stop_owned     = logic::observation_append_owned(r.header);
-    const bool      hydronic_owned = logic::hydronic_append_owned(r.header);
-    size_t          slot           = 0;
-    const esp_err_t e              = flash_append_record_at(r, slot);
+    size_t          slot = 0;
+    const esp_err_t e    = flash_append_record_at(r, slot);
+    // `flash_append_record_at` only updates `r.header.sequence`; evaluating source ownership after
+    // it finishes keeps the flags out of caller-saved spills across the write/verify path.
+    const bool stop_owned     = logic::observation_append_owned(r.header);
+    const bool hydronic_owned = logic::hydronic_append_owned(r.header);
+    if (s_flash_retention_yield) {
+        if (flash_is_heater_owned(r.header)) flash_heater_append_outcome(true);
+        if (stop_owned) stop_observation_flash_failed();
+        if (hydronic_owned) hydronic_observation_flash_failed();
+        return e;
+    }
     if (e == ESP_OK) {
         flash_note_append_success(slot);
         // The ONLY place an ahead-of-the-clock episode ends: the source appended data again. A
         // manifest says nothing about the cursor, and a "no longer ahead" observation must not
         // end it either (see s_flash_ahead_logged).
-        if (!flash_is_manifest(r.header) && !stop_owned && !hydronic_owned &&
-            !flash_cycling_owned(r.header)) {
-            if (!flash_fault_owned(r.header) && !flash_dhw_owned(r.header, false) &&
-                !flash_dhw_owned(r.header, true))
-                s_flash_ahead_logged[flash_modbus_checkup_owned(r.header) ? kCheckupModbusSource
-                                                                          : r.header.source] =
-                    false;
+        if (!flash_is_heater_owned(r.header)) {
+            if (!flash_is_manifest(r.header) && !stop_owned && !hydronic_owned &&
+                !flash_cycling_owned(r.header)) {
+                if (!flash_fault_owned(r.header) && !flash_dhw_owned(r.header, false) &&
+                    !flash_dhw_owned(r.header, true))
+                    s_flash_ahead_logged[flash_modbus_checkup_owned(r.header) ? kCheckupModbusSource
+                                                                              : r.header.source] =
+                        false;
+            }
         }
     } else {
         if (stop_owned) stop_observation_flash_failed();
         if (hydronic_owned) hydronic_observation_flash_failed();
-        flash_note_append_failure(slot, e, r.header);
+        if (flash_is_heater_owned(r.header)) flash_heater_append_outcome(false);
+        if (!s_flash_seq_rejected) flash_note_append_failure(slot, e, r.header);
     }
     return e;
 }
@@ -3615,6 +3744,7 @@ __attribute__((noinline)) void flash_hydronic_appended(const FlashJournalRecord&
                                                            bool       shutdown = false) {
     if (src_i == kStopObservationSource) return flash_build_next_stop_observation(r);
     if (src_i == kHydronicObservationSource) return flash_build_next_hydronic_observation(r);
+    if (src_i == kHeaterContextSource) return flash_build_next_heater_context(r);
     if (src_i == kCyclingRunSource) return flash_build_next_cycling_runs(r, wait_ticks, shutdown);
     if (src_i == kCyclingTraceSource || src_i == kCyclingModbusTraceSource)
         return flash_build_next_cycling(r, wait_ticks, shutdown,
@@ -3884,6 +4014,7 @@ void history_service_flash_restore() {
     // Expiration belongs to the reducer owner and must precede flash -> observation locking.
     checkup_stop_context_expire(esp_timer_get_time());
     checkup_hydronic_expire(esp_timer_get_time());
+    checkup_heater_context_expire();
     if (!s_flash_mtx || !time_synced()) return;
     // Resets and factory forget mutate the same endpoints/index. Keep their snapshot, record
     // selection and final splice in one nonblocking flash transaction (flash -> history).
@@ -3891,6 +4022,7 @@ void history_service_flash_restore() {
     if (!flash_lk.acquired() || s_flash_forgotten.load() || !s_flash_scan_ok) return;
     stop_observation_flash_service(flash_read_stop_observation);
     hydronic_observation_flash_service(flash_read_hydronic_observation);
+    flash_progress_heater_context();
     history_restore_checkup_flash();
     history_restore_cycling_flash(0);
     history_restore_cycling_runs_flash();
@@ -4028,6 +4160,7 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
         // independent archives before asking their producers for records.
         stop_observation_flash_service(flash_read_stop_observation);
         hydronic_observation_flash_service(flash_read_hydronic_observation);
+        if (!s_flash_heater_pinned) heater_context_flash_service(flash_read_heater_context, 0);
         if (shutdown) history_restore_cycling_flash(wait_ticks);
         if (shutdown) history_restore_fault_flash(wait_ticks);
         if (shutdown) history_restore_dhw_flash(wait_ticks);
@@ -4037,11 +4170,25 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
     if (!logic::history_journal_retry_due(s_flash_fail_paused, esp_timer_get_time(),
                                           s_flash_fail_last_us))
         return 0;
+    if (!logic::history_journal_sequence_reservable(s_flash_next_sequence, 1)) return 0;
 
     const bool         flush_cycling_runs = shutdown && max_records > 0;
     size_t             written            = 0;
     FlashJournalRecord r;
     if (shutdown) {
+        // Finish an in-flight/deferred heater claim before shutdown pre-loops reserve new
+        // sequences for cycling, fault, or DHW records.
+        while (max_records > 0 && s_flash_heater_pinned) {
+            if (!flash_build_for_service(kHeaterContextSource, r, wait_ticks)) {
+                if (s_flash_heater_pinned) return written;
+                break;
+            }
+            if (flash_append_record(r) != ESP_OK) return written;
+            ++written;
+            --max_records;
+        }
+        if (written > 0 && !s_flash_heater_pinned)
+            heater_context_flash_service(flash_read_heater_context, 0);
         // Finish any group already in flight, then offer a final checkpoint. Leave all of the
         // ordinary write budget available to trends and the other diagnosis records.
         if (s_flash_cycling.part == 0 && !s_flash_cycling.reset_token) {
@@ -4100,9 +4247,12 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
         }
     }
     while (max_records) {
-        bool appended = false;
-        for (size_t try_src = 0; try_src < kJournalServiceSources; ++try_src) {
-            const size_t src_i = (s_flash_service_source + try_src) % kJournalServiceSources;
+        bool         appended = false;
+        const size_t attempts = s_flash_heater_pinned ? 1 : kJournalServiceSources;
+        for (size_t try_src = 0; try_src < attempts; ++try_src) {
+            const size_t src_i = s_flash_heater_pinned
+                                     ? kHeaterContextSource
+                                     : (s_flash_service_source + try_src) % kJournalServiceSources;
             if ((src_i == kCyclingTraceSource || src_i == kCyclingModbusTraceSource ||
                  src_i == kFaultTraceSource || src_i == kFaultModbusTraceSource ||
                  src_i == kDhwTraceSource || src_i == kDhwModbusTraceSource ||
@@ -4148,17 +4298,21 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
                 stop_observation_flash_service(flash_read_stop_observation);
             if (src_i == kHydronicObservationSource)
                 hydronic_observation_flash_service(flash_read_hydronic_observation);
+            if (src_i == kHeaterContextSource && !s_flash_heater_pinned)
+                heater_context_flash_service(flash_read_heater_context, 0);
             written++;
             appended = true;
             --max_records;
-            s_flash_service_source = (src_i + 1) % kJournalServiceSources;
+            s_flash_service_source =
+                s_flash_heater_pinned ? kHeaterContextSource : (src_i + 1) % kJournalServiceSources;
             break;
         }
         if (!appended) break;
     }
     // Runs use their own allowance after the timeline and all existing shutdown writes. A
     // failed detail append must not leave an older diagnosis or observation fence unwritten.
-    for (size_t run_pages = 0; flush_cycling_runs && run_pages < 2; ++run_pages) {
+    for (size_t run_pages = 0; flush_cycling_runs && !s_flash_heater_pinned && run_pages < 2;
+         ++run_pages) {
         if (!flash_build_for_service(kCyclingRunSource, r, wait_ticks, true)) break;
         if (flash_append_record(r) != ESP_OK) break;
         ++written;
@@ -4192,13 +4346,15 @@ void history_flash_save() {
 bool history_flash_forget_ready() { return s_flash_forget_ready.load(std::memory_order_acquire); }
 
 // The factory reset deletes the user's configuration; the plant history it recorded is theirs too.
-// Erasing all 4 MiB costs one cycle per sector and is deliberately reserved for this explicit action.
+// Erasing all 4 MiB costs one cycle per sector and is deliberately reserved for this explicit
+// action.
 bool history_flash_forget() {
     s_flash_forgotten.store(true);
     stop_observation_forget();
     hydronic_observation_forget();
     checkup_cycling_forget();
     checkup_dhw_trace_forget();
+    heater_context_forget();
     // Readers are suppressed immediately, even if the subsequent physical erase fails. Retire
     // browser leases at that privacy boundary rather than letting them display the forgotten data.
     bump_history_epoch();
@@ -4267,10 +4423,17 @@ bool history_flash_forget() {
     for (int attempt = 1; attempt <= 3 && e != ESP_OK; ++attempt) {
         e = esp_partition_erase_range(s_flash_part, 0, s_flash_part->size);
         if (e != ESP_OK)
-            diag_printf("history: journal erase attempt %d/3 failed (%s)\n",
-                        attempt, esp_err_to_name(e));
+            diag_printf("history: journal erase attempt %d/3 failed (%s)\n", attempt,
+                        esp_err_to_name(e));
     }
-    if (e != ESP_OK) return false;                 // remain forgotten; never append on the way out
+    if (e != ESP_OK) return false; // remain forgotten; never append on the way out
+    const auto reset_heater_flash = []() __attribute__((noinline)) {
+        s_flash_heater_piece    = {};
+        s_flash_heater_pinned   = false;
+        s_flash_retention_yield = false;
+        s_flash_seq_rejected    = false;
+    };
+    reset_heater_flash();
     return wipe_ram_and_index();
 }
 

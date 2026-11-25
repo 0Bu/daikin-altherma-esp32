@@ -169,26 +169,31 @@ mutation("omit_hydronic_history_forget",
          "    hydronic_observation_forget();\n", "",
          "early_forget", "early_history_forget_suppresses_hydronic_start_and_report")
 mutation("omit_hydronic_failure_release",
+         "    } else {\n"
+         "        if (stop_owned) stop_observation_flash_failed();\n"
          "        if (hydronic_owned) hydronic_observation_flash_failed();\n",
-         "", "commit_rejected", "failed_append_releases_claim_for_real_service_retry")
+         "    } else {\n"
+         "        if (stop_owned) stop_observation_flash_failed();\n",
+         "commit_rejected", "failed_append_releases_claim_for_real_service_retry")
 mutation("erase_wrong_sector_at_wrap",
-         "            return esp_partition_erase_range(s_flash_part, sector_offset,\n"
-         "                                             logic::HISTORY_FLASH_ERASE_BYTES);",
-         "            return esp_partition_erase_range(s_flash_part,\n"
-         "                logic::HISTORY_FLASH_PARTITION_BYTES - logic::HISTORY_FLASH_ERASE_BYTES,\n"
-         "                logic::HISTORY_FLASH_ERASE_BYTES);",
+         "    e = esp_partition_erase_range(s_flash_part, sector_offset, logic::HISTORY_FLASH_ERASE_BYTES);",
+         "    e = esp_partition_erase_range(s_flash_part,\n"
+         "        logic::HISTORY_FLASH_PARTITION_BYTES - logic::HISTORY_FLASH_ERASE_BYTES,\n"
+         "        logic::HISTORY_FLASH_ERASE_BYTES);",
          "wrap_slot", "wrap_erases_exact_landing_sector_range")
 mutation("omit_stop_failure_release",
-         "        if (stop_owned) stop_observation_flash_failed();\n", "",
+         "    } else {\n"
+         "        if (stop_owned) stop_observation_flash_failed();\n",
+         "    } else {\n",
          "stop_commit_rejected", "stop_failed_append_releases_for_shared_retry")
 mutation("classify_stop_request_with_committed_reader",
          "logic::observation_append_owned(r.header)", "logic::observation_header_matches(r.header)",
          "stop_fence_commit_rejected", "stop_failed_append_releases_for_shared_retry")
 mutation("hydronic_success_clears_core_ahead",
          "if (!flash_is_manifest(r.header) && !stop_owned && !hydronic_owned &&\n"
-         "            !flash_cycling_owned(r.header))",
+         "                !flash_cycling_owned(r.header))",
          "if (!flash_is_manifest(r.header) && !stop_owned &&\n"
-         "            !flash_cycling_owned(r.header))",
+         "                !flash_cycling_owned(r.header))",
          "core_ahead_independence", "hydronic_success_preserves_core_ahead_episode")
 controls = []
 for name, body, case, oracle in mutations:
@@ -206,8 +211,10 @@ for name, body, case, oracle in mutations:
     print("DETECTED " + name + " " + result.stdout.strip(), flush=True)
 
 name = "reuse_sequence_until_verified_success"
-reserve = "    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence))\n" \
-          "        return ESP_ERR_INVALID_ARG;\n"
+reserve = "    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence)) {\n" \
+          "        s_flash_seq_rejected = true;\n" \
+          "        return ESP_ERR_INVALID_ARG;\n" \
+          "    }\n"
 success = "    s_flash_next_slot = (slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT;\n"
 if text.count(reserve) != 1 or text.count(success) != 1:
     raise RuntimeError("Expected unique sequence timing mutation anchors")

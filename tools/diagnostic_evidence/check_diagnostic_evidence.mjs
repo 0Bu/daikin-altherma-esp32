@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { readAppSource } from "../ui/read_app_source.mjs";
-import { auditEvidenceContract, OBSERVATION_SOURCE_FILES } from "./evidence_contract.mjs";
+import { auditEvidenceContract, OBSERVATION_SOURCE_FILES, HEATER_CONTEXT_SOURCE_FILES } from "./evidence_contract.mjs";
 
 let root = process.cwd();
 let appArg = "main/www/app.sources";
@@ -82,6 +82,7 @@ for (const relative of [
   "main/checkup.cpp",
   "main/logic/fault_state.hpp",
   ...OBSERVATION_SOURCE_FILES,
+  ...HEATER_CONTEXT_SOURCE_FILES,
 ]) {
   fingerprintText(relative, read(path.join(root, relative), relative));
 }

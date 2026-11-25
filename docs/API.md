@@ -200,7 +200,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
 | `flow` | `min_l_min`, independent `hydronic` observations, nullable `minimum_windows`, `heating_minimum`, `water_agreement` and `secondary_supply` |
-| `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
+| `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s`, `context` |
 | `retries` | `seen` |
 
 For `dhw_loss`, `max_k_h` is the maximum completed one-hour **net sensor cooling**, not standing
@@ -467,6 +467,39 @@ pause while preserving a start less than 24 hours old; this optional observation
 When a factory reset starts forgetting history, this field becomes null and collection stops
 until reboot, including when flash erasure fails.
 Heater coverage is reported separately for each supported signal; an unread signal has null runtime.
+
+`heater.context` is an independent rolling-hour observation of reported X10A heater flags. In
+Modbus diagnostics mode (`health.source: "modbus"`), `/status` leaves it as an unconfirmed
+placeholder (`confirmed: false`, null `epoch`, metrics and channel fields) without leaking X10A
+evidence. It does not replace the legacy heater clocks or change their verdict. Its stricter
+endpoint admission and separate journal mean its populations can differ from those legacy fields.
+`confirmed` identifies the current X10A profile/source/consent scope; it is not a current
+bus-liveness claim. `dated`, `coverage_partial`, `restore_pending`, `persistence_pending`,
+`archive_incomplete`, `clock_uncertain` and `storage_loss` qualify the evidence. `epoch` is
+boot-local; compare the device boot identity too. `dropped` counts storage-loss notices as a lower
+bound, not missing seconds or heater events. During reindexing or a read failure, a previously
+validated, unexpired same-boot archive sum can remain visible with pending/error qualifiers. A cold
+boot never adopts that RAM sum; reset, scope, clock and aging changes withdraw it. Unread records
+cannot establish a new restoration.
+
+The separate `buh` and `bsh` objects contain `supported`, `readable_s`, `on_s`, `off_s`,
+`transition_s`, `unreadable_s`, `union_s`, `overlap_s`, `unknown_context_s`, `unclassified_s`,
+`complete_context_s`, `samples`, `readable_samples`, `on_samples`, `observed_hours`, `saturated`
+and `quiet_mild_notice`. Seconds floor accumulated microseconds. Positive samples can therefore
+exist with zero whole seconds. Conversely, a timed seam piece can have no ending sample in its
+own hour. Saturated values are lower bounds. Missing scope/heater evidence produces nulls;
+a supported category without evaluable ON samples or time is not a measured negative.
+
+Each heater's `categories` has `emergency`, `error`, `defrost_recovery`, `dhw_route`, `silent`,
+`cold_outdoor`, `mild_outdoor`, `compressor_off` and `quiet_mild_heating`. Each exposes `supported`,
+`positive_s`, `evaluable_on_s` and `positive_samples`. Categories overlap **within each heater's
+own ON population**. `union_s` counts time with any positive category and `overlap_s` time with
+at least two; neither is subtracted from combined BUH+BSH time. `unclassified_s` has no positive
+category; `unknown_context_s` lacks complete context. These qualifiers can overlap.
+The published `max_gap_s` (`15 s`), `recovery_s` (`300 s`), `notice_s` (`900 s`),
+`mild_boundary_tenths_c` (`+2 °C` split) parameters and `categories_overlap` describe project rules,
+not manufacturer limits or calibrated energy, bivalence, or necessity verdicts.
+
 Complete rules, coverage and experimental boundaries are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md); owner wording is in [DIAGNOSTICS.md](DIAGNOSTICS.md).
 

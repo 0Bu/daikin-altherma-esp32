@@ -1,4 +1,4 @@
-// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -313,6 +313,15 @@ I18N.de = localeValues([
   /* check.cycling.e_ongoing */ "Bei letzter Messung noch aktiv.",
   /* check.cycling.cause_unavailable */ "Keine Details",
   /* check.cycling.cause_older_unavailable */ "Für diese älteren Läufe sind keine gespeicherten Details zu Start und Stopp verfügbar.",
+  /* check.heater_context.title */ "Kontext der gemeldeten Heizerflags",
+  /* check.heater_context.columns */ "Kontext|BUH|BSH",
+  /* check.heater_context.counts */ "Positive Zeit / auswertbare ON-Zeit · positive Messpunkte",
+  /* check.heater_context.categories */ "Notbetrieb-Flag|Fehlerstatus|Abtauen/Nachlauf|Warmwasserweg|Silent-Mode-Flag|Außenluft ≤+2°C|Außenluft >+2°C|Verdichter als gestoppt gemeldet|Silent Mode + mildes Heizen",
+  /* check.heater_context.totals */ "gemeldet ON|Vereinigung der Kontexte|Überlappung|unbekannter Kontext|keine positive Kategorie|lesbare Flagzeit",
+  /* check.heater_context.states */ "Quelle nicht bestätigt|Undatierte Beobachtungen|24 h unvollständig|Archiv noch nicht geprüft|Speicherung ausstehend|Archiv nicht verfügbar: beschädigte oder ungelesene Datensätze|Uhrzeit unsicher|Zähler gesättigt: Untergrenzen|Nicht unterstützt",
+  /* check.heater_context.notice */ "Mindestens 15 Minuten gemeldete Heizerzeit bei Silent Mode, Heizen und milder Außenluft: vorläufiger Projekthinweis.",
+  /* check.heater_context.rule */ "Lesbare Intervallenden, Lücken ≤15 s. Der Nachlauf endet spätestens 300 s nach einem beobachteten Abtauende im Heizbetrieb. Die +2°C-Trennung und der 900-s-Hinweis sind Projektheuristiken.",
+  /* check.heater_context.limits */ "Kategorien überlappen getrennt je Heizer. Fehlender Kontext bleibt unbekannt. Energie, Betriebsursache, Bivalenz oder Notwendigkeit sind nicht belegt. Warnung ist kein Notbetrieb; Low noise control bleibt ohne Zuordnung. Zustände zwischen Messpunkten bleiben unbekannt.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `Speicher ${d}`,
   /* check.buh_runtime */ (d) => `Zusatz ${d}`,
