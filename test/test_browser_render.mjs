@@ -1496,8 +1496,8 @@ async function assertFlowInspector(page, context, missingDay) {
       a.getBoundingClientRect().bottom <= b.getBoundingClientRect().top + 1;
     return { cardOrder: before(body, chart) && before(chart, rows) && before(rows, brief),
       simpleCopy: body.innerText.includes(t("check.flow.explain")) && body.innerText.includes(t("check.flow.assessment")),
-      visibleRows: /Modbus/i.test(rows.textContent) && rows.innerText.includes(t("check.pressure")) &&
-        rows.innerText.includes(t("check.flow.pump")) && rows.innerText.includes(fmt1(96)),
+      visibleRows: /Modbus/i.test(rows.textContent) && !rows.innerText.includes(t("check.pressure")) &&
+        !/water pressure|water pump signal/i.test(rows.innerText),
       disclosure: Boolean(document.querySelector("#inspCard details")),
       duplicate: Boolean(document.querySelector("[data-desc='model:health_flow']")) };
   })()`), { cardOrder: true, simpleCopy: true, visibleRows: true, disclosure: false, duplicate: false },

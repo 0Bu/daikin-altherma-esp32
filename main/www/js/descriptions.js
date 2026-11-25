@@ -870,6 +870,7 @@ const mbForInspect = (key) => {
   if (key === "pel") return mbPower();
   if (key === "comp") return mbRow(31);
   if (key === "pump") return mbRow(30);
+  if (key === "spaceh") return mbByConcept("space_op");
   return p ? mbByConcept(p.cid) : null;
 };
 // A true binary row as a tri-state boolean (null = absent or malformed). A plain numeric 0/1 can be

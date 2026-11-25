@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -176,7 +176,6 @@ I18N.cs = localeValues([
   /* check.flow.runup */ "Měření se započítávají po nejméně deseti minutách nepřetržitého vytápění místností.",
   /* check.flow.assessment */ "V instalační příručce najdete minimální průtok pro svůj model a provozní režim. Příliš malý průtok může vyvolat chybu 7H.",
   /* check.flow.explain */ "Průtok udává, kolik litrů vody projde tepelným čerpadlem za minutu.",
-  /* check.flow.pump */ "Řídicí signál čerpadla",
   /* check.flow.live */ "Nyní",
   /* check.flow.show */ "Zobrazit nejnižší hodnotu v grafu",
   /* check.flow.readout */ (value) => `V tomto úseku byla alespoň jednou naměřena hodnota ${value}. Vytápění místností už běželo nejméně deset minut.`,

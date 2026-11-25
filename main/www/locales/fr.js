@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -176,7 +176,6 @@ I18N.fr = localeValues([
   /* check.flow.runup */ "Les mesures sont prises en compte après au moins dix minutes de chauffage des pièces sans interruption.",
   /* check.flow.assessment */ "La notice d’installation indique le débit minimal pour chaque modèle et mode de fonctionnement. Un débit trop faible peut déclencher l’erreur 7H.",
   /* check.flow.explain */ "Le débit indique combien de litres d’eau traversent la pompe à chaleur chaque minute.",
-  /* check.flow.pump */ "Commande de la pompe",
   /* check.flow.live */ "Maintenant",
   /* check.flow.show */ "Afficher un minimum sur le graphique",
   /* check.flow.readout */ (value) => `Dans cet intervalle, au moins une mesure a donné ${value}. Le chauffage des pièces fonctionnait déjà depuis au moins dix minutes.`,

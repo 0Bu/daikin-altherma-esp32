@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -176,7 +176,6 @@ I18N.es = localeValues([
   /* check.flow.runup */ "Las mediciones cuentan tras al menos diez minutos seguidos de calefacción.",
   /* check.flow.assessment */ "La guía de instalación indica el caudal mínimo para cada modelo y modo de funcionamiento. Un caudal demasiado bajo puede provocar el error 7H.",
   /* check.flow.explain */ "El caudal indica cuántos litros de agua pasan por la bomba de calor cada minuto.",
-  /* check.flow.pump */ "Consigna de la bomba",
   /* check.flow.live */ "Ahora",
   /* check.flow.show */ "Mostrar un mínimo en el gráfico",
   /* check.flow.readout */ (value) => `En este tramo se midió ${value} al menos una vez. La calefacción llevaba en marcha al menos diez minutos.`,

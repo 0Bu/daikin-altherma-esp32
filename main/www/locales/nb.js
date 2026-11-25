@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -176,7 +176,6 @@ I18N.nb = localeValues([
   /* check.flow.runup */ "Målingene teller etter minst ti minutter med sammenhengende romoppvarming.",
   /* check.flow.assessment */ "I installasjonsveiledningen finner du den minste vannmengden for din modell og driftsmodus. For liten vannmengde kan utløse feil 7H.",
   /* check.flow.explain */ "Vannmengden viser hvor mange liter vann som passerer gjennom varmepumpen hvert minutt.",
-  /* check.flow.pump */ "Styresignal til pumpen",
   /* check.flow.live */ "Nå",
   /* check.flow.show */ "Vis et lavpunkt i grafen",
   /* check.flow.readout */ (value) => `I dette tidsrommet ble ${value} målt minst én gang. Romoppvarmingen hadde da vært i gang i minst ti minutter.`,

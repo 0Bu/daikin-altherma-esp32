@@ -327,7 +327,6 @@ const I18N = {
     "check.flow.runup": "Readings count after 10 minutes of continuous room heating.",
     "check.flow.assessment": "The installation manual lists the minimum flow for your model and operating mode. Too little flow can trigger a 7H error.",
     "check.flow.explain": "Flow rate is the number of liters of water that pass through the heat pump each minute.",
-    "check.flow.pump": "Pump command",
     "check.flow.live": "Now",
     "check.flow.show": "Show a low point",
     "check.flow.readout": (value) => `In this period, at least one reading was ${value}. Room heating had already been running for at least ten minutes.`,
