@@ -1495,9 +1495,19 @@ function flowMinimumTime(time, from, to) {
 function selectFlowMinimum(plot, clientX, clientY, tolerance = 0) {
   const bands = [...plot.querySelectorAll("[data-flow-band]")];
   if (!bands.length) return false;
+  const host = plot.closest(".vhist");
+  const legend = host.querySelector("[data-flow-min-show]");
+  const readout = host.querySelector(".vhist-flow-readout");
+  const source = plot.dataset.flowMinSource, minimum = Number(plot.dataset.flowMinimum);
   let picked;
   if (clientX == null) {
-    picked = bands[(bands.findIndex(b => b.classList.contains("selected")) + 1) % bands.length];
+    if (readout.hidden) {
+      // Keep the last window as a cursor so reopening can reach even a window in a curve gap.
+      const previous = S.flowMinSelection;
+      const index = previous?.source === source && previous.minimum === minimum
+        ? bands.findIndex(b => Number(b.dataset.flowBand) === previous.from) : -1;
+      picked = bands[(index + 1) % bands.length];
+    }
   } else {
     const svg = plot.querySelector("svg");
     const bounds = svg.getBoundingClientRect();
@@ -1515,15 +1525,15 @@ function selectFlowMinimum(plot, clientX, clientY, tolerance = 0) {
       picked = b;
       best = distance;
     }
+    if (!picked) return false;
   }
-  if (!picked) return false;
-  S.flowMinSelection = { from: Number(picked.dataset.flowBand), minimum: Number(plot.dataset.flowMinimum),
-    source: plot.dataset.flowMinSource };
+  if (picked) S.flowMinSelection = { from: Number(picked.dataset.flowBand), minimum, source, expanded: true };
+  else if (S.flowMinSelection) S.flowMinSelection.expanded = false;
   for (const b of bands) b.classList.toggle("selected", b === picked);
-  const readout = plot.closest(".vhist").querySelector(".vhist-flow-readout");
-  readout.hidden = false;
-  readout.querySelector("strong").textContent = picked.dataset.flowTime;
-  readout.querySelector("span").textContent = picked.dataset.flowReadout;
+  readout.hidden = !picked;
+  readout.querySelector("strong").textContent = picked?.dataset.flowTime ?? "";
+  readout.querySelector("span").textContent = picked?.dataset.flowReadout ?? "";
+  legend.setAttribute("aria-expanded", String(!!picked));
   return true;
 }
 
@@ -1638,7 +1648,8 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
     const minimum = flow.minimum;
     const time = new Intl.DateTimeFormat(LANG, { dateStyle: "short", timeStyle: "short" });
     const explanation = t("check.flow.readout", histFmt1(minimum) + (u || " l/min"));
-    const selected = S.flowMinSelection?.source === flow.source && S.flowMinSelection.minimum === minimum
+    const selected = S.flowMinSelection?.expanded && S.flowMinSelection.source === flow.source &&
+      S.flowMinSelection.minimum === minimum
       ? flowBands.find(b => b.from === S.flowMinSelection.from) : null;
     const windows = flowBands.map(b => `<rect class="vhist-flow-band${b === selected ? " selected" : ""}"` +
       ` x="${b.x.toFixed(3)}" y="0" width="${b.width.toFixed(3)}" height="${HIST_H}" data-flow-band="${b.from}"` +
@@ -1647,9 +1658,10 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
     flowSvg = `<defs><clipPath id="flowObservationClip">${flowCurveArea}</clipPath></defs>` +
       `<g clip-path="url(#flowObservationClip)">${windows}</g>`;
     flowAttr = ` data-flow-minimum="${minimum}" data-flow-min-source="${esc(flow.source)}"`;
-    legendItems.push(`<button type="button" data-flow-min-show class="vhist-source vhist-legend-flow-min">` +
+    legendItems.push(`<button type="button" data-flow-min-show class="vhist-source vhist-legend-flow-min"` +
+      ` aria-expanded="${!!selected}" aria-controls="flowMinimumReadout">` +
       `<i aria-hidden="true"></i>${esc(t("check.flow.show"))}</button>`);
-    flowReadout = `<div class="vhist-flow-readout" role="status"${selected ? "" : " hidden"}>` +
+    flowReadout = `<div id="flowMinimumReadout" class="vhist-flow-readout" role="status"${selected ? "" : " hidden"}>` +
       `<strong>${selected ? esc(flowMinimumTime(time, selected.from, selected.to)) : ""}</strong>` +
       `<span>${selected ? esc(explanation) : ""}</span></div>`;
   }

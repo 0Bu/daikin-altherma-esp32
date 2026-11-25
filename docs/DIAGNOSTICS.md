@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: b8779f56d71a82ae48b384e1d2200245804a2b390daf3c4bf9e247c77cddd1a5 -->
+<!-- user-docs-contract: d67457ed7a02178cebda160b603a56a80f944b513bfb8f72fa2f05e83edb431e -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -232,9 +232,10 @@ space heating. It uses X10A when an eligible minimum is available and otherwise 
 HomeHub Modbus result. The label names the source of the reported minimum.
 
 **Meaning:** Shading under the matching source's curve marks covered parts of recorded five-minute
-windows containing the minimum. Select a shaded area or use the legend to see the window directly
-below the chart. The legend can also open windows inside gaps when that source has a visible
-reading elsewhere on the chart. The summary at the bottom of the card can show the minimum even
+windows containing the minimum. Select a shaded area or the legend to see the window below the chart.
+Select the legend again to close the explanation. Reopening it shows the next window. The legend also
+reaches windows inside gaps when the source has a visible reading elsewhere on the chart.
+The summary at the bottom of the card can show the minimum even
 if older X10A records lack a time. Modbus observations accumulate again after a restart.
 
 With X10A active for Plant diagnostics, the inspector also shows water-temperature agreement

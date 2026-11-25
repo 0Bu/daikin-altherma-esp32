@@ -1571,17 +1571,34 @@ async function assertFlowInspector(page, context, missingDay) {
   const selectedInterval = async ([from, to]) => page.evaluate(`(() => {
     const selected = document.querySelector("#inspHist .vhist-flow-band.selected");
     const readout = document.querySelector("#inspHist .vhist-flow-readout");
+    const legend = document.querySelector("#inspHist [data-flow-min-show]");
     const plot = document.querySelector("#inspHist [data-hist=flow]");
     const rows = document.getElementById("inspRows");
     const format = new Intl.DateTimeFormat(LANG, { dateStyle: "short", timeStyle: "short" });
     const from = new Date(${from} * 1000), to = new Date(${to} * 1000);
     const expectedTime = format.formatRange ? format.formatRange(from, to) : format.format(from) + " – " + format.format(to);
     return Number(selected?.dataset.flowBand) === ${from} && !readout.hidden &&
+      legend.getAttribute("aria-expanded") === "true" && legend.getAttribute("aria-controls") === readout.id &&
       plot.getBoundingClientRect().bottom <= readout.getBoundingClientRect().top &&
       readout.getBoundingClientRect().bottom <= rows.getBoundingClientRect().top &&
       readout.querySelector("strong").textContent === expectedTime &&
       readout.querySelector("span").textContent === t("check.flow.readout", histFmt1(11) + " L/min");
   })()`);
+  const legend = '#inspHist [data-flow-min-show]';
+  const legendClosed = () => page.evaluate(`(() => {
+    const button = document.querySelector(${JSON.stringify(legend)});
+    return document.querySelector("#inspHist .vhist-flow-readout").hidden &&
+      !document.querySelector("#inspHist .vhist-flow-band.selected") &&
+      button.getAttribute("aria-expanded") === "false";
+  })()`);
+  const activateLegend = () => clickElement(page, legend, { touch: context.startsWith("phone/") });
+  assert.equal(await legendClosed(), true, `${context}: the legend starts closed`);
+  await activateLegend();
+  assert.equal(await selectedInterval(intervals[0]), true,
+    `${context}: the legend opens a recorded window even inside a curve gap`);
+  await activateLegend();
+  assert.equal(await legendClosed(), true, `${context}: activating the legend again closes the explanation`);
+  assert.equal(await bandCount(), intervals.length, `${context}: closing the legend keeps all minimum shading`);
   const minimumArea = `#inspHist [data-flow-band="${intervals[1][0]}"]`;
   await clickElement(page, minimumArea, { yFraction: .05 });
   assert.equal(await selectedInterval(intervals[1]), false,
@@ -1593,11 +1610,27 @@ async function assertFlowInspector(page, context, missingDay) {
   await captureNativeEvidence(page, `${context}/tapped`, "#inspFlowDiagnosis", "#inspCard");
   assert.equal(await page.evaluate('S.histPin.has("flow")'), false,
     `${context}: selecting diagnosis evidence leaves the numeric curve unpinned`);
-  const legend = '#inspHist [data-flow-min-show]';
   await page.evaluate(`document.querySelector(${JSON.stringify(legend)}).focus(); true`);
   await page.key("Enter", { code: "Enter", keyCode: 13 });
+  assert.equal(await legendClosed(), true,
+    `${context}: Enter closes the explanation opened by a chart tap`);
+  assert.equal(await page.evaluate(`(() => {
+    const selector = ${JSON.stringify(legend)};
+    const line = "#inspHist .vhist-line:not(.mb)";
+    const wasFocused = document.activeElement.matches(selector);
+    const before = document.querySelector(line).getAttribute("d");
+    const trend = S.hist.get("flow");
+    const v = [...trend.v];
+    v[2] += 10;
+    S.hist.set("flow", { ...trend, gen: trend.gen + 1, v });
+    renderInspect();
+    return before !== document.querySelector(line).getAttribute("d") &&
+      wasFocused && document.activeElement.matches(selector);
+  })()`), true, `${context}: rebuilding a closed explanation preserves legend focus`);
+  assert.equal(await legendClosed(), true, `${context}: rebuilding the chart keeps the explanation closed`);
+  await page.key("Enter", { code: "Enter", keyCode: 13 });
   assert.equal(await selectedInterval(intervals[2]), true,
-    `${context}: the focused legend button moves to the next recorded interval`);
+    `${context}: reopening the explanation moves to the next recorded interval`);
   await page.waitFor("!S.clickHold && !S.scrub && !S.histBusy.size");
   assert.equal(await page.evaluate(`(() => {
     const selected = document.querySelector("#inspHist .vhist-flow-band.selected");
@@ -1731,6 +1764,16 @@ async function assertFlowInspector(page, context, missingDay) {
     `${context}: tapping the Modbus area shows its recorded time between the chart and values`);
   await assertLayout(await page.evaluate(layoutAudit), `${context}/modbus-minimum`);
   await captureNativeEvidence(page, `${context}/modbus-minimum`, "#inspFlowDiagnosis", "#inspCard");
+  await page.evaluate(`(() => {
+    const windows = S.status.health.checks.find(c => c.id === "flow").heating_minimum.minimum_windows;
+    windows.hour_masks = [1, ...Array(23).fill(0)];
+    renderInspect();
+  })()`);
+  assert.equal(await bandCount(), 1, `${context}: the Modbus fixture has a single minimum window`);
+  await activateLegend();
+  assert.equal(await selectedInterval(intervals[0]), true, `${context}: the lone Modbus window opens`);
+  await activateLegend();
+  assert.equal(await legendClosed(), true, `${context}: a second tap closes the lone Modbus window`);
   await page.evaluate("S._modbus[0].flow_scale_unverified = true; renderApp(); true");
   assert.equal(await bandCount(), 0, `${context}: an unverified Modbus curve cannot be shaded`);
   await setHeatingMinimum("modbus", "unsupported");
