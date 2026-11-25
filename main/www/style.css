@@ -384,7 +384,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   font-size: 13.5px; color: var(--muted); line-height: 1.55;
   transform: translateY(-7px); transition: transform .22s ease;
 }
-.vitem.open .vdesc-body, .inspect.open .inspect-card { transform: none; }
+/* Keep open explainers composited during live value repaints. */
+.vitem.open .vdesc-body, .inspect.open .inspect-card { transform: translateZ(0); }
 
 /* ── Inspector tongue (attached below the schematic card) ────────────────────────────────────
    Reuses the value-row explainer copy (DESCRIPTIONS) so "what is this / what's normal" has ONE
