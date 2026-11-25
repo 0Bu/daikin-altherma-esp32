@@ -2085,7 +2085,7 @@ function syncCheckupFaultPanel(panel) {
 
 // H1 is an independent dated population, not a new verdict or a replacement for min_l_min.
 function checkupHydronicKnown(h) {
-  return h?.method === 1 && h.confirmed === true && h.dated === true &&
+  return h?.method === 2 && h.confirmed === true && h.dated === true &&
     typeof h.first_evidence_unix_s === "number" && Number.isFinite(h.first_evidence_unix_s) &&
     h.first_evidence_unix_s >= 0 && typeof h.last_evidence_unix_s === "number" &&
     Number.isFinite(h.last_evidence_unix_s) && h.last_evidence_unix_s >= h.first_evidence_unix_s &&
@@ -2113,16 +2113,75 @@ function checkupFlowReport() {
     ? w : null;
   const locationsMissing = minimum !== null &&
     (!windows || windows.locations_missing === true || !windows.hour_masks.some(Boolean));
-  return { source, minimum, windows, locationsMissing, unsupported: heating?.reason === "unsupported" };
+  const a = source === "x10a" && reported.water_agreement && typeof reported.water_agreement === "object" &&
+    reported.water_agreement.method === 2 ? reported.water_agreement : null;
+  const agreement = a ? {
+    known: checkupHydronicKnown(heating),
+    fresh: heating?.current === true && heating?.confirmed === true,
+    saturated: heating?.population_saturated === true,
+    data: a,
+  } : null;
+  return { source, minimum, windows, locationsMissing, unsupported: heating?.reason === "unsupported", agreement };
 }
 
-function checkupFlowBriefHtml({ source, minimum, locationsMissing, unsupported }) {
+function checkupWaterAgreementHtml(agreement) {
+  const a = agreement?.data;
+  if (!a || typeof a !== "object" || a.method !== 2) return "";
+  const { known, fresh, saturated } = agreement;
+  const alabels = t("check.hydronic.agree_labels").split("|");
+  const areasons = t("check.hydronic.agree_reasons").split("|");
+  const alimits = t("check.hydronic.agree_limits").split("|");
+  const ameta = t("check.hydronic.agree_meta").split("|");
+  const nd = t("sys.nodata");
+  const num = n => typeof n === "number" && Number.isFinite(n);
+  const cnt = n => num(n) && Number.isSafeInteger(n) && n >= 0;
+  const fmt = (n, p = 3) => n.toLocaleString(LANG, { maximumFractionDigits: p });
+  const apre = saturated || (cnt(a.population_limitations_mask) && (a.population_limitations_mask & 4)) ? "≥" : "";
+  const aval = n => known && cnt(n) ? apre + fmt(n) : nd;
+  const adur = n => known && num(n) && n >= 0 ? apre + t("hist.duration_sec", fmt(n, 6)) : nd;
+  const rng = (r, n, u) => known && cnt(n) && n > 0 && r && [r.min, r.mean, r.max].every(num)
+    ? t("service.metric.range", fmt(r.min), fmt(r.mean), fmt(r.max), u) : nd;
+  const pairText = (pair) => {
+    if (!pair || (pair.supported !== true && !(known && cnt(pair.samples) && pair.samples > 0)))
+      return nd;
+    if (!known || !cnt(pair.samples)) return nd;
+    return `${rng(pair.delta_k, pair.samples, "K")} · ${adur(pair.qualified_s)} · ${aval(pair.windows)} ${ameta[0]} · ${aval(pair.samples)} ${ameta[1]}`;
+  };
+  const sr = k => t(`service.reason.${k}`);
+  const acode = Number.isInteger(a.reason_code) && a.reason_code >= 0 && a.reason_code <= 19 ? a.reason_code : -1;
+  const areason = [
+    t("check.status.ok"), sr("unsupported_profile"), t("conn.disabled"), t("conn.offline"),
+    sr("missing_fresh_signal"), nd, t("hist.pump_inactive"),
+    areasons[0], areasons[1], areasons[2], sr("defrost"), areasons[3],
+    t("service.state.waiting"), areasons[4], sr("poll_gap"), nd,
+    nd, nd, nd, t("conn.disabled"),
+  ][acode];
+  const acur = fresh || [1, 2, 3, 14, 15, 16, 17, 18, 19].includes(acode) ? areason || nd : nd;
+  const asettle = fresh && acode === 12 && num(a.settling_remaining_s) &&
+    a.settling_remaining_s > 0 && a.settling_remaining_s <= 600
+    ? ` ${t("hist.duration_sec", fmt(a.settling_remaining_s))}` : "";
+  const aflags = m => cnt(m) && m <= 7
+    ? [alimits[0], alimits[1]].filter((_, i) => m & (1 << i)).join(" · ") : nd;
+  const rowHtml = (label, value) =>
+    `<p><span class="vdesc-n">${esc(label)}:</span> <span class="num">${esc(value)}</span></p>`;
+  const statusText = [acur + asettle, fresh ? aflags(a.current_limitations_mask) : ""].filter(Boolean).join(" · ");
+  const popLim = known ? aflags(a.population_limitations_mask) : "";
+  return rowHtml(alabels[0], pairText(a.r1_r4)) +
+    rowHtml(alabels[1], pairText(a.r2_r1)) +
+    rowHtml(alabels[2], statusText) +
+    (popLim ? rowHtml(alabels[3], popLim) : "") +
+    `<p>${esc(ameta[2])}</p>`;
+}
+
+function checkupFlowBriefHtml({ source, minimum, locationsMissing, unsupported, agreement }) {
   if (source !== "x10a") return `<p>${esc(t("check.flow.x10a_only"))}</p>`;
-  if (minimum === null) return `<p>${esc(t(unsupported ? "check.status.unavailable" : "check.flow.waiting"))}</p>`;
-  return `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · X10A</span>` +
-    `<strong class="num">${esc(histFmt1(minimum))} l/min</strong></div>` +
-    `<p>${esc(t("check.flow.runup"))}</p>` +
-    (locationsMissing ? `<p>${esc(t("check.flow.locations_missing"))}</p>` : "");
+  const head = minimum === null
+    ? `<p>${esc(t(unsupported ? "check.status.unavailable" : "check.flow.waiting"))}</p>`
+    : `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · X10A</span>` +
+      `<strong class="num">${esc(histFmt1(minimum))} l/min</strong></div>` +
+      `<p>${esc(t("check.flow.runup"))}</p>` +
+      (locationsMissing ? `<p>${esc(t("check.flow.locations_missing"))}</p>` : "");
+  return head + checkupWaterAgreementHtml(agreement);
 }
 
 function checkupStatusKey(c) {

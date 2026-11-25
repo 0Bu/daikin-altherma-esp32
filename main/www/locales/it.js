@@ -1,4 +1,4 @@
-// translation-source: c7de29a481f17e11a35ea248d888ac416d34b79cb23bafa5bcba8f20a50dc331
+// translation-source: eceea7ddd6ed641798b2f04b3048352f8ee2c044ab186c3c4c20fc20c05eef5b
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -358,6 +358,10 @@ I18N.it = localeValues([
   /* service.metric.eev */ "Comando valvola di espansione",
   /* service.metric.hp */ "Alta pressione",
   /* service.metric.lp */ "Bassa pressione",
+  /* check.hydronic.agree_labels */ "Solo pompa R1T−R4T|Solo pompa R2T−R1T|Stato concordanza|Limiti concordanza",
+  /* check.hydronic.agree_reasons */ "Portata sotto 5,0 l/min|Compressore attivo|Riscaldatore attivo o ambiguo|Valvola 3 vie cambiata|Temperature non stazionarie",
+  /* check.hydronic.agree_limits */ "R2T non disponibile|Percorso ACS incluso",
+  /* check.hydronic.agree_meta */ "finestre|letture|Solo concordanza passiva; nessuna calibrazione; calore esterno non escluso.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · media ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "lettura ammessa" : "letture ammesse"}`,
   /* service.metric.input_none */ "Nessun ingresso selezionato",

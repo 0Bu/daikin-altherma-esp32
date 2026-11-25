@@ -230,8 +230,9 @@ void codec() {
     require(bytes[HYDRONIC_PAYLOAD_BYTES] == 0xa5 && bytes.back() == 0xa5,
             "codec writes exact width without tail padding");
     require(bytes[0] == 101 && bytes[1] == 0 && bytes[4] == 202 && bytes[8] == 47 &&
-                bytes[9] == 1 && bytes[122] == HYDRONIC_DUR_BOTH && bytes[123] == 0,
-            "explicit little endian identity, timed edges and reserved byte");
+                bytes[9] == 1 && bytes[122] == HYDRONIC_DUR_BOTH && bytes[175] == 0 &&
+                bytes[176] == 0 && bytes[177] == 0,
+            "explicit little endian identity, timed edges and reserved bytes");
     HydronicHourlyPayload decoded;
     require(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
             "codec round trip");
@@ -239,24 +240,54 @@ void codec() {
                 decoded.first_accepted_unix_us == p.first_accepted_unix_us &&
                 decoded.duration_edges == HYDRONIC_DUR_BOTH,
             "codec retains independent sample and UTC fields");
-    p.spread = {-2000, -1000, -1000};
+    p.spread             = {-2000, -1000, -1000};
+    p.r1_r4_qualified_us = 1000000;
+    p.r1_r4_samples      = 2;
+    p.r1_r4_windows      = 1;
+    p.r1_r4              = {-400, -250, -150};
+    p.r2_r1_qualified_us = 1000000;
+    p.r2_r1_samples      = 2;
+    p.r2_r1_windows      = 1;
+    p.r2_r1              = {300, 100, 200};
+    p.agree_limitations  = AgreementDhwRoute;
     hydronic_encode(p, bytes.data(), wire_header);
     require(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded) &&
-                decoded.spread.sum_milli == -2000 && decoded.spread.min_milli == -1000,
-            "portable signed negative spread decode");
+                decoded.spread.sum_milli == -2000 && decoded.spread.min_milli == -1000 &&
+                decoded.r1_r4_samples == 2 && decoded.r1_r4_windows == 1 &&
+                decoded.r1_r4.sum_milli == -400 && decoded.r2_r1_samples == 2 &&
+                decoded.r2_r1.max_milli == 200 && decoded.agree_limitations == AgreementDhwRoute,
+            "portable signed negative spread and agreement decode");
     require(hydronic_signed64(UINT64_MAX) == -1 && hydronic_signed64(1ULL << 63) == INT64_MIN &&
                 hydronic_signed32(UINT32_MAX) == -1 && hydronic_signed32(1u << 31) == INT32_MIN,
             "signed decoding covers extrema without out-of-range conversion");
-    bytes[123] = 1;
+    bytes[177] = 1;
     require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
-            "reserved bits refused");
-    bytes[123] = 0;
+            "reserved trailing byte 177 refused");
+    bytes[177] = 0;
+    bytes[176] = 1;
+    require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
+            "reserved trailing byte 176 refused");
+    bytes[176] = 0;
     bytes[122] = 0x80;
     require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
             "unknown duration edge bit refused");
-    require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, wire_header, decoded) &&
+    bytes[122] = HYDRONIC_DUR_BOTH;
+    require(hydronic_decode(bytes.data(), 124, wire_header, decoded) == false &&
+                !hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, wire_header, decoded) &&
                 !hydronic_decode(nullptr, HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
-            "wrong or absent bytes refused");
+            "wrong, legacy v1, or absent bytes refused");
+    wire_header.pad[8] = wire_header.pad[9] = 0xff;
+    require(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded) &&
+                decoded.flow_min_evidence == HYDRONIC_MINIMUM_LOCATION_MISSING,
+            "legacy minimum marker decodes without inventing location");
+    wire_header.pad[8] = 1;
+    wire_header.pad[9] = 0x80;
+    require(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, wire_header, decoded),
+            "reserved minimum metadata bits refused");
+    wire_header.pad[8] = wire_header.pad[9] = 0;
+    hydronic_encode(p, bytes.data(), wire_header);
+    require(wire_header.pad[8] == 1 && wire_header.pad[9] == 0,
+            "encode preserves header minimum evidence");
     const auto valid = payload(100);
     for (unsigned i = 0; i < 21; ++i) {
         auto bad = valid;
@@ -931,6 +962,63 @@ void minimum_windows() {
     drain();
     boot(false);
     require(crosses_hour(hydronic_observation_report()), "precise tied bins survive replay");
+}
+void water_agreement() {
+    boot();
+    // Inject a legacy v1 (3266505973u, 62 words, 124 B) record; fail-closed scan ignores it.
+    auto& v1_slot = flash[next_slot];
+    v1_slot       = make_slot(current_bucket() - 2, payload(current_bucket() - 2), next_sequence++);
+    v1_slot.header.catalog_fp  = 3266505973u;
+    v1_slot.header.value_count = 62;
+    v1_slot.header.crc = history_journal_crc_bytes(v1_slot.header, v1_slot.bytes.data(), 124);
+    scan_slot(next_slot);
+    next_slot = (next_slot + 1) % flash.size();
+    hydronic_observation_flash_service(reader);
+    require(hydronic_observation_report().totals.samples == 0,
+            "v1 124 B schema record is rejected fail-closed");
+
+    sdk::now_us = 3590000000LL;
+    HydronicDelta d1;
+    d1.from_us              = -1;
+    d1.to_us                = 3590000000LL;
+    d1.r1_r4_milli          = -250;
+    d1.r1_r4_accepted       = true;
+    d1.r1_r4_window_started = true;
+    d1.r2_r1_milli          = 150;
+    d1.r2_r1_accepted       = true;
+    d1.r2_r1_window_started = true;
+    d1.agree_reason         = AgreementReason::None;
+    d1.agree_limitations    = AgreementDhwRoute;
+    hydronic_observation_record(d1);
+
+    sdk::now_us = 3605000000LL;
+    HydronicDelta d2;
+    d2.from_us            = 3590000000LL;
+    d2.to_us              = 3605000000LL;
+    d2.observed_us        = 15000000LL;
+    d2.r1_r4_qualified_us = 15000000LL;
+    d2.r1_r4_milli        = -150;
+    d2.r1_r4_accepted     = true;
+    d2.agree_reason       = AgreementReason::None;
+    d2.agree_limitations  = AgreementR2tUnavailable;
+    hydronic_observation_record(d2);
+
+    const auto check_agreement = [](const HydronicObservationReport& r) {
+        return r.confirmed && r.dated && r.totals.samples == 0 && r.totals.candidate_us == 0 &&
+               r.totals.observed_us == 15000000LL && r.totals.r1_r4_samples == 2 &&
+               r.totals.r1_r4_windows == 1 && r.totals.r1_r4_qualified_us == 15000000LL &&
+               r.totals.r1_r4.sum_milli == -400 && r.totals.r1_r4.min_milli == -250 &&
+               r.totals.r1_r4.max_milli == -150 && r.totals.r2_r1_samples == 1 &&
+               r.totals.r2_r1_windows == 1 && r.totals.r2_r1.sum_milli == 150 &&
+               (r.totals.agree_limitations == (AgreementDhwRoute | AgreementR2tUnavailable));
+    };
+    require(check_agreement(hydronic_observation_report()),
+            "agreement populations aggregate across hour boundary without polluting H1");
+    hydronic_observation_seal();
+    drain();
+    boot(false);
+    require(check_agreement(hydronic_observation_report()),
+            "agreement populations survive flash persistence and replay");
 }
 void archive_clock_rollback(bool with_live) {
     boot();
@@ -1748,6 +1836,8 @@ int main(int argc, char** argv) {
             codec();
         else if (name == "minimum_windows")
             minimum_windows();
+        else if (name == "water_agreement")
+            water_agreement();
         else if (name == "settling_durations")
             settling_durations();
         else if (name == "seam_and_revisions")

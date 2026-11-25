@@ -1,4 +1,4 @@
-// translation-source: c7de29a481f17e11a35ea248d888ac416d34b79cb23bafa5bcba8f20a50dc331
+// translation-source: eceea7ddd6ed641798b2f04b3048352f8ee2c044ab186c3c4c20fc20c05eef5b
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -358,6 +358,10 @@ I18N.de = localeValues([
   /* service.metric.eev */ "Expansionsventil-Befehl",
   /* service.metric.hp */ "Hochdruck",
   /* service.metric.lp */ "Niederdruck",
+  /* check.hydronic.agree_labels */ "Nur Pumpe R1T−R4T|Nur Pumpe R2T−R1T|Abgleichstatus|Abgleichgrenzen",
+  /* check.hydronic.agree_reasons */ "Durchfluss unter 5,0 l/min|Verdichter läuft|Heizer aktiv oder unklar|3-Wege-Ventil gewechselt|Temperaturen nicht stationär",
+  /* check.hydronic.agree_limits */ "R2T nicht verfügbar|Warmwasserpfad enthalten",
+  /* check.hydronic.agree_meta */ "Fenster|Messwerte|Nur passiver Abgleich; keine Kalibrierung; Fremdwärme nicht ausgeschlossen.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · Mittel ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "berücksichtigter Messwert" : "berücksichtigte Messwerte"}`,
   /* service.metric.input_none */ "Kein gewählter Eingang",

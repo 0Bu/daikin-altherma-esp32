@@ -1,4 +1,4 @@
-// translation-source: c7de29a481f17e11a35ea248d888ac416d34b79cb23bafa5bcba8f20a50dc331
+// translation-source: eceea7ddd6ed641798b2f04b3048352f8ee2c044ab186c3c4c20fc20c05eef5b
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -358,6 +358,10 @@ I18N.uk = localeValues([
   /* service.metric.eev */ "Команда розширювального клапана",
   /* service.metric.hp */ "Високий тиск",
   /* service.metric.lp */ "Низький тиск",
+  /* check.hydronic.agree_labels */ "Лише насос R1T−R4T|Лише насос R2T−R1T|Стан узгодження|Межі узгодження",
+  /* check.hydronic.agree_reasons */ "Потік нижче 5,0 л/хв|Компресор працює|Нагрівач активний або неясний|Триходовий клапан перемкнуто|Температури не усталені",
+  /* check.hydronic.agree_limits */ "R2T недоступний|Шлях ГВП включено",
+  /* check.hydronic.agree_meta */ "вікон|показів|Лише пасивне узгодження; не калібрування; зовнішнє тепло не виключено.",
   /* service.metric.range */ (a, b, c, d) => `мін. ${a} · середнє ${b} · макс. ${c} ${d}`,
   /* service.metric.samples */ n => `Кількість прийнятих показів: ${n}`,
   /* service.metric.input_none */ "Вхід не вибрано",

@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 932, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 936, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -126,6 +126,16 @@ for (const code of codes) {
     assert.ok(value.trim(), `${code} assessment is empty`);
     if (code !== "en") assert.ok(!Object.values(catalog.en).includes(value),
       `${code} assessment falls back to English`);
+  }
+  for (const [key, segments] of [
+    ["check.hydronic.agree_labels", 4],
+    ["check.hydronic.agree_reasons", 5],
+    ["check.hydronic.agree_limits", 2],
+    ["check.hydronic.agree_meta", 3],
+  ]) {
+    const parts = dict[key].split("|");
+    assert.equal(parts.length, segments, `${code}/${key} segment count`);
+    for (const part of parts) assert.ok(part.trim(), `${code}/${key} has empty segment`);
   }
 }
 // Completed DHW windows are counts. The current candidate and settling remainder are durations;

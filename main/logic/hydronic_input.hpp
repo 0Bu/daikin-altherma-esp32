@@ -41,6 +41,9 @@ struct HydronicInputPlan {
     InstrumentState states[HYDRONIC_INPUTS] = {};
     uint32_t        schema_fp               = 0;
     CheckupLocator  secondary_supply{}, secondary_pump{}, secondary_heating_input{};
+    CheckupLocator  post_buh_leaving{}, bsh{};
+    InstrumentState post_buh_state = InstrumentState::Absent;
+    InstrumentState bsh_state      = InstrumentState::Absent;
 };
 
 inline void fill_secondary_supply_plan(HydronicInputPlan& p, const ProfileView& v) {
@@ -110,6 +113,18 @@ inline void fill_hydronic_input_plan(HydronicInputPlan& p, const char* profile_i
         crc            = checkup_fp_u32(crc, checkup_schema_row_key(row));
         crc            = checkup_fp_u32(crc, checkup_schema_row_fingerprint(v, row));
     }
+    const auto resolve_optional = [&](Instrument inst, CheckupLocator& loc, InstrumentState& st) {
+        const auto r = instrument_resolve(v, inst);
+        st           = r.state;
+        crc          = checkup_fp_u32(crc, static_cast<uint32_t>(r.state));
+        if (r.state != InstrumentState::Supported) return;
+        const auto row = adjudicated(v, static_cast<size_t>(r.row));
+        loc            = {row.reg, row.offset, row.conv};
+        crc            = checkup_fp_u32(crc, checkup_schema_row_key(row));
+        crc            = checkup_fp_u32(crc, checkup_schema_row_fingerprint(v, row));
+    };
+    resolve_optional(Instrument::LeavingWaterPostBuh, p.post_buh_leaving, p.post_buh_state);
+    resolve_optional(Instrument::Bsh, p.bsh, p.bsh_state);
     p.schema_fp = config_crc32_final(crc);
     if (!p.schema_fp) p.schema_fp = 1;
     fill_secondary_supply_plan(p, v);
@@ -122,6 +137,16 @@ inline HydronicInputPlan hydronic_input_plan(const char* profile_id, const Profi
 inline bool hydronic_input_supported(const HydronicInputPlan& p, HydronicInput input) {
     const size_t k = static_cast<size_t>(input);
     return k < HYDRONIC_INPUTS && p.schema_fp && p.states[k] == InstrumentState::Supported;
+}
+inline bool hydronic_plan_supported(const HydronicInputPlan& p) {
+    if (!p.schema_fp) return false;
+    for (size_t k = 0; k < 11; ++k)
+        if (k != static_cast<size_t>(HydronicInput::Command) &&
+            !hydronic_input_supported(p, static_cast<HydronicInput>(k)))
+            return false;
+    for (unsigned k = 0; k < 4; ++k)
+        if (p.states[11 + k] == InstrumentState::Ambiguous) return false;
+    return true;
 }
 template <class Row>
 inline const Row* hydronic_fresh_row(const CheckupLocator& key, const Row* rows, size_t count) {
@@ -204,6 +229,14 @@ inline HydronicSample hydronic_collect(const HydronicInputPlan& p, const Row* ro
         if (p.states[11 + k] == InstrumentState::Ambiguous) s.phase_ambiguous = true;
         s.phase[k] = bit(input);
     }
+    s.post_buh_supported = p.schema_fp != 0 && p.post_buh_state == InstrumentState::Supported;
+    s.post_buh_ambiguous = p.post_buh_state == InstrumentState::Ambiguous;
+    if (s.post_buh_supported)
+        s.post_buh_known =
+            parse_numeric(hydronic_fresh_row(p.post_buh_leaving, rows, count), s.post_buh_c);
+    s.bsh_supported = p.schema_fp != 0 && p.bsh_state == InstrumentState::Supported;
+    s.bsh_ambiguous = p.bsh_state == InstrumentState::Ambiguous;
+    if (s.bsh_supported) s.bsh = parse_bit(hydronic_fresh_row(p.bsh, rows, count));
     if (p.secondary_supply.conv &&
         parse_bit(hydronic_fresh_row(p.secondary_pump, rows, count)) == HydronicBit::On &&
         parse_bit(hydronic_fresh_row(p.secondary_heating_input, rows, count)) == HydronicBit::On)

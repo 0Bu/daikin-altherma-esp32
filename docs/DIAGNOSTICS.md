@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 0138c0de597635ebc20e10320c726803042d2896396624841c54eaaff6472df2 -->
+<!-- user-docs-contract: 5891197ebc9f5af10cf2869960334bf4897a64038c6b45116f6b31e75c256a78 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -233,12 +233,21 @@ the card explains that the heating minimum requires X10A.
 containing that minimum. Select a shaded area or use the legend to see when it occurred directly
 below the chart. The legend is available when a recorded window overlaps the dated chart and an
 X10A sample is visible. It can also open windows inside curve gaps. The summary at the bottom of
-the card can show the minimum even if older records lack a time. It follows the available Modbus
-comparison, water pressure and requested pump percentage.
+the card can show the minimum even if older records lack a time. During quiescent pump-only X10A
+circulation (`>= 5.0 l/min` for at least `600 s` with compressor, defrost, and heaters off,
+unchanged 3-way valve, and `<= 0.5 K` drift over `300 s` on both sensors of a pair), the same
+inspector also separately shows 24-hour signed leaving water before the backup heater minus return
+water (`R1T−R4T`) and (when supported and readable) post-heater minus pre-heater (`R2T−R1T`)
+ranges, qualified duration, episode windows, and reading counts; switching to Modbus hides
+water-temperature agreement. It follows the available Modbus comparison, water pressure and
+requested pump percentage.
 
 **Important limit:** The required flow depends on the model and operating mode. Shading gives the
-time window of a reading, with no claim about how long the flow stayed there. The observation alone
-cannot identify a fault or establish the cause of low flow.
+time window of a reading, with no claim about how long the flow stayed there. The `600 s`
+settling, `300 s` / `0.5 K` drift, `5.0 l/min` flow, and `15 s` gap rules are project filters, not
+published Daikin tolerances; passive agreement does not calibrate sensors, exclude external heat
+sources or valve leakage, establish steady operation, or diagnose a bypass, restriction, or low
+flow.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 

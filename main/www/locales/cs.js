@@ -1,4 +1,4 @@
-// translation-source: c7de29a481f17e11a35ea248d888ac416d34b79cb23bafa5bcba8f20a50dc331
+// translation-source: eceea7ddd6ed641798b2f04b3048352f8ee2c044ab186c3c4c20fc20c05eef5b
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -358,6 +358,10 @@ I18N.cs = localeValues([
   /* service.metric.eev */ "Povel expanzního ventilu",
   /* service.metric.hp */ "Vysoký tlak",
   /* service.metric.lp */ "Nízký tlak",
+  /* check.hydronic.agree_labels */ "Jen čerpadlo R1T−R4T|Jen čerpadlo R2T−R1T|Stav shody|Omezení shody",
+  /* check.hydronic.agree_reasons */ "Průtok pod 5,0 l/min|Kompresor běží|Ohřívač aktivní nebo nejasný|3cestný ventil přepnut|Teploty nejsou ustálené",
+  /* check.hydronic.agree_limits */ "R2T nedostupné|Včetně okruhu TUV",
+  /* check.hydronic.agree_meta */ "oken|měření|Pouze pasivní shoda; ne kalibrace; cizí teplo není vyloučeno.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · průměr ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `Počet přijatých odečtů: ${n}`,
   /* service.metric.input_none */ "Žádný zvolený vstup",
