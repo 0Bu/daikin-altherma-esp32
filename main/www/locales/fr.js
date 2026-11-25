@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -387,6 +387,12 @@ I18N.fr = localeValues([
   /* check.detail.pressure.info */ "Basse",
   /* check.detail.pressure.warn */ "Critique",
   /* check.detail.pressure.ok */ "Normale",
+  /* check.pressure.finding */ "Constat confirmé",
+  /* check.pressure.sustained */ (a) => `Pression inférieure ou égale à ${a} pendant au moins 60 secondes consécutives.`,
+  /* check.pressure.clear */ "Aucune pression basse prolongée confirmée.",
+  /* check.pressure.rules */ "Comment la pression est-elle évaluée ?",
+  /* check.pressure.unavailable */ "Diagnostic de pression X10A indisponible.",
+  /* check.pressure.pending */ "Mesure dans la zone critique. La durée reste inconnue.",
   /* check.detail.defrost_events_insufficient */ "Moins de trois dégivrages associés ; aucun verdict de part.",
   /* check.detail.source_stale */ "Pas de mesure X10A récente ; état actuel inconnu. Historique conservé.",
   /* check.detail.no_paired_runtime */ "Pas de durée lisible associée ; nombre seulement.",
@@ -1106,7 +1112,7 @@ INSPECT_I18N.fr = inspectValues(
     ["Tuyau d’entrée PHE", "Tuyau d’entrée du PHE", "Retour commun au PHE par R4T après réunion des branches. En chauffage il est normalement plus froid que R1T, en froid actif plus chaud ; R4T n’est pas un capteur dédié aux émetteurs.", (d) => waterMoving(d) ? `Retour à ${degC(d.ret)}, ${fmt1(d.flow)} l/min et ${fmt1(d.wp)} bar.` : "Pompe et débit ne prouvent aucune circulation dans le retour."], // wret
     ["Débit", "Débit d’eau", "Débit du circuit commun. Le minimum dépend du modèle ; à lire avec pompe et pression."], // flow
     ["État du fluxostat", 0, "Entrée binaire X10A ; elle ne mesure pas les l/min ni le débit minimal.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A actif ; comparer avec pompe et ${fmt1(d.flow)} l/min.` : `X10A inactif ; pompe active, comparer ${fmt1(d.flow)} l/min et défauts 7H/C0.`], // flow_switch
-    ["Pression d’eau", 0, "Pression du circuit hydraulique, pas du fluide frigorigène. La plage admise dépend du modèle et de l’installation ; consulter le manuel exact."], // wp
+    ["Pression d’eau", 0], // wp
   ],
 );
 
@@ -1188,7 +1194,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
   ["R1T sort du PHE avant BUH ; avec R4T et débit, estime la puissance par mode, emplacement selon l’unité."], // 34
   ["Retour R4T au PHE ; évaluer le ΔT avec débit, compresseur et mode, jamais avec 5 K universels."], // 35
   ["Débit du circuit commun ; le minimum dépend du modèle et du mode, et une valeur basse peut causer 7H."], // 36
-  ["Pression hydraulique : beaucoup de manuels exigent >1 bar ; à ≤1,0 bar consulter la notice du modèle exact."], // 37
+  ["Pression de l’eau dans le circuit hydraulique fermé.","De nombreux manuels Altherma exigent plus de 1 bar à l’entrée de la pompe. La plage admissible dépend du modèle, de la hauteur de l’installation et du vase d’expansion. À 1,0 bar ou moins, consulter la notice de l’appareil exact."], // 37
   ["Commande X10A inversée : 0 = max, 100 = arrêt ([0, 100] → 100–0 %). Ne mesure pas les RPM ni ne prouve rotation, hauteur ou débit ; lisez ON/OFF et débit séparément."], // 38
   ["État pompe ; ne prouve pas la chaleur utile et peut agir sans compresseur : comparer au débit."], // 39
   ["État du circulateur d’un circuit solaire thermique configuré."], // 40

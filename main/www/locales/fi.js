@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -387,6 +387,12 @@ I18N.fi = localeValues([
   /* check.detail.pressure.info */ "Matala",
   /* check.detail.pressure.warn */ "Kriittinen",
   /* check.detail.pressure.ok */ "Normaali",
+  /* check.pressure.finding */ "Vahvistettu havainto",
+  /* check.pressure.sustained */ (a) => `Paine oli enintään ${a} vähintään 60 sekuntia yhtäjaksoisesti.`,
+  /* check.pressure.clear */ "Pitkittynyttä matalaa painetta ei vahvistettu.",
+  /* check.pressure.rules */ "Miten paine arvioidaan?",
+  /* check.pressure.unavailable */ "X10A-painediagnoosi ei ole käytettävissä.",
+  /* check.pressure.pending */ "Mittaus on kriittisellä alueella. Kestoa ei vielä tiedetä.",
   /* check.detail.defrost_events_insufficient */ "Alle kolme yhdistettyä sulatusta; ei osuusarviota.",
   /* check.detail.source_stale */ "Ei tuoretta X10A-näytettä; nykytila tuntematon. Historia säilyy.",
   /* check.detail.no_paired_runtime */ "Ei yhdistettyä luettavaa aikaa; vain määrä.",
@@ -1044,7 +1050,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["R1T PHE:n jälkeen ennen BUH:ta; R4T:n, virtauksen ja tilan kanssa sillä arvioidaan lämpötehoa."], // 34
   ["R4T yhteisessä PHE-paluussa; R1T−R4T on PHE:n ΔT, ei lämmönluovuttajien eikä yleinen 5 K sääntö."], // 35
   ["Yhteisen vesipiirin virtaus; vähimmäinen riippuu mallista ja tilasta, ja pieni virtaus voi aiheuttaa 7H:n."], // 36
-  ["Suljetun vesipiirin paine; sallittu alue on mallikohtainen, ja arvolla ≤1,0 bar tarkista kyseisen mallin ohje."], // 37
+  ["Suljetun vesikierron paine.","Sallittu painealue riippuu mallista, asennuskorkeudesta ja paisuntasäiliöstä. Jos paine on enintään 1,0 bar, tarkista kyseisen laitteen ohjekirja."], // 37
   ["Käänteinen X10A-komento: 0 = maks, 100 = seis ([0, 100] → 100–0 %). Ei mittaa RPM:ää eikä todista pyörimistä, nostokorkeutta tai virtaamaa; lue PÄÄLLÄ/POIS ja virtaama erikseen."], // 38
   ["Vesikiertopumpun tila; käynti ei yksin todista hyödyllistä lämmönsiirtoa, joten vertaa virtaukseen."], // 39
   ["Määritetyn aurinkolämpöpiirin pumppu, eri kuin lämpöpumpun vesikiertopumppu."], // 40
@@ -1298,7 +1304,7 @@ INSPECT_I18N.fi = inspectValues(
     ["PHE:n paluuputki", "PHE:n paluuputki", "Yhteinen paluu R4T:lle säiliö- ja tilahaarojen yhdistyttyä. Lämmityksessä yleensä R1T:tä kylmempi, jäähdytyksessä lämpimämpi; R4T ei ole lämmönluovuttimien lähellä.", (d) => waterMoving(d) ? `Paluu ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Paluuputken kiertoa ei ole vahvistettu."], // wret
     ["Vesivirtaama", "Vesivirtaama", "Yhteisen piirin virtaama; vaadittu minimi riippuu mallista ja tilasta."], // flow
     ["Virtauskytkimen tila", "Virtauskytkimen tila", "X10A:n binääritila; ei mittaa l/min-arvoa eikä vahvista mallin minimivirtaamaa.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A PÄÄLLÄ; vertaa pumppuun ja arvoon ${fmt1(d.flow)} l/min.` : `X10A POIS; pumpun käydessä vertaa arvoa ${fmt1(d.flow)} l/min ja vikaa 7H/C0.`], // flow_switch
-    ["Vedenpaine", "Vedenpaine", "Suljetun vesipiirin paine. Sallittu alue riippuu mallista, korkeuserosta ja paisuntasäiliöstä; katso ohjekirja."], // wp
+    ["Vedenpaine", "Vedenpaine"], // wp
   ],
 );
 

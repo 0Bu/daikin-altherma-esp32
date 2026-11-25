@@ -191,10 +191,7 @@ function recoverOpenHistory() {
   const host = globalThis.document?.getElementById(dashboard ? "valueGroups" : "settingsCards");
   const rows = dashboard ? ".vgroup:not([hidden]) .vitem.open [data-trend]" : ".vitem.open [data-trend]";
   for (const button of host?.querySelectorAll(rows) || []) {
-    const started = button.dataset.desc === "model:health_pressure"
-      ? ensureHist(button.dataset.trend, "x10a", "refresh")
-      : ensureHistPair(button.dataset.trend, "refresh");
-    if (started) break;
+    if (ensureHistPair(button.dataset.trend, "refresh")) break;
   }
 }
 
@@ -1010,9 +1007,8 @@ function statusCardsHtml() {
 
 // ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, legacy-208/legacy-349) ─────────
 // The dashboard already answers what the plant is doing NOW (the schematic) and what one reading did
-// today (a value row's trend). This is the third question, and the only one that needs counting
-// rather than reading: how often the compressor started, what share of runtime went into defrosting,
-// how low the water pressure got. The firmware does all of it — every verdict, every threshold and
+// today (a value row's trend). The diagnosis asks how often the compressor started and what share
+// of runtime went into defrosting. The firmware does all of it — every verdict, every threshold and
 // every coverage decision arrives in /status.health, judged. Nothing is re-decided here.
 //
 // That split is deliberate and load-bearing. The rules live in a host-tested C++ header that CI gates
@@ -1020,8 +1016,7 @@ function statusCardsHtml() {
 // of the same judgement, which is precisely how lwt_select's rule came to be re-opened by a looser
 // copy of itself. The browser's job is words and colour.
 //
-// Rendered in the order received: logic/checkup.hpp declares the checks in reading order, so there is
-// no second opinion here about which row matters most.
+// Inventory of visible diagnoses in firmware order. Pressure is presented in its schematic inspector.
 const CHECKUP_ROW = {
   fault:    "check.fault",
   dhw_loss: "check.dhw_loss",
@@ -2232,12 +2227,16 @@ function checkupWaterAgreementHtml(agreement) {
     `<p>${esc(ameta[2])}</p>`;
 }
 
+function inspectDiagnosisResultHtml(label, value) {
+  return `<div class="inspect-diagnosis-result"><span>${esc(label)}</span>` +
+    `<strong class="num">${esc(value)}</strong></div>`;
+}
+
 function checkupFlowBriefHtml({ source, minimum, locationsMissing, unsupported, agreement }) {
   const name = source === "modbus" ? "Modbus" : "X10A";
   const head = minimum === null
     ? `<p>${esc(t(unsupported ? "check.flow.unavailable" : "check.flow.waiting"))}</p>`
-    : `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · ${name}</span>` +
-      `<strong class="num">${esc(histFmt1(minimum))} l/min</strong></div>` +
+    : inspectDiagnosisResultHtml(`${t("check.flow.lowest")} · ${name}`, `${histFmt1(minimum)} l/min`) +
       `<p>${esc(t("check.flow.runup"))}</p>` +
       (locationsMissing ? `<p>${esc(t("check.flow.locations_missing"))}</p>` : "");
   return head + checkupWaterAgreementHtml(agreement);
@@ -2668,9 +2667,6 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   const base = LANG === "de" && description.de ? description.de : description;
   const what = copy ? copy[0] : base.what;
   const normal = copy ? copy[1] : base.normal;
-  if (c.id === "pressure" && c.verdict !== "unavailable" && hasHist("water_pressure")) {
-    return descNoteHtml(t("normal.label"), normal);
-  }
   let detail;
   // Discard reasons are aggregates, without a per-candidate cause ranking. Missing readings
   // include necessary valve/heater/pump inputs as well as tank temperature; missing X10A/HomeHub
@@ -2756,7 +2752,7 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
     detail += ` ${t("check.detail.coverage_missing",
                     Math.ceil(c.required_s - c.observed_s).toLocaleString(LANG))}`;
   // Only the bounded daily assessments need a complete day; flow waits for eligible pump time.
-  if (["pressure", "defrost"].includes(c.id) && statusKey === "collecting" &&
+  if (c.id === "defrost" && statusKey === "collecting" &&
       fullSpan === false && Number.isFinite(report.span_s) &&
       ["day_incomplete", "input_coverage"].includes(c.reason))
     detail += ` ${t("check.detail.horizon_wait",
@@ -2879,14 +2875,6 @@ function checkupMetricValue(c) {
       const paired = c.paired_count == null ? "" : t("check.paired_cycles", c.paired_count);
       return checkupWithOutdoor(c, [n, paired, share].filter(Boolean).join(" · "));
     }
-    case "pressure": {
-      if (v === "warn" && Number.isFinite(c.min_bar))
-        return `${t("check.detail.pressure.warn")} · ${checkupFmt1(c.min_bar)} bar`;
-      if (v === "info" && Number.isFinite(c.min_bar))
-        return `${t("check.detail.pressure.info")} · ${checkupFmt1(c.min_bar)} bar`;
-      const shown = Number.isFinite(c.current_bar) ? c.current_bar : c.min_bar;
-      return !Number.isFinite(shown) ? "" : `${checkupFmt1(shown)} bar`;
-    }
     case "flow":
       return !Number.isFinite(c.min_l_min) ? "" : `${checkupFmt1(c.min_l_min)} l/min`;
     case "heater": {
@@ -2935,11 +2923,7 @@ function checkupValue(c) {
   return checkupMetricValue(c) || st;
 }
 
-function checkupPressureHistoryHtml(id, unit, label) {
-  return cachedHistoryHtml(S.hist.get(id), id, unit, label, "x10a", true);
-}
-
-const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "pressure", "retries"]);
+const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "retries"]);
 function checkupCardHtml(includeHealth = true) {
   const h = S.status?.health;
   const source = h?.source || S.status?.diagnostics?.effective_source || "x10a";
@@ -2952,25 +2936,20 @@ function checkupCardHtml(includeHealth = true) {
   let healthRows = "";
   const unreadable = includeHealth && h?.persist === "unknown";
   const visibleChecks = includeHealth && Array.isArray(h?.checks)
-    ? h.checks.filter(c => c.id !== "flow" && !(isModbus && MODBUS_HIDDEN_CHECKS.has(c.id)))
+    ? h.checks.filter(c => Object.hasOwn(CHECKUP_ROW, c.id) && c.id !== "flow" && c.id !== "pressure" &&
+                          !(isModbus && MODBUS_HIDDEN_CHECKS.has(c.id)))
     : [];
   if (unreadable) healthRows = `<span class="empty">${esc(t("sys.nodata"))}</span>`;
   if (!unreadable && visibleChecks.length) {
     for (const c of visibleChecks) {
       const key = CHECKUP_ROW[c.id];
-      if (!key) continue;                             // a check this UI does not know: skipped, never guessed at
       const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
-      const isPressure = c.id === "pressure" && c.verdict !== "unavailable" && hasHist("water_pressure");
       const rowVal = c.id === "fault" ? checkupFaultRow(c) : { text: checkupValue(c), aria: "" };
+      const detail = checkupDetailHtml(c, h.full_span === true, h);
       healthRows += modelDescRow(`health_${c.id}`, t(key), rowVal.text,
                                  { cls: `checkup-val${tone ? ` ${tone}` : ""}`,
                                    ariaValue: rowVal.aria,
-                                   bodyHtml: checkupDetailHtml(c, h.full_span === true, h),
-                                   trendId: isPressure ? "water_pressure" : "",
-                                   histUnit: isPressure ? "bar" : "",
-                                   paused: isPressure ? ("diagnosis" !== S.dashboardCard) : undefined,
-                                   renderHistory: isPressure ? checkupPressureHistoryHtml : undefined,
-                                   chartFirst: isPressure });
+                                   bodyHtml: detail });
     }
   }
   // This row remains independent of /status.health and is not counted by the badge below.
@@ -2982,12 +2961,16 @@ function checkupCardHtml(includeHealth = true) {
   // Findings are counts of serialized verdicts, not a health score or a second threshold rule.
   const warnings = visibleChecks.filter(c => c.verdict === "warn").length;
   const notes = visibleChecks.filter(c => c.verdict === "info").length;
+  const assessed = visibleChecks.filter(c => c.id !== "dhw_loss" && c.id !== "retries" &&
+    c.evidence !== "observation" && c.evidence !== "experimental");
+  const summary = assessed.some(c => c.verdict === "collecting") ? "collecting"
+                : assessed.some(c => c.verdict === "ok") ? "ok" : "unavailable";
   const badge = warnings ? t("check.summary.warnings", warnings)
               : notes ? t("check.summary.notes", notes)
-              : h.status === "ok" ? t("check.summary.ok")
-              : h.status === "collecting" ? t("check.summary.collecting")
+              : summary === "ok" ? t("check.summary.ok")
+              : summary === "collecting" ? t("check.summary.collecting")
               : t("check.summary.observations");
-  const badgeCls = { warn: "err", ok: "ok", collecting: "dim", unavailable: "dim" }[h.status] || "";
+  const badgeCls = warnings ? "err" : notes ? "" : summary === "ok" ? "ok" : "dim";
   return vcard(cardTitle, rows, badge, badgeCls, "diagnosis", t("nav.diagnosis"));
 }
 

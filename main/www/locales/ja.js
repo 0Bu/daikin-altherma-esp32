@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -387,6 +387,12 @@ I18N.ja = localeValues([
   /* check.detail.pressure.info */ "低い",
   /* check.detail.pressure.warn */ "危険",
   /* check.detail.pressure.ok */ "正常",
+  /* check.pressure.finding */ "確認済みの判定",
+  /* check.pressure.sustained */ (a) => `${a} 以下の状態が連続で 60 秒以上続きました。`,
+  /* check.pressure.clear */ "低い水圧の持続は確認されませんでした。",
+  /* check.pressure.rules */ "水圧はどのように判定されますか？",
+  /* check.pressure.unavailable */ "X10A の水圧診断を利用できません。",
+  /* check.pressure.pending */ "測定値は危険範囲です。継続時間は未確認です。",
   /* check.detail.defrost_events_insufficient */ "対応除霜3回未満。割合判定なし。",
   /* check.detail.source_stale */ "新鮮なX10A試料なし。現在状態不明。過去記録は保持。",
   /* check.detail.no_paired_runtime */ "対応する読取可能時間なし。回数のみ。",
@@ -1044,7 +1050,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
   ["PHE後・BUH前のR1T。R4Tと流量、運転モードを合わせて熱出力を推定します。残熱にも注意します。"], // 34
   ["PHE共通戻りのR4T。R1T−R4TはPHEのΔTで、放熱器のΔTではなく一律5 K基準も使えません。"], // 35
   ["共通水回路の流量。必要最小値は機種とモードで異なり、低流量は7Hの原因になり得ます。"], // 36
-  ["閉水回路の圧力。許容範囲は機種依存で、≤1.0 barなら該当機種の説明書を確認します。"], // 37
+  ["閉じた水回路の水圧です。","許容圧力の範囲は機種、設置時の高低差、膨張タンクによって異なります。1.0 bar 以下なら該当機種の説明書を確認してください。"], // 37
   ["反転 X10A 指令：生値 0 = 最大、100 = 停止（[0, 100] → 100–0 %）。RPM を測らず回転・揚程・流量を証明しません。入/切と流量を別に確認。"], // 38
   ["水循環ポンプの状態。運転だけでは有効な熱移動を証明せず、実流量と照合します。"], // 39
   ["設定済み太陽熱回路のポンプ状態。ヒートポンプ側の水循環ポンプとは別です。"], // 40
@@ -1298,7 +1304,7 @@ INSPECT_I18N.ja = inspectValues(
     ["PHE戻り配管", "PHE戻り配管", "タンクと室内分岐の合流後、R4Tへ戻る共通配管です。通常、暖房ではR1Tより低く、冷房では高く、R4Tは端末付近ではありません。", (d) => waterMoving(d) ? `戻り ${degC(d.ret)}、${fmt1(d.flow)} l/min、${fmt1(d.wp)} bar。` : "戻り配管の循環は未確認です。"], // wret
     ["水流量", "水流量", "共通水回路の流量です。必要最小値は機種とモードで異なります。"], // flow
     ["流量スイッチ", "流量スイッチ状態", "X10Aの2値状態です。l/minを測らず、機種の最小流量も確認しません。", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A 入。ポンプと ${fmt1(d.flow)} l/minを比較してください。` : `X10A 切。ポンプ運転中は ${fmt1(d.flow)} l/minと7H/C0異常を確認してください。`], // flow_switch
-    ["水圧", "水圧", "閉じた水回路の圧力です。許容範囲は機種、高低差、膨張タンクで異なるため取扱説明書を参照してください。"], // wp
+    ["水圧", "水圧"], // wp
   ],
 );
 

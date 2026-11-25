@@ -404,8 +404,15 @@ not establish identical readings. Translated Model rows have stable explanation 
 
 The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in and while the active
 source (`X10A` or `Modbus`) is live or has retained/confirmed window state. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
-Rows cover fault, tank loss, starts, defrost, water pressure, heater runtime and retry changes. The
-observation-only flow result appears in the **Flow rate** inspector. Collapsed rows show the primary
+Rows cover fault, tank loss, starts, defrost, heater runtime and retry changes. The observation-only
+flow result appears in the **Flow rate** inspector. The [water pressure finding](DIAGNOSTICS.md#water-pressure)
+follows any second-source pressure reading in its inspector. With the X10A assessment available and
+its trend visible, selecting a chart position opens the explanation below the time axis.
+A red triangle after the pressure label marks a confirmed critical
+finding. The amber signal for an unconfirmed critical reading follows the settings button's upper-right
+placement.
+
+Collapsed rows show the primary
 measured value when available, or a status such as checking, no window, measured, tentative or N/A.
 The collapsed `fault` row retains an accessible label and stays quiet when no active or retained
 fault exists. It otherwise shows `<code> · <duration>` or `<code> · Unknown` when stale, with status

@@ -196,25 +196,19 @@ for (const c of [
   { id: "cycling", starts: null }, { id: "defrost", count: null },
   { id: "heater", buh_s: null, bsh_s: null },
 ]) assert.equal(ui.metric({ verdict: "collecting", ...c }), "");
-assert.equal(ui.metric({ id: "pressure", verdict: "unavailable", min_bar: 0 }), "");
-assert.equal(ui.metric({ id: "pressure", verdict: "collecting", min_bar: 0, current_bar: 1.5 }), "1.5 bar");
-assert.equal(ui.metric({ id: "pressure", verdict: "collecting", min_bar: 0 }), "0 bar");
-assert.equal(ui.metric({ id: "pressure", verdict: "info", min_bar: 0.8, confirmed_low: true }), "Low · 0.8 bar");
-assert.equal(ui.metric({ id: "pressure", verdict: "warn", min_bar: 0.4, confirmed_critical: true }), "Critical · 0.4 bar");
-assert.equal(ui.metric({ id: "pressure", verdict: "ok", min_bar: NaN }), "");
 
 // An almost-complete input clock and a partial calendar horizon have different explanations.
 const collecting = {
   id: "cycling", verdict: "collecting", evidence: "heuristic", reason: "input_coverage",
   starts: 2, observed_s: 77759, required_s: 77760,
 };
-const collectingPressure = { ...collecting, id: "pressure" };
-let detail = ui.detail(collectingPressure, true, { span_s: 86400, source_age_s: 5, source_fresh: true });
+const collectingDefrost = { ...collecting, id: "defrost" };
+let detail = ui.detail(collectingDefrost, true, { span_s: 86400, source_age_s: 5, source_fresh: true });
 assert.match(detail, /Readable signals: 21 h 35 min of 21 h 36 min required/);
 assert.match(detail, /Missing readable time: 1 s/);
 assert.match(detail, /Data window: 24 h/);
 assert.doesNotMatch(detail, /full 24-hour window is still missing/);
-detail = ui.detail({ ...collectingPressure, observed_s: 77760, reason: "day_incomplete" }, false,
+detail = ui.detail({ ...collectingDefrost, observed_s: 77760, reason: "day_incomplete" }, false,
                    { span_s: 84600, source_age_s: 5, source_fresh: true });
 assert.match(detail, /full 24-hour window is still missing: 30 min remaining/);
 assert.doesNotMatch(detail, /insufficient coverage|Missing readable time/);
@@ -238,14 +232,12 @@ for (const lang of locales) {
   assert.ok(!flowDetail.includes(ageLabel), `${lang} fresh flow need not repeat source age`);
   assert.ok(flowDetail.includes(ui.text(lang, "check.detail.collecting_unknown")),
     `${lang} flow must retain its actual collection state`);
-  for (const id of ["pressure", "defrost"]) {
-    for (const reason of ["day_incomplete", "input_coverage"]) {
-      const daily = { ...collecting, id, reason, observed_s: 900 };
-      assert.ok(ui.detail(daily, false, partialReport).includes(horizon),
-        `${lang}/${id}/${reason} must explain its missing day`);
-      assert.ok(!ui.detail(daily, true, { ...partialReport, span_s: 86400 }).includes(completeHorizon),
-        `${lang}/${id} must not add a day once the horizon is complete`);
-    }
+  for (const reason of ["day_incomplete", "input_coverage"]) {
+    const daily = { ...collectingDefrost, reason, observed_s: 900 };
+    assert.ok(ui.detail(daily, false, partialReport).includes(horizon),
+      `${lang}/defrost/${reason} must explain its missing day`);
+    assert.ok(!ui.detail(daily, true, { ...partialReport, span_s: 86400 }).includes(completeHorizon),
+      `${lang}/defrost must not add a day once the horizon is complete`);
   }
   for (const id of ["fault", "dhw_loss", "heater", "retries"]) {
     assert.ok(!ui.detail({ ...collectingFlow, id, windows: 0 }, false, partialReport).includes(horizon),
@@ -1006,57 +998,106 @@ for (const lang of locales) {
 }
 context.S.status = savedFlowStatus;
 ui.setLang("en");
-// Water pressure uses 24-hour curve-first diagnosis when X10A history is available, and falls back
-// cleanly to concise threshold state labels when no history buffer is advertised.
+// Pressure has one display in the inspector, with X10A diagnosis separate from the live source.
 const pressure = {
   id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0.8,
-  current_bar: 1.5, min_unix_s: 1791888000, confirmed_low: true, confirmed_critical: false,
+  current_bar: 1.5, min_unix_s: 1791887970, confirmed_low: true, confirmed_critical: false,
 };
-detail = ui.detail(pressure);
-assert.match(detail, /24-hour water-pressure curve/);
-assert.match(detail, /Low/);
-assert.doesNotMatch(detail, /NOTE|WARNING|Minimum recorded at/);
-detail = ui.detail({ ...pressure, verdict: "warn", min_bar: 0.4, current_bar: null, min_unix_s: null,
-                     confirmed_low: true, confirmed_critical: true }, true,
-                   { span_s: 86400, source_age_s: 900, source_fresh: false });
-assert.match(detail, /Critical/);
-assert.match(detail, /No fresh X10A sample/);
-assert.doesNotMatch(detail, /NOTE|WARNING|Minimum recorded at/);
-
-// With water_pressure trend advertised and expanded, checkupCardHtml renders the graph first and
-// only the Normal: reference below — zero prose or label clutter above the curve.
-context.S.stage = "dashboard";
-context.S.dashboardCard = "diagnosis";
-context.S.hist = new Map([["water_pressure", { at: Date.now(), gen: 1, dt: 300, unit: "bar", b0: 380, held: [], v: [15, 12, 9, 4, 8, 15] }]]);
+const pressureRing = { at: Date.now(), gen: 1, dt: 300, unit: "bar", b0: 380,
+  t0: 1791886800, held: [], v: [15, 12, 9, 4, 8, 15] };
+context.S.live = { wp: 1.5 };
+context.S.hist = new Map([["water_pressure", pressureRing]]);
 context.S.histPin = new Map();
 context.S.histHidden = new Map();
 context.S.histBusy = new Set();
 context.S.histRequests = new Map();
 context.S.histEpoch = 1;
-context.S.descOpen = new Set(["model:health_pressure"]);
 context.S.status = {
+  hp: { connected: true },
   diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
   history: { rows: [{ id: "water_pressure", label: "Water Pressure" }] },
   health: { status: "info", span_s: 86400, full_span: true, source_fresh: true, source_age_s: 1, checks: [pressure] },
 };
-detail = ui.detail(pressure);
-assert.match(detail, /^<div class="vdesc-p"><span class="vdesc-n">Normal:<\/span>/);
-assert.doesNotMatch(detail, /24-hour water-pressure curve|NOTE|WARNING|Low|Critical/);
-const pressureCard = ui.card(true);
-assert.ok(pressureCard.indexOf("data-chart") < pressureCard.indexOf("Normal:"),
-          "water_pressure chart must appear before Normal note in expanded diagnosis card");
-assert.match(pressureCard, /vhist-thresh low/);
-assert.match(pressureCard, /vhist-thresh crit/);
-assert.match(pressureCard, /vhist-line warn/);
-assert.match(pressureCard, /vhist-line err/);
-assert.match(pressureCard, /vhist-legend-low/);
-assert.match(pressureCard, /vhist-legend-crit/);
-assert.match(pressureCard, /Low · 0\.8 bar/);
+const pressureState = () => context.pressureDiagnosis();
+const pressureText = () => context.pressureFindingHtml(pressureState());
+const pressureExplanation = () => context.pressureExplanationHtml(pressureState());
+const pressurePlot = () => context.histHtml("water_pressure", "bar", "Water pressure", "", true, null,
+  { pressureDiagnosis: true, finding: pressureState()?.finding, findingExplanation: pressureExplanation() });
+const pressureInspector = pressurePlot();
+assert.doesNotMatch(pressureInspector, /vhist-pressure-explanation/);
+assert.doesNotMatch(pressureInspector, /vhist-head|vhist-range/);
+assert.match(context.histHtml("water_pressure", "bar", "Water pressure"), /vhist-head/);
+assert.match(pressureInspector, /vhist-pressure-finding warn[^>]*left:80\.00%/);
+assert.match(pressureInspector, /vhist-thresh low/);
+assert.match(pressureInspector, /vhist-thresh crit/);
+assert.match(pressureInspector, /vhist-line warn/);
+assert.match(pressureInspector, /vhist-line err/);
+const lowResult = /<div class="inspect-diagnosis-result"><span>Confirmed finding · X10A<\/span><strong class="num">0\.8\u00a0bar<\/strong><\/div>/;
+assert.match(pressureText(), lowResult);
+const lowFindingTime = new Date(pressure.min_unix_s * 1000).toLocaleString("en", { dateStyle: "short", timeStyle: "short" });
+assert.ok(pressureText().endsWith("<p>Low · " + escapeText(lowFindingTime) + "</p>"));
+assert.doesNotMatch(pressureText(), /60 consecutive seconds/);
+assert.match(pressureExplanation(), /^<div class="vdesc-n">X10A · How is pressure assessed\?<\/div><p>At or below 1\.0\u00a0bar for at least 60 consecutive seconds\.<\/p>$/);
+assert.doesNotMatch(ui.card(true), /model:health_pressure|1 note/);
+// A chart minimum elsewhere, a boundary, an unfinished bucket and an undated finding cannot get
+// a marker. The qualified finding stays visible below the related readings.
+for (const time of [1791887670, 1791888000, 1791888301, 1791886499, null]) {
+  context.S.status.health.checks = [{ ...pressure, min_unix_s: time }];
+  assert.match(pressureText(), lowResult);
+  if (time === null) assert.ok(pressureText().endsWith("<p>Low</p>"));
+  assert.doesNotMatch(pressurePlot(), /vhist-pressure-finding/);
+}
+context.S.status.health.checks = [pressure];
+for (const ring of [{ ...pressureRing, t0: null }, { ...pressureRing, held: [[4, 1]] },
+  { ...pressureRing, v: [15, 12, 9, 4, null, 15] }]) {
+  context.S.hist.set("water_pressure", ring);
+  assert.doesNotMatch(pressurePlot(), /vhist-pressure-finding/);
+}
+context.S.hist.set("water_pressure", pressureRing);
+const criticalPressure = { ...pressure, verdict: "warn", min_bar: 0.4, min_unix_s: 1791887670, confirmed_critical: true };
+context.S.status.health.checks = [criticalPressure];
+assert.equal(pressureState().finding.critical, true);
+assert.match(pressureText(), /<strong class="num">0\.4\u00a0bar<\/strong><\/div><p>Critical · /);
+assert.match(pressurePlot(), /vhist-pressure-finding err[^>]*left:60\.00%/);
+assert.match(pressureExplanation(), /At or below 0\.5\u00a0bar for at least 60 consecutive seconds/);
+context.S.status.history.modbus_rows = [{ id: "water_pressure" }];
+context.S.hist.set(vm.runInContext('histCacheKey("water_pressure", "modbus")', context), pressureRing);
+context.S.histPin.set("water_pressure", { bucket: 383, lanes: ["x10a", "modbus"], witnessed: true,
+  source: "", pressureInspector: true });
+assert.match(pressurePlot(), /vhist-pressure-explanation/);
+context.S.histHidden.set("water_pressure", new Set(["x10a"]));
+assert.doesNotMatch(pressurePlot(), /vhist-pressure-finding|vhist-pressure-explanation|data-pressure-assessment/);
+context.S.histPin.delete("water_pressure");
+context.S.histHidden.clear();
+context.S.hist.set("water_pressure", { ...pressureRing, t0: null });
+assert.doesNotMatch(pressurePlot(), /vhist-pressure-finding/);
+context.S.status.health.source_fresh = false;
+assert.equal(pressureState().current, null);
+assert.equal(pressureState().finding.critical, true);
+context.S.status.health.source_fresh = true;
+const unconfirmedPressure = { ...pressure, verdict: "collecting", confirmed_low: false, current_bar: 0.4 };
+context.S.status.health.checks = [unconfirmedPressure];
+context.S.live.wp = 0.4;
+assert.equal(pressureState().pending, true);
+assert.match(pressureText(), /Duration is still unknown/);
+context.S.live.mbFields = new Set(["wp"]);
+assert.equal(pressureState().current, null);
+assert.equal(pressureState().pending, false);
+assert.match(pressureText(), /No current assessment/);
+context.S.status.diagnostics.effective_source = "modbus";
+assert.equal(pressureState(), null);
+assert.match(pressureText(), /X10A pressure diagnosis unavailable/);
+context.S.status.diagnostics.effective_source = "x10a";
+context.S.status.health.checks = [criticalPressure];
+context.S.transportUnavailable = "status";
+assert.equal(pressureState(), null);
+context.S.transportUnavailable = null;
+context.S.status.diagnostics.enabled = false;
+assert.equal(pressureState(), null);
 context.S.status = null;
-context.S.descOpen = new Set();
+context.S.live = null;
 context.S.hist.clear();
 context.S.histPin.clear();
-delete context.S.dashboardCard;
 
 // Cleared and unreadable-current fault states must not promise automatic resolution or no action.
 detail = ui.detail({ id: "fault", verdict: "info", active: 0 });
@@ -1111,7 +1152,8 @@ context.S.status = { health: {
   checks: [dhw, pressure, cycling],
 } };
 let card = ui.card();
-assert.match(card, />3 notes<\/span>/);
+assert.match(card, />2 notes<\/span>/);
+assert.doesNotMatch(card, /model:health_pressure/);
 assert.doesNotMatch(card, /2\/4 checks|checks assessed/);
 assert.match(card, /class="vrow-val checkup-val warn"/);
 assert.doesNotMatch(card, /All clear|healthy|8 values|health score/);
@@ -1129,8 +1171,8 @@ for (const lang of locales) {
 }
 ui.setLang("en");
 context.S.status.health = { status: "warn", checks: [dhw, { ...pressure, verdict: "warn" }] };
-assert.match(ui.card(), />1 warning<\/span>/);
-assert.doesNotMatch(ui.card(), />1 note<\/span>/);
+assert.match(ui.card(), />1 note<\/span>/);
+assert.doesNotMatch(ui.card(), />1 warning<\/span>|section-badge err/);
 context.S.status.health = { status: "ok", checks: [{ id: "fault", verdict: "ok", active: 0 }] };
 assert.match(ui.card(), />No hint in assessed data<\/span>/);
 context.S.status.health = { status: "collecting", checks: [collecting] };
@@ -1261,7 +1303,7 @@ for (const lang of locales) {
     assert.ok(!ui.detail({ ...result, aborts: 0 }).includes(discarded),
       `${lang}/${verdict} must not invent discarded reading-gap evidence`);
   }
-  for (const c of [dhw, pressure, cycling, defrost, waiting, partialModeCycling,
+  for (const c of [dhw, cycling, defrost, waiting, partialModeCycling,
       { id: "fault", verdict: "info", active: 0 },
       { id: "fault", verdict: "info", active: null, reason: "source_stale" }]) {
     assert.doesNotMatch(ui.detail(c, false, { span_s: 3600, source_age_s: 900, source_fresh: false }),
@@ -1280,8 +1322,6 @@ assert.match(ui.detail(dhw), /Beispiel für eine Stunde: 200 l Wasser/);
 assert.match(ui.detail(dhw), /0,28 kWh Wärme/);
 assert.match(ui.detail(dhw), /0,09–0,11 kWh Strom/);
 assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursache noch Behebung/);
-assert.equal(ui.metric(pressure), "Niedrig · 0,8 bar");
-assert.match(ui.detail(pressure), /24-Stunden-Wasserdruckverlauf/);
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6,5 l/min");
 assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "");
 assert.equal(ui.value({ id: "fault", verdict: "warn", active: 1, latest: { code: "7H-01", duration_s: 120, age_s: 0 } }),
