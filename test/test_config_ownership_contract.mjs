@@ -102,9 +102,11 @@ assert.match(save,
 // The key spelling the writers use is the one config_load reads.
 assert.match(transaction, /CONFIG_KEY_SERVICE = "cfg";/, "the service entry key is on-flash format");
 assert.match(transaction, /CONFIG_KEY_LINK\s*=\s*"link";/, "the link entry key is on-flash format");
+assert.match(transaction, /CONFIG_KEY_GAS\s*=\s*"gas";/, "the gas entry key is on-flash format");
 // The tri-state read: "no entry" and "an entry this build cannot use" must stay distinguishable.
 assert.match(config, /nvs_read_blob\("cfg", raw\)/, "config_load must read the service entry");
 assert.match(config, /nvs_read_blob\("link", link_raw\)/, "config_load must read the link entry");
+assert.match(config, /nvs_read_blob\("gas", gas_raw\)/, "config_load must read the gas entry");
 assert.doesNotMatch(config, /nvs_get_blob\(/,
   "config_load must not collapse a missing entry and an unreadable one into one false");
 
@@ -147,6 +149,39 @@ assert.match(configHeader, /\[\[nodiscard\]\] ConfigSaveResult config_save_link\
 assert.match(config,
   /ConfigSaveResult config_save_if_current\(const Config& c\) \{\s*return save_whole\(c, \/\*owns_link=\*\/false, \/\*require_current=\*\/true\);\s*\}/,
   "a revision-bound Board save must own only the service blob and require an exact revision");
+
+// Gas comparison saves own only the separate "gas" key via config_save_gas_comparison_transaction.
+const gasTxStart = transaction.indexOf("ConfigSaveOutcome config_save_gas_comparison_transaction(");
+const gasTxEnd = transaction.indexOf("\n} // namespace daik", gasTxStart);
+assert.ok(gasTxStart >= 0 && gasTxEnd > gasTxStart,
+  "the separate gas-comparison save transaction must remain identifiable");
+const gasTx = transaction.slice(gasTxStart, gasTxEnd);
+const gasFit = at(gasTx, /gas_comparison_blob_strings_fit\(/);
+const gasEncode = at(gasTx, /gas_comparison_blob_serialize\(/, gasFit);
+const gasWrite = at(gasTx, /store\.write_blob\(CONFIG_KEY_GAS,/, gasEncode);
+const gasPublish = at(gasTx, /live\.tariff_currency\s*=\s*std::move\(blob\.tariff_currency\)/, gasWrite);
+assert.ok(gasFit >= 0 && gasEncode > gasFit && gasWrite > gasEncode && gasPublish > gasWrite,
+  "gas comparison transaction must validate and serialize before writing CONFIG_KEY_GAS and move after");
+assert.doesNotMatch(gasTx, /CONFIG_KEY_SERVICE|CONFIG_KEY_LINK/,
+  "gas comparison saves must not rewrite cfg or link blobs");
+const gasSaveStart = config.indexOf("bool config_save_gas_comparison(");
+const gasSaveEnd = config.indexOf("\nbool config_stored_blob_unreadable()", gasSaveStart);
+assert.ok(gasSaveStart >= 0 && gasSaveEnd > gasSaveStart,
+  "config_save_gas_comparison wrapper must remain identifiable");
+const gasSaveBody = config.slice(gasSaveStart, gasSaveEnd);
+assert.match(gasSaveBody,
+  /Lock\s+lk\(g_mtx\);\s*NvsBlobStore\s+store;\s*out\s*=\s*config_save_gas_comparison_transaction\(\s*g_cfg,/,
+  "config_save_gas_comparison must run its transaction under g_mtx using NvsBlobStore");
+assert.doesNotMatch(gasSaveBody, /s_cfg_blob_unreadable/,
+  "saving separate gas tariffs must not alter the cfg unreadable guard");
+const setGasStart = http.indexOf("static esp_err_t set_gas_comparison(");
+const setGasEnd = http.indexOf("\nstatic esp_err_t set_hp(", setGasStart);
+assert.ok(setGasStart >= 0 && setGasEnd > setGasStart, "/set_gas_comparison must remain identifiable");
+const setGasBody = http.slice(setGasStart, setGasEnd);
+assert.match(setGasBody, /config_save_gas_comparison\(/,
+  "/set_gas_comparison must persist exclusively through config_save_gas_comparison");
+assert.doesNotMatch(setGasBody, /config_save\(/,
+  "/set_gas_comparison must not rewrite the whole cfg/link service blobs");
 
 // 3. Exactly one owner of the link, and no reconciling save on its X10A path.
 const linkSaves = [...http.matchAll(/config_save_link\(/g)].length;

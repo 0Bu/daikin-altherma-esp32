@@ -26,6 +26,7 @@
 #include "logic/dhw_loss_persist.hpp"
 #include "logic/fault_persist.hpp"
 #include "logic/fault_trace.hpp"
+#include "logic/working_figure.hpp"
 #include "hydronic_observation_store.hpp"
 #include "stop_observation_store.hpp"
 
@@ -170,6 +171,11 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours     = null
                                     DiagnosticsSource           source    = DiagnosticsSource::X10a,
                                     logic::DefrostStartReport*  defrost   = nullptr,
                                     logic::DhwLossTimeline*     dhw_trace = nullptr);
+
+// Evaluate the 24 h working figure and gas-cost comparison for the requested source under one lock,
+// using the caller's Config snapshot without allocating.
+logic::WorkingFigureReport
+checkup_working_figure_status(const Config& c, DiagnosticsSource source = DiagnosticsSource::X10a);
 
 // Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
 // constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.

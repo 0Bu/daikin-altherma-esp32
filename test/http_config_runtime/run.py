@@ -49,10 +49,10 @@ def command(argv, success=True):
     return result
 
 
-def compile(source, tag, ota=OTA_SOURCE, include_main=None):
+def compile(source, tag, ota=OTA_SOURCE, include_main=None, extra_flags=()):
     binary = OUT / (tag + '.bin')
     extra = ['-I' + str(include_main)] if include_main else []
-    command([CXX, *extra, *FLAGS, '-MMD', '-MF', OUT / (tag + '.d'),
+    command([CXX, *extra, *extra_flags, *FLAGS, '-MMD', '-MF', OUT / (tag + '.d'),
              '-DCONFIG_HTTP_PRODUCTION_SOURCE="' + str(source) + '"',
              '-DOTA_HTTP_PRODUCTION_SOURCE="' + str(ota) + '"',
              HERE / 'fixture.cpp', OUT / 'cjson.o', *LINK, '-o', binary])
@@ -103,7 +103,7 @@ before = inputs([OUT / 'preflight.d', OUT / 'cjson.d'])
 source_text, ota_text = SOURCE.read_text(), OTA_SOURCE.read_text()
 binary = compile(SOURCE, 'production')
 baseline = command([binary])
-if 'PASS total=18 assertions=4549\n' not in baseline.stdout:
+if 'PASS total=19 assertions=4645\n' not in baseline.stdout:
     raise RuntimeError('the current behavioral group inventory changed\n' + baseline.stdout)
 print(baseline.stdout, end='')
 

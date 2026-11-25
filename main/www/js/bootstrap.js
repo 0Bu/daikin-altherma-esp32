@@ -68,6 +68,11 @@ function wire() {
     // very panel the user was reading. On touch screens the gesture may start on the tooltip strip
     // above the plot, so the whole graph is part of this guard rather than only [data-hist].
     if (e.target.closest(".vhist-graph, .checkup-fault-chart, .checkup-fault-table-wrap")) return;
+    const act = e.target.closest("[data-act]");
+    if (act) {
+      if (act.dataset.act === "gas-comparison") openGasComparison();
+      return;
+    }
     const desc = e.target.closest("[data-desc]");
     if (desc) toggleDesc(desc);
   });
@@ -664,6 +669,7 @@ function wireRestOfApp() {
     if (act.dataset.act === "board") openBoard();
     else if (act.dataset.act === "ota") checkFirmwareUpdate();
     else if (act.dataset.act === "circulation") openCirculation();
+    else if (act.dataset.act === "gas-comparison") openGasComparison();
   });
   $("settingsCards").addEventListener("change", (e) => {
     if (e.target.id === "e32Rx" || e.target.id === "e32Tx") onPinPick();
@@ -964,6 +970,100 @@ function wireRestOfApp() {
     }
     idle(); closeCirculation();
     toast(t("circ.deleted"), "ok");
+    await refreshStatus();
+  };
+
+  $("gcCancel").onclick = closeGasComparison;
+  $("gasComparisonBackdrop").onclick = closeGasComparison;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("gasComparisonModal").hidden) closeGasComparison();
+  });
+  for (const id of ["gcElecPrice", "gcGasPrice", "gcCurrency"])
+    $(id).addEventListener("input", () => {
+      $(id).classList.remove("invalid"); $("gcError").hidden = true;
+      updateGasComparisonPreview();
+    });
+  $("gcCurrency").addEventListener("change", () => {
+    $("gcCurrency").classList.remove("invalid"); $("gcError").hidden = true;
+  });
+  const gasComparisonInput = () => {
+    const input = gasComparisonFormPayload();
+    const bad = (id, msg) => {
+      $(id).classList.add("invalid");
+      $("gcError").textContent = msg;
+      $("gcError").hidden = false;
+      toast(msg, "err");
+      return null;
+    };
+    if (!Number.isFinite(input.elec_price) || input.elec_price < 0.0001 || input.elec_price > 99.9999)
+      return bad("gcElecPrice", t("wf.gas.err_price"));
+    if (!Number.isFinite(input.gas_price) || input.gas_price < 0.0001 || input.gas_price > 99.9999)
+      return bad("gcGasPrice", t("wf.gas.err_price"));
+    if (!WF_CURRENCIES.includes(input.currency))
+      return bad("gcCurrency", t("wf.gas.err_currency"));
+    return input;
+  };
+  const showGasComparisonRequestError = (msg) => {
+    const field = /currency/i.test(msg) ? "gcCurrency" :
+      /gas/i.test(msg) ? "gcGasPrice" : /elec|tariff|price/i.test(msg) ? "gcElecPrice" : null;
+    if (field) $(field).classList.add("invalid");
+    $("gcError").textContent = msg;
+    $("gcError").hidden = false;
+    toast(msg, "err");
+  };
+  const setGasComparisonActionBusy = (button, on, label) => {
+    setBusy(button, on, label);
+    if (on) {
+      $("gcBtn").disabled = true;
+      $("gcDeleteBtn").disabled = true;
+    } else {
+      $("gcBtn").disabled = false;
+      $("gcDeleteBtn").disabled = !S.status?.gas_comparison?.configured;
+    }
+  };
+  $("gasComparisonForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = gasComparisonInput();
+    if (!input) return;
+    if (S.busy) { toast(t("toast.applying"), "info"); return; }
+    S.busy = true;
+    setGasComparisonActionBusy("gcBtn", true, "btn.saving");
+    const idle = () => { S.busy = false; setGasComparisonActionBusy("gcBtn", false); };
+    let r;
+    try { r = await post("/set_gas_comparison", input); }
+    catch { idle(); showGasComparisonRequestError(t("toast.unreachable")); return; }
+    if (!r.ok) {
+      const msg = await errorOf(r, t("toast.rejected"));
+      idle(); showGasComparisonRequestError(msg); return;
+    }
+    const res = await r.json().catch(() => ({}));
+    idle(); closeGasComparison();
+    toast(t(res.saved === false ? "toast.no_changes" : "wf.gas.saved"), res.saved === false ? "info" : "ok");
+    await refreshStatus();
+  });
+  $("gcDeleteBtn").onclick = async () => {
+    if (S.busy) { toast(t("toast.applying"), "info"); return; }
+    if (!S.status?.gas_comparison?.configured) return;
+    const status = S.status;
+    S.busy = true;
+    setGasComparisonActionBusy("gcDeleteBtn", true, "wf.gas.deleting");
+    const idle = () => { S.busy = false; setGasComparisonActionBusy("gcDeleteBtn", false); };
+    let r;
+    try { r = await post("/set_gas_comparison", { clear: true }); }
+    catch { idle(); showGasComparisonRequestError(t("toast.unreachable")); return; }
+    if (!r.ok) {
+      const msg = await errorOf(r, t("toast.rejected"));
+      idle(); showGasComparisonRequestError(msg); return;
+    }
+    if (S.status === status && !S.imageReloading) {
+      status.gas_comparison = {
+        configured: false,
+        gas_efficiency_pct: status.gas_comparison?.gas_efficiency_pct || 88,
+        currency: status.gas_comparison?.currency || "EUR",
+      };
+    }
+    idle(); closeGasComparison();
+    toast(t("wf.gas.deleted"), "ok");
     await refreshStatus();
   };
 

@@ -129,7 +129,11 @@ const context = vm.createContext({
 const dashboard = readAppFragments(["dashboard.js"]);
 const retirement = dashboard.slice(dashboard.indexOf("function retireMountedHistory()"),
   dashboard.indexOf("function selectDashboardCard("));
-const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + retirement +
+const wfCurStart = dashboard.indexOf("const WF_CURRENCY_SYM =");
+const wfCurEnd = dashboard.indexOf("function wfMoney(");
+assert.ok(wfCurStart >= 0 && wfCurEnd > wfCurStart, "dashboard.js currency slice must remain non-empty");
+const wfCurrencies = dashboard.slice(wfCurStart, wfCurEnd);
+const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + retirement + wfCurrencies +
   readAppFragments(["app_state.js", "settings.js", "bootstrap.js"])
     .replace(/\nboot\(\);\s*$/, "\n");
 vm.runInContext(`${source}
@@ -143,8 +147,8 @@ vm.runInContext(`${source}
     S, MODALS, ROUTED_MODALS, TRANSIENT_MODALS, POPUP_ROUTES, notices, wire, initNavigation,
     applyRouteFromLocation, hydrateRoutedPopup, askOtaInstall, settleOtaDecision,
     otaFail, paintOtaAlert, dismissOtaAlert,
-    openWifi, openMqtt, openCirculation, openSyslog,
-    openNtp, openHomehub, openBoard, openBug,
+    openWifi, openMqtt, openCirculation, openGasComparison,
+    openSyslog, openNtp, openHomehub, openBoard, openBug,
     refreshStatus: productionRefreshStatus,
     realStatusReader: () => { refreshStatus = productionRefreshStatus; },
   };`, context, { filename: "main/www/app.sources" });
@@ -159,6 +163,7 @@ ui.S.status = {
     power_path: "apower", timestamp_path: "aenergy.minute_ts",
     max_age_s: 120, on_threshold_w: 3.0, off_threshold_w: 1.0, confirm_s: 60,
   },
+  gas_comparison: { configured: false, gas_efficiency_pct: 88, currency: "EUR" },
   syslog: {},
   ntp: { server: "pool.ntp.org" },
   modbus: { host: "", port: 502, unit_id: 1 },
@@ -187,6 +192,7 @@ const cases = [
   { name: "Wi-Fi", modal: "wifiModal", open: "openWifi", cancel: "wfCancel", backdrop: "wifiBackdrop", form: "wifiForm", url: "/set_wifi" },
   { name: "MQTT", modal: "mqttModal", open: "openMqtt", cancel: "mqCancel", backdrop: "mqttBackdrop", form: "mqttForm", url: "/set_mqtt" },
   { name: "Circulation pump", modal: "circulationModal", open: "openCirculation", cancel: "circCancel", backdrop: "circulationBackdrop", form: "circulationForm", url: "/set_circulation", customSave: true },
+  { name: "Gas comparison", modal: "gasComparisonModal", open: "openGasComparison", cancel: "gcCancel", backdrop: "gasComparisonBackdrop", form: "gasComparisonForm", url: "/set_gas_comparison", customSave: true },
   { name: "Syslog", modal: "syslogModal", open: "openSyslog", cancel: "slCancel", backdrop: "syslogBackdrop", form: "syslogForm", url: "/set_syslog" },
   { name: "NTP", modal: "ntpModal", open: "openNtp", cancel: "ntpCancel", backdrop: "ntpBackdrop", form: "ntpForm", url: "/set_ntp" },
   { name: "HomeHub", modal: "homehubModal", open: "openHomehub", cancel: "hhCancel", backdrop: "homehubBackdrop", form: "homehubForm", url: "/set_hp", customSave: true },
@@ -357,6 +363,7 @@ const delegatedTarget = (selector, key, value) => ({
 for (const entry of [
   ["settingsCards", "[data-act]", "act", "board", "boardModal"],
   ["settingsCards", "[data-act]", "act", "circulation", "circulationModal"],
+  ["settingsCards", "[data-act]", "act", "gas-comparison", "gasComparisonModal"],
   ["connTile", "[data-edit]", "edit", "wifi", "wifiModal"],
   ["connTile", "[data-edit]", "edit", "mqtt", "mqttModal"],
   ["connTile", "[data-edit]", "edit", "syslog", "syslogModal"],
@@ -369,6 +376,15 @@ for (const entry of [
   assert.equal(document.getElementById(modal).hidden, false, `${value}: visible entry action must open`);
   assert.equal(location.hash, `#settings/${ui.POPUP_ROUTES[modal]}`,
     `${value}: visible entry action must add its addressable popup route`);
+}
+for (const [value, modal] of [
+  ["gas-comparison", "gasComparisonModal"],
+]) {
+  loadRoute("");
+  await document.getElementById("valueGroups").fire("click", { target: delegatedTarget("[data-act]", "act", value) });
+  assert.equal(document.getElementById(modal).hidden, false, `${value}: dashboard action must open`);
+  assert.equal(location.hash, `#settings/${ui.POPUP_ROUTES[modal]}`,
+    `${value}: dashboard action must add its addressable popup route`);
 }
 loadRoute("#settings");
 await document.getElementById("footBug").onclick();
@@ -587,6 +603,10 @@ const configureValid = (item) => {
     document.getElementById("circOn").value = "3.0";
     document.getElementById("circOff").value = "1.0";
     document.getElementById("circConfirm").value = "60";
+  } else if (item.modal === "gasComparisonModal") {
+    document.getElementById("gcElecPrice").value = "0.3200";
+    document.getElementById("gcGasPrice").value = "0.1050";
+    document.getElementById("gcCurrency").value = "EUR";
   }
 };
 
@@ -610,6 +630,9 @@ for (const item of cases.filter((entry) => entry.form)) {
       "circulation-source persistence must present the exact live proof");
     assert.equal(fetchState.calls[0]?.body?.power_path, "apower");
     assert.equal(fetchState.calls[0]?.body?.timestamp_path, "aenergy.minute_ts");
+  } else if (item.modal === "gasComparisonModal") {
+    assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_gas_comparison"],
+      "gas comparison Save must persist directly");
   }
 
   fetchState.mode = "reject";
@@ -771,6 +794,7 @@ assert.equal(ui.S.busy, false, "a failed ENV III probe must release the shared S
 const invalid = [
   { modal: "wifiModal", form: "wifiForm", set() { document.getElementById("wfSSID").value = ""; } },
   { modal: "mqttModal", form: "mqttForm", set() { document.getElementById("mqBroker").value = "bad uri"; } },
+  { modal: "gasComparisonModal", form: "gasComparisonForm", set() { document.getElementById("gcElecPrice").value = "0.32"; document.getElementById("gcGasPrice").value = "0.10"; document.getElementById("gcCurrency").value = "CAD"; } },
   { modal: "syslogModal", form: "syslogForm", set() { document.getElementById("slHost").value = "host:not-a-port"; } },
   { modal: "homehubModal", form: "homehubForm", set() { document.getElementById("hhPort").value = "70000"; } },
 ];

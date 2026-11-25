@@ -32,6 +32,7 @@
 #include "logic/json.hpp"       // json_append_escaped — the ONE encoder every payload uses
 #include "logic/mqtt_base.hpp"  // mqtt_base_valid — the installation base topic's rules, host-tested
 #include "logic/mqtt_uri.hpp"   // parse_mqtt_uri — host/port/TLS split, host-tested
+#include "logic/gas_comparison.hpp"
 #include "hp_modbus.hpp"        // mb_reconfigure — start/stop the second, independent stack
 #include "mqtt_ha.hpp"          // mqtt_reference_reconfigure — re-evaluate its master-gated binding
 #include "net.hpp"              // net_eth_reserved_pins — the pads a detected W5500 is clocking
@@ -759,6 +760,75 @@ static esp_err_t set_circulation(httpd_req_t* req) {
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }
 
+[[gnu::noinline]] static bool parse_tariff_price_tm(double val, uint32_t& out_tm) {
+    if (!std::isfinite(val) || val < 0.0 ||
+        val > static_cast<double>(TARIFF_PRICE_MAX_TENTH_MILL) / 10000.0 + 1e-6)
+        return false;
+    const long long scaled = static_cast<long long>(val * 10000.0 + 0.5);
+    if (scaled < 0 || scaled > static_cast<long long>(TARIFF_PRICE_MAX_TENTH_MILL)) return false;
+    out_tm = static_cast<uint32_t>(scaled);
+    return true;
+}
+
+[[gnu::noinline]] static esp_err_t send_saved_json(httpd_req_t* req, bool saved) {
+    return http_send_json(req, saved ? "{\"ok\":true,\"saved\":true,\"reboot\":false}"
+                                     : "{\"ok\":true,\"saved\":false,\"reboot\":false}");
+}
+
+static esp_err_t set_gas_comparison(httpd_req_t* req) {
+    const char* parse_error = nullptr;
+    JsonGuard   j(read_config_document(req, 512, parse_error));
+    if (!j) return send_bad_req(req, parse_error);
+    const char* error =
+        config_request_field_error(j, HttpConfigFieldType::Number, {"elec_price", "gas_price"});
+    if (!error) error = config_request_field_error(j, HttpConfigFieldType::String, {"currency"});
+    if (!error) error = config_request_field_error(j, HttpConfigFieldType::Boolean, {"clear"});
+    if (error) return send_bad_req(req, error);
+
+    const cJSON* const elec_item = cJSON_GetObjectItem(j, "elec_price");
+    const cJSON* const gas_item  = cJSON_GetObjectItem(j, "gas_price");
+    const cJSON* const cur_item  = cJSON_GetObjectItem(j, "currency");
+    const bool         clear     = jb(j, "clear", false);
+    const double       elec_val  = elec_item ? elec_item->valuedouble : 0.0;
+    const double       gas_val   = gas_item ? gas_item->valuedouble : 0.0;
+    const bool         has_elec  = elec_item != nullptr;
+    const bool         has_gas   = gas_item != nullptr;
+    const bool         has_cur   = cur_item != nullptr;
+    std::string        currency  = has_cur ? js(j, "currency") : std::string{};
+    j.reset();
+
+    Config   c       = config();
+    uint32_t elec_tm = c.elec_price_tenth_mill;
+    uint32_t gas_tm  = c.gas_price_tenth_mill;
+    if (clear) {
+        elec_tm = 0;
+        gas_tm  = 0;
+    } else {
+        if ((has_elec && !parse_tariff_price_tm(elec_val, elec_tm)) ||
+            (has_gas && !parse_tariff_price_tm(gas_val, gas_tm)))
+            return send_bad_req(req, "Tariff price out of range");
+    }
+    if (has_cur) {
+        for (char& ch : currency) {
+            if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+        }
+    }
+    const std::string_view cur_sv =
+        has_cur ? std::string_view(currency) : std::string_view(c.tariff_currency);
+    const char* why = nullptr;
+    if (!gas_comparison_config_valid(elec_tm, gas_tm, cur_sv, &why))
+        return send_bad_req(req, why ? why : "invalid gas comparison config");
+
+    if (c.elec_price_tenth_mill == elec_tm && c.gas_price_tenth_mill == gas_tm &&
+        c.tariff_currency == cur_sv) {
+        return send_saved_json(req, false);
+    }
+    const std::string next_currency = has_cur ? std::move(currency) : c.tariff_currency;
+    if (!config_save_gas_comparison(elec_tm, gas_tm, next_currency)) return send_write_failed(req);
+    diag_printf("tariff: gas comparison %s\n", elec_tm == 0 ? "cleared" : "saved");
+    return send_saved_json(req, true);
+}
+
 // An X10A /set_hp derives its model fields from one config() snapshot, and a detection commit can
 // land between that snapshot and the save; config_save_link then refuses the save as Stale. One
 // sweep commits at most a link and a model back to back, so a fresh snapshot settles within a few
@@ -1410,6 +1480,7 @@ void http_register_config(httpd_handle_t s, HttpSurface surface) {
     http_register_on(s, surface, "/set_mqtt", HTTP_POST, set_mqtt);
     http_register_on(s, surface, "/test_circulation", HTTP_POST, test_circulation);
     http_register_on(s, surface, "/set_circulation", HTTP_POST, set_circulation);
+    http_register_on(s, surface, "/set_gas_comparison", HTTP_POST, set_gas_comparison);
     http_register_on(s, surface, "/set_syslog", HTTP_POST, set_syslog);
     http_register_on(s, surface, "/set_ntp", HTTP_POST, set_ntp);
     http_register_on(s, surface, "/set_hp", HTTP_POST, set_hp);

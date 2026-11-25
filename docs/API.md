@@ -7,7 +7,7 @@ privacy; [ARCHITECTURE.md](ARCHITECTURE.md) describes ownership. HTTP implementa
 
 ## Surface and errors
 
-The trusted-LAN route count of 38 includes assets, aliases and the catch-all. The open setup AP
+The trusted-LAN route count of 39 includes assets, aliases and the catch-all. The open setup AP
 serves only provisioning (`/`, `/index.html`, `/favicon.ico`, `/set_wifi` and captive GET fallback).
 A withheld GET serves the setup page; a withheld POST is 404. `/scan`, live data, configuration other
 than WiFi, OTA and MCP are not available on that AP.
@@ -132,6 +132,19 @@ retained, messages, errors, rejections, optional error
 `state` is confirmed `on`, `off` or `unknown`, using hysteresis and the confirmation window. A single
 power spike or a reading in the hysteresis band is not proof of off/on. This independently measured
 DHW circulation witness runs only while plant diagnostics is enabled.
+
+`gas_comparison` fields (always emitted at top level):
+
+```text
+configured, elec_price, gas_price, gas_efficiency_pct, currency, break_even_az
+```
+
+`configured` is `true` when both `elec_price` and `gas_price` are positive (half-set tariffs are
+rejected); when unconfigured, `elec_price`, `gas_price` and `break_even_az` are `null`.
+`gas_efficiency_pct` is a read-only `88` (fixed `88%` gross calorific value $H_s$ modern
+condensing gas boiler baseline), `currency` defaults to `"EUR"` within the curated 12-code
+allowlist (`EUR`, `CHF`, `GBP`, `USD`, `PLN`, `CZK`, `SEK`, `NOK`, `DKK`, `UAH`, `JPY`, `CNY`),
+and `break_even_az = (elec_price * 0.88) / gas_price`.
 
 ### History and 24-hour checks
 
@@ -563,6 +576,38 @@ Source changes and interruptions clear the exposed counts alongside the existing
 selection and withheld pairings. This is neither a controlled service test nor proof of refrigerant
 charge or valve position.
 
+### Performance factor observation
+
+`working_figure` is emitted at the top level of `GET /status` when `diagnostics.enabled` is true and
+the effective display source is ready — either `diagnostics.effective_source` is `"x10a"` with a
+valid boot profile fingerprint (`fp_valid`), or `diagnostics.effective_source` is `"modbus"` with a
+configured Modbus target (`modbus_diag_avail`); otherwise it is omitted. It is an observation
+(`kind:"observation"`), not a ninth verdict in `health`.
+
+```text
+kind, supported, state, tariffs_configured, full_window, source_fresh, is_estimate,
+is_compressor_only, pel_source, span_s, observed_s, unpairable_s, defrost_s, buh_s,
+bsh_excluded_s, cooling_excluded_s, coverage_pct, neutral_band_pct, heat_kwh, elec_kwh, az,
+gas_efficiency_pct, currency, elec_price, gas_price, break_even_az, gas_equiv_kwh, cost_wp,
+cost_gas, cost_delta, cost_delta_pct, outdoor_mean_c, outdoor_min_c, limited_buh, unpaired_buh,
+ct_unwired
+```
+
+`state` is one of `unsupported`, `collecting`, `standby`, `partial`, `limited`, `cheaper`,
+`similar`, `more_expensive`, or `measured`. `pel_source` is `none`, `x10a_ct`, `x10a_inv`, or
+`modbus` (`is_estimate` is always `true` and `neutral_band_pct` is uniformly `20` across all
+supported onboard X10A and Modbus sources). Native Altherma 4 Modbus reports `supported:false` and
+`state:"unsupported"` (`buh_s` stays `0` on HomeHub Modbus, while `limited_buh` flags active-flow
+post-BUH rises `41 − 40 > 1.5 K`). `heat_kwh` and `elec_kwh`
+are `null` when `!supported`; `az` is `null` in `unsupported`, `collecting`, and `standby`.
+Tariff fields (`elec_price`, `gas_price`, `break_even_az`) are `null` unless `tariffs_configured`;
+`gas_efficiency_pct` is always `88` (see `gas_comparison` above), and `gas_equiv_kwh`, `cost_wp`,
+`cost_gas`, `cost_delta` (`cost_wp - cost_gas`, negative = heat pump cheaper), and
+`cost_delta_pct` are `null` unless `supported`, past `collecting`/`standby`, and
+`tariffs_configured`. `outdoor_mean_c` and `outdoor_min_c` are `null` when no running-compressor
+outdoor sample was recorded. See [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#working-figure-observation)
+for thresholds, source selection and exclusions.
+
 ## GET /values
 
 The response object has a `values` (X10A) array and a separate `modbus` array only while the staged
@@ -693,12 +738,16 @@ the link blob; it does not migrate or write the service blob.
 | NVS item | Purpose |
 |---|---|
 | `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, circulation mapping, ENV III, diagnostics consent/generation/source |
+| `gas` | Standalone gas-comparison tariff blob (`DKG1` v1: `elec_price`, `gas_price`, `currency`), written only by `/set_gas_comparison` so `cfg` remains v21 across downgrades or rollbacks |
 | `link` | Complete RX/TX/protocol/observation-identity cache; failed write preserves the previous complete entry. A rejected entry is reported in `/diag`; only detection (cached pair, build default, their swaps) or `/set_hp` rewrites it |
 | Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
 | `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; which boot or uptime clears which is in [ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) |
 
 The service layout remains v21. The preferred plant-diagnostics display source byte uses
 `0` for X10A and `1` for Modbus, with X10A as the default for older records.
+Gas-comparison tariffs (`elec_price`, `gas_price`, `currency`) live in their own `gas` NVS blob
+(`DKG1` v1) so `cfg` stays v21 and downgrading or rolling back to a pre-gas-comparison v21 build
+keeps WiFi, MQTT and HomeHub configuration intact.
 Retired room-input and forecast slots keep their positions for compatibility with previous firmware.
 The next successful service configuration save writes empty room mappings and default forecast values.
 Downgrading to earlier firmware that supports v21 preserves access to the record and requires
@@ -791,7 +840,7 @@ the revision has changed. Both refusals leave the submitted settings unwritten.
 applies live (at least one field is required; invalid `source` returns `400`). The first opt-in
 (`enabled:true` while `diagnostics_generation == 0`) draws a durable non-zero generation. Setting
 `enabled:false` pauses new checks and circulation collection. Existing X10A and Modbus diagnostic
-stores (checkup/DHW/cycling/stop-context) and circulation history age out after 24 hours.
+stores (checkup/DHW/cycling/stop-context/energy) and circulation history age out after 24 hours.
 Re-enabling resumes within the same generation without bridging the paused interval. Switching
 `source` between `"x10a"` and `"modbus"` updates the displayed card source without advancing
 `diagnostics_generation` or clearing collected X10A or Modbus history. In-flight diagnosis samples captured before a transition are
@@ -809,6 +858,16 @@ clock rollback cannot extend it. Absent, expired or invalid proof is 409. Empty 
 proof. Save applies live; cosmetic renaming does not retire evidence. Unchanged mapping returns
 `saved:false,reboot:false`. Numeric bounds/decoder policy are in `logic/circulation_source.hpp`.
 
+`POST /set_gas_comparison` accepts optional `elec_price` (number, `0`–`99.9999`), `gas_price`
+(number, `0`–`99.9999`), `currency` (normalized to uppercase against the `gas_comparison`
+allowlist above; default `"EUR"`), and `clear` (boolean; resets both prices to `0` while keeping
+`currency` unless also updated). Any legacy `gas_efficiency_pct` key is ignored without changing
+the fixed `88%` ($H_s$) baseline. Prices quantize to `1e-4` currency/kWh; either both prices
+must be positive or both `0` (half-set tariffs return `400`). Missing fields retain saved values;
+unchanged config returns `{ok:true,saved:false,reboot:false}`. Saves apply live without reboot
+(`reboot:false`) and immediately recalculate `gas_comparison` and the existing 24 h `working_figure`
+buckets at read time without clearing energy history. Validation and currency rules live in
+`logic/gas_comparison.hpp`.
 ## OTA operation contract
 
 Agent-run writes follow [MAINTENANCE.md](MAINTENANCE.md#local-dev-ota-tests) for an explicitly

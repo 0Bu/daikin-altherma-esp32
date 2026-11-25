@@ -8,7 +8,7 @@ const parsers = [...config.matchAll(/json_parse_document\(std::string_view\(body
 const consumers = [...config.matchAll(/JsonGuard\s+j\(read_config_document\(req,\s*\d+,\s*parse_error\)\);/g)];
 assert.equal(readers.length, 1, "configuration ingress must share the byte-counted reader");
 assert.equal(parsers.length, 1, "the shared parser must include embedded NULs in its bounded input");
-assert.equal(consumers.length, 12, "all 12 current JSON config bodies must own the shared parsed document");
+assert.equal(consumers.length, 13, "all 13 current JSON config bodies must own the shared parsed document");
 assert.match(config, /if \(length < 0\)\s*\{\s*error = "bad body";\s*return nullptr;/,
   "a failed bounded read must never reach the parser");
 const guard = read("main/json_guard.hpp");

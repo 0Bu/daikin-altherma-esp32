@@ -652,6 +652,41 @@ assert.match(historySource, /compare_exchange_weak[\s\S]*?memory_order_release/)
 assert.doesNotMatch(read("main/mqtt_ha.hpp"), /\bcirculation_source_status\(\);/,
   "circulation status must not regain a Config-copying no-argument overload");
 
+// Checkup accumulation never copies Config directly via config() and enforces strict separation
+// between HomeHub Modbus and X10A electrical power without falling back from Modbus to X10A.
+{
+  const checkupCode = checkup.replace(/\/\/[^\n]*/g, "");
+  assert.doesNotMatch(checkupCode, /\bconfig\s*\(/,
+    "main/checkup.cpp must never call config() directly");
+  const workingFigure = read("main/logic/working_figure.hpp");
+  const wfStep = workingFigure.slice(workingFigure.indexOf("working_figure_step("),
+    workingFigure.indexOf("struct WorkingFigureTariffs"));
+  const wfEval = workingFigure.slice(workingFigure.indexOf("working_figure_evaluate("));
+  assert.match(wfStep,
+    /if\s*\(cov\.is_modbus\)\s*\{\s*if\s*\(!cov\.has_modbus_power\) return;\s*if\s*\(!in\.modbus_power_known[\s\S]{0,220}?acc\.pending\.unpairable_s\s*=[\s\S]{0,60}?return;\s*\}/,
+    "Modbus power meter must reject missing/invalid watts as unpairable instead of falling back to X10A");
+  assert.match(wfEval,
+    /if\s*\(cov\.is_modbus\)\s*\{\s*r\.pel_kind\s*=\s*EnergyPelKind::Modbus;\s*\}\s*else\s+if\s*\(cov\.ct_rows\s*>\s*0/,
+    "evaluation pel_kind must never fall back to X10A on Modbus profiles");
+  assert.match(checkup,
+    /uint32_t\s+effective_pel_source_fp_locked\(const CheckupSlot&\s+slot\)\s*\{\s*if\s*\(slot\.is_modbus\) return logic::checkup_modbus_pel_source_fingerprint\(slot\.modbus_profile\);/,
+    "Modbus and X10A electrical identities must dispatch per slot without cross-fallback");
+}
+
+// /status always exposes gas_comparison and emits working_figure only when diagnostics are
+// enabled on a confirmed X10A or configured Modbus source.
+{
+  const appendStatusFn = status.slice(status.indexOf("static void append_status_json("));
+  assert.match(appendStatusFn,
+    /append_status_gas_comparison_json\(j,\s*c\);/,
+    "/status must always emit gas_comparison even when diagnostics are off");
+  assert.match(appendStatusFn,
+    /if\s*\(c\.diagnostics_enabled\s*&&\s*\(\(diag_effective\s*==\s*DiagnosticsSource::X10a\s*&&\s*c\.fp_valid\)\s*\|\|\s*\(diag_effective\s*==\s*DiagnosticsSource::Modbus\s*&&\s*modbus_diag_avail\)\)\)\s*\{[\s\S]{0,180}?append_status_working_figure_json\(j,\s*wf\);\s*\}/,
+    "/status must emit working_figure only when diagnostics are enabled on a confirmed X10A or configured Modbus source");
+  assert.equal((appendStatusFn.match(/\bappend_status_working_figure_json\(/g) || []).length, 1,
+    "working_figure must have a single guarded serialization site in append_status_json");
+}
+
 // Dual-source fault timeline isolation and redaction contracts:
 // X10A and Modbus maintain separate fault traces/resets, shutdown saves respect fault_forgotten,
 // and ?redact=1 omits timeline coordinates plus wall-clock start/end timestamps.

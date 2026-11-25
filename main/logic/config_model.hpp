@@ -12,6 +12,7 @@
 #include "ota_channel.hpp"  // OtaChannel — which published feed this device follows
 #include "modbus.hpp"       // MODBUS_TCP_PORT / MODBUS_DEFAULT_UNIT — the mb_* field defaults
 #include "circulation_source.hpp"
+#include "gas_comparison.hpp"
 #include "ui_lang.hpp"      // UiLang — the web UI's manual language override (else browser-detected)
 
 namespace daik {
@@ -139,7 +140,12 @@ struct Config {
     bool              diagnostics_enabled    = false;
     uint32_t    diagnostics_generation = 0;
     DiagnosticsSource diagnostics_source     = DiagnosticsSource::X10a;
-    std::string syslog_host;       // "" = Syslog disabled
+    // Gas-cost comparison tariffs. Price units are 1e-4 currency/kWh (`tenth_mill`); 0 disables
+    // cost comparison while keeping the measured 24 h working figure active.
+    uint32_t    elec_price_tenth_mill = 0;
+    uint32_t    gas_price_tenth_mill  = 0;
+    std::string tariff_currency       = "EUR";
+    std::string syslog_host; // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled
     // state, it just idles until a route to the server exists — so an empty save is read by
@@ -733,6 +739,12 @@ inline bool validate(const Config& c, std::string& reason, int max_gpio = 48, bo
                                          c.circulation_off_tenths_w,
                                          c.circulation_confirm_s, &circulation_why)) {
         reason = circulation_why ? circulation_why : "invalid circulation source config";
+        return false;
+    }
+    const char* gas_why = nullptr;
+    if (!gas_comparison_config_valid(c.elec_price_tenth_mill, c.gas_price_tenth_mill,
+                                     c.tariff_currency, &gas_why)) {
+        reason = gas_why ? gas_why : "invalid gas comparison config";
         return false;
     }
     return true;

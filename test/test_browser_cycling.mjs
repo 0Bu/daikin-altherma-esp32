@@ -464,9 +464,10 @@ export async function assertCyclingChart(page, server, context) {
         await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left",
           buttons: 0, clickCount: 1, ...beforeClose });
       }
-      // Let the collapse settle before tap calculates a hit point. On a short viewport the
-      // collapsing panel can scroll the row away between native press and release.
+      // Let the collapse and .vdesc's 220 ms height transition settle before tap calculates a hit
+      // point so bottom-of-page scroll clamping cannot shift ROW between press and release.
       await page.waitFor("!S.clickHold");
+      await page.waitFor(`(() => { const h = document.querySelector(${JSON.stringify(ROW)})?.closest(".vitem")?.querySelector(".vdesc-inner")?.getBoundingClientRect().height; return typeof h === "number" && h < 1; })()`);
       assert.equal(await evaluate(page, sel => document.querySelector(sel).getAttribute("aria-expanded"), ROW),
         "false", context + ": releasing the old pointer cannot reopen the collapsed disclosure");
       await page.waitFor(`(() => {

@@ -256,11 +256,11 @@ void reject_headers(const char* key, std::string value) {
 
 namespace daik {
 OtaChannel config_ota_channel() { return fixture::dev ? OtaChannel::Dev : OtaChannel::Release; }
-bool     provisioning_ap_active() { return fixture::ap; }
-bool     ota_busy() { return fixture::busy; }
-bool     ota_download_active() { return fixture::download; }
-size_t   heap_largest_internal_block() { return fixture::largest; }
-WifiInfo wifi_info() {
+bool       provisioning_ap_active() { return fixture::ap; }
+bool       ota_busy() { return fixture::busy; }
+bool       ota_download_active() { return fixture::download; }
+size_t     heap_largest_internal_block() { return fixture::largest; }
+WifiInfo   wifi_info() {
     WifiInfo out{};
     std::strcpy(out.ip, "192.0.2.10");
     return out;
@@ -362,6 +362,7 @@ int main(int argc, char** argv) {
                                                                 {"/set_mqtt", 1},
                                                                 {"/test_circulation", 1},
                                                                 {"/set_circulation", 1},
+                                                                {"/set_gas_comparison", 1},
                                                                 {"/set_syslog", 1},
                                                                 {"/set_ntp", 1},
                                                                 {"/set_hp", 1},
@@ -387,7 +388,7 @@ int main(int argc, char** argv) {
             reset();
             start(ap_mode);
             const auto& expected = ap_mode ? setup : lan;
-            check(sdk::routes.size() == expected.size(), "AP5/LAN38 exact route count changed");
+            check(sdk::routes.size() == expected.size(), "AP5/LAN39 exact route count changed");
             for (size_t i = 0; i < expected.size(); ++i) {
                 check(sdk::routes[i].uri == std::string(expected[i].first) &&
                           sdk::routes[i].method == expected[i].second,
@@ -396,7 +397,7 @@ int main(int argc, char** argv) {
                           sdk::routes[i].user_ctx != nullptr,
                       "route bypassed production trampoline");
             }
-            check(sdk::config.max_uri_handlers == 38 && sdk::config.stack_size == 10240 &&
+            check(sdk::config.max_uri_handlers == 39 && sdk::config.stack_size == 10240 &&
                       sdk::config.lru_purge_enable &&
                       sdk::config.uri_match_fn == httpd_uri_match_wildcard,
                   "server capacity/stack/LRU/wildcard configuration changed");
@@ -410,18 +411,18 @@ int main(int argc, char** argv) {
                   sdk::log.find("server start failed") != std::string::npos,
               "server failure must log and stop registration");
         reset();
-        sdk::fail_registration = 37;
+        sdk::fail_registration = 38;
         start();
-        check(sdk::routes.size() == 37 &&
+        check(sdk::routes.size() == 38 &&
                   sdk::log.find("route /* not registered: ESP_ERR_HTTPD_HANDLERS_FULL") !=
                       std::string::npos,
               "catch-all capacity failure went silent");
         reset();
         start();
-        sdk::config.max_uri_handlers = 38;
+        sdk::config.max_uri_handlers = 39;
         daik::http_register(daik::http_server_handle(), "/overflow", HTTP_GET,
                             [](httpd_req_t*) { return ESP_OK; });
-        check(sdk::routes.size() == 38 &&
+        check(sdk::routes.size() == 39 &&
                   sdk::log.find("route /overflow not registered") != std::string::npos,
               "capacity failure changed registration or went silent");
     });

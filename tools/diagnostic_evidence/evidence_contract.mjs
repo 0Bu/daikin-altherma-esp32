@@ -19,7 +19,8 @@ export const OBSERVATION_SOURCE_FILES = Object.freeze([
   "main/hydronic_observation_store.hpp", "main/hydronic_observation_store.cpp",
   "main/history.cpp", "main/logic/defrost_start.hpp", "main/logic/cycling_run_context.hpp",
   "main/logic/cycling_run_persist.hpp", "main/logic/dhw_loss_trace.hpp",
-  "main/logic/dhw_loss_persist.hpp",
+  "main/logic/dhw_loss_persist.hpp", "main/logic/working_figure.hpp",
+  "main/logic/gas_comparison.hpp",
 ]);
 
 function occurrences(text, needle) {

@@ -27,6 +27,7 @@
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -74,6 +75,7 @@ struct PersistedCheckup {
     uint32_t crc;
     logic::CheckupRing  ring;
     logic::DhwLossRing  dhw;
+    logic::EnergyRing   energy;
     // One-shot checkpoint written by esp_restart's shutdown handler.  It has its own seal because
     // ring integrity must remain usable to validate the handoff while this open state is changing.
     // checkup_start consumes it before any producer exists and retires all completed RAM hours.
@@ -108,9 +110,15 @@ __NOINIT_ATTR PersistStore s_store;
 __NOINIT_ATTR PersistStore s_mb_store;
 
 // Copy a read-only reset template without constructing the expanded state on a caller's stack.
-constexpr logic::DhwLossState  kFreshDhwLossState{};
-constexpr logic::DhwLossBucket kEmptyDhwLossBucket{};
-constexpr int64_t              kNoCommitUs = INT64_MIN;
+constexpr logic::DhwLossState      kFreshDhwLossState{};
+constexpr logic::DhwLossBucket     kEmptyDhwLossBucket{};
+constexpr logic::EnergyBucket      kEmptyEnergyBucket{};
+constexpr logic::EnergyAccumulator kEmptyEnergyAccumulator{};
+constexpr logic::EnergyCoverage    kEmptyEnergyCoverage{};
+constexpr logic::EnergyCoverage    kHomeHubEnergyCoverage =
+    logic::energy_modbus_coverage(ModbusProfile::HomeHub);
+constexpr logic::EnergyRing kEmptyEnergyRing{};
+constexpr int64_t           kNoCommitUs = INT64_MIN;
 
 // One independent source slot (X10A vs HomeHub Modbus). The two sources keep completely separate
 // 24h rings, cycling traces, restore states, and flash/handoff scopes; they share only the checkup
@@ -162,23 +170,32 @@ struct CheckupSlot {
     std::atomic<uint32_t>          fault_reset_token{0};
     std::atomic<uint32_t>          fault_reset_acked{0};
     // Capability of the CURRENT confirmed profile.
-    logic::CheckupCoverage cov{};
-    daik::FaultClass       fault_now      = daik::FaultClass::Unknown;
-    int64_t                source_last_us = -1; // actual source rows, never an empty gap callback
-    int                    pressure_now   = -1;
-    std::atomic<bool>      reset_requested{false};
-    std::atomic<bool>      dhw_reset_requested{false};
+    ModbusProfile            modbus_profile = ModbusProfile::Auto;
+    logic::CheckupCoverage   cov{};
+    logic::EnergyCoverage    energy_cov{};
+    logic::EnergyAccumulator energy_acc{};
+    daik::FaultClass         fault_now      = daik::FaultClass::Unknown;
+    int64_t                  source_last_us = -1; // actual source rows, never an empty gap callback
+    int                      pressure_now   = -1;
+    uint32_t                 pel_source_fp  = 0;
+    std::atomic<bool>        reset_requested{false};
+    std::atomic<bool>        dhw_reset_requested{false};
+    std::atomic<bool>        energy_reset_requested{false};
     // End of the newest COMPLETED bucket in this boot's monotonic clock.
     int64_t last_commit_us = kNoCommitUs;
-    // When DHW evidence last restarted without the shared lifecycle, in this boot's monotonic
-    // clock.
-    int64_t dhw_scope_us      = -1;
-    uint8_t live_commit_count = 0; // completed in THIS monotonic clock, max 23
+    // When DHW or energy evidence last restarted without the shared lifecycle, in this boot's
+    // monotonic clock.
+    int64_t dhw_scope_us           = -1;
+    int64_t energy_scope_us        = -1;
+    int64_t energy_carried_span_us = 0;
+    uint8_t live_commit_count      = 0; // completed in THIS monotonic clock, max 23
     logic::CheckupJournalRevision revision{};
     std::atomic<int64_t>          revision_acked{INT64_MIN};
     int64_t                       journal_label_offset = INT64_MIN;
     bool                          dhw_restart_armed    = false;
     uint32_t                      dhw_restart_bucket   = 0;
+    bool                          energy_restart_armed  = false;
+    uint32_t                      energy_restart_bucket = 0;
     int64_t                       seal_bucket          = INT64_MIN;
     int64_t                       seal_end_unix_s      = INT64_MIN;
     bool                          flash_pending        = false;
@@ -452,6 +469,12 @@ uint32_t circulation_identity() {
     });
 }
 
+[[gnu::noinline]] uint32_t effective_pel_source_fp_locked(const CheckupSlot& slot) {
+    if (slot.is_modbus) return logic::checkup_modbus_pel_source_fingerprint(slot.modbus_profile);
+    return logic::checkup_x10a_pel_source_fingerprint(
+        slot.energy_cov.ct_rows > 0, slot.energy_cov.has_inv && slot.energy_cov.has_rps);
+}
+
 // The row a locator addresses, or -1. Composes logic/checkup.hpp's pure predicate rather than taking
 // the parallel-array checkup_select(): building (reg, off, conv) views for a full resolved profile
 // would consume material space on the POLL TASK's 8 KB stack every second, and that stack fails
@@ -541,6 +564,10 @@ uint32_t checkup_persist_crc(const CheckupSlot& slot) {
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(d.buf), sizeof(d.buf));
     crc = config_crc32_update(crc, &d.count, sizeof(d.count));
     crc = config_crc32_update(crc, &d.head, sizeof(d.head));
+    const auto& e   = p.energy;
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(e.buf), sizeof(e.buf));
+    crc = config_crc32_update(crc, &e.count, sizeof(e.count));
+    crc = config_crc32_update(crc, &e.head, sizeof(e.head));
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&p.span_us), sizeof(p.span_us));
     crc =
         config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&p.model_fp), sizeof(p.model_fp));
@@ -575,6 +602,7 @@ void reset_run_ctx_locked() {
 void persist_wipe(CheckupSlot& slot, bool keep_handoff = false) {
     slot.P().ring.reset();
     slot.P().dhw.reset();
+    slot.P().energy.reset();
     slot.dhw_trace.reset();
     slot.cycling_trace.reset();
     slot.cycling_restored.reset();
@@ -600,13 +628,18 @@ void persist_wipe(CheckupSlot& slot, bool keep_handoff = false) {
     }
     slot.P().boots_since_commit =
         0; // reserved integrity counter; no completed RAM hours are adopted
-    slot.last_commit_us    = kNoCommitUs;
-    slot.live_commit_count = 0;
-    slot.dhw_scope_us      = -1; // both rings restart together
-    slot.source_last_us    = -1;
-    slot.pressure_now      = -1;
-    slot.revision          = {};    // the withdrawn hours have nothing left to re-append
-    slot.dhw_restart_armed = false; // no hour older than the wipe remains to be appended
+    slot.last_commit_us         = kNoCommitUs;
+    slot.live_commit_count      = 0;
+    slot.dhw_scope_us           = -1; // all rings restart together
+    slot.energy_scope_us        = -1;
+    slot.energy_carried_span_us = 0;
+    slot.energy_acc             = kEmptyEnergyAccumulator;
+    slot.source_last_us         = -1;
+    slot.pressure_now           = -1;
+    slot.revision               = {};    // the withdrawn hours have nothing left to re-append
+    slot.dhw_restart_armed      = false; // no hour older than the wipe remains to be appended
+    slot.energy_restart_armed   = false;
+    slot.energy_restart_bucket  = 0;
     slot.seal_bucket = slot.seal_end_unix_s = INT64_MIN; // a wiped open hour has nothing to journal
     slot.flash_pending                      = false;
     // Retain model_fp for the next record; detection confirms it before consuming a reset.
@@ -618,6 +651,7 @@ bool apply_reset_locked(CheckupSlot& slot) {
     slot.boot_handoff_valid       = false;
     slot.fault_boot_handoff_valid = false;
     slot.dhw_reset_requested.store(false);
+    slot.energy_reset_requested.store(false);
     slot.state     = logic::CheckupState{};
     slot.dhw_state = kFreshDhwLossState;
     if (!slot.is_modbus) {
@@ -626,7 +660,16 @@ bool apply_reset_locked(CheckupSlot& slot) {
     }
     slot.cov       = logic::CheckupCoverage{};
     slot.fault_now = daik::FaultClass::Unknown;
-    persist_wipe(slot); // clears both rings and the checkpoint to withdraw the previous scope
+    if (!slot.source_confirmed) {
+        slot.modbus_profile = ModbusProfile::Auto;
+        slot.energy_cov     = kEmptyEnergyCoverage;
+    }
+    slot.energy_acc             = kEmptyEnergyAccumulator;
+    slot.energy_carried_span_us = 0;
+    slot.energy_restart_armed   = false;
+    slot.energy_restart_bucket  = 0;
+    slot.pel_source_fp          = slot.source_confirmed ? effective_pel_source_fp_locked(slot) : 0;
+    persist_wipe(slot); // clears rings and the checkpoint to withdraw the previous scope
     return true;
 }
 
@@ -645,6 +688,21 @@ bool apply_dhw_reset_locked(CheckupSlot& slot) {
     slot.dhw_restart_armed     = true;
     slot.dhw_restart_bucket    = logic::checkup_bucket(slot.dhw_scope_us);
     slot.P().dhw_handoff.magic = 0;
+    checkup_persist_seal(slot);
+    return true;
+}
+
+bool apply_energy_reset_locked(CheckupSlot& slot) {
+    if (!slot.energy_reset_requested.exchange(false)) return false;
+    slot.P().energy.reset();
+    slot.P().energy.head        = slot.P().ring.head;
+    slot.P().energy.count       = slot.P().ring.count;
+    slot.pel_source_fp          = effective_pel_source_fp_locked(slot);
+    slot.energy_acc             = kEmptyEnergyAccumulator;
+    slot.energy_carried_span_us = 0;
+    slot.energy_scope_us        = esp_timer_get_time();
+    slot.energy_restart_armed   = true;
+    slot.energy_restart_bucket  = logic::checkup_bucket(slot.energy_scope_us);
     checkup_persist_seal(slot);
     return true;
 }
@@ -695,6 +753,8 @@ void commit_and_fold_locked(CheckupSlot& slot, const logic::CheckupSample& s, in
             slot.slot_times.expiry_us[idx]           = 0;
             slot.slot_times.restored_end_unix_s[idx] = 0;
         }
+        slot.P().energy.commit(slot.energy_acc.pending, skipped);
+        slot.energy_acc.reset_pending(bucket, continuous_boundary ? now : -1);
         slot.P().ring.commit(skipped);
         slot.P().dhw.commit(skipped);
         const int64_t completed_end_us =
@@ -742,10 +802,33 @@ void commit_and_fold_locked(CheckupSlot& slot, const logic::CheckupSample& s, in
     slot.state.have_bucket     = true;
 }
 
+[[gnu::noinline]] void fold_energy_locked(CheckupSlot& slot, const logic::EnergyStepInput& ein,
+                                          uint32_t bucket, bool discard_energy_sample) {
+    if (discard_energy_sample) {
+        slot.energy_acc.reset_continuity();
+        return;
+    }
+    if (!slot.energy_acc.have_bucket) {
+        slot.energy_acc.bucket      = bucket;
+        slot.energy_acc.have_bucket = true;
+    }
+    logic::working_figure_step(slot.energy_acc, slot.energy_cov, ein, nullptr);
+    if (slot.energy_acc.ct_switch_reset_pending) {
+        const bool cleared_ring = slot.energy_acc.acknowledge_ct_unwired_switch(slot.P().energy);
+        if (cleared_ring) {
+            slot.energy_carried_span_us = 0;
+            slot.energy_restart_armed   = true;
+            slot.energy_restart_bucket  = bucket;
+            checkup_persist_seal(slot);
+        }
+    }
+}
+
 // Software restart: date the open hour so history_flash_save() can try to journal it.
 void seal_open_hour_locked(CheckupSlot& slot) {
     if (slot.seal_bucket != INT64_MIN || !slot.state.have_bucket || !slot.model_fp ||
-        !slot.source_confirmed || !slot.source_fp || slot.P().ring.count != slot.P().dhw.count)
+        !slot.source_confirmed || !slot.source_fp || slot.P().ring.count != slot.P().dhw.count ||
+        slot.P().ring.count != slot.P().energy.count)
         return;
     int64_t unix_s = -1;
     int32_t ms     = 0;
@@ -783,6 +866,14 @@ bool sealed_flash_next_locked(const CheckupSlot& slot, int64_t after_bucket, int
     payload.end_unix_s             = slot.seal_end_unix_s;
     payload.checkup                = slot.P().ring.pending;
     payload.dhw                    = slot.P().dhw.pending;
+    payload.pel_source_fp          = slot.pel_source_fp;
+    payload.energy                 = slot.energy_acc.pending;
+    if (slot.state.have_bucket &&
+        logic::checkup_journal_energy_withheld(
+            slot.energy_restart_armed, slot.energy_restart_bucket, slot.state.bucket + 1, 0)) {
+        payload.pel_source_fp = 0;
+        payload.energy        = kEmptyEnergyBucket;
+    }
     bucket                         = slot.seal_bucket;
     return logic::checkup_journal_bucket(payload.end_unix_s) == bucket;
 }
@@ -837,8 +928,10 @@ void checkup_reboot_save() {
 
     apply_reset_locked(s_x10a);
     apply_dhw_reset_locked(s_x10a);
+    apply_energy_reset_locked(s_x10a);
     apply_reset_locked(s_modbus);
     apply_dhw_reset_locked(s_modbus);
+    apply_energy_reset_locked(s_modbus);
     const int64_t stop_now = esp_timer_get_time();
     if (!stop_context_suppressed_locked()) {
         const auto stop_event = logic::stop_context_seal(s_stop_context);
@@ -924,6 +1017,13 @@ void slot_start(CheckupSlot& slot, bool diagnostics_enabled, uint32_t diagnostic
     slot.last_commit_us          = kNoCommitUs;
     slot.live_commit_count       = 0;
     slot.dhw_source_fp           = dhw_fp;
+    slot.modbus_profile            = ModbusProfile::Auto;
+    slot.energy_cov                = kEmptyEnergyCoverage;
+    slot.energy_acc                = kEmptyEnergyAccumulator;
+    slot.pel_source_fp             = effective_pel_source_fp_locked(slot);
+    slot.energy_carried_span_us    = 0;
+    slot.energy_restart_armed      = false;
+    slot.energy_restart_bucket     = 0;
     slot.cycling_restore_allowed = !safe_mode_active();
     slot.fault_restore_allowed   = !safe_mode_active();
     slot.dhw_trace_restore_allowed = !safe_mode_active();
@@ -985,11 +1085,17 @@ void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_chang
         retire_dhw_trace_locked(slot);
         slot.reset_requested.store(false);
         slot.dhw_reset_requested.store(false);
-        slot.state     = logic::CheckupState{};
-        slot.dhw_state = kFreshDhwLossState;
-        slot.cov       = logic::CheckupCoverage{};
-        slot.fault_now = daik::FaultClass::Unknown;
+        slot.energy_reset_requested.store(false);
+        slot.state                  = logic::CheckupState{};
+        slot.dhw_state              = kFreshDhwLossState;
+        slot.cov                    = logic::CheckupCoverage{};
+        slot.fault_now              = daik::FaultClass::Unknown;
+        slot.energy_acc             = kEmptyEnergyAccumulator;
+        slot.energy_carried_span_us = 0;
+        slot.energy_restart_armed   = false;
+        slot.energy_restart_bucket  = 0;
         persist_wipe(slot);
+        slot.pel_source_fp   = slot.source_confirmed ? effective_pel_source_fp_locked(slot) : 0;
         slot.persist_verdict = enabled ? logic::CheckupRestore::DiagnosticsChanged
                                        : logic::CheckupRestore::DiagnosticsDisabled;
         return;
@@ -1005,6 +1111,7 @@ void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_chang
     if (!enabled)
         slot.fault_trace.record(esp_timer_get_time(),
                                 logic::FaultSampleDetail{logic::FaultTraceKind::Gap});
+    slot.energy_acc.reset_continuity();
     slot.dhw_state      = kFreshDhwLossState;
     slot.fault_now      = daik::FaultClass::Unknown;
     slot.pressure_now   = -1;
@@ -1085,7 +1192,7 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     const uint32_t dhw_fp = circulation_identity();
     s_requested_dhw_source_fp.store(dhw_fp);
     s_diagnostics_enabled.store(diagnostics_enabled, std::memory_order_release);
-    s_diagnostics_generation = diagnostics_generation;
+    s_diagnostics_generation    = diagnostics_generation;
     const bool flash_pending    = history_checkup_flash_pending();
     const bool mb_flash_pending = history_modbus_checkup_flash_pending();
     slot_start(s_x10a, diagnostics_enabled, diagnostics_generation, dhw_fp, flash_pending);
@@ -1173,6 +1280,8 @@ void checkup_reset() {
     s_x10a.source_confirmed = false;
     s_x10a.source_fp        = 0;
     s_x10a.model_fp         = 0;
+    s_x10a.energy_cov       = kEmptyEnergyCoverage;
+    s_x10a.pel_source_fp    = 0;
     s_x10a.persist_verdict  = logic::CheckupRestore::ModelChanged;
     s_x10a.reset_requested.store(true);
 }
@@ -1189,6 +1298,9 @@ void checkup_modbus_reset() {
     s_modbus.source_confirmed         = false;
     s_modbus.source_fp                = 0;
     s_modbus.model_fp                 = 0;
+    s_modbus.modbus_profile           = ModbusProfile::Auto;
+    s_modbus.energy_cov               = kEmptyEnergyCoverage;
+    s_modbus.pel_source_fp            = 0;
     s_modbus.persist_verdict          = logic::CheckupRestore::ModelChanged;
     s_modbus.reset_requested.store(true);
 }
@@ -1203,6 +1315,16 @@ void checkup_modbus_reset() {
     if (air.state != logic::InstrumentState::Supported) return false;
     const auto row = logic::adjudicated(view, static_cast<size_t>(air.row));
     return logic::checkup_row_matches(logic::CHECKUP_LOC_OUTDOOR, row.reg, row.offset, row.conv);
+}
+
+[[gnu::noinline]] static logic::EnergyCoverage
+energy_coverage_from_view(const logic::ProfileView& view) {
+    logic::EnergyCoverage e_cov;
+    for (size_t i = 0; i < view.count(); ++i) {
+        if (!row_publishable(view[i])) continue;
+        logic::energy_cover_row(e_cov, logic::adjudicated(view, i));
+    }
+    return e_cov;
 }
 
 __attribute__((noinline)) void reset_hydronic_on_detect_locked(const char* profile_id,
@@ -1232,6 +1354,7 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     const auto                  stop_inputs = logic::stop_context_input_plan(profile_id, view);
     const bool                  defrost_air = defrost_air_supported(view);
     const logic::CheckupLocator rwt_loc     = resolve_rwt_locator(view);
+    const auto                  e_cov       = energy_coverage_from_view(view);
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
@@ -1239,6 +1362,8 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_x10a.source_confirmed = source_fp != 0 && fp != 0;
     s_x10a.model_fp         = fp;
     s_x10a.source_fp        = source_fp;
+    s_x10a.energy_cov       = s_x10a.source_confirmed ? e_cov : kEmptyEnergyCoverage;
+    s_x10a.pel_source_fp    = s_x10a.source_confirmed ? effective_pel_source_fp_locked(s_x10a) : 0;
     s_stop_context          = kEmptyStopContext;
     s_stop_inputs           = stop_inputs;
     s_defrost_start         = {};
@@ -1293,6 +1418,21 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_x10a.reset_requested.store(true);
 }
 
+[[gnu::noinline]] static bool modbus_confirm_commit_locked(ModbusProfile profile, uint32_t fp,
+                                                           uint32_t source_fp) {
+    const bool first          = !s_modbus.source_confirmed;
+    s_modbus.source_confirmed = source_fp != 0 && fp != 0;
+    s_modbus.model_fp         = fp;
+    s_modbus.source_fp        = source_fp;
+    s_modbus.modbus_profile   = s_modbus.source_confirmed ? profile : ModbusProfile::Auto;
+    s_modbus.energy_cov       = (s_modbus.source_confirmed && profile == ModbusProfile::HomeHub)
+                                    ? kHomeHubEnergyCoverage
+                                    : kEmptyEnergyCoverage;
+    s_modbus.pel_source_fp =
+        s_modbus.source_confirmed ? effective_pel_source_fp_locked(s_modbus) : 0;
+    return first;
+}
+
 void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp) {
     uint32_t fp = 0;
     if (profile == ModbusProfile::HomeHub) {
@@ -1307,11 +1447,7 @@ void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp) {
     if (!lk.acquired()) return;
     if (s_modbus.source_confirmed && s_modbus.model_fp == fp && s_modbus.source_fp == source_fp)
         return;
-    const bool first          = !s_modbus.source_confirmed;
-    s_modbus.source_confirmed = source_fp != 0 && fp != 0;
-    s_modbus.model_fp         = fp;
-    s_modbus.source_fp        = source_fp;
-    if (first) {
+    if (modbus_confirm_commit_locked(profile, fp, source_fp)) {
         if (s_modbus.source_confirmed && s_modbus.boot_handoff_valid &&
             !s_modbus.reset_requested.load() && !s_modbus.dhw_reset_requested.load() &&
             s_diagnostics_enabled.load(std::memory_order_acquire) &&
@@ -1357,6 +1493,178 @@ void checkup_dhw_reset() {
     s_dhw_identity_generation.fetch_add(1);
     s_x10a.dhw_reset_requested.store(true);
     s_modbus.dhw_reset_requested.store(true);
+}
+
+[[gnu::noinline]] static void capture_tenths(const CachedValue& cv, bool& seen, bool& known,
+                                             int32_t& dst) {
+    seen    = true;
+    int val = 0;
+    if (tenths(cv, val)) {
+        known = true;
+        dst   = val;
+    }
+}
+
+[[gnu::noinline]] static void energy_extract_input(const CachedValue* v, size_t n, bool rps_known,
+                                                   bool rps_running, const logic::CheckupSample& s,
+                                                   int                     outdoor_tenths,
+                                                   logic::EnergyStepInput& ein) {
+    ein                 = logic::EnergyStepInput{};
+    ein.source_ok       = (n > 0);
+    ein.rps_known       = rps_known;
+    ein.rps_running     = rps_running;
+    ein.buh_known       = s.buh_known;
+    ein.buh_on          = s.buh_on;
+    ein.bsh_known       = s.bsh_known;
+    ein.bsh_on          = s.bsh_on;
+    ein.defrost_known   = s.defrost_known;
+    ein.defrost_on      = s.defrost_on;
+    ein.valve_dhw_known = s.valve_known;
+    ein.valve_dhw_on    = s.valve_dhw;
+    ein.outdoor_known   = s.outdoor.available;
+    ein.outdoor_tenths  = s.outdoor.available ? outdoor_tenths : 0;
+
+    bool seen_lwt_t1   = false;
+    bool seen_lwt_t2   = false;
+    bool seen_rwt_t1   = false;
+    bool seen_rwt_t2   = false;
+    bool seen_post_buh = false;
+    bool seen_rps      = false;
+    bool seen_iu_mode  = false;
+    for (size_t i = 0; i < n; ++i) {
+        const CachedValue& cv  = v[i];
+        int                val = 0;
+        if (cv.reg == 0x63u && cv.off >= 14u && cv.off <= 16u && cv.conv == 161) {
+            if (tenths(cv, val) && val >= 0 && ein.ct_valid_count < UINT8_MAX) {
+                ein.ct_valid_count++;
+                ein.ct_sum_tenths += val;
+            }
+            continue;
+        }
+        if (cv.reg == 0x21u && cv.off == 0u &&
+            (!cv.unit || cv.unit[0] == '\0' || (cv.unit[0] == 'A' && cv.unit[1] == '\0'))) {
+            if (!ein.inv_known && !cv.held && !cv.held_unknown && tenths(cv, val) && val >= 0) {
+                ein.inv_known  = true;
+                ein.inv_tenths = val;
+            }
+            continue;
+        }
+        if (!seen_rps && rps_known && logic::ou_is_rps_witness(cv.label, cv.reg)) {
+            seen_rps = true;
+            if (tenths(cv, val)) ein.rps_tenths = val;
+            continue;
+        }
+        if (!ein.flow_known && cv.reg == 0x62u && cv.off == 9u &&
+            (!cv.unit || cv.unit[0] == '\0' || logic::checkup_text_equal(cv.unit, "L/min") ||
+             logic::checkup_text_equal(cv.unit, "l/min"))) {
+            bool dummy = false;
+            capture_tenths(cv, dummy, ein.flow_known, ein.flow_tenths);
+            continue;
+        }
+        if (!seen_post_buh && logic::cop_is_post_buh(cv.label, cv.reg)) {
+            capture_tenths(cv, seen_post_buh, ein.post_buh_known, ein.post_buh_tenths);
+            continue;
+        }
+        if (!seen_lwt_t1 && logic::lwt_is_pre_buh(cv.label)) {
+            capture_tenths(cv, seen_lwt_t1, ein.lwt_known, ein.lwt_tenths);
+            continue;
+        }
+        if (!seen_lwt_t1 && !seen_lwt_t2 && logic::lwt_is_measurement(cv.label)) {
+            capture_tenths(cv, seen_lwt_t2, ein.lwt_known, ein.lwt_tenths);
+            continue;
+        }
+        if (!seen_rwt_t1 && logic::rwt_is_r4t(cv.label)) {
+            capture_tenths(cv, seen_rwt_t1, ein.rwt_known, ein.rwt_tenths);
+            continue;
+        }
+        if (!seen_rwt_t1 && !seen_rwt_t2 && logic::rwt_is_measurement(cv.label)) {
+            capture_tenths(cv, seen_rwt_t2, ein.rwt_known, ein.rwt_tenths);
+            continue;
+        }
+        if (!seen_iu_mode &&
+            logic::checkup_row_matches(logic::CHECKUP_LOC_IU_MODE, cv.reg, cv.off, cv.conv)) {
+            seen_iu_mode = true;
+            ein.set_iu_mode(cv.value.c_str());
+        }
+    }
+}
+
+[[gnu::noinline]] static void modbus_energy_extract_input(const CachedValue* v, size_t n,
+                                                          ModbusProfile               profile,
+                                                          const logic::CheckupSample& s,
+                                                          logic::EnergyStepInput&     ein) {
+    ein                 = logic::EnergyStepInput{};
+    ein.source_ok       = (n > 0);
+    ein.rps_known       = s.rps_known;
+    ein.rps_running     = s.rps_running;
+    ein.bsh_known       = s.bsh_known;
+    ein.bsh_on          = s.bsh_on;
+    ein.valve_dhw_known = s.valve_known;
+    ein.valve_dhw_on    = s.valve_dhw;
+    ein.flow_known      = s.flow_ok;
+    ein.flow_tenths     = s.flow_tenths;
+    if (s.operating_mode == logic::CheckupOperatingMode::Heating) {
+        ein.set_iu_mode(logic::EnergyIuMode::HeatingOrDhwOrStop);
+    } else if (s.operating_mode == logic::CheckupOperatingMode::Cooling) {
+        ein.set_iu_mode(logic::EnergyIuMode::CoolingDhw);
+    } else {
+        ein.set_iu_mode(logic::EnergyIuMode::Unknown);
+    }
+
+    bool seen_defrost  = false;
+    bool seen_lwt      = false;
+    bool seen_post_buh = false;
+    bool seen_rwt      = false;
+    bool seen_outdoor  = false;
+    bool seen_power    = false;
+    for (size_t i = 0; i < n; ++i) {
+        const CachedValue&     cv  = v[i];
+        const def::HomeHubReg* row = modbus_row_for_cv(cv, profile);
+        if (!row || row->space != MbFunc::ReadInput) continue;
+        switch (row->offset) {
+        case 35: {
+            int val = 0;
+            if (!seen_defrost) {
+                seen_defrost = true;
+                if (exact_int(cv, val) && (val == 0 || val == 1)) {
+                    ein.defrost_known = true;
+                    ein.defrost_on    = (val == 1);
+                }
+            }
+            break;
+        }
+        case 40:
+            if (!seen_lwt) capture_tenths(cv, seen_lwt, ein.lwt_known, ein.lwt_tenths);
+            break;
+        case 41:
+            if (!seen_post_buh)
+                capture_tenths(cv, seen_post_buh, ein.post_buh_known, ein.post_buh_tenths);
+            break;
+        case 42:
+            if (!seen_rwt) capture_tenths(cv, seen_rwt, ein.rwt_known, ein.rwt_tenths);
+            break;
+        case 44:
+            if (!seen_outdoor)
+                capture_tenths(cv, seen_outdoor, ein.outdoor_known, ein.outdoor_tenths);
+            break;
+        case 51:
+            if (!seen_power) {
+                seen_power       = true;
+                const char* text = cv.value.c_str();
+                if (text[0] != '\0') {
+                    char*        end = nullptr;
+                    const double kw  = std::strtod(text, &end);
+                    if (end != text && *end == '\0' && std::isfinite(kw) && kw >= 0.0) {
+                        ein.modbus_power_known = true;
+                        ein.modbus_power_w     = kw * 1000.0;
+                    }
+                }
+            }
+            break;
+        default:
+            break;
+        }
+    }
 }
 
 uint32_t checkup_consent_epoch() { return s_diagnostics_epoch.load(std::memory_order_acquire); }
@@ -1413,10 +1721,12 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     // Allocation-free, including on the OOM catch and TLS hold paths: the applied source epoch
     // alone withdraws a replaced witness, so no Config copy is needed on this per-cycle path.
     const CirculationPumpSample circulation = circulation_pump_sample();
-    s.circulation_configured = circulation.configured;
-    s.circulation_known = circulation.known;
-    s.circulation_on = circulation.on;
-    s.retry_expected_mask = coverage.retry_mask;
+    s.circulation_configured                = circulation.configured;
+    s.circulation_known                     = circulation.known;
+    s.circulation_on                        = circulation.on;
+    s.retry_expected_mask                   = coverage.retry_mask;
+    logic::EnergyStepInput ein;
+    energy_extract_input(v, n, rps_known, rps_running, s, outdoor_tenths, ein);
 
     // Fault class is matched by converter because a profile carries it on the outdoor page AND the
     // hydronic one. Retry counters use exact page/offset/converter identities because conv 311 also
@@ -1519,6 +1829,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     const bool discard_dhw_sample = apply_dhw_reset_locked(s_x10a) ||
                                     dhw_generation != s_dhw_identity_generation.load() ||
                                     circulation_generation != circulation_source_generation();
+    const bool discard_energy_sample = apply_energy_reset_locked(s_x10a);
     // OOM/TLS callbacks report an observation gap, not a newly resolved empty profile. A genuine
     // unidentified-profile cycle still supplies confirmed empty coverage and withdraws capability.
     if (profile_confirmed) s_x10a.cov = coverage;
@@ -1533,25 +1844,15 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         s_x10a.fault_trace.observe_window(static_cast<uint32_t>(now / 1000000));
     }
     commit_and_fold_locked(s_x10a, s, now, bucket, discard_dhw_sample);
+    ein.now_us = now;
+    fold_energy_locked(s_x10a, ein, bucket, discard_energy_sample);
 }
 
-void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
-                           uint32_t source_generation, uint32_t consent_epoch,
-                           bool source_confirmed, ModbusProfileBasis basis) {
-    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
-    if (!s_mtx) return;
-    if (!v && n) return;
-
-    const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile, basis);
-    logic::CheckupSample         s;
-    int64_t                      unix_s  = -1;
-    int32_t                      unix_ms = 0;
-    time_now(unix_s, unix_ms);
-    if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
-    s.x10a_blind = !n;
-
-    uint16_t mb_fault_code = 0;
-    int      mb_fault_sub  = 0;
+[[gnu::noinline]] static void modbus_collect_sample(const CachedValue* v, size_t n,
+                                                    ModbusProfile                 profile,
+                                                    const logic::CheckupCoverage& cov,
+                                                    logic::CheckupSample&         s,
+                                                    uint16_t& mb_fault_code, int& mb_fault_sub) {
     for (size_t i = 0; i < n; ++i) {
         const CachedValue&     cv  = v[i];
         const def::HomeHubReg* row = modbus_row_for_cv(cv, profile);
@@ -1628,6 +1929,48 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
             break;
         }
     }
+}
+
+[[gnu::noinline]] static void modbus_fault_trace_locked(uint16_t mb_fault_code, int mb_fault_sub,
+                                                        FaultClass fault, int64_t now) {
+    const logic::FaultSampleDetail mb_fault =
+        logic::checkup_modbus_fault_detail(fault, mb_fault_code, mb_fault_sub);
+    const bool was_active = logic::fault_trace_kind_active(s_modbus.fault_trace.state.kind);
+    const bool now_active = logic::fault_trace_kind_active(mb_fault.kind);
+    if (s_modbus.fault_trace.record(now, mb_fault) && (was_active || now_active))
+        s_modbus.fault_trace_dirty = true;
+    s_modbus.fault_trace.observe_window(static_cast<uint32_t>(now / 1000000));
+}
+
+[[gnu::noinline]] static void modbus_fold_energy_locked(const CachedValue* v, size_t n,
+                                                        ModbusProfile               profile,
+                                                        const logic::CheckupSample& s, int64_t now,
+                                                        uint32_t bucket,
+                                                        bool     discard_energy_sample) {
+    logic::EnergyStepInput ein;
+    modbus_energy_extract_input(v, n, profile, s, ein);
+    ein.now_us = now;
+    fold_energy_locked(s_modbus, ein, bucket, discard_energy_sample);
+}
+
+void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
+                           uint32_t source_generation, uint32_t consent_epoch,
+                           bool source_confirmed, ModbusProfileBasis basis) {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
+    if (!s_mtx) return;
+    if (!v && n) return;
+
+    const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile, basis);
+    logic::CheckupSample         s;
+    int64_t                      unix_s  = -1;
+    int32_t                      unix_ms = 0;
+    time_now(unix_s, unix_ms);
+    if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
+    s.x10a_blind = !n;
+
+    uint16_t mb_fault_code = 0;
+    int      mb_fault_sub  = 0;
+    modbus_collect_sample(v, n, profile, cov, s, mb_fault_code, mb_fault_sub);
 
     const uint32_t              dhw_generation         = s_dhw_identity_generation.load();
     const uint32_t              circulation_generation = circulation_source_generation();
@@ -1649,20 +1992,18 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
     const bool discard_dhw_sample = apply_dhw_reset_locked(s_modbus) ||
                                     dhw_generation != s_dhw_identity_generation.load() ||
                                     circulation_generation != circulation_source_generation();
-    if (source_confirmed) s_modbus.cov = cov;
+    const bool discard_energy_sample = apply_energy_reset_locked(s_modbus);
+    if (source_confirmed) {
+        s_modbus.cov        = cov;
+        s_modbus.energy_cov = logic::energy_modbus_coverage(profile, basis);
+    }
     s_modbus.fault_now    = s.fault;
     s_modbus.pressure_now = -1;
     if (n) s_modbus.source_last_us = now;
-    if (s_modbus.source_confirmed && now >= 0) {
-        const logic::FaultSampleDetail mb_fault =
-            logic::checkup_modbus_fault_detail(s.fault, mb_fault_code, mb_fault_sub);
-        const bool was_active = logic::fault_trace_kind_active(s_modbus.fault_trace.state.kind);
-        const bool now_active = logic::fault_trace_kind_active(mb_fault.kind);
-        if (s_modbus.fault_trace.record(now, mb_fault) && (was_active || now_active))
-            s_modbus.fault_trace_dirty = true;
-        s_modbus.fault_trace.observe_window(static_cast<uint32_t>(now / 1000000));
-    }
+    if (s_modbus.source_confirmed && now >= 0)
+        modbus_fault_trace_locked(mb_fault_code, mb_fault_sub, s.fault, now);
     commit_and_fold_locked(s_modbus, s, now, bucket, discard_dhw_sample);
+    modbus_fold_energy_locked(v, n, profile, s, now, bucket, discard_energy_sample);
 }
 
 static void expire_restored_locked(CheckupSlot& slot);
@@ -1826,6 +2167,7 @@ static void expire_restored_locked(CheckupSlot& slot) {
         if (!logic::checkup_restored_expired(s_slot_times.expiry_us[i], now_us)) continue;
         slot.P().ring.buf[i]                = logic::CheckupBucket{};
         slot.P().dhw.buf[i]                 = kEmptyDhwLossBucket;
+        slot.P().energy.buf[i]              = kEmptyEnergyBucket;
         s_slot_times.expiry_us[i]           = logic::CHECKUP_EXPIRED_SLOT_US;
         s_slot_times.restored_end_unix_s[i] = 0;
         changed                             = true;
@@ -1837,6 +2179,7 @@ static void expire_restored_locked(CheckupSlot& slot) {
         logic::checkup_restored_expired(logic::checkup_live_expiry_us(pending_start_us), now_us)) {
         slot.P().ring.pending = logic::CheckupBucket{};
         slot.P().dhw.pending  = kEmptyDhwLossBucket;
+        slot.energy_acc       = kEmptyEnergyAccumulator;
         slot.state            = logic::CheckupState{};
         slot.dhw_state        = kFreshDhwLossState;
         slot.fault_now        = FaultClass::Unknown;
@@ -2029,6 +2372,39 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     return report;
 }
 
+logic::WorkingFigureReport checkup_working_figure_status(const Config&     c,
+                                                         DiagnosticsSource source) {
+    logic::WorkingFigureReport report{};
+    if (!s_mtx || !s_diagnostics_enabled.load(std::memory_order_acquire)) return report;
+    logic::WorkingFigureTariffs tariffs{};
+    tariffs.elec_price_tenth_mill = c.elec_price_tenth_mill;
+    tariffs.gas_price_tenth_mill  = c.gas_price_tenth_mill;
+    if (tariff_currency_valid(c.tariff_currency)) {
+        std::memcpy(tariffs.currency, c.tariff_currency.data(), 3);
+        tariffs.currency[3] = '\0';
+    }
+    CheckupSlot& slot = slot_for(source);
+    Lock         lk(s_mtx);
+    if (!lk.acquired() || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
+        slot.reset_requested.load() || !slot.source_confirmed)
+        return report;
+    expire_restored_locked(slot);
+    const int64_t now_us      = esp_timer_get_time();
+    const bool    have_source = slot.source_last_us >= 0 && now_us >= slot.source_last_us;
+    const bool    source_fresh =
+        have_source && (now_us - slot.source_last_us) <=
+                           static_cast<int64_t>(logic::CHECKUP_MAX_GAP_S) * 1000000LL;
+    const bool     energy_reset = slot.energy_reset_requested.load();
+    const uint32_t span_s =
+        energy_reset ? 0u
+                     : logic::energy_span_s(slot.energy_acc, slot.energy_carried_span_us, now_us);
+    report = logic::working_figure_evaluate(
+        energy_reset ? kEmptyEnergyRing : slot.P().energy,
+        energy_reset ? kEmptyEnergyAccumulator : slot.energy_acc, slot.energy_cov, tariffs,
+        source_fresh, span_s, energy_reset ? nullptr : slot.slot_times.expiry_us, now_us);
+    return report;
+}
+
 bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket, int64_t& bucket,
                         logic::CheckupJournalPayload& payload, DiagnosticsSource source) {
     if (!s_mtx || now_unix_s < 0) return false;
@@ -2036,7 +2412,7 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket, int64_t& bucke
     Lock         lk(s_mtx, 0);
     if (!lk.acquired() || s_diagnostics_generation == 0 || slot.reset_requested.load() ||
         !slot.model_fp || !slot.source_confirmed || !slot.source_fp ||
-        slot.P().ring.count != slot.P().dhw.count)
+        slot.P().ring.count != slot.P().dhw.count || slot.P().ring.count != slot.P().energy.count)
         return false;
 
     if (slot.last_commit_us != kNoCommitUs && slot.live_commit_count && slot.P().ring.count) {
@@ -2065,6 +2441,9 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket, int64_t& bucke
             const size_t dhw_i = (static_cast<size_t>(slot.P().dhw.head) +
                                   logic::CHECKUP_COMPLETED_BUCKETS - 1 - age) %
                                  logic::CHECKUP_COMPLETED_BUCKETS;
+            const size_t energy_i = (static_cast<size_t>(slot.P().energy.head) +
+                                     logic::CHECKUP_COMPLETED_BUCKETS - 1 - age) %
+                                    logic::CHECKUP_COMPLETED_BUCKETS;
             payload                        = logic::CheckupJournalPayload{};
             payload.model_fp               = slot.model_fp;
             payload.source_fp              = slot.source_fp;
@@ -2078,6 +2457,13 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket, int64_t& bucke
                                                     current, age)) {
                 payload.dhw_source_fp = 0;
                 payload.dhw           = kEmptyDhwLossBucket;
+            }
+            payload.pel_source_fp = slot.pel_source_fp;
+            payload.energy        = slot.P().energy.buf[energy_i];
+            if (logic::checkup_journal_energy_withheld(slot.energy_restart_armed,
+                                                       slot.energy_restart_bucket, current, age)) {
+                payload.pel_source_fp = 0;
+                payload.energy        = kEmptyEnergyBucket;
             }
             bucket = target;
             return logic::checkup_journal_bucket(payload.end_unix_s) == target;
@@ -2116,8 +2502,8 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     const int64_t now_us          = esp_timer_get_time();
     const bool                    reset_requested = slot.reset_requested.load();
     logic::CheckupJournalLiveSpan live;
-    if (P().ring.count && P().ring.count == P().dhw.count && slot.last_commit_us != kNoCommitUs &&
-        now_us >= slot.last_commit_us) {
+    if (P().ring.count && P().ring.count == P().dhw.count && P().ring.count == P().energy.count &&
+        slot.last_commit_us != kNoCommitUs && now_us >= slot.last_commit_us) {
         const int64_t latest_end   = now_unix_s - (now_us - slot.last_commit_us) / 1000000;
         const int64_t newest_label = latched_newest_locked(slot, latest_end);
         if (newest_label != INT64_MIN) {
@@ -2164,8 +2550,10 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
         latest_bucket - static_cast<int64_t>(logic::CHECKUP_COMPLETED_BUCKETS - 1);
     if (earliest_bucket < capacity_start) earliest_bucket = capacity_start;
 
-    size_t  materialized        = 0;
-    int64_t earliest_stored_end = INT64_MAX;
+    size_t     materialized               = 0;
+    int64_t    earliest_stored_end        = INT64_MAX;
+    int64_t    earliest_energy_stored_end = INT64_MAX;
+    const bool energy_reset_pending       = slot.energy_reset_requested.load();
     for (int64_t b = earliest_bucket; b <= latest_bucket; ++b) {
         const auto* rec =
             logic::checkup_journal_choose(b, live, records, count, now_unix_s,
@@ -2176,17 +2564,38 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
         ++materialized;
         if (rec->payload.end_unix_s < earliest_stored_end)
             earliest_stored_end = rec->payload.end_unix_s;
+        if (!energy_reset_pending &&
+            logic::checkup_journal_pel_identity_matches(rec->payload, slot.pel_source_fp) &&
+            rec->payload.end_unix_s < earliest_energy_stored_end)
+            earliest_energy_stored_end = rec->payload.end_unix_s;
     }
     if (!materialized) return fresh_if_pending();
     const auto wall_span_s =
         static_cast<uint32_t>(now_unix_s - earliest_stored_end) + logic::CHECKUP_DT_S;
 
-    if (logic::checkup_journal_rebuild(P().ring, P().dhw, slot.slot_times, live, records, count,
-                                       earliest_bucket, latest_bucket, now_unix_s, now_us,
-                                       slot.source_confirmed, slot.model_fp, slot.source_fp,
-                                       s_diagnostics_generation, reset_requested,
-                                       slot.dhw_source_fp, slot.dhw_reset_requested.load()))
+    bool energy_retired = false;
+    if (logic::checkup_journal_rebuild(
+            P().ring, P().dhw, slot.slot_times, live, records, count, earliest_bucket,
+            latest_bucket, now_unix_s, now_us, slot.source_confirmed, slot.model_fp, slot.source_fp,
+            s_diagnostics_generation, reset_requested, slot.dhw_source_fp,
+            slot.dhw_reset_requested.load(), P().energy, slot.pel_source_fp, energy_reset_pending,
+            energy_retired))
         slot.dhw_scope_us = now_us;
+    if (energy_retired || earliest_energy_stored_end == INT64_MAX) {
+        if (energy_retired) slot.energy_scope_us = now_us;
+        slot.energy_carried_span_us = 0;
+    } else {
+        const auto energy_wall_span_s =
+            static_cast<uint32_t>(now_unix_s - earliest_energy_stored_end) + logic::CHECKUP_DT_S;
+        const int64_t live_energy_span_us =
+            slot.energy_acc.first_sample_us >= 0 && now_us >= slot.energy_acc.first_sample_us
+                ? now_us - slot.energy_acc.first_sample_us
+                : 0;
+        const int64_t energy_wall_span_us = static_cast<int64_t>(energy_wall_span_s) * 1000000LL;
+        slot.energy_carried_span_us       = energy_wall_span_us > live_energy_span_us
+                                                ? energy_wall_span_us - live_energy_span_us
+                                                : 0;
+    }
     P().ring.age_buckets = static_cast<uint8_t>(
         P().ring.count < logic::CHECKUP_BUCKETS ? P().ring.count : logic::CHECKUP_BUCKETS);
 
