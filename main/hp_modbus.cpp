@@ -1307,9 +1307,14 @@ static void mb_poll_once() {
                      s_status.last_error_register == first_failure.reg))
                     return;
             }
-            status_error(std::string(code), failure_message(first_failure), first_failure.detail,
-                         first_failure.reg,
-                         /*link_down=*/!final_current_session, cycle_target_generation);
+            try {
+                status_error(std::string(code), failure_message(first_failure),
+                             first_failure.detail, first_failure.reg,
+                             /*link_down=*/!final_current_session, cycle_target_generation);
+            } catch (const std::bad_alloc&) {
+                // The readings already committed. Keep the previous error text and leave the
+                // completed cycle visible instead of routing this through the poll-gap handler.
+            }
         } else if (logic::mb_cycle_proves_recovery(full, final_current_session)) {
             // One status error represents the WHOLE map. A fast cycle did not re-read the remaining
             // rows and therefore cannot prove that their last failure recovered.

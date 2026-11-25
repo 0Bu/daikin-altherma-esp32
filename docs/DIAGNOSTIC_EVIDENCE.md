@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 4e58748fff78bb677a1c533168fa2a4e1c019fdcced9d65bfdf2f842d90aea2b -->
+<!-- diagnostic-evidence-contract: 798d68a916d25ba5a2644c5829f9a53bea4988e9af12f87a2a803218bee14bab -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.

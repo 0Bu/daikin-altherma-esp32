@@ -38,13 +38,13 @@ function compile(production, name) {
   return binary;
 }
 
-function mutateOnce(before, after, name) {
+function mutateOnce(before, after, name, input = source) {
   const count = typeof before === "string"
-    ? source.split(before).length - 1
-    : [...source.matchAll(new RegExp(before.source, before.flags + "g"))].length;
+    ? input.split(before).length - 1
+    : [...input.matchAll(new RegExp(before.source, before.flags + "g"))].length;
   assert.equal(count, 1, `${name}: mutation anchor must be unique`);
   const mutated = path.join(dir, `${name}.cpp`);
-  fs.writeFileSync(mutated, source.replace(before, after));
+  fs.writeFileSync(mutated, input.replace(before, after));
   return mutated;
 }
 
@@ -57,8 +57,23 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=37\b/);
+  assert.match(baseline.stdout, /PASS total=38\b/);
   console.log(baseline.stdout.trim());
+
+  const injected = mutateOnce(
+    /status_error\(std::string\(code\),\s*failure_message\(first_failure\),/,
+    "if (first_failure.reg == 30) throw std::bad_alloc();\n                $&",
+    "poll-error-format-allocation-failure");
+  const allocationFailure = execute(compile(injected, "poll-error-oom"), ["completed_poll_error_reporting"]);
+  assert.equal(allocationFailure.status, 0, allocationFailure.stdout + allocationFailure.stderr);
+  const escaped = mutateOnce(
+    /\} catch \(const std::bad_alloc&\) \{\s*\/\/ The readings already committed\./,
+    "} catch (const std::bad_alloc&) { throw; // The readings already committed.",
+    "poll-error-escapes-to-gap", fs.readFileSync(injected, "utf8"));
+  const escapedFailure = execute(compile(escaped, "poll-error-escape"), ["completed_poll_error_reporting"]);
+  assert.equal(escapedFailure.status, 1);
+  assert.match(escapedFailure.stderr, /^FAIL completed_poll_error_reporting:/m);
+  console.log("completed poll stays visible when its error message cannot allocate; escaped error rejected");
 
   // A successfully compiled mutation must fail its particular behavioral oracle. A crash,
   // compilation failure or another test failure cannot count as evidence that the oracle works.
@@ -212,7 +227,7 @@ try {
       `${mutation.name}: only its specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production Modbus runtime: 37 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
+  console.log(`production Modbus runtime: 38 cases, ${mutations.length + 1} negative controls; source sha256=${sourceHash}`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

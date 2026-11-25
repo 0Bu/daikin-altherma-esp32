@@ -1216,6 +1216,28 @@ void heating_flow_poll_evidence() {
         peer.set_word(MbFunc::ReadInput, offset, 1);
     }
 }
+void completed_poll_error_reporting() {
+    reset();
+    adapter::cfg.diagnostics_enabled = true;
+    Peer peer(false, ModbusProfile::HomeHub,
+              {{MbFunc::ReadInput, 35, 0}, {MbFunc::ReadInput, 36, 0}, {MbFunc::ReadInput, 37, 0}});
+    mb_poll_once();
+    REQUIRE(mb_values_live() && s_cycle_tick == 1);
+
+    status_error("previous_error", "previous register error", 2, 36, false);
+    peer.batch_exception        = true;
+    peer.input_exception_offset = 30;
+    sdk::clock_us.fetch_add(1000000);
+    mb_poll_once();
+    const auto state = mb_status();
+    REQUIRE(state.connected && mb_values_live() && s_cycle_tick == 2);
+    REQUIRE(adapter::checkup_heating_breaks == 1 && adapter::checkup_live_calls == 1);
+    if (state.last_error_code == "previous_error") {
+        REQUIRE(state.last_error == "previous register error" && state.last_error_register == 36);
+    } else {
+        REQUIRE(state.last_error_code == "modbus_exception" && state.last_error_register == 30);
+    }
+}
 void space_route_values() {
     // Independent wire expectations: 0 is the space circuit, 1 is DHW, and neither an unknown enum
     // nor a protocol sentinel proves either route. Both profiles and both commit paths use the
@@ -1678,6 +1700,7 @@ int main(int argc, char** argv) {
                     {"poll_full_fast_break", test::poll_full_fast_break},
                     {"poll_batch_fallback", test::poll_batch_fallback},
                     {"heating_flow_poll_evidence", test::heating_flow_poll_evidence},
+                    {"completed_poll_error_reporting", test::completed_poll_error_reporting},
                     {"space_route_values", test::space_route_values},
                     {"space_route_missing", test::space_route_missing},
                     {"space_route_age", test::space_route_age},
