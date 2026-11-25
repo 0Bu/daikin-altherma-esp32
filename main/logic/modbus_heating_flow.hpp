@@ -64,8 +64,8 @@ public:
 
         const int64_t unix_s   = (now_us + clock_offset_us_) / 1000000;
         const auto    utc_hour = static_cast<uint32_t>(unix_s / 3600);
-        const auto bit      = static_cast<uint16_t>(1u << (unix_s % 3600 / 300));
-        auto&      hour     = hours_[utc_hour % HYDRONIC_WINDOW_HOURS];
+        const auto    bit      = static_cast<uint16_t>(1u << (unix_s % 3600 / 300));
+        auto&         hour     = hours_[utc_hour % HYDRONIC_WINDOW_HOURS];
         if (hour.utc_hour != utc_hour || !hour.minimum_tenths || flow_tenths < hour.minimum_tenths)
             hour = {utc_hour, flow_tenths, bit};
         else if (hour.minimum_tenths == flow_tenths)
