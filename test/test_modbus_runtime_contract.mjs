@@ -192,9 +192,9 @@ try {
       before: "sweep_started_us, cycle_generation);",
       after: "sweep_started_us, cycle_target_generation);",
     },
-    ...["defrost_clear", "hot_start_clear"].map(witness => ({
+    ...["defrost_clear", "hot_start_clear", "pump_running", "compressor_running"].map(witness => ({
       name: `heating-skips-fast-${witness}`, scenario: "heating_flow_poll_evidence",
-      before: `|| !gates.${witness}`,
+      before: new RegExp(`\\|\\|\\s*!gates\\.${witness}\\b`),
       after: "",
     })),
   ];

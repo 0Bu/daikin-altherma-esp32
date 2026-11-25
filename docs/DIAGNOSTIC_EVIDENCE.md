@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 54c8aa451e9f82f6d1cab44bba2a4e8002c27e8c9ee21afb0138cb811994faae -->
+<!-- diagnostic-evidence-contract: 549a7995f5f751fddb57154a88c4c3a90ff4b7262e978f90902bb9029e5ba115 -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -686,13 +686,18 @@ v2 headers that ignore these bytes.
 The independent HomeHub EKRHH heating minimum uses affirmative flow coverage and a positive
 reading from a completed Modbus sweep. Each eligible sweep must show the pump and compressor on
 (inputs 30 and 31), defrost and hot start off (35 and 36), the space-heating valve route (37),
-heating mode (38) and active normal space operation (53). The intervening fast sweeps must still
-confirm 35–38 and 53. Missing or invalid inputs, a sweep or gap longer than 15 seconds, a link or
-consent interruption, or a wall-clock shift over two seconds relative to monotonic time breaks
-continuity. After 600 continuous eligible seconds, dated readings in tenths of a litre per minute
-contribute to independent RAM-only hour buckets and five-minute minimum masks. Previously qualified
-hours can still report dated evidence after a link interruption. Reboot, a target or profile change,
-or a new diagnostics generation clears the Modbus window.
+heating mode (38) and active normal space operation (53). The intervening fast sweeps must confirm
+all seven operating witnesses (30, 31, 35–38 and 53). Missing or invalid inputs, a sweep or gap longer
+than 15 seconds, or a link or consent interruption breaks continuity. After 600 continuous eligible
+seconds, dated readings in tenths of a litre per minute contribute to independent RAM-only hour
+buckets and five-minute minimum masks. The first dated sweep anchors the UTC projection from
+monotonic time. Wall time is checked to millisecond precision against that fixed projection.
+The report withholds the minimum when the deviation exceeds two seconds. A dated sweep outside that
+tolerance clears the accumulated hours and restarts qualification, including when smaller successive
+corrections add up to the deviation. Previously qualified hours can still report dated evidence
+after a link interruption. Reboot, a target or profile change, or a new diagnostics generation
+clears the Modbus window.
+
 The inspector prefers a qualified X10A minimum and uses the qualified HomeHub Modbus minimum when
 X10A has none. The two sources contribute separately, and the recorded windows can shade only the
 corresponding curve.
@@ -722,10 +727,10 @@ withholds the comparison when more than 15 seconds have elapsed since the start 
 accepted sweep, and Modbus diagnostics leaves it null. The live comparison adds no journal fields.
 No shipped profile currently provides this complete input set.
 
-**Project boundary:** Sixty seconds, 600 seconds, 300 seconds, `0.5 K`, `5.0 l/min`, and 15 seconds
-are project filters, not published Daikin thresholds (`4P629085-1E` §6.5.1 / §10.6.3 / §16.2 do not
-define a passive quiescent agreement tolerance). No validated
-active-zone controller target is available in current queryable profiles. No 900-second pattern
+**Project boundary:** The 60-second pump run-up, 600-second settling, 300-second stability window,
+`0.5 K` drift cap, `5.0 l/min` circulation floor, 15-second continuity limit and two-second Modbus
+clock tolerance all come from this project. No validated active-zone controller target is available
+in current queryable profiles. No 900-second pattern
 classifier, 9 K alarm or model minimum compressor speed is inferred. The secondary comparison
 keeps zone intent unknown even where multiple setpoints are visible.
 

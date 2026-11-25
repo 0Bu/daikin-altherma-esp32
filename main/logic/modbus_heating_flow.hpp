@@ -22,27 +22,38 @@ class ModbusHeatingFlow {
     };
     Hour    hours_[HYDRONIC_WINDOW_HOURS]{};
     int64_t last_us_           = -1;
-    int64_t last_unix_s_       = -1;
+    int64_t clock_offset_us_   = -1;
     int64_t eligible_since_us_ = -1;
 
+    bool clock_matches(int64_t now_us, int64_t wall_us) const {
+        if (last_us_ < 0 || now_us < last_us_ || wall_us < now_us) return false;
+        const int64_t shift_us = wall_us - now_us - clock_offset_us_;
+        return shift_us >= -2000000 && shift_us <= 2000000;
+    }
+
 public:
+    void reset() {
+        for (auto& hour : hours_) hour = {};
+        last_us_           = -1;
+        clock_offset_us_   = -1;
+        eligible_since_us_ = -1;
+    }
+
     void break_run() { eligible_since_us_ = -1; }
 
-    void record(int64_t now_us, int64_t started_us, int64_t unix_s, uint16_t flow_tenths) {
-        if (unix_s <= 0 || unix_s > UINT32_MAX || now_us < 0) {
+    void record(int64_t now_us, int64_t started_us, int64_t wall_us, uint16_t flow_tenths) {
+        if (now_us < 0 || wall_us <= 0 || wall_us < now_us || wall_us / 1000000 > UINT32_MAX) {
             break_run();
             return;
         }
         if (last_us_ >= 0) {
-            const int64_t elapsed_us = now_us - last_us_;
-            const int64_t wall_shift = unix_s - last_unix_s_ - elapsed_us / 1000000;
-            if (elapsed_us < 0 || wall_shift < -2 || wall_shift > 2)
-                *this = {};
-            else if (elapsed_us > HYDRONIC_MAX_GAP_US)
+            if (!clock_matches(now_us, wall_us))
+                reset();
+            else if (now_us - last_us_ > HYDRONIC_MAX_GAP_US)
                 break_run();
         }
-        last_us_     = now_us;
-        last_unix_s_ = unix_s;
+        if (clock_offset_us_ < 0) clock_offset_us_ = wall_us - now_us;
+        last_us_ = now_us;
         if (started_us < 0 || started_us > now_us || now_us - started_us > HYDRONIC_MAX_GAP_US ||
             !flow_tenths) {
             break_run();
@@ -51,7 +62,8 @@ public:
         if (eligible_since_us_ < 0) eligible_since_us_ = now_us;
         if (now_us - eligible_since_us_ < HYDRONIC_SETTLE_US) return;
 
-        const auto utc_hour = static_cast<uint32_t>(unix_s / 3600);
+        const int64_t unix_s   = (now_us + clock_offset_us_) / 1000000;
+        const auto    utc_hour = static_cast<uint32_t>(unix_s / 3600);
         const auto bit      = static_cast<uint16_t>(1u << (unix_s % 3600 / 300));
         auto&      hour     = hours_[utc_hour % HYDRONIC_WINDOW_HOURS];
         if (hour.utc_hour != utc_hour || !hour.minimum_tenths || flow_tenths < hour.minimum_tenths)
@@ -60,12 +72,11 @@ public:
             hour.slots |= bit;
     }
 
-    ModbusHeatingFlowReport report(int64_t now_us, int64_t unix_s) const {
+    ModbusHeatingFlowReport report(int64_t now_us, int64_t wall_us) const {
         ModbusHeatingFlowReport r;
         r.supported = true;
-        if (last_us_ < 0 || now_us < last_us_ || unix_s <= 0 || unix_s > UINT32_MAX) return r;
-        const int64_t wall_shift = unix_s - last_unix_s_ - (now_us - last_us_) / 1000000;
-        if (wall_shift < -2 || wall_shift > 2) return r;
+        if (!clock_matches(now_us, wall_us) || wall_us / 1000000 > UINT32_MAX) return r;
+        const int64_t unix_s = (now_us + clock_offset_us_) / 1000000;
 
         const int64_t first = unix_s / 3600 - static_cast<int64_t>(HYDRONIC_WINDOW_HOURS) + 1;
         if (first < 0) return r;

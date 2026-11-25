@@ -8004,6 +8004,17 @@ static void test_modbus_plan() {
         // is refreshed once per full cycle instead of once per second.
         CHECK(fast_batches == 3);
         CHECK(fast_regs == 15);
+        int heating_fast_batches = 0;
+        for (int i = 0; i < nb; ++i) {
+            if (mb_batch_is_fast(b[i], true)) ++heating_fast_batches;
+        }
+        CHECK(heating_fast_batches == 4);
+        CHECK(mb_offset_is_heating_witness(MbFunc::ReadInput, 30));
+        CHECK(mb_offset_is_heating_witness(MbFunc::ReadInput, 31));
+        CHECK(!mb_offset_is_heating_witness(MbFunc::ReadHolding, 30));
+        CHECK(!mb_offset_is_heating_witness(MbFunc::ReadInput, 32));
+        CHECK(mb_plan_max_requests(b, nb, false, true, true) ==
+              mb_plan_max_requests(b, nb, false) + 3);
         // Every gate offset really is inside some fast batch — the assertion above counts batches,
         // this one proves the coverage it is standing in for.
         for (size_t g = 0; g < MB_GATE_OFFSET_COUNT; g++) {
@@ -34708,10 +34719,13 @@ void test_modbus_heating_flow() {
     constexpr int64_t utc_hour = 500000;
     constexpr int64_t utc      = utc_hour * 3600;
     ModbusHeatingFlow flow;
-    auto              sample = [&](int64_t at_s, uint16_t tenths = 83, int64_t age_s = 1) {
-        flow.record(at_s * second, (at_s - age_s) * second, utc + at_s, tenths);
+    auto sample = [&](int64_t at_s, uint16_t tenths = 83, int64_t age_s = 1, int64_t shift_us = 0) {
+        flow.record(at_s * second, (at_s - age_s) * second, (utc + at_s) * second + shift_us,
+                    tenths);
     };
-    auto report = [&](int64_t at_s) { return flow.report(at_s * second, utc + at_s); };
+    auto report = [&](int64_t at_s, int64_t shift_us = 0) {
+        return flow.report(at_s * second, (utc + at_s) * second + shift_us);
+    };
 
     for (int t = 1; t < 601; t += 5) sample(t);
     CHECK(report(600).minimum_tenths == 0);
@@ -34736,9 +34750,23 @@ void test_modbus_heating_flow() {
     sample(1547, 50);
     CHECK(report(1547).minimum_tenths == 60);
     CHECK(report(24 * 3600).minimum_tenths == 0);
-    CHECK(flow.report(1547 * second, utc + 1547 + 3600).minimum_tenths == 0);
-    flow.record(1552 * second, 1551 * second, utc + 1552 + 3600, 50);
-    CHECK(flow.report(1552 * second, utc + 1552 + 3600).minimum_tenths == 0);
+    CHECK(report(1547, 2500000).minimum_tenths == 0);
+    sample(1552, 50, 1, 2500000);
+    CHECK(report(1552, 2500000).minimum_tenths == 0);
+
+    for (int t = 1; t <= 601; t += 5) sample(t);
+    CHECK(report(601).minimum_tenths == 83);
+    sample(606, 90, 1, 1500000);
+    CHECK(report(606, 1500000).minimum_tenths == 83);
+    sample(611, 90, 1, 2200000);
+    CHECK(report(611, 2200000).minimum_tenths == 0);
+
+    for (int t = 1; t <= 601; t += 5) sample(t);
+    CHECK(report(601).minimum_tenths == 83);
+    flow.reset();
+    CHECK(report(601).minimum_tenths == 0);
+    sample(606, 50);
+    CHECK(report(606).minimum_tenths == 0);
 }
 
 } // namespace hydronic_host_tests

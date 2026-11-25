@@ -1161,6 +1161,7 @@ void poll_batch_fallback() {
 }
 void heating_flow_poll_evidence() {
     reset();
+    adapter::cfg.diagnostics_enabled     = true;
     constexpr uint32_t target_generation = 11, consent_epoch = 4;
     s_target_generation                = target_generation;
     adapter::checkup_consent_epoch_val = consent_epoch;
@@ -1184,10 +1185,11 @@ void heating_flow_poll_evidence() {
     mb_poll_once();
     REQUIRE(adapter::checkup_heating_breaks == 0 && adapter::checkup_live_calls == 1);
 
-    // A failed batch is retried one register at a time. Either missing phase reply must break
-    // heating continuity even while the other phase, space/Heating gates and socket remain live.
+    // A failed batch is retried one register at a time. A missing heating witness must break
+    // continuity even while the other witnesses, space/Heating gates and socket remain live.
     peer.batch_exception = true;
-    for (uint16_t offset : {35, 36}) {
+    for (uint16_t offset : {30, 31, 35, 36}) {
+        s_cycle_tick                = 1;
         peer.input_exception_offset = offset;
         const unsigned previous     = adapter::checkup_heating_breaks;
         sdk::clock_us.fetch_add(1000000);
@@ -1200,6 +1202,18 @@ void heating_flow_poll_evidence() {
                 adapter::checkup_live_calls == 1);
         REQUIRE(adapter::checkup_last_target_generation == target_generation);
         REQUIRE(adapter::checkup_last_consent_epoch == consent_epoch);
+    }
+    peer.batch_exception        = false;
+    peer.input_exception_offset = 0;
+    for (uint16_t offset : {30, 31}) {
+        s_cycle_tick = 1;
+        peer.set_word(MbFunc::ReadInput, offset, 0);
+        const unsigned previous = adapter::checkup_heating_breaks;
+        sdk::clock_us.fetch_add(1000000);
+        mb_poll_once();
+        REQUIRE(adapter::checkup_heating_breaks == previous + 1 &&
+                adapter::checkup_live_calls == 1);
+        peer.set_word(MbFunc::ReadInput, offset, 1);
     }
 }
 void space_route_values() {

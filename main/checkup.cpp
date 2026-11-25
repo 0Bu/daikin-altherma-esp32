@@ -1250,7 +1250,7 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
                               s_stop_generation, !generation_changed && s_stop_allow_restore);
     set_hydronic_diagnostics_locked(enabled, generation, generation_changed);
     if (generation_changed)
-        s_modbus_heating = {};
+        s_modbus_heating.reset();
     else
         s_modbus_heating.break_run();
     slot_set_diagnostics(s_x10a, enabled, generation_changed);
@@ -1300,7 +1300,7 @@ void checkup_modbus_reset() {
     retire_cycling_locked(s_modbus);
     retire_fault_locked(s_modbus);
     retire_dhw_trace_locked(s_modbus);
-    s_modbus_heating                  = {};
+    s_modbus_heating.reset();
     s_modbus_heating_target           = 0;
     s_modbus_heating_link             = 0;
     s_modbus.boot_handoff_valid       = false;
@@ -1457,7 +1457,7 @@ void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp) {
     if (!lk.acquired()) return;
     if (s_modbus.source_confirmed && s_modbus.model_fp == fp && s_modbus.source_fp == source_fp)
         return;
-    s_modbus_heating        = {};
+    s_modbus_heating.reset();
     s_modbus_heating_target = 0;
     s_modbus_heating_link   = 0;
     if (modbus_confirm_commit_locked(profile, fp, source_fp)) {
@@ -1861,16 +1861,20 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     fold_energy_locked(s_x10a, ein, bucket, discard_energy_sample);
 }
 
-struct ModbusHeatingWitnesses {
-    bool no_defrost   = false;
-    bool no_hot_start = false;
-    bool normal_space = false;
+struct ModbusCheckupReadings {
+    logic::CheckupSample sample;
+    int                  fault_sub    = 0;
+    uint16_t             fault_code   = 0;
+    bool                 no_defrost   = false;
+    bool                 no_hot_start = false;
+    bool                 normal_space = false;
 };
 
-[[gnu::noinline]] static void
-modbus_collect_sample(const CachedValue* v, size_t n, ModbusProfile profile,
-                      const logic::CheckupCoverage& cov, logic::CheckupSample& s,
-                      uint16_t& mb_fault_code, int& mb_fault_sub, ModbusHeatingWitnesses& heating) {
+[[gnu::noinline]] static void modbus_collect_sample(const CachedValue* v, size_t n,
+                                                    ModbusProfile                 profile,
+                                                    const logic::CheckupCoverage& cov,
+                                                    ModbusCheckupReadings&        readings) {
+    auto& s = readings.sample;
     for (size_t i = 0; i < n; ++i) {
         const CachedValue&     cv  = v[i];
         const def::HomeHubReg* row = modbus_row_for_cv(cv, profile);
@@ -1888,10 +1892,10 @@ modbus_collect_sample(const CachedValue* v, size_t n, ModbusProfile profile,
             }
             break;
         case 22:
-            mb_fault_code = logic::fault_code_pack(cv.value.c_str());
+            readings.fault_code = logic::fault_code_pack(cv.value.c_str());
             break;
         case 23:
-            if (exact_int(cv, val) && val > 0 && val <= 999) mb_fault_sub = val;
+            if (exact_int(cv, val) && val > 0 && val <= 999) readings.fault_sub = val;
             break;
         case 30:
             if (exact_int(cv, val) && (val == 0 || val == 1)) {
@@ -1912,10 +1916,10 @@ modbus_collect_sample(const CachedValue* v, size_t n, ModbusProfile profile,
             }
             break;
         case 35:
-            heating.no_defrost = exact_int(cv, val) && val == 0;
+            readings.no_defrost = exact_int(cv, val) && val == 0;
             break;
         case 36:
-            heating.no_hot_start = exact_int(cv, val) && val == 0;
+            readings.no_hot_start = exact_int(cv, val) && val == 0;
             break;
         case 37:
             if (exact_int(cv, val) && (val == 0 || val == 1)) {
@@ -1950,7 +1954,7 @@ modbus_collect_sample(const CachedValue* v, size_t n, ModbusProfile profile,
             if (cov.flow && !cv.modbus_flow_scale_unverified) s.flow_ok = tenths(cv, s.flow_tenths);
             break;
         case 53:
-            heating.normal_space = exact_int(cv, val) && val == 1;
+            readings.normal_space = exact_int(cv, val) && val == 1;
             break;
         default:
             break;
@@ -1980,6 +1984,43 @@ modbus_collect_sample(const CachedValue* v, size_t n, ModbusProfile profile,
     fold_energy_locked(s_modbus, ein, bucket, discard_energy_sample);
 }
 
+[[gnu::noinline]] static int64_t modbus_heating_wall_us() {
+    int64_t unix_s  = -1;
+    int32_t unix_ms = 0;
+    time_now(unix_s, unix_ms);
+    return unix_s > 0 && unix_s <= UINT32_MAX ? unix_s * 1000000 + unix_ms * 1000 : -1;
+}
+
+[[gnu::noinline]] static void record_modbus_heating_locked(const ModbusCheckupReadings& readings,
+                                                           uint32_t source_generation,
+                                                           bool     source_confirmed,
+                                                           uint32_t link_generation,
+                                                           int64_t  sweep_started_us) {
+    if (!s_modbus.cov.flow || !s_modbus.source_confirmed || hydronic_observation_suppressed()) {
+        s_modbus_heating.reset();
+        s_modbus_heating_target = 0;
+        return;
+    }
+    if (!source_confirmed || !link_generation) {
+        s_modbus_heating.break_run();
+        return;
+    }
+
+    if (s_modbus_heating_target != source_generation) s_modbus_heating.reset();
+    if (s_modbus_heating_link != link_generation) s_modbus_heating.break_run();
+    s_modbus_heating_target = source_generation;
+    s_modbus_heating_link   = link_generation;
+    const auto& s           = readings.sample;
+    const bool  eligible    = s.flow_ok && s.flow_tenths > 0 && s.flow_tenths <= UINT16_MAX &&
+                          s.pump_known && s.pump_on && s.rps_known && s.rps_running &&
+                          s.valve_known && !s.valve_dhw &&
+                          s.operating_mode == logic::CheckupOperatingMode::Heating &&
+                          readings.no_defrost && readings.no_hot_start && readings.normal_space;
+    const int64_t wall_us = modbus_heating_wall_us();
+    s_modbus_heating.record(esp_timer_get_time(), sweep_started_us, wall_us,
+                            eligible ? static_cast<uint16_t>(s.flow_tenths) : 0);
+}
+
 void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
                            uint32_t source_generation, uint32_t consent_epoch,
                            bool source_confirmed, ModbusProfileBasis basis,
@@ -1989,17 +2030,17 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
     if (!v && n) return;
 
     const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile, basis);
-    logic::CheckupSample         s;
-    int64_t                      unix_s  = -1;
-    int32_t                      unix_ms = 0;
-    time_now(unix_s, unix_ms);
-    if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
+    ModbusCheckupReadings        readings;
+    auto&                        s = readings.sample;
+    {
+        int64_t unix_s  = -1;
+        int32_t unix_ms = 0;
+        time_now(unix_s, unix_ms);
+        if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
+    }
     s.x10a_blind = !n;
 
-    uint16_t               mb_fault_code = 0;
-    int                    mb_fault_sub  = 0;
-    ModbusHeatingWitnesses heating;
-    modbus_collect_sample(v, n, profile, cov, s, mb_fault_code, mb_fault_sub, heating);
+    modbus_collect_sample(v, n, profile, cov, readings);
 
     const uint32_t              dhw_generation         = s_dhw_identity_generation.load();
     const uint32_t              circulation_generation = circulation_source_generation();
@@ -2026,29 +2067,13 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
         s_modbus.cov        = cov;
         s_modbus.energy_cov = logic::energy_modbus_coverage(profile, basis);
     }
-    if (!s_modbus.cov.flow || !s_modbus.source_confirmed || hydronic_observation_suppressed()) {
-        s_modbus_heating        = {};
-        s_modbus_heating_target = 0;
-    } else if (!source_confirmed || !link_generation) {
-        s_modbus_heating.break_run();
-    } else {
-        if (s_modbus_heating_target != source_generation) s_modbus_heating = {};
-        if (s_modbus_heating_link != link_generation) s_modbus_heating.break_run();
-        s_modbus_heating_target = source_generation;
-        s_modbus_heating_link   = link_generation;
-        const bool eligible     = s.flow_ok && s.flow_tenths > 0 && s.flow_tenths <= UINT16_MAX &&
-                              s.pump_known && s.pump_on && s.rps_known && s.rps_running &&
-                              s.valve_known && !s.valve_dhw &&
-                              s.operating_mode == logic::CheckupOperatingMode::Heating &&
-                              heating.no_defrost && heating.no_hot_start && heating.normal_space;
-        s_modbus_heating.record(now, sweep_started_us, unix_s,
-                                eligible ? static_cast<uint16_t>(s.flow_tenths) : 0);
-    }
+    record_modbus_heating_locked(readings, source_generation, source_confirmed, link_generation,
+                                 sweep_started_us);
     s_modbus.fault_now    = s.fault;
     s_modbus.pressure_now = -1;
     if (n) s_modbus.source_last_us = now;
     if (s_modbus.source_confirmed && now >= 0)
-        modbus_fault_trace_locked(mb_fault_code, mb_fault_sub, s.fault, now);
+        modbus_fault_trace_locked(readings.fault_code, readings.fault_sub, s.fault, now);
     commit_and_fold_locked(s_modbus, s, now, bucket, discard_dhw_sample);
     modbus_fold_energy_locked(v, n, profile, s, now, bucket, discard_energy_sample);
 }
@@ -2067,10 +2092,8 @@ logic::ModbusHeatingFlowReport checkup_modbus_heating_report() {
         !s_modbus.source_confirmed || s_modbus.reset_requested.load() || !s_modbus.cov.flow ||
         !mb_target_generation_matches(s_modbus_heating_target))
         return {};
-    int64_t unix_s  = -1;
-    int32_t unix_ms = 0;
-    time_now(unix_s, unix_ms);
-    const auto report = s_modbus_heating.report(esp_timer_get_time(), unix_s);
+    const int64_t wall_us = modbus_heating_wall_us();
+    const auto    report  = s_modbus_heating.report(esp_timer_get_time(), wall_us);
     return hydronic_observation_suppressed() ? logic::ModbusHeatingFlowReport{} : report;
 }
 
