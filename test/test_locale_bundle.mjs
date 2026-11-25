@@ -145,6 +145,7 @@ async function browserChecks(packsByCode, fixtures, baselineSources) {
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   let browser;
+  let bodyError = null;
   try {
     browser = await launchBrowser(); const page = browser.page;
     const url = `http://127.0.0.1:${server.address().port}/`;
@@ -187,9 +188,16 @@ async function browserChecks(packsByCode, fixtures, baselineSources) {
       await page.evaluate("Promise.all(['de','pl','nb','zh'].map(loadLocale))");
     }
     // Chromium can accept a damaged gzip footer. The explicit decoded CRC is the integrity check.
+    const unexpected = page.diagnostics.filter((msg) =>
+      !/Failed to load resource|ERR_CONTENT_DECODING_FAILED/.test(msg));
+    assert.deepEqual(unexpected, [], "corrupt bundle checks must emit no JS exceptions or unexpected errors");
+    page.clearDiagnostics();
     console.log(`locale packs browser: ${browser.product}; CSP, concurrent/repeated loads, globals and malformed inputs pass; gzip footer accepted=${crcResults.some(Boolean)}`);
+  } catch (error) {
+    bodyError = error;
+    throw error;
   } finally {
-    await browser?.close();
+    await browser?.close({ checkDiagnostics: !bodyError });
     await new Promise(resolve => { server.closeAllConnections(); server.close(resolve); });
   }
 }

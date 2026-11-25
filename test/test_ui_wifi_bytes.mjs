@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { createStrictDocument } from "../tools/ui/strict_dom.mjs";
 
 const html = fs.readFileSync(new URL("../main/www/setup.html", import.meta.url), "utf8");
 const scripts = [...html.matchAll(/<script>([^]*?)<\/script>/g)];
@@ -15,14 +16,7 @@ const cases = [
   ["Network", "ä".repeat(32), false], [" spaced ", "quoted\\\"pass", true],
 ];
 function harness(script, mode = "ok") {
-  const elements = new Map();
-  const document = { getElementById(id) {
-    if (!elements.has(id)) elements.set(id, {
-      value: "", textContent: "", className: "", disabled: false, listeners: {},
-      addEventListener(name, fn) { this.listeners[name] = fn; },
-    });
-    return elements.get(id);
-  } };
+  const document = createStrictDocument("main/www/setup.html");
   const calls = [];
   const context = vm.createContext({ document, TextEncoder, console, fetch: async (url, options) => {
     calls.push({ url, body: JSON.parse(options.body) });
@@ -31,11 +25,15 @@ function harness(script, mode = "ok") {
       text: async () => JSON.stringify({ ok: false, error: "invalid fixture input" }) };
   } });
   vm.runInContext(script, context);
-  return { elements, calls, async submit(ssid, pass) {
-    document.getElementById("ssid").value = ssid;
-    document.getElementById("pass").value = pass;
-    await document.getElementById("f").listeners.submit({ preventDefault() {} });
-  } };
+  return {
+    getElementById: (id) => document.getElementById(id),
+    calls,
+    async submit(ssid, pass) {
+      document.getElementById("ssid").value = ssid;
+      document.getElementById("pass").value = pass;
+      await document.getElementById("f").fire("submit");
+    },
+  };
 }
 async function credentialOracle(script) {
   for (const [ssid, pass, accepted] of cases) {
@@ -44,8 +42,8 @@ async function credentialOracle(script) {
     assert.equal(h.calls.length, Number(accepted), "setup must enforce UTF-8 byte limits");
     if (accepted) {
       assert.deepEqual(h.calls[0], { url: "/set_wifi", body: { ssid, pass } });
-      assert.match(h.elements.get("msg").textContent, /^Saved/);
-    } else assert.doesNotMatch(h.elements.get("msg").textContent, /^Saved/);
+      assert.match(h.getElementById("msg").textContent, /^Saved/);
+    } else assert.doesNotMatch(h.getElementById("msg").textContent, /^Saved/);
   }
 }
 await credentialOracle(source);
@@ -53,9 +51,9 @@ for (const mode of ["reject", "busy", "unreachable"]) {
   const h = harness(source, mode);
   await h.submit("Network", "ä".repeat(4));
   assert.equal(h.calls.length, 1);
-  assert.equal(h.elements.get("btn").disabled, false, "rejected save must permit retry");
-  assert.equal(h.elements.get("pass").value, "ä".repeat(4));
-  assert.doesNotMatch(h.elements.get("msg").textContent, /^Saved/);
+  assert.equal(h.getElementById("btn").disabled, false, "rejected save must permit retry");
+  assert.equal(h.getElementById("pass").value, "ä".repeat(4));
+  assert.doesNotMatch(h.getElementById("msg").textContent, /^Saved/);
 }
 const mutant = source.replace("new TextEncoder().encode(ssid).length", "ssid.length")
   .replace("new TextEncoder().encode(pass).length", "pass.length");

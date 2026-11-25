@@ -66,6 +66,7 @@ vm.runInContext(
        S.otaCached = otaCached;
      },
      lang: (value) => { LANG = value; },
+     t,
    };`,
   sandbox,
   { filename: "main/www/app.sources" },
@@ -230,7 +231,14 @@ for (const locale of localeNames) {
   ui.set({ ...observed, state: "limited", special_phases_known: false,
     limitations: ["temperature_context_incomplete", "pressure_sides_incomplete", "outdoor_context_incomplete"] });
   html = ui.card();
-  assert.doesNotMatch(html, /service\.(?:metric|limit|common)|undefined|NaN/, locale);
+  assert.doesNotMatch(html, /service\.(?:metric|limit|common|help)|undefined|NaN/, locale);
+  const limitedHelp = ui.t("service.help.limited");
+  assert.ok(limitedHelp && limitedHelp !== "service.help.limited", `${locale}: service.help.limited exists`);
+  assert.ok(html.includes(limitedHelp), `${locale}: state=limited must render service.help.limited`);
+  assert.ok(!limitedHelp.includes(ui.t("service.title")),
+    `${locale}: service.help.limited must not repeat the row title`);
+  assert.equal((html.match(new RegExp(ui.t("service.title").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length, 2,
+    `${locale}: service.title must appear only in row label and aria-label, not in help copy`);
   for (const unit of ["rps", "°C", "pls", "bar"]) assert.ok(html.includes(unit), `${locale} ${unit}`);
   assert.doesNotMatch(html, />OK</);
   assert.equal((html.match(/class="vdesc-p"/g) || []).length, 3, `${locale}: exactly three blocks`);

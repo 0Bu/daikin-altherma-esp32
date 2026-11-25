@@ -274,4 +274,48 @@ assert.equal(explicitDrains, 2, "a failed render still releases the history queu
   assert.deepEqual(bootOrder, ["probeRunningOta", "renderApp", "sysSet:sys.nodata"]);
 }
 
+// When renderApp() itself throws on a deferred-paint pollTick, pollTick() must catch it cleanly,
+// log "Live update failed", release _pollBusy, increment _pollFails, and schedule exponential backoff.
+{
+  const timers = [];
+  let timerId = 1;
+  const pollErrors = [];
+  const failCtx = {
+    S: { hpProbeBusy: false },
+    LANG: "en",
+    document: { hidden: false, addEventListener() {} },
+    performance: { now: () => 0 },
+    setTimeout(fn, ms) { timers.push({ id: timerId, fn, ms }); return timerId++; },
+    clearTimeout(id) {
+      const idx = timers.findIndex((t) => t.id === id);
+      if (idx >= 0) timers.splice(idx, 1);
+    },
+    async refreshStatus() { return true; },
+    async refreshValues() { return true; },
+    renderApp() { throw new Error("boom in renderApp"); },
+    async loadLocale() { return true; },
+    applyStaticI18n() {}, labelSchematicHits() {}, wire() {}, initNavigation() {}, resumeOta() {},
+    console: {
+      error: (...args) => { pollErrors.push(args.map(String).join(" ")); },
+      log() {}, warn() {},
+    },
+  };
+  failCtx.window = failCtx;
+  failCtx.globalThis = failCtx;
+  const failSandbox = vm.createContext(failCtx);
+  vm.runInContext(`${source}\nthis.__state = () => ({ fails: _pollFails, busy: _pollBusy });`,
+    failSandbox, { filename: "main/www/js/bootstrap.js" });
+  failSandbox.wire = () => {};
+  await flush();
+  assert.equal(timers.length, 1, "pollStart() schedules initial tick");
+  await timers.shift().fn();
+  assert.equal(pollErrors.length, 1, "renderApp() throw inside pollTick must log one console.error");
+  assert.match(pollErrors[0], /Live update failed/, "pollTick catch must log Live update failed");
+  const st = failSandbox.__state();
+  assert.equal(st.fails, 1, "renderApp() throw must increment _pollFails");
+  assert.equal(st.busy, false, "renderApp() throw must release _pollBusy");
+  assert.equal(timers.length, 1, "backoff timer must remain scheduled after renderApp() throw");
+  assert.equal(timers[0].ms, 4000, "first failure must double 2s cadence to 4000ms backoff");
+}
+
 console.log("UI poll cadence: forced status refresh and queued history after a failed live poll pass");
