@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -387,6 +387,12 @@ I18N.es = localeValues([
   /* check.detail.pressure.info */ "Baja",
   /* check.detail.pressure.warn */ "Crítica",
   /* check.detail.pressure.ok */ "Normal",
+  /* check.pressure.finding */ "Resultado confirmado",
+  /* check.pressure.sustained */ (a) => `A ${a} o menos durante al menos 60 segundos consecutivos.`,
+  /* check.pressure.clear */ "No se ha confirmado una presión baja sostenida.",
+  /* check.pressure.rules */ "¿Cómo se evalúa la presión?",
+  /* check.pressure.unavailable */ "Diagnóstico de presión X10A no disponible.",
+  /* check.pressure.pending */ "Lectura en el intervalo crítico. Se desconoce todavía la duración.",
   /* check.detail.defrost_events_insufficient */ "Menos de tres desescarches asociados; sin evaluación de porcentaje.",
   /* check.detail.source_stale */ "Sin lectura X10A reciente; estado actual desconocido. Historial conservado.",
   /* check.detail.no_paired_runtime */ "Sin tiempo legible asociado; solo recuento.",
@@ -1122,7 +1128,7 @@ INSPECT_I18N.es = inspectValues(
     ["Tubería de entrada PHE", "Tubería de entrada del PHE", "Retorno común al PHE por R4T después de unir los ramales. En calefacción suele estar más frío que R1T y en refrigeración activa más caliente; R4T no es un sensor dedicado en los emisores.", (d) => waterMoving(d) ? `Retorno a ${degC(d.ret)}, ${fmt1(d.flow)} l/min y ${fmt1(d.wp)} bar.` : "Bomba y caudal no demuestran circulación en el retorno."], // wret
     ["Caudal", "Caudal de agua", "Caudal del circuito común. El mínimo depende del modelo; interprétalo con bomba y presión."], // flow
     ["Estado del flujostato", 0, "Entrada binaria X10A; no mide l/min ni confirma el caudal mínimo.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A activo; compáralo con bomba y ${fmt1(d.flow)} l/min.` : `X10A inactivo; con bomba activa, compara ${fmt1(d.flow)} l/min y fallos 7H/C0.`], // flow_switch
-    ["Presión de agua", 0, "Presión del circuito hidráulico, no del refrigerante. El intervalo permitido depende del modelo y de la instalación; compárala con el manual exacto."], // wp
+    ["Presión de agua", 0], // wp
   ],
 );
 
@@ -1204,7 +1210,7 @@ DESCRIPTION_I18N.es = descriptionValues([
   ["R1T sale del PHE antes de BUH; con R4T y caudal estima potencia por modo, pero su ubicación depende de la unidad."], // 34
   ["Retorno R4T al PHE; evalúa el ΔT con caudal, compresor y modo, no con 5 K universales."], // 35
   ["Caudal del circuito común; el mínimo depende de modelo y modo, y un valor bajo puede causar 7H."], // 36
-  ["Presión hidráulica: muchos manuales exigen >1 bar, pero a ≤1,0 bar consulta el manual del modelo exacto."], // 37
+  ["Presión del agua en el circuito hidráulico cerrado.","Muchos manuales Altherma requieren más de 1 bar en la entrada de la bomba. El rango permitido depende del modelo, la altura de la instalación y el vaso de expansión. A 1,0 bar o menos, consulta el manual de la unidad exacta."], // 37
   ["Orden X10A invertida: 0 = máx, 100 = paro ([0, 100] → 100–0 %). No mide RPM ni prueba giro, altura ni caudal; lee ON/OFF y caudal por separado."], // 38
   ["Estado de bomba; no prueba calor útil y puede actuar sin compresor: compáralo con caudal."], // 39
   ["Estado de la bomba de un circuito solar térmico configurado."], // 40

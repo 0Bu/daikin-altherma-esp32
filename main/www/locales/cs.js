@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -387,6 +387,12 @@ I18N.cs = localeValues([
   /* check.detail.pressure.info */ "Nízký",
   /* check.detail.pressure.warn */ "Kritický",
   /* check.detail.pressure.ok */ "Normální",
+  /* check.pressure.finding */ "Potvrzený nález",
+  /* check.pressure.sustained */ (a) => `Tlak nejvýše ${a} po dobu alespoň 60 sekund bez přerušení.`,
+  /* check.pressure.clear */ "Trvale nízký tlak nebyl potvrzen.",
+  /* check.pressure.rules */ "Jak se vyhodnocuje tlak?",
+  /* check.pressure.unavailable */ "Diagnostika tlaku X10A není dostupná.",
+  /* check.pressure.pending */ "Hodnota je v kritickém rozsahu. Doba trvání zatím není známá.",
   /* check.detail.defrost_events_insufficient */ "Méně než tři spárovaná odmrazení; bez verdiktu podílu.",
   /* check.detail.source_stale */ "Žádný čerstvý vzorek X10A; aktuální stav neznámý. Historie zachována.",
   /* check.detail.no_paired_runtime */ "Žádná spárovaná čitelná doba; pouze počet.",
@@ -1075,7 +1081,7 @@ INSPECT_I18N.cs = inspectValues(
     ["Vratné potrubí k PHE", 0, "Společný návrat do R4T po spojení zásobníku a domu. Při vytápění je obvykle chladnější než R1T, při chlazení teplejší; R4T není u spotřebičů.", (d) => waterMoving(d) ? `Návrat ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Oběh ve vratném potrubí není potvrzen."], // wret
     ["Průtok vody", 0, "Průtok společným okruhem; minimum závisí na modelu a režimu."], // flow
     ["Stav spínače průtoku", 0, "Binární stav X10A; neměří l/min ani nepotvrzuje minimum modelu.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A ZAP; porovnejte s čerpadlem a ${fmt1(d.flow)} l/min.` : `X10A VYP; při chodu čerpadla porovnejte ${fmt1(d.flow)} l/min a chybu 7H/C0.`], // flow_switch
-    ["Tlak vody", 0, "Tlak v uzavřeném hydraulickém okruhu. Povolený rozsah závisí na modelu, výšce a expanzní nádobě; viz návod."], // wp
+    ["Tlak vody", 0], // wp
   ],
 );
 
@@ -1157,7 +1163,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
   ["R1T měří vodu z PHE před BUH; režim, R4T a průtok určují význam i odhad výkonu."], // 34
   ["R4T je společná vratka do PHE; R1T−R4T je ΔT PHE, ne přímo otopných těles."], // 35
   ["Rychlost oběhu vody ve společném okruhu vytápění/chlazení a TUV."], // 36
-  ["Tlak vody; rozsah závisí na modelu, při ≤1,0 bar použijte přesný návod."], // 37
+  ["Tlak v uzavřeném hydraulickém okruhu.","Povolený rozsah závisí na modelu, výšce instalace a expanzní nádobě. Při tlaku 1,0 bar nebo méně zkontrolujte návod konkrétní jednotky."], // 37
   ["Obrácený X10A povel: 0 = max, 100 = stop ([0, 100] → 100–0 %). Neměří RPM ani neprokazuje otáčení, výtlak nebo průtok; čtěte ZAP/VYP a průtok zvlášť."], // 38
   ["Běh oběhového čerpadla nedokazuje přenos tepla; potvrďte jej průtokem."], // 39
   ["Stav čerpadla nakonfigurovaného solárního termického okruhu."], // 40

@@ -1537,17 +1537,31 @@ function selectFlowMinimum(plot, clientX, clientY, tolerance = 0) {
   return true;
 }
 
-function histHtml(id, unit, name, source = "", identifySource = false, flow = null) {
+function pressureFindingIndex(view, finding) {
+  if (finding?.at == null) return -1;
+  const series = histVisibleSeries(view).find(s => s.source === "x10a");
+  if (!series || !historyWallLabelAllowed(series.raw)) return -1;
+  const sample = (finding.at - series.raw.t0) / view.dt;
+  // The time axis labels the end of each bucket. A timestamp on a boundary in whole seconds
+  // cannot reliably identify which bucket owns the original observation.
+  if (Number.isInteger(sample)) return -1;
+  const index = Math.ceil(sample) + series.offset;
+  return index >= 0 && series.v[index] === Math.round(finding.bar * 10) && !histHeld(series, index) ? index : -1;
+}
+
+function histHtml(id, unit, name, source = "", identifySource = false, flow = null,
+                  { pressureDiagnosis = false, finding, findingExplanation = "" } = {}) {
   const offeredX = (!source || source === "x10a") && hasHist(id);
   const offeredM = (!source || source === "modbus") && hasModbusHist(id);
   const offeredE = (!source || source === "env3") && hasEnv3Hist(id);
   if (!offeredX && !offeredM && !offeredE) return "";
   const offered = [offeredX && id, offeredM && histCacheKey(id, "modbus"),
     offeredE && histCacheKey(id, "env3")].filter(Boolean);
-  const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
+  const wrap = (body, cls) => `<div class="vhist${pressureDiagnosis ? " vhist-pressure-diagnosis" : ""}${cls ? " " + cls : ""}">${body}</div>`;
   const view = historyView(id, source);
   if (!view?.v.some(v => v != null)) return histEmptyHtml(offered.map(key => S.hist.get(key)), wrap);
-  const chartName = identifySource ? `${name || id} · ${view.series[0].name}` : name;
+  const visible = histVisibleSeries(view);
+  const chartName = identifySource ? `${name || id} · ${visible.map(s => s.name).join(" / ")}` : name;
 
   const allPts = view.series.flatMap((s) => s.v.map((x) => x == null ? null : x / 10));
 
@@ -1561,11 +1575,14 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   // grows with the board; after that every source remains a rolling day. A source that started or
   // changed later contributes explicit null gaps, never a shorter axis or fabricated flat data.
   const full  = n * view.dt >= 23.5 * 3600;
-  const visible = histVisibleSeries(view);
   const flowBands = id === "flow" ? flowMinimumBands(view, flow) : [];
   const scale = histScale(allPts, n, id);
   const { lo, hi, X, Y } = scale;
   const isPressure = id === "water_pressure";
+  const findingIndex = pressureDiagnosis ? pressureFindingIndex(view, finding) : -1;
+  const findingMark = findingIndex < 0 ? "" :
+    `<span class="vhist-pressure-finding${pressureZoneClass(finding.bar)}" aria-hidden="true"` +
+    ` style="left:${(X(findingIndex) / HIST_W * 100).toFixed(2)}%;top:${(Y(finding.bar) / HIST_H * 100).toFixed(2)}%"></span>`;
 
   // Contiguous runs only: each becomes one light area with its darker upper-edge line, so every
   // numeric trend uses the same visual grammar while a gap remains a real gap. Multiple sources use
@@ -1609,6 +1626,11 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   // Its instant is re-resolved here on every render, so the pin follows its measurement as the ring
   // rolls and disappears once that measurement has left the day.
   const pi = histPinIndex(id, view);
+  // The synopsis is already escaped by the inspector. It describes its 24-hour finding,
+  // independently of the reading in the ordinary pinned sample tooltip.
+  const hasExplanation = pressureDiagnosis && findingExplanation && visible.some(s => s.source === "x10a");
+  const showExplanation = hasExplanation && pi >= 0 && S.histPin.get(id)?.pressureInspector;
+  const pressureAttr = hasExplanation ? " data-pressure-assessment" : "";
   const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
   let pinCross = "", pinMarks = "";
   if (pi >= 0) {
@@ -1705,19 +1727,22 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
     : "";
   const axis = `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
     `<span>${esc(histAxisEnd(view))}</span></div>`;
-  return wrap(
+  const heading = pressureDiagnosis ? "" :
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
-    `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
+    `<span class="vhist-range mono num">${esc(rng)}</span></div>`;
+  return wrap(heading + legend +
     `<div class="vhist-graph${grid.yAxis ? " vhist-has-y" : ""}">` + grid.yAxis +
       histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
-      `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)}${flowAttr} data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", chartName || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}">` +
+      `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${pressureAttr}${histRevision(view)}${flowAttr} data-n="${n}" tabindex="0" role="img"` +
+        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", chartName || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}"` +
+        `${showExplanation ? ' aria-describedby="inspPressureExplanation"' : ""}>` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${phaseBands}${area}${flowSvg}${line}${dots}</svg>` +
-        threshHtml + nowDots + pinCross + pinMarks +
+        threshHtml + nowDots + findingMark + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
       `</div>` + axis + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` + flowReadout +
+    (showExplanation ? `<div class="vhist-note vhist-pressure-explanation" id="inspPressureExplanation">${findingExplanation}</div>` : "") +
     histUnavailableHtml(view) +
     (modbusFlowUnverified(view) ? `<div class="vhist-note">${esc(t("hist.modbus_flow_unverified"))}</div>` : ""),
     view.series.length > 1 ? "vhist-multi" : ""
@@ -1904,12 +1929,14 @@ function expireFallbackHistoryPins() {
 }
 // Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
 // you just made is the obvious way to dismiss it, and needs no extra affordance on an 88 px plot.
-function histPinToggle(id, i, source = "", captured) {
+function histPinToggle(id, i, source = "", captured, pressureInspector = false) {
   const h = captured || historyView(id, source);
   const total = h?.v.length || 0;
   if (!total) return;
   i = Math.max(0, Math.min(total - 1, i));
-  if (histPinIndex(id, h) === i) S.histPin.delete(id);
+  // A pin arriving from the value list still shows the reading, but touching the inspector's
+  // plot must select it here before it can be tapped again to dismiss its explanation.
+  if (histPinIndex(id, h) === i && (!pressureInspector || S.histPin.get(id)?.pressureInspector)) S.histPin.delete(id);
   else if (i === h.liveIndex) S.histPin.set(id, { sources: histPinSources(h), source,
     live: true, sample: liveHistoryPinSample(id, source, h) });
   else if (Number.isInteger(h.b0)) {
@@ -1919,6 +1946,7 @@ function histPinToggle(id, i, source = "", captured) {
       witnessed: witnessed.length > 0,
       lanes: (witnessed.length ? witnessed : visible).map(s => s.source) });
   } else S.histPin.set(id, { i, gen: histPlottedPinRevision(h), sources: histPinSources(h), source });
+  if (pressureInspector && S.histPin.has(id)) S.histPin.get(id).pressureInspector = true;
   // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the
   // middle of a click; it must not delay the very update the click just asked for — a pin that
   // appeared 600 ms after the finger lifted would read as the same "it didn't take" the pin was
@@ -2814,8 +2842,6 @@ function modelDescRow(id, label, value, opt = {}) {
   const d = MODEL_DESCRIPTIONS[id];
   if (!d) return vrow(label, value, opt);
   const val = esc(value) + (opt.unit ? `<span class="vrow-unit">${esc(opt.unit)}</span>` : "");
-  // No trend half here unless a check explicitly passes a trend (such as health_pressure's X10A
-  // 24-hour water-pressure curve).
   return descAccordion(`model:${id}`, label, val, opt.cls || "",
                        opt.bodyHtml ?? descBodyHtml(d, undefined, modelDescriptionCopy(id)),
                        opt.trendId || "", opt.histUnit || "", opt.paused, opt.renderHistory,
@@ -2866,17 +2892,12 @@ function toggleDesc(btn) {
   // including a cache hit (ensureHistPair then returns without triggering a repaint).
   if (open && trend && !item.querySelector(".vhist")) {
     const body = item.querySelector("[data-chart]") || item.querySelector(".vdesc-body");
-    const chart = key === "model:health_pressure"
-      ? histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent, "x10a", true)
-      : histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent);
+    const chart = histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent);
     replaceHistoryHtml(body, body.innerHTML + chart);
   }
   // Fetch the trend only once the panel is actually opened — a device that buffers eleven series
   // would otherwise answer a request per row on every page load, for panels nobody looked at.
-  if (open && trend) {
-    if (key === "model:health_pressure") ensureHist(trend, "x10a");
-    else ensureHistPair(trend);
-  }
+  if (open && trend) ensureHistPair(trend);
 }
 
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the

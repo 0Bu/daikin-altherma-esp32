@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -387,6 +387,12 @@ I18N.zh = localeValues([
   /* check.detail.pressure.info */ "偏低",
   /* check.detail.pressure.warn */ "危急",
   /* check.detail.pressure.ok */ "正常",
+  /* check.pressure.finding */ "已确认的结果",
+  /* check.pressure.sustained */ (a) => `压力连续至少 60 秒不高于 ${a}。`,
+  /* check.pressure.clear */ "未确认有持续低压。",
+  /* check.pressure.rules */ "如何评估水压？",
+  /* check.pressure.unavailable */ "X10A 水压诊断不可用。",
+  /* check.pressure.pending */ "读数处于危险范围，持续时间尚不明确。",
   /* check.detail.defrost_events_insufficient */ "少于3次配对除霜；不作比例判定。",
   /* check.detail.source_stale */ "无新鲜X10A样本；当前状态未知。保留历史。",
   /* check.detail.no_paired_runtime */ "无配对可读运行时间；仅次数。",
@@ -1104,7 +1110,7 @@ INSPECT_I18N.zh = inspectValues(
     ["PHE 回水管", "PHE 回水管", "支路汇合后经 R4T 回 PHE；不是末端专用传感器。", (d) => waterMoving(d) ? `${degC(d.ret)}，${fmt1(d.flow)} l/min，${fmt1(d.wp)} bar。` : "泵/流量未证明回水循环。"], // wret
     ["流量", "水流量", "公共水路流量；最低值随型号，须结合泵和压力。"], // flow
     ["流量开关状态", "流量开关状态", "X10A 二进制输入；不测 l/min 或确认最低流量。", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A 启动；结合泵和 ${fmt1(d.flow)} l/min。` : `X10A 未启动；结合 ${fmt1(d.flow)} l/min 与 7H/C0。`], // flow_switch
-    ["水压", "水路压力", "水压，非制冷剂压力；范围取决于型号/安装。"], // wp
+    ["水压", "水路压力"], // wp
   ],
 );
 
@@ -1186,7 +1192,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
   ["PHE 后、BUH 前 R1T；配合 R4T/流量估算功率，位置随型号。"], // 34
   ["PHE 回水 R4T；须结合流量/压缩机/模式，无统一 5 K。"], // 35
   ["公共水流量；最低值随型号/模式，过低可触发 7H。"], // 36
-  ["水压；许多手册要求 >1 bar，≤1.0 bar 时查确切型号手册。"], // 37
+  ["封闭液压回路中的水压。","许多 Altherma 手册要求泵入口的压力高于 1 bar。允许的压力范围取决于机型、安装高度和膨胀罐。压力为 1.0 bar 或更低时，请查阅相应机型的手册。"], // 37
   ["反向 X10A 指令：0 = 最大，100 = 停机（[0, 100] → 100–0 %）。不测 RPM 也不证明旋转、扬程或流量；请分开查看开关状态与流量。"], // 38
   ["泵状态；须结合流量，运行不证明换热。"], // 39
   ["太阳能回路泵状态；不同于热泵水路泵。"], // 40

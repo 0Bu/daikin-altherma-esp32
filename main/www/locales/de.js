@@ -1,4 +1,4 @@
-// translation-source: 3c86b4e63448da4f5dd90d63677e3ea492c7c4ca05106ad170474ffa3d7e118e
+// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -387,6 +387,12 @@ I18N.de = localeValues([
   /* check.detail.pressure.info */ "Niedrig",
   /* check.detail.pressure.warn */ "Kritisch",
   /* check.detail.pressure.ok */ "Normal",
+  /* check.pressure.finding */ "Bestätigter Befund",
+  /* check.pressure.sustained */ (a) => `Mindestens 60 Sekunden durchgehend bei höchstens ${a}.`,
+  /* check.pressure.clear */ "Kein anhaltend niedriger Druck bestätigt.",
+  /* check.pressure.rules */ "Wie entsteht der Befund?",
+  /* check.pressure.unavailable */ "X10A-Druckdiagnose nicht verfügbar.",
+  /* check.pressure.pending */ "Messwert im kritischen Bereich. Die Dauer ist noch offen.",
   /* check.detail.defrost_events_insufficient */ "Weniger als drei zugeordnete Abtauungen; kein Anteilsurteil.",
   /* check.detail.source_stale */ "Keine frische X10A-Abfrage; aktueller Zustand unbekannt. Historie bleibt erhalten.",
   /* check.detail.no_paired_runtime */ "Keine zugehörige lesbare Laufzeit; nur Anzahl belegt.",

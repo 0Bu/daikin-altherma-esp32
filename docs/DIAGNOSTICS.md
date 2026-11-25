@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 22e04b31905419fa037d8824c25668e271faa8ddc6d11b01ea294769594a364d -->
+<!-- user-docs-contract: e5e9f01d2b89587e9ceefc783404985cb0c1c53f55187cf0493e3ac1ab404e7a -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -206,8 +206,14 @@ water flow and tank charging require separate evidence.
 <!-- user-docs: health_pressure -->
 ### Water pressure
 
-**In plain language:** The card plots the 24-hour X10A water-pressure history using 5-minute
-minimums, alongside the live pressure when fresh or the confirmed Low / Critical state.
+**In plain language:** Open Water pressure on the schematic to see the current reading and the
+24-hour chart of 5-minute minimums. The X10A finding follows any second-source pressure reading.
+A confirmed Low or Critical finding includes its lowest reading and the observation time, when known.
+A marker highlights the matching X10A sample when it can be identified in the chart. When the X10A
+history and assessment are available, select a position in the chart to show the assessment criteria
+directly below it. A red warning triangle after the Water pressure label signals a confirmed Critical
+finding in the 24-hour window. An amber dot signals a current critical reading with the duration
+still open.
 
 **Meaning:** Readings above **1.0 bar** are shown as normal. At least **60 continuously observed
 seconds** at or below **1.0 bar** (`0.6–1.0 bar`) produce **NOTE** (*Low*), and at least
