@@ -575,6 +575,8 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
             defrost.verdict    = logic::CheckupVerdict::Info;
             defrost.reason     = logic::CheckupReason::None;
             defrost.observed_s = 86400;
+            report.source_fresh = true;
+            report.source_age_s = 1;
         }
         if (fixture::flow_min_tenths >= 0)
             report.checks[static_cast<size_t>(logic::CheckupCheck::Flow)].a =

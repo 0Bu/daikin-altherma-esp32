@@ -73,6 +73,12 @@ function wire() {
       if (act.dataset.act === "gas-comparison") openGasComparison();
       return;
     }
+    if (e.target.closest("[data-defrost-inspect]")) {
+      if (S.insp !== "defrost") inspectPick("defrost");
+      S.inspFromDefrostNotice = true;
+      $("inspClose").focus();
+      return;
+    }
     const desc = e.target.closest("[data-desc]");
     if (desc) toggleDesc(desc);
   });

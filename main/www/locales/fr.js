@@ -1,4 +1,4 @@
-// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
+// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -169,7 +169,7 @@ I18N.fr = localeValues([
   /* check.fault */ "Défaut de l’unité",
   /* check.dhw_loss */ "Refroidissement ECS",
   /* check.cycling */ "Démarrages compresseur",
-  /* check.defrost */ "Dégivrages",
+  /* check.defrost */ "Dégivrage",
   /* check.pressure */ "Pression d’eau",
   /* check.flow */ "Débit min.",
   /* check.flow.lowest */ "Débit le plus bas en chauffage",
@@ -232,7 +232,6 @@ I18N.fr = localeValues([
   /* check.detail.fault.past */ "Aucun message actif ; un message a été enregistré. Sa disparition ne prouve ni sa cause ni sa résolution.",
   /* check.detail.fault.past_unknown */ "Un message a été enregistré ; l’état actuel du défaut est illisible.",
   /* check.detail.collecting */ (a, b) => `Signaux lisibles : ${a} sur ${b} requis.`,
-  /* check.detail.outdoor_defrost */ " Les valeurs extérieures X10A ne comprennent que des mesures récentes lorsque les états du dégivrage et du compresseur étaient tous deux lisibles et que le compresseur fonctionnait. Elles fournissent du contexte et ne modifient ni le seuil de dégivrage ni le verdict.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Fenêtres horaires admises : ${a} ; candidate actuelle : ${c} sur ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Fenêtres horaires admises : ${a} ; charge ou résistance du ballon détectée. Stabilisation restante : ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Fenêtres horaires admises : ${a} ; attente de la prochaine heure admissible.`,
@@ -249,8 +248,6 @@ I18N.fr = localeValues([
   /* check.detail.experimental */ "Compteurs expérimentaux ; stabilité n’exclut pas une limitation.",
   /* check.detail.unavailable */ "Aucun signal évaluable dans ce profil.",
   /* check.starts */ (n) => `${n} ${n === 1 ? "démarrage" : "démarrages"}`,
-  /* check.cycles */ (n) => `${n} ${n === 1 ? "cycle" : "cycles"}`,
-  /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "apparié" : "appariés"}`,
   /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "cycle" : "cycles"}`,
   /* check.cycling.mean */ (d) => `Moy. ${d}`,
   /* check.cycling.completed */ "Cycles terminés",
@@ -316,8 +313,6 @@ I18N.fr = localeValues([
   /* check.cycling.e_ongoing */ "Actif au dernier relevé.",
   /* check.cycling.cause_unavailable */ "Sans détails",
   /* check.cycling.cause_older_unavailable */ "Aucun détail enregistré sur le démarrage ou l’arrêt n’est disponible pour ces anciens cycles.",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `ballon ${d}`,
   /* check.buh_runtime */ (d) => `appoint ${d}`,
@@ -377,13 +372,13 @@ I18N.fr = localeValues([
   /* check.detail.period_label */ "Période des données :",
   /* check.detail.period */ (a) => `${a}, au plus 24 h ; lacunes possibles`,
   /* check.detail.age_label */ "Âge de la dernière mesure :",
-  /* check.detail.horizon_wait */ (a) => `La fenêtre complète de 24 heures manque encore : ${a} restantes.`,
   /* check.detail.fault.ok */ "Aucun message actuel ou mémorisé dans les signaux de défaut lisibles.",
-  /* check.detail.defrost.info */ "≥3 dégivrages associés dépassent 15 % du temps lisible du compresseur : indice du projet.",
-  /* check.detail.defrost.ok */ "Aucun indice de part ; météo et lacunes non évaluées.",
-  /* check.defrost.last_start */ (date, route, outdoor) => `Dernier début de dégivrage observé · ${date} · Circuit ${route} · Air extérieur ${outdoor}`,
-  /* check.defrost.route_space */ "Chauffage",
-  /* check.defrost.route_dhw */ "Ballon d’eau chaude",
+  /* check.defrost.normal */ "De courts dégivrages sont habituels par temps froid et humide. La part du dégivrage indique quelle fraction du temps de fonctionnement du compresseur avec un état de dégivrage connu a servi au dégivrage.",
+  /* check.defrost.modbus.about */ "Modbus utilise un seul signal pour le dégivrage et la préparation du redémarrage du compresseur.",
+  /* check.defrost.modbus.normal */ "Le signal est inactif en régime stable. Les deux phases peuvent l’activer.",
+  /* check.defrost.starts_label */ "Démarrages de dégivrage observés",
+  /* check.defrost.share */ "Part du dégivrage",
+  /* check.defrost.notice */ "Part du dégivrage élevée",
   /* check.detail.pressure.info */ "Basse",
   /* check.detail.pressure.warn */ "Critique",
   /* check.detail.pressure.ok */ "Normale",
@@ -393,9 +388,7 @@ I18N.fr = localeValues([
   /* check.pressure.rules */ "Comment la pression est-elle évaluée ?",
   /* check.pressure.unavailable */ "Diagnostic de pression X10A indisponible.",
   /* check.pressure.pending */ "Mesure dans la zone critique. La durée reste inconnue.",
-  /* check.detail.defrost_events_insufficient */ "Moins de trois dégivrages associés ; aucun verdict de part.",
   /* check.detail.source_stale */ "Pas de mesure X10A récente ; état actuel inconnu. Historique conservé.",
-  /* check.detail.no_paired_runtime */ "Pas de durée lisible associée ; nombre seulement.",
   /* check.detail.current_label */ "≤1,0 bar basse",
   /* check.detail.minimum_time_label */ "≤0,5 bar critique",
   /* check.detail.coverage_missing */ (a) => `Temps lisible manquant : ${a} s.`,
@@ -507,7 +500,7 @@ I18N.fr = localeValues([
   /* hist.boost_active */ "Renfort actif",
   /* hist.boost_inactive */ "Renfort arrêté",
   /* hist.boost_aria */ frAria("de l’état Smart Grid avec les quatre modes"),
-  /* hist.defrost_total */ (d) => `Dégivrage · ${d}`,
+  /* hist.defrost_total */ (d) => `Blocs de 5 min avec dégivrage · ${d}`,
   /* hist.defrost_none */ "Aucun cycle de dégivrage observé pendant la période enregistrée.",
   /* hist.defrost_active */ "Dégivrage",
   /* hist.defrost_inactive */ "Pas de dégivrage",
@@ -635,7 +628,7 @@ I18N.fr = localeValues([
   /* schem.card_aria */ "Schéma en direct du système : unité extérieure, circuit frigorifique, échangeur à plaques, circuit d'eau avec chauffage d'appoint et vanne 3 voies, ballon ECS et circuit des locaux",
   /* schem.group_aria */ "Schéma en direct — sélectionnez une valeur ou un composant pour obtenir une explication",
   /* schem.outdoor_unit */ "UNITÉ EXTÉRIEURE",
-  /* schem.defrost_pill */ "❄ dégivrage",
+  /* schem.defrost_pill */ "dégivrage",
   /* schem.outdoor */ "Extérieur",
   /* insp.close */ "Fermer",
   /* schem.defrost_transfer */ "Pendant un dégivrage confirmé, la chaleur peut passer de l’eau au fluide frigorigène. Les tuyaux n’indiquent ce sens que si le débit et les températures actuels le confirment.",
@@ -1205,9 +1198,9 @@ DESCRIPTION_I18N.fr = descriptionValues([
   ["Mode locaux actif chauffage/froid, sans Auto ; ne prouve pas le compresseur et exige l’activité."], // 45
   ["Sélection HomeHub Auto/chauffage/froid ; configuration, pas état actuel ni preuve d’activité."], // 46
   ["État extérieur arrêt/chauffage/froid ; peut rester choisi compresseur arrêté et ne prouve pas la chaleur."], // 47
-  ["Indicateur combiné dégivrage et redémarrage compresseur sur le registre 35 ; OFF = normal, ON = dégivrage ou préparation au redémarrage."], // 48
+  ["Le registre 35 de HomeHub regroupe le dégivrage et le redémarrage du compresseur.", "Le signal est à l’arrêt en régime stable. Il s’active pendant le dégivrage ou la préparation du redémarrage."], // 48
   ["Indicateur de démarrage à chaud sur le registre 36 ; OFF = régime établi, ON = bref préchauffage de l’échangeur."], // 49
-  ["Dégivrage extérieur ; normal par froid humide, mais ce bit seul ne diagnostique pas des cycles excessifs."], // 50
+  ["Le dégivrage élimine le givre de l’échangeur extérieur.", "Il est normal par temps froid et humide. Ce seul signal ne permet pas de savoir si les cycles sont trop fréquents."], // 50
   ["Classe de gravité d’un défaut actif : Normal, Erreur, Avertissement ou Prudence."], // 51
   ["Signification du code de défaut actuellement signalé"], // 52
   ["Fonctionnement de secours après un défaut de pompe à chaleur."], // 53

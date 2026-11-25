@@ -33,8 +33,8 @@ assert.match(style,
   /\.vdesc, \.inspect \{[^}]*grid-template-rows: 0fr;[^}]*transition: grid-template-rows \.22s ease;[^}]*\}[\s\S]*?\.vitem\.open \.vdesc, \.inspect\.open \{ grid-template-rows: 1fr; \}/,
   "the schematic inspector must use the exact same clipped height transition as every other tongue");
 assert.match(style,
-  /\.vdesc-body, \.inspect-card \{[^}]*margin: 0 10px 12px;[^}]*border-top: 0;[^}]*border-radius: 0 0 var\(--r-tile\) var\(--r-tile\);[^}]*box-shadow: var\(--shadow-tongue\);[^}]*transform: translateY\(-7px\);[^}]*transition: transform \.22s ease;[^}]*\}[\s\S]*?\.vitem\.open \.vdesc-body, \.inspect\.open \.inspect-card \{ transform: none; \}/,
-  "the schematic inspector and row explainers must share one surface and pull-out movement");
+  /\.vdesc-body, \.inspect-card \{[^}]*margin: 0 10px 12px;[^}]*border-top: 0;[^}]*border-radius: 0 0 var\(--r-tile\) var\(--r-tile\);[^}]*box-shadow: var\(--shadow-tongue\);[^}]*transform: translateY\(-7px\);[^}]*transition: transform \.22s ease;[^}]*\}[\s\S]*?\.vitem\.open \.vdesc-body, \.inspect\.open \.inspect-card \{ transform: translateZ\(0\); \}/,
+  "the inspector and row explainers must share one surface and pull-out movement, ending on a composited layer");
 assert.doesNotMatch(style, /inspect-tongue-in/,
   "the inspector must not retain an independent one-shot animation");
 assert.match(index, /<div class="inspect-inner">\s*<div class="inspect-card" id="inspCard" aria-hidden="true" inert>/,
