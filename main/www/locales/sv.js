@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -176,7 +176,6 @@ I18N.sv = localeValues([
   /* check.flow.runup */ "Mätvärden räknas efter minst tio minuters oavbruten rumsuppvärmning.",
   /* check.flow.assessment */ "Installationshandboken anger minsta flöde för varje modell och driftläge. För lågt flöde kan utlösa fel 7H.",
   /* check.flow.explain */ "Flödet visar hur många liter vatten som passerar genom värmepumpen varje minut.",
-  /* check.flow.pump */ "Pumpens styrsignal",
   /* check.flow.live */ "Nu",
   /* check.flow.show */ "Visa ett lägsta värde i grafen",
   /* check.flow.readout */ (value) => `Under det här tidsavsnittet uppmättes ${value} minst en gång. Rumsuppvärmningen hade då pågått i minst tio minuter.`,

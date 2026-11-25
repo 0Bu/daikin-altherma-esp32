@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -176,7 +176,6 @@ I18N.fi = localeValues([
   /* check.flow.runup */ "Mittaukset otetaan huomioon, kun tilojen lämmitys on jatkunut yhtäjaksoisesti vähintään kymmenen minuuttia.",
   /* check.flow.assessment */ "Asennusoppaassa on kunkin mallin ja käyttötilan vähimmäisvirtaama. Liian pieni virtaama voi aiheuttaa 7H-virheen.",
   /* check.flow.explain */ "Virtaama kertoo, kuinka monta litraa vettä kulkee lämpöpumpun läpi minuutissa.",
-  /* check.flow.pump */ "Pumpun ohjaus",
   /* check.flow.live */ "Nyt",
   /* check.flow.show */ "Näytä alin kohta kuvaajassa",
   /* check.flow.readout */ (value) => `Tällä aikavälillä mitattiin vähintään kerran ${value}. Tilojen lämmitys oli silloin jatkunut vähintään kymmenen minuuttia.`,

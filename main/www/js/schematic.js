@@ -775,7 +775,7 @@ function renderLive() {
 //     profile's own spelling of it could match a neighbouring DESCRIPTIONS entry.
 //   • a COMPONENT (outdoor unit, PHE, space circuit, …) — carries its own `what` (nothing in
 //     DESCRIPTIONS describes an assembly) plus `now(d)`, a sentence built from the live values that
-//     says what the part is doing right now, and `rows`, the readings that belong to it.
+//     says what the part is doing right now, without duplicating adjacent pills in `rows`.
 // English/German copy remains beside the source logic. The eleven newer locale modules mirror only the
 // human-facing fields by stable INSPECT key; `now` functions receive the same live snapshot without
 // duplicating any source-selection or plant-state logic.
@@ -844,8 +844,7 @@ const INSPECT = {
     // "Thermostat ON/OFF" belongs HERE, not on the heating riser it used to be drawn on: it is a bit
     // in the very same status byte as the operating mode above it (0x60/2), and it says the indoor
     // unit is asking for the compressor — for hot water just as much as for the house.
-    rows: [/i\/u operation mode/i, { sel: /thermostat on/i, group: "hydronic" },
-           /(error|fault) code/i],
+    rows: [{ sel: /thermostat on/i, group: "hydronic" }, /(error|fault) code/i],
   },
   // Board-local observation rather than a heat-pump register. Its custom renderer keeps all three
   // current measurements together and hands their three independent history rings to one combined
@@ -932,13 +931,11 @@ const INSPECT = {
               de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. X10A aktualisiert die eigenen Sensoren der Außeneinheit im Stillstand nicht mehr; die Außentemperatur stammt deshalb aus dem Modbus-Register, die Heißgastemperatur bleibt „—“. Das Register wird erfolgreich gelesen, trägt aber keinen Quellzeitstempel; das Alter der zugrunde liegenden Messung ist daher unbekannt." }
           : { en: "Idle — the compressor is stopped, so no active heating or cooling transfer is taking place. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
               de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—“ statt die Werte des letzten Laufs zu wiederholen." },
-    rows: [/outdoor air/i, ouHxRow, /inv frequency/i, highSideRow, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
   },
   comp: {
     trend: "comp_rps",
     t: { en: "Compressor", de: "Verdichter" },
     re: /inv frequency/i, sample: "INV frequency (rps)",
-    rows: [/inv frequency/i, /inv primary current/i, /discharge pipe temp/i],
   },
   out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)" },
   ouhx: {
@@ -960,8 +957,8 @@ const INSPECT = {
   // entry: the headline, the source line and the DESCRIPTIONS copy all resolve from the entry's own
   // row, so a shared entry would answer a tap on the temperature pill with a bar headline and the
   // pressure row's name under it — a number attributed to the wrong sensor, in the panel whose job
-  // is to say which sensor it came from. Each still lists the other as a member row, since they do
-  // describe one point in the circuit.
+  // is to say which sensor it came from. Each card stays focused on its own sensor without repeating
+  // the neighbouring pill.
   hp: {
     // The pill draws d.circP from this profile's one high-side row, so the headline resolves THE SAME
     // row. It stays selected while held over, so that the panel can say why the pill is blank, and the
@@ -970,12 +967,10 @@ const INSPECT = {
     t: { en: "High pressure", de: "Hochdruck" },
     sample: "High pressure",
     trend: "circuit_pressure",
-    rows: [highSideRow, /discharge pipe temp/i],
   },
   disch: {
     t: { en: "Discharge temperature", de: "Heißgastemperatur" },
     re: /discharge pipe temp/i, sample: "Discharge pipe temp.",
-    rows: [/discharge pipe temp/i, highSideRow],
     // Keep the last run visible as a curve while the compressor rests. The current 0x20 reading is
     // intentionally withheld then because the outdoor unit only repeats its held-over value, but
     // the history ring preserves the samples that were genuinely measured during operation.
@@ -992,12 +987,10 @@ const INSPECT = {
       de: "Kältemitteldruck auf der Niederdruckseite des Verdichters. Im Heizbetrieb ist das die Verdampferseite nach der Entspannung. Nicht jedes unterstützte Profil liefert einen Niederdruckgeber; ohne nutzbaren Messwert bleibt die Anzeige „—“.",
     },
     re: /^low pressure$/i, sample: "Low pressure",
-    rows: [/^low pressure$/i, /expansion valve ?1/i],
   },
   eev: {
     t: { en: "Expansion valve", de: "Expansionsventil" },
     re: /expansion valve ?1/i, sample: "Expansion valve 1 (pls)",
-    rows: [/expansion valve ?1/i, /^low pressure$/i],
   },
   r3t: {
     t: { en: "Refrigerant liquid-side temperature (R3T)", de: "Kältemittel-Flüssigkeitstemperatur · R3T" },
@@ -1031,7 +1024,6 @@ const INSPECT = {
           de: `Dem Wasser werden rund ${fmt1(d.pth)} kW entzogen: ${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K.` }
       : { en: `About ${fmt1(d.pth)} kW transferred into the water (${fmt1(d.flow)} l/min at ΔT ${fmt1(d.dt)} K).`,
           de: `Rund ${fmt1(d.pth)} kW gehen ins Wasser über: ${fmt1(d.flow)} l/min bei ΔT ${fmt1(d.dt)} K.` },
-    rows: [lwtRow, rwtRow, /flow sensor/i],
   },
   lwt: {
     t: { en: "PHE water outlet (pre-BUH, R1T)", de: "PHE-Wasseraustritt · vor BUH · R1T" },
@@ -1070,7 +1062,6 @@ const INSPECT = {
           de: `${fmt1(d.dt)} K. Beim aktiven Kühlen soll R1T unter R4T liegen; die vorzeichenbehaftete Differenz ist daher negativ.` }
       : { en: `${fmt1(d.dt)} K. Positive means the PHE is adding heat to the water.`,
           de: `${fmt1(d.dt)} K. Positiv bedeutet, dass der PHE dem Wasser Wärme zuführt.` },
-    rows: [lwtRow, rwtRow],
   },
   pth: {
     t: (d) => d && d.pthKind === "cooling"
@@ -1109,7 +1100,6 @@ const INSPECT = {
           de: `≈ ${fmt1(d.pth)} kW Kälteleistung${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.` }
       : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`,
           de: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.` },
-    rows: [/flow sensor/i, /current measured by ct/i, /inv primary current/i],
   },
   // Its own pill next to the heat output, so its own entry — and the one derived figure with no
   // catalog row behind it at all, hence copy written here rather than pulled from DESCRIPTIONS.
@@ -1171,12 +1161,6 @@ const INSPECT = {
           de: `${fmt1(d.cop)} kW wasserseitige Wärme hinter dem BUH je kW aus Stromwandlern geschätzter Aufnahme — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Welche elektrischen Lasten enthalten sind, bestimmt der Einbau der Stromwandler.` }
       : { en: `${fmt1(d.cop)} kW of heat per kW of electricity for the heat-pump boundary — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The backup heater is outside both figures; whole-plant efficiency therefore cannot be derived from this value while the heater runs.`,
           de: `${fmt1(d.cop)} kW Wärme je kW Strom innerhalb der Wärmepumpen-Bilanz — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Der Zusatzheizer liegt außerhalb beider Bilanzgrößen; die Effizienz der Gesamtanlage lässt sich daraus während seines Betriebs nicht ableiten.` },
-    // The numerator's own row, but ONLY while the plan actually uses it (d.copPostBuh) — listing it
-    // under a heat-pump COP would name an input that figure never touched. Resolved through the one
-    // postBuhRow(), never a second pattern: a looser copy here is exactly how the (R2T) tag would
-    // start matching the discharge pipe again. pickRow already takes a function (see its definition).
-    rows: [/flow sensor/i, () => (S.live && S.live.copPostBuh ? postBuhRow() : null),
-           /current measured by ct/i, /inv primary current/i, /buh step ?1/i, /^bsh$/i],
   },
   buh: {
     t: { en: "Backup heater (BUH)", de: "Zusatzheizer · BUH" },
@@ -1186,7 +1170,7 @@ const INSPECT = {
       : d.buh2 ? { en: "Step 2 — both stages firing.", de: "Stufe 2 — beide Stufen heizen." }
       : d.buh1 ? { en: "Step 1 — one stage firing.", de: "Stufe 1 — eine Stufe heizt." }
       : { en: "Off — no backup-heater stage is active.", de: "Aus — keine Zusatzheizerstufe ist aktiv." },
-    rows: [/buh step ?1/i, /buh step ?2/i, /buh output capacity/i],
+    rows: [/buh step ?2/i, /buh output capacity/i],
   },
   bsh: {
     t: { en: "Electric tank heater", de: "Heizstab" },
@@ -1234,12 +1218,9 @@ const INSPECT = {
   tank: {
     t: { en: "DHW tank / thermal store", de: "Warmwasser-/Wärmespeicher" },
     re: /dhw tank temp/i, sample: "DHW Tank Temp. (R5T)",
-    // The tank box represents a GROUP even though its temperature is also the compact headline.
-    // Keep every member in the one table below the chart; neither the Modbus twin nor a sentence
-    // repeating tank + setpoint belongs inside the explanatory prose above it.
-    listAllValues: true,
-    rows: [/dhw tank temp/i, { sel: /dhw setpoint/i, mbFallback: () => mbRow(10) }, /3.?way valve/i,
-           { mbOff: 33 }],
+    // Keep the tank's own un-pilled readings (target setpoint and disinfection) below the chart
+    // without repeating the tank temperature headline or the 3-way valve owned by its own pill.
+    rows: [{ sel: /dhw setpoint/i, mbFallback: () => mbRow(10) }, { mbOff: 33 }],
   },
   heat: {
     t: (d) => activeSpaceKind(d) === "cool"
@@ -1262,21 +1243,17 @@ const INSPECT = {
               de: `Wasser wird zum ${activeSpaceKind(d) === "cool" ? "Kühlkreis" : activeSpaceKind(d) === "heat" ? "Heizkreis" : "Raumkreis"} geführt. Der interne R1T misst ${degC(d.lwt)}; kein nachgeschalteter Fühler bestätigt die Flächentemperatur.` }
         : { en: "Current pump and flow readings do not establish circulation through the space branch.",
             de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
-    rows: [ROOM_TEMP_RE, { sel: /^rt setpoint/i, mbFallback: () => mbRoomSetpointRow() },
-           { sel: /^space heating operation/i, cid: "space_op" }],
   },
   // This catalog row is normal space heat/cool operation, not a heating demand. "Thermostat ON/OFF"
   // remains with the indoor-unit status byte; neither bit alone proves compressor operation.
   spaceh: {
     t: { en: "Space heating/cooling operation", de: "Raumheiz-/kühlbetrieb" },
     re: /^space heating operation/i, sample: "Space heating Operation ON/OFF",
-    rows: [/^space heating operation/i, ROOM_TEMP_RE,
-           { sel: /^rt setpoint/i, mbFallback: () => mbRoomSetpointRow() }],
   },
   room: {
     t: { en: "Room temperature", de: "Raumtemperatur" },
     re: ROOM_TEMP_RE, sample: "Indoor Ambient Temp. (R1T)",
-    rows: [ROOM_TEMP_RE, { sel: /^rt setpoint/i, mbFallback: () => mbRoomSetpointRow() }],
+    rows: [{ sel: /^rt setpoint/i, mbFallback: () => mbRoomSetpointRow() }],
   },
   pump: {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },
@@ -1291,7 +1268,7 @@ const INSPECT = {
       en: pumpNowText(d, [(n) => `Pump command ${n} %.`, "Pump status is ON.", "Pump reports stopped (OFF).", "Pump ON/OFF is unknown.", (n) => `Measured flow ${n} l/min.`, "No flow reading.", "Reported OFF conflicts with flow; external circulation, coast-down or stale signals possible.", "Circulation is not established."]),
       de: pumpNowText(d, [(n) => `Pumpenbefehl ${n} %.`, "Pumpenstatus ist An.", "Pumpe meldet Stillstand (Aus).", "Pumpenstatus An/Aus unbekannt.", (n) => `Gemessener Durchfluss ${n} l/min.`, "Kein Durchflussmesswert.", "Gemeldetes Aus widerspricht Durchfluss; externe Umwälzung, Nachlauf oder veraltete Signale möglich.", "Zirkulation ist nicht belegt."]),
     }),
-    rows: [/water pump signal/i, /flow sensor/i, /^water pressure$/i],
+    rows: [/water pump signal/i],
   },
   pel: PEL_INSPECT,
   defrost: {
@@ -1332,7 +1309,6 @@ const INSPECT = {
             de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; Druck und Heißgastemperatur benötigen X10A." }
       : { en: "No active refrigerant circulation — the compressor is stopped. Pressure equalisation depends on the circuit and how long it has been idle.",
           de: "Kein aktiver Kältemittelumlauf — der Verdichter steht. Ob und wie weit sich die Drücke angeglichen haben, hängt vom Kältekreis und der Stillstandszeit ab." },
-    rows: [highSideRow, /discharge pipe temp/i],
   },
   rcold: {
     t: { en: "Liquid line", de: "Flüssigkeitsleitung" },
@@ -1347,7 +1323,6 @@ const INSPECT = {
         : { en: "Flowing — the HomeHub confirms compressor operation; expansion-valve position requires X10A.",
             de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; die Stellung des Expansionsventils benötigt X10A." }
       : { en: "Still — the compressor is stopped.", de: "Kein Durchfluss — der Verdichter steht." },
-    rows: [/^low pressure$/i, /expansion valve ?1/i],
   },
   wsup: {
     t: { en: "PHE outlet pipe", de: "Leitung ab PHE-Austritt" },
@@ -1360,7 +1335,6 @@ const INSPECT = {
           de: `R1T meldet vor dem Zusatzheizer ${degC(d.lwt)} bei ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "; dahinter ist eine Zusatzheizerstufe aktiv" : ""}.` }
       : { en: "Current pump and flow readings do not establish circulation in this pipe.",
           de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation in dieser Leitung." },
-    rows: [lwtRow, /flow sensor/i],
   },
   wtank: {
     t: { en: "Tank circuit", de: "Speicherkreis" },
@@ -1376,8 +1350,6 @@ const INSPECT = {
             de: "Der Speicherweg ist gewählt, die aktuellen Pumpen- und Durchflusswerte belegen jedoch keine aktive Speicherladung." }
       : { en: "The tank route is not selected; the controller reports the space route instead.",
           de: "Der Speicherweg ist nicht gewählt; die Regelung meldet stattdessen den Raumweg." },
-    rows: [/dhw tank temp/i, { sel: /dhw setpoint/i, mbFallback: () => mbRow(10) }, /3.?way valve/i,
-           { mbOff: 33 }],
   },
   wheat: {
     // Titled for the CIRCUIT, not one leg of it: this target is both the flow down from the valve
@@ -1402,7 +1374,6 @@ const INSPECT = {
               de: `Zirkulation zum Raumkreis mit ${fmt1(d.flow)} l/min. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}.` }
         : { en: "Current pump and flow readings do not establish circulation through the space branch.",
             de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
-    rows: [lwtRow, rwtRow, /^space heating operation/i],
   },
   wret: {
     t: { en: "PHE inlet pipe", de: "Leitung zum PHE-Eintritt" },
@@ -1415,12 +1386,10 @@ const INSPECT = {
           de: `Kommt mit ${degC(d.ret)} zurück, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` }
       : { en: "Current pump and flow readings do not establish circulation in the return pipe.",
           de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation in der Rücklaufleitung." },
-    rows: [rwtRow, /flow sensor/i, /^water pressure$/i],
   },
   flow: {
     t: { en: "Flow rate", de: "Durchfluss" },
     re: /flow sensor/i, sample: "Flow sensor",
-    rows: [/flow sensor/i, /^water pressure$/i, /water pump signal/i],
   },
   flow_switch: {
     t: { en: "Water-flow-switch status", de: "Status „Water flow switch“" },
@@ -1431,12 +1400,10 @@ const INSPECT = {
           de: `Der binäre X10A-Status ist An. Er ist weder eine Durchflussmessung noch ein Nachweis des modellspezifischen Mindestwerts; mit Pumpe und dem Messwert von ${fmt1(d.flow)} l/min vergleichen.` }
       : { en: `The X10A binary status is OFF. That is normally expected with a stopped pump; if the pump runs, compare it with the ${fmt1(d.flow)} l/min flow reading and any 7H/C0 fault.`,
           de: `Der binäre X10A-Status ist Aus. Bei stehender Pumpe ist das normalerweise zu erwarten; läuft die Pumpe, mit dem Messwert von ${fmt1(d.flow)} l/min und einer möglichen 7H-/C0-Störung vergleichen.` },
-    rows: [/water flow switch/i, /flow sensor/i, /water pump operation/i],
   },
   wp: {
     t: { en: "Water pressure", de: "Wasserdruck" },
     re: /^water pressure$/i, sample: "Water pressure",
-    rows: [/^water pressure$/i, /flow sensor/i],
   },
 };
 
@@ -1493,56 +1460,46 @@ const inspCurRow = (e) => {
 // updating and shows a value from whenever something else last moved, looking perfectly current.
 function inspMember(sel) {
   if (sel && sel.mbOff != null) return { x10a: null, mb: mbRow(sel.mbOff) };
-  // A selector may carry an explicit Modbus concept ({sel, cid}) so its HomeHub twin can stand in even
-  // on a board with NO X10A row to source the concept from — X10A absent, HomeHub live. Without it the
-  // space-operation evidence (the only reading a HomeHub-only plant can offer here) vanished with the
-  // X10A rows, leaving the RAUMKREIS explainer empty though the gateway was answering.
   const spec = sel && sel.sel ? sel : null;
   const selector = spec && spec.group ? () => vRowGroup(spec.sel, spec.group)
                  : spec ? spec.sel : sel;
-  const cid = spec && spec.cid ? spec.cid : null;
   const r = pickRow(selector);
   // X10A down: the retained row is not a reading any more. The gateway stands in where it carries
   // the same quantity (mbFallbackFor — the helper whose whole job is that substitution) and the
   // member simply disappears where it does not, rather than printing a stale number under its label.
-  // With no X10A row at all, the explicit concept (cid) or explicit fallback resolves the gateway row.
+  // With no X10A row at all, an explicit fallback resolver supplies the gateway row.
   if (x10aDown()) {
-    const fbRow = r ? mbFallbackFor(r.concept) : (cid ? mbFallbackFor(cid) : null);
+    const fbRow = r ? mbFallbackFor(r.concept) : null;
     return { x10a: null, mb: fbRow || (spec && spec.mbFallback ? spec.mbFallback() : null) };
   }
   return { x10a: r, mb: mbTwin(r) };
 }
 
-// The component rows shown below the chart. A leaf VALUE entry often includes its own selector in
-// `rows` so the same table can also describe an ASSEMBLY; omit its already-prominent headline pair
-// by default. A grouped target can explicitly choose `listAllValues`: the DHW tank is both a value
-// headline and a box containing temperature, target and valve state, and the group table must be
-// complete rather than moving its first pair into the prose above the chart.
+// Supplementary un-pilled rows shown below the chart. Omit the entry's own prominent headline
+// pair so the panel never repeats the header value below the chart.
 function inspMembers(e, row, fb) {
   if (!e || !e.rows) return [];
   return e.rows
     .map((sel) => inspMember(sel))
     .filter((m, i, a) => {
       if (!(m.x10a || m.mb)) return false;
-      if (!e.listAllValues && ((row && m.x10a === row) || (fb && m.mb === fb))) return false;
+      if ((row && m.x10a === row) || (fb && m.mb === fb)) return false;
       return a.findIndex((o) =>
         (m.x10a ? o.x10a === m.x10a : o.x10a == null && o.mb === m.mb)) === i;
     });
 }
 
-// Every reading below an inspector belongs in ONE value list after the trend. A leaf target keeps
-// its X10A reading in the prominent headline, so only the Modbus twin is added here; a grouped
-// target already keeps the complete X10A/Modbus pair in inspMembers(). This replaces the exceptional
-// path that inserted a leaf's Modbus value between the timeless description and the chart, while
-// all other values sat below the chart behind dividers.
+// Every reading below an inspector belongs in ONE value list after the trend. A target keeps
+// its X10A reading in the prominent headline, so only its Modbus twin and any un-pilled
+// component sub-readings are added here.
 function inspValues(e, row, fb) {
   // Some inspectors intentionally expose one authoritative X10A contact only. Do not manufacture
   // the generic leaf twin or append component/context rows for those entries.
   if (e && e.x10aOnly) return [];
   const members = inspMembers(e, row, fb);
   // Keep the old comparison contract: a second opinion is only meaningful while the primary
-  // headline has a current value. Grouped targets still show all available readings independently.
-  const twin = e && !e.listAllValues && row && row.value != null ? mbTwin(row) : null;
+  // headline has a current value.
+  const twin = e && row && row.value != null ? mbTwin(row) : null;
   return twin ? [{ x10a: null, mb: twin, compare: row }, ...members] : members;
 }
 
@@ -1923,14 +1880,9 @@ function renderInspect(mode = "") {
     // with nothing saying that they come from different instruments or which is which. A reading is
     // a label and a value; a second reading needs both, not a second number in the first one's slot.
     .map((m) => {
-      const x = m.x10a;
-      const pump = isFlow && /water pump signal/i.test(x?.label || "");
-      const pressure = isFlow && /^water pressure$/i.test(x?.label || "");
-      const command = pump && x.value != null && String(x.value).trim() && !rowHeldOver(x, d)
-        ? pumpCommandPercent(Number(x.value)) : null;
-      const row = x
-        ? `<div class="inspect-row"><span>${esc(pump ? t("check.flow.pump") : pressure ? t("check.pressure") : displayReadingLabel(x.label, x))}</span>` +
-          `<span>${esc(pump ? (command == null ? "—" : `${fmt1(command)} %`) : inspVal(x, d))}</span></div>`
+      const row = m.x10a
+        ? `<div class="inspect-row"><span>${esc(displayReadingLabel(m.x10a.label, m.x10a))}</span>` +
+          `<span>${esc(inspVal(m.x10a, d))}</span></div>`
         : "";
       if (!m.mb) return row;
       const mbUnit = displayUnit(m.mb);
