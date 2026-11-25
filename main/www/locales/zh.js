@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -176,7 +176,6 @@ I18N.zh = localeValues([
   /* check.flow.runup */ "室内连续供暖至少 10 分钟后，测量值才计入统计。",
   /* check.flow.assessment */ "不同机型和运行模式所需的最低流量可查阅安装手册。流量过低可能触发 7H 故障。",
   /* check.flow.explain */ "流量表示每分钟流过热泵的水有多少升。",
-  /* check.flow.pump */ "水泵控制指令",
   /* check.flow.live */ "当前",
   /* check.flow.show */ "在曲线上显示一个最低点",
   /* check.flow.readout */ (value) => `这一时间段内，至少有一次测得 ${value}。测量时，室内供暖已连续运行至少 10 分钟。`,

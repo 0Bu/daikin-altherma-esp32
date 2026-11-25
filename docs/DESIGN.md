@@ -277,13 +277,17 @@ tree. Opening preserves scroll position; tapping the same target, close or Escap
 
 The inspector is an attached, inset explanation tongue using the shared clipped 220 ms pull-out
 transition. It is inert while collapsed. The usual order is title/headline/exact source identity,
-explanation, optional history, then member values. Assemblies with no single measurement have no
-headline or numeric chart. A leaf omits its own duplicated value row but keeps a current HomeHub
-twin with its comparison; grouped components keep their full member list.
+explanation, optional history, then owned supplementary values (if any). Assemblies and pipe runs
+with no single measurement have no headline, numeric chart, or duplicated pill rows; they explain
+the part and its live state in prose. A target omits its own duplicated headline row and never
+duplicates readings owned by another schematic card; it keeps a current HomeHub twin of the same
+quantity with its comparison and any un-pilled sub-readings owned solely by that component (tank
+setpoint/disinfection, pump signal, BUH stage 2/capacity, operating-mode thermostat/fault code, room
+setpoint, and electrical CT/inverter currents).
 
 **Flow rate** follows that order. Its trend comes after the explanation and Normal note. The
-comparison, water pressure and pump command follow the trend, and the heating observation comes
-last. Violet fill marks recorded five-minute windows wherever they overlap the visible, dated X10A
+HomeHub comparison follows the trend when paired, and the heating observation comes last. Violet
+fill marks recorded five-minute windows wherever they overlap the visible, dated X10A
 curve. Gaps stay clear. Select an area or use the legend to read its time and heating conditions
 directly below the plot. Adjacent five-minute windows share a single readout. When a recorded
 window overlaps the dated chart and an X10A sample is visible, the legend also reaches windows

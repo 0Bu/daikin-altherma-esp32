@@ -140,9 +140,15 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   assert.equal(nodes.get("svRoomSet").textContent, "22.0");
   assert.equal(nodes.get("schem").classList.contains("no-room"), false);
   assert.equal(c.inspCurRow(c.INSPECT.room), room);
-  for (const entry of [c.INSPECT.room, c.INSPECT.heat, c.INSPECT.spaceh])
-    assert.ok(c.inspMembers(entry, null, null).some((m) => m.x10a === room),
-      "each room/component inspector resolves the actual Hybrid room row");
+  const roomMembers = Array.from(c.inspMembers(c.INSPECT.room, room, null));
+  assert.ok(roomMembers.some((m) => m.x10a === setpoint),
+    "the room inspector keeps the actual Hybrid setpoint row");
+  assert.equal(roomMembers.some((m) => m.x10a === room), false,
+    "the room inspector does not repeat its own headline row");
+  for (const key of ["heat", "spaceh"]) {
+    assert.deepEqual(Array.from(c.inspMembers(c.INSPECT[key], null, null)), [],
+      `${key} inspector does not repeat room rows`);
+  }
   for (const missing of [[], [X("RT Temp.", null, "room_temp")],
                          [X("RT Temp. unsupported suffix", "99", "room_temp")]]) {
     c.S._values = [...missing, setpoint];
@@ -615,19 +621,17 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
 }
 
 // ── HomeHub-only board: no X10A rows at all, but the gateway is answering ────────────────────────
-// The space-operation evidence is the only reading a HomeHub-only plant can offer at the RAUMKREIS
-// explainer. It used to vanish with the X10A rows: inspMember sourced the Modbus twin from the X10A
-// row's `concept`, and there was no X10A row to source it from. The rows entry now carries the
-// concept explicitly ({sel, cid}) so the twin stands in on its own — X10A absent, HomeHub live.
+// The space-operation evidence is the only reading a HomeHub-only plant can offer at the space
+// heating demand target. When X10A is absent and HomeHub is live, mbForInspect("spaceh") resolves
+// the gateway space_op register so the card shows the HomeHub fallback without inventing X10A rows.
 {
   const M_SPACE_OP = { label: "Space heating/cooling normal operation", value: 0, unit: "",
                        off: 53, concept: "space_op", binary: true };
   const c = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [], modbus: [M_SPACE_OP] });
-  const members = c.inspMembers(c.INSPECT.heat, null, null);
-  const spaceRow = members.find((m) => m.mb && m.mb.concept === "space_op");
-  assert.ok(spaceRow, "X10A absent + HomeHub live: the space-operation row must still appear from Modbus");
-  assert.equal(spaceRow.x10a, null, "it stands in for the missing X10A row, not beside a present one");
-  assert.equal(members.filter((m) => m.x10a).length, 0, "no X10A rows exist, so none are invented");
+  assert.equal(c.mbForInspect("spaceh"), M_SPACE_OP,
+    "X10A absent + HomeHub live: spaceh inspector resolves the space_op Modbus fallback");
+  assert.deepEqual(Array.from(c.inspMembers(c.INSPECT.heat, null, null)), [],
+    "heat assembly inspector has no extra value rows");
 }
 
 // ── Both links live, but the outdoor unit is resting ────────────────────────────────────────────
@@ -1173,31 +1177,31 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   assert.equal(live.inspComparisonHtml({ compare: OUT_X, mb: OUT_M }, heldData), "",
     "a held-over primary value is not reported as a source disagreement");
 
-  const GROUP = { ...LEAF, listAllValues: true };
-  const members = live.inspValues(GROUP, row, null);
-  assert.equal(members.length, 2, "the grouped target keeps its full value list");
-  assert.equal(members[0].x10a, TANK_X, "the X10A tank temperature is the first group row");
-  assert.equal(members[0].mb, TANK_M, "its Modbus twin stays on the same group member");
-  assert.equal(live.inspComparisonHtml(members[0], live.liveData()), "",
-    "existing grouped source rows stay compact without multiplying comparison notes");
-  assert.equal(members[1].x10a, SETPOINT, "the DHW setpoint follows in the same group");
-  assert.equal(live.INSPECT.tank.listAllValues, true,
-    "the production tank inspector opts into the complete group table");
+  const tankRow = live.inspCurRow(live.INSPECT.tank);
+  const members = Array.from(live.inspValues(live.INSPECT.tank, tankRow, null));
+  assert.equal(members.length, 2, "the production tank inspector shows only its Modbus twin and DHW setpoint");
+  assert.equal(members[0].x10a, null, "the headline DHW tank temperature is not repeated in the values list");
+  assert.equal(members[0].mb, TANK_M, "its Modbus twin stays as a comparison row");
+  assert.match(live.inspComparisonHtml(members[0], live.liveData()), /Difference 0\.2 °C/,
+    "two current source readings keep their comparison note with the Modbus row");
+  assert.equal(members[1].x10a, SETPOINT, "the DHW setpoint follows");
+  assert.equal(live.INSPECT.tank.listAllValues, undefined,
+    "the production tank inspector does not opt into repeating its headline");
   assert.equal(live.INSPECT.tank.now, undefined,
     "the production tank inspector does not repeat temperature and target as prose");
 
-  // With X10A down, the gateway becomes the headline but remains part of the complete group table.
+  // With X10A down, the gateway becomes the headline and is not repeated in the values list.
   const down = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
                      values: [TANK_X], modbus: [TANK_M] });
   const fallback = down.mbForInspect("tank");
   assert.equal(fallback, TANK_M, "the tank target resolves the exact Modbus fallback row");
-  assert.equal(down.inspValues(GROUP, null, fallback)[0].mb, TANK_M,
-    "the Modbus fallback remains visible in the complete group table");
+  assert.deepEqual(Array.from(down.inspValues(down.INSPECT.tank, null, fallback)), [],
+    "the Modbus fallback headline is not repeated below the chart");
 
-  // An assembly has no headline and therefore retains the full list, including the paired reading.
+  // An assembly without a headline retains every member reading it explicitly owns.
   const assembly = { rows: [/dhw tank temp/i, /dhw setpoint/i] };
   assert.equal(live.inspMembers(assembly, null, null).length, 2,
-    "component inspectors retain all of their member readings");
+    "component inspectors retain all of their explicit member readings");
 }
 
 assert.doesNotMatch(SOURCE, /inspSourceNoteHtml/,
@@ -1630,8 +1634,18 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
     assert.equal(plain.inspNowText(plain.INSPECT[key], d), plain.heldUnknownText(),
       `the ${key} panel does not state a stop nobody measured`);
   }
-  assert.ok(plain.inspHeldHtml(plain.INSPECT.comp, d).includes(plain.heldUnknownText()),
-    "a panel that only lists such a row states the doubt as well");
+  const ctWithHeldInv = ctx({ x10a: true, values: [
+    OUT_U,
+    { label: "Current measured by CT sensor of L1", value: "2.0", unit: "A", reg: 0x63 },
+    { label: "Current measured by CT sensor of L2", value: "2.1", unit: "A", reg: 0x63 },
+    { label: "Current measured by CT sensor of L3", value: "2.2", unit: "A", reg: 0x63 },
+    INV_U,
+  ] });
+  const ctD = ctWithHeldInv.liveData();
+  assert.equal(ctD.pelSrc, "CT", "CT electrical estimate still succeeds when CT phases are current");
+  assert.equal(ctD.pelUnknown, false, "and pel does not report the electrical headline as unknown");
+  assert.ok(ctWithHeldInv.inspHeldHtml(ctWithHeldInv.INSPECT.pel, ctD).includes(ctWithHeldInv.heldUnknownText()),
+    "a panel whose value list shows a held_unknown inverter row states the doubt as well");
   assert.equal(plain.inspHeldHtml(plain.INSPECT.ou, d), "", "and one that said it above does not repeat it");
   d.defrost = true;
   assert.notEqual(plain.inspNowText(plain.INSPECT.ou, d), plain.heldUnknownText(),
@@ -1807,6 +1821,100 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
     (c) => `cmd:${c}`, "on", "stopped", "unknown", (f) => `flow:${f}`, "no-flow", "conflict", "idle",
   ]);
   assert.equal(stopUnknownText, "cmd:0.0 unknown no-flow idle");
+}
+
+// ── 23. Cross-card inspector deduplication: no pill/assembly cards repeat peer or headline rows ──
+{
+  const vals = [
+    X("Outdoor air temp.(R1T)", "7.5", "outdoor"),
+    X("O/U Heat Exch. Temp.(R4T)", "1.2", null),
+    X("Inverter compressor", "42", "comp_rps", { unit: "rps", reg: 0x20 }),
+    X("INV primary current (A)", "5.5", null, { unit: "A", reg: 0x21 }),
+    X("High Pressure(R1T)", "18.4", "hp_bar", { unit: "bar", reg: 0x20 }),
+    X("High pressure(S1NPH)", "18.5", "hp_bar", { unit: "bar", reg: 0x20 }),
+    X("Discharge pipe temp.(R2T)", "62.0", "discharge", { reg: 0x20 }),
+    X("Low pressure", "4.8", "lp_bar", { unit: "bar", reg: 0x20 }),
+    X("EV1", "240", null, { unit: "pls", reg: 0x21 }),
+    X("Leaving water temp. before BUH (R1T)", "38.0", "lwt_before", { reg: 0x61 }),
+    X("Leaving water temp. after BUH (R2T)", "38.5", "lwt_after", { reg: 0x61 }),
+    X("Inlet water temp.(R4T)", "33.0", "rwt", { reg: 0x61 }),
+    X("DHW tank temp. (R5T)", "46.0", "dhw_tank", { reg: 0x62 }),
+    X("DHW setpoint", "48.0", null, { reg: 0x62 }),
+    X("Indoor ambient temp. (R1T)", "21.2", "room", { reg: 0x61 }),
+    X("RT setpoint", "21.0", null, { reg: 0x61 }),
+    X("Flow sensor (l/min)", "18.2", "flow", { unit: "l/min", reg: 0x62 }),
+    X("Flow switch", "1", "flow_sw", { unit: "", reg: 0x60, binary: true }),
+    X("Water pressure", "1.8", "pressure", { unit: "bar", reg: 0x62 }),
+    X("Circulation pump", "1", "pump", { unit: "", reg: 0x60, binary: true }),
+    X("Water pump signal", "75", "pump_pct", { unit: "%", reg: 0x62 }),
+    X("Operation Mode", "Heating", "op_mode", { unit: "", reg: 0x60 }),
+    X("Thermostat ON/OFF", "1", "thermostat", { unit: "", reg: 0x60, binary: true }),
+    X("Error code", "0", null, { unit: "", reg: 0x60 }),
+    X("BUH Step1", "0", "buh1", { unit: "", reg: 0x60, binary: true }),
+    X("BUH Step2", "0", "buh2", { unit: "", reg: 0x60, binary: true }),
+    X("BUH output capacity", "0", null, { unit: "kW", reg: 0x62 }),
+    X("3way valve(On:DHW_Off:Space)", "0", "valve_dhw", { unit: "", reg: 0x60, binary: true }),
+    X("Current measured by CT sensor of L1", "3.1", null, { unit: "A", reg: 0x63 }),
+    X("Current measured by CT sensor of L2", "3.0", null, { unit: "A", reg: 0x63 }),
+    X("Current measured by CT sensor of L3", "3.2", null, { unit: "A", reg: 0x63 }),
+  ];
+  const mbs = [
+    M(40, "Leaving water temperature before BUH", "38.2", "lwt_before"),
+    M(41, "Leaving water temperature after BUH", "38.6", "lwt_after"),
+    M(42, "Return water temperature", "33.1", "rwt"),
+    M(43, "Domestic Hot Water temperature", "45.8", "dhw_tank"),
+    M(44, "Outdoor air temperature", "7.4", "outdoor"),
+    M(45, "Indoor room temperature", "21.1", "room"),
+    M(46, "Water flow rate", "18.0", "flow", { unit: "l/min" }),
+    M(47, "Water pressure", "1.8", "pressure", { unit: "bar" }),
+    M(49, "Room thermostat setpoint", "21.0", null),
+    M(10, "DHW setpoint", "48.0", null),
+    M(33, "DHW tank booster", "0", null, { binary: true }),
+  ];
+  const full = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: vals, modbus: mbs });
+  full.S.status.history = { rows: [{ id: "circuit_pressure", label: "High pressure(S1NPH)" }] };
+  full.S.live = full.liveData();
+
+  const noExtraRowsCards = [
+    "comp", "hp", "disch", "lp", "eev", "dt", "pth", "cop", "spaceh", "flow", "flow_switch", "wp",
+    "ou", "phe", "heat", "rhot", "rcold", "wsup", "wtank", "wheat", "wret",
+  ];
+  for (const key of noExtraRowsCards) {
+    const e = full.INSPECT[key];
+    assert.ok(!e.rows || e.rows.length === 0, `${key}: must have no cross-card or redundant rows`);
+  }
+
+  for (const key of Object.keys(full.INSPECT)) {
+    const e = full.INSPECT[key];
+    const head = full.inspCurRow(e);
+    const list = Array.from(full.inspValues(e, head, null));
+    if (head) {
+      assert.equal(list.some((m) => m.x10a === head), false,
+        `${key}: headline X10A row must never be repeated inside #inspRows`);
+    }
+  }
+
+  const flowRows = Array.from(full.inspValues(full.INSPECT.flow, full.inspCurRow(full.INSPECT.flow), null));
+  assert.equal(flowRows.length, 1, "flow inspector shows only its paired Modbus flow twin");
+  assert.equal(flowRows[0].x10a, null);
+  assert.equal(flowRows[0].mb.off, 46);
+
+  const wpRows = Array.from(full.inspValues(full.INSPECT.wp, full.inspCurRow(full.INSPECT.wp), null));
+  assert.equal(wpRows.length, 1, "wp inspector shows only its paired Modbus pressure twin");
+  assert.equal(wpRows[0].x10a, null);
+  assert.equal(wpRows[0].mb.off, 47);
+
+  const tankRows = Array.from(full.inspValues(full.INSPECT.tank, full.inspCurRow(full.INSPECT.tank), null));
+  assert.equal(tankRows.some((m) => /3.?way valve/i.test(m.x10a?.label || "")), false,
+    "tank inspector does not repeat the 3-way valve");
+  assert.equal(tankRows.some((m) => m.x10a && /dhw setpoint/i.test(m.x10a.label)), true,
+    "tank inspector retains DHW setpoint");
+  assert.equal(tankRows.some((m) => m.mb && m.mb.off === 33), true,
+    "tank inspector retains Modbus off 33");
+
+  const pumpRows = Array.from(full.inspValues(full.INSPECT.pump, full.inspCurRow(full.INSPECT.pump), null));
+  assert.deepEqual(pumpRows.map((m) => m.x10a?.label), ["Water pump signal"],
+    "pump inspector keeps only Water pump signal");
 }
 
 console.log("UI source matrix: arbitration, Smart-Grid and mode-aware cooling semantics correct");

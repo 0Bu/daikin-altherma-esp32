@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -176,7 +176,6 @@ I18N.ja = localeValues([
   /* check.flow.runup */ "室内暖房が連続して10分以上続いた後の測定値を集計します。",
   /* check.flow.assessment */ "必要な最低流量は機種と運転モードによって異なります。据付説明書で確認できます。流量が少なすぎると、エラー7Hが発生することがあります。",
   /* check.flow.explain */ "流量は、ヒートポンプを1分間に通る水の量をリットルで示したものです。",
-  /* check.flow.pump */ "ポンプへの指令値",
   /* check.flow.live */ "現在",
   /* check.flow.show */ "グラフで最低点を表示",
   /* check.flow.readout */ (value) => `この区間では、${value} が少なくとも1回測定されました。その時点で室内暖房は10分以上続いていました。`,

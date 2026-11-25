@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -181,7 +181,6 @@ I18N.pl = localeValues([
   /* check.flow.runup */ "Pomiary są uwzględniane po co najmniej dziesięciu minutach ciągłego ogrzewania pomieszczeń.",
   /* check.flow.assessment */ "Instrukcja montażu podaje minimalny przepływ dla każdego modelu i trybu pracy. Zbyt mały przepływ może wywołać błąd 7H.",
   /* check.flow.explain */ "Przepływ pokazuje, ile litrów wody przepływa przez pompę ciepła w ciągu minuty.",
-  /* check.flow.pump */ "Sygnał sterujący pompą",
   /* check.flow.live */ "Teraz",
   /* check.flow.show */ "Pokaż minimum na wykresie",
   /* check.flow.readout */ (value) => `W tym przedziale co najmniej raz zmierzono ${value}. Ogrzewanie pomieszczeń trwało już od co najmniej dziesięciu minut.`,

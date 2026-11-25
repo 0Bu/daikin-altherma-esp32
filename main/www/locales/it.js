@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -176,7 +176,6 @@ I18N.it = localeValues([
   /* check.flow.runup */ "Le misure contano dopo almeno dieci minuti di riscaldamento continuo degli ambienti.",
   /* check.flow.assessment */ "Il manuale di installazione indica la portata minima per ogni modello e modalità di funzionamento. Una portata troppo bassa può causare l’errore 7H.",
   /* check.flow.explain */ "La portata indica quanti litri d’acqua attraversano la pompa di calore ogni minuto.",
-  /* check.flow.pump */ "Comando della pompa",
   /* check.flow.live */ "Ora",
   /* check.flow.show */ "Mostra un minimo nel grafico",
   /* check.flow.readout */ (value) => `In questo intervallo è stato misurato almeno un valore di ${value}. Il riscaldamento degli ambienti era attivo da almeno dieci minuti.`,

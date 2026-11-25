@@ -1,4 +1,4 @@
-// translation-source: bef241956252223e473986f0f04b14ff68b2285466e981c89ba24e3e766e587f
+// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -176,7 +176,6 @@ I18N.de = localeValues([
   /* check.flow.runup */ "Messwerte zählen erst nach mindestens zehn Minuten durchgehender Raumheizung.",
   /* check.flow.assessment */ "Den passenden Mindestdurchfluss findest du in der Installationsanleitung deines Modells. Er hängt von der Betriebsart ab. Zu wenig Durchfluss kann die Störung 7H auslösen.",
   /* check.flow.explain */ "Der Durchfluss zeigt, wie viele Liter Wasser pro Minute durch die Wärmepumpe fließen.",
-  /* check.flow.pump */ "Pumpenanforderung",
   /* check.flow.live */ "Jetzt",
   /* check.flow.show */ "Tiefstwert im Verlauf zeigen",
   /* check.flow.readout */ (value) => `In diesem Abschnitt wurden mindestens einmal ${value} gemessen. Die Raumheizung lief da schon seit mindestens zehn Minuten.`,
