@@ -2738,13 +2738,19 @@ function checkupHeaterValue(c) {
   return parts.length ? t("check.min", parts.join(" · ")) : "";
 }
 
+const CHECKUP_OUTDOOR_SOURCE_LABELS = new Map([
+  ["homehub", "Modbus"],
+  ["x10a", "X10A"],
+  ["env3", "ENV III"],
+]);
+
 function checkupOutdoorContext(c) {
   if (typeof c.outdoor_source !== "string" ||
       !Number.isFinite(c.outdoor_min_c) || !Number.isFinite(c.outdoor_mean_c) ||
       !(Number(c.outdoor_samples) > 0)) return "";
   const fmt = (n) => n.toLocaleString(LANG,
     { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const source = c.outdoor_source === "homehub" ? "Modbus" : outdoorSourceLabel(c.outdoor_source);
+  const source = CHECKUP_OUTDOOR_SOURCE_LABELS.get(c.outdoor_source) ?? "—";
   return c.outdoor_min_c === c.outdoor_mean_c
     ? t("check.outdoor_one", source, fmt(c.outdoor_mean_c))
     : t("check.outdoor_range", source, fmt(c.outdoor_min_c), fmt(c.outdoor_mean_c));
