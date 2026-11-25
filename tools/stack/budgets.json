@@ -2896,7 +2896,7 @@
       "max_bytes": 192
     },
     "modbus_read_split": {
-      "pattern": "^daik::mb_poll_once\\(\\)::\\{lambda\\(daik::logic::MbBatch const&, bool\\)#1\\}::operator\\(\\)\\(daik::logic::MbBatch const&, bool\\) const$",
+      "pattern": "^daik::mb_poll_once\\(\\)::\\{lambda\\(daik::logic::MbBatch const&, bool\\)\\x231\\}::operator\\(\\)\\(daik::logic::MbBatch const&, bool\\) const$",
       "max_bytes": 80
     },
     "status_hydronic": {
@@ -2920,7 +2920,7 @@
       "max_bytes": 48
     },
     "status_json_chunk_callback": {
-      "pattern": "^daik::detail::json_output<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&\\)::\\{lambda\\(void\\*, std::basic_string_view<char, std::char_traits<char> >\\)#1\\}::_FUN\\(void\\*, std::basic_string_view<char, std::char_traits<char> >\\)$",
+      "pattern": "^daik::detail::json_output<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&\\)::\\{lambda\\(void\\*, std::basic_string_view<char, std::char_traits<char> >\\)\\x231\\}::_FUN\\(void\\*, std::basic_string_view<char, std::char_traits<char> >\\)$",
       "max_bytes": 64
     },
     "status_chunk_append": {
