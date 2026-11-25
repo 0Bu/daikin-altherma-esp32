@@ -1297,8 +1297,18 @@ static void mb_poll_once() {
         outdoor_row_answered, current_session, outdoor_temperature_c);
     const auto report_cycle_result = [&](bool final_current_session) {
         if (first_failure.type != MbFailureType::None) {
-            status_error(std::string(failure_code(first_failure.type)),
-                         failure_message(first_failure), first_failure.detail, first_failure.reg,
+            const char* code = failure_code(first_failure.type);
+            {
+                Lock lk(s_mtx);
+                if (s_target_generation.load(std::memory_order_acquire) !=
+                        cycle_target_generation ||
+                    (!s_status.discovering && s_status.last_error_code == code &&
+                     s_status.last_error_detail == first_failure.detail &&
+                     s_status.last_error_register == first_failure.reg))
+                    return;
+            }
+            status_error(std::string(code), failure_message(first_failure), first_failure.detail,
+                         first_failure.reg,
                          /*link_down=*/!final_current_session, cycle_target_generation);
         } else if (logic::mb_cycle_proves_recovery(full, final_current_session)) {
             // One status error represents the WHOLE map. A fast cycle did not re-read the remaining
@@ -1350,8 +1360,9 @@ static void mb_poll_once() {
             !gates.heating_mode_active || !gates.defrost_clear || !gates.hot_start_clear ||
             !gates.pump_running || !gates.compressor_running)
             checkup_modbus_heating_break(cycle_target_generation, consent_epoch);
-        report_cycle_result(final_current_session);
+        // A failed status allocation cannot repeat this tick after its data were committed.
         s_cycle_tick++;
+        report_cycle_result(final_current_session);
         return;
     }
 
@@ -1438,8 +1449,8 @@ static void mb_poll_once() {
         s_heating_mode_ms            = final_current_session ? gates.heating_mode_ms : -1;
         s_plant_outdoor_ms           = final_current_session ? gates.plant_outdoor_ms : -1;
     }
-    report_cycle_result(final_current_session);
     s_cycle_tick = profile_promoted ? 0 : s_cycle_tick + 1;
+    report_cycle_result(final_current_session);
 }
 
 static void mb_task_start_if_enabled() noexcept;

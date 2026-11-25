@@ -49,6 +49,11 @@ function mutateOnce(before, after, name) {
 }
 
 try {
+  // Status message formatting can allocate after a completed sweep. Even if it throws, the
+  // committed fast or full tick must already have advanced.
+  assert.match(source, /s_cycle_tick\+\+;\s*report_cycle_result\(final_current_session\);\s*return;/);
+  assert.match(source, /s_cycle_tick = profile_promoted \? 0 : s_cycle_tick \+ 1;\s*report_cycle_result\(final_current_session\);/);
+
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);

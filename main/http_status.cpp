@@ -509,14 +509,11 @@ template <typename JsonOut>
     json_append_quoted(
         j, observed ? "observed"
                     : ((x10a_collecting || modbus.supported) ? "collecting" : "unsupported"));
-    if (use_modbus) {
-        append_status_tenths_field(j, "min_l_min",
-                                   modbus.minimum_tenths ? modbus.minimum_tenths : -1);
-    } else {
-        j += ",\"min_l_min\":";
-        auto sink = detail::json_output(j);
-        hydronic_json_decimal(sink, obs.totals.flow.min_milli, 1, x10a_observed);
-    }
+    j += ",\"min_l_min\":";
+    auto          sink = detail::json_output(j);
+    const int64_t minimum_milli =
+        use_modbus ? modbus.minimum_tenths * 100LL : obs.totals.flow.min_milli;
+    hydronic_json_decimal(sink, minimum_milli, 1, observed);
     j += ",\"minimum_windows\":";
     append_heating_windows(j, use_modbus ? modbus.windows : obs.minimum_windows,
                            redact || !observed);

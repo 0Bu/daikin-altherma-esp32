@@ -2907,6 +2907,38 @@
       "pattern": "^void daik::append_heating_minimum<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::CheckupHydronicReport const&, bool, bool\\)$",
       "max_bytes": 144
     },
+    "status_hydronic_decimal": {
+      "pattern": "^void daik::hydronic_json_decimal<daik::detail::JsonOutput>\\(daik::detail::JsonOutput&, long long, unsigned long long, bool\\)$",
+      "max_bytes": 64
+    },
+    "status_hydronic_unsigned": {
+      "pattern": "^void daik::hydronic_json_unsigned<daik::detail::JsonOutput>\\(daik::detail::JsonOutput&, unsigned long long, bool\\)$",
+      "max_bytes": 80
+    },
+    "status_json_output_write": {
+      "pattern": "^daik::detail::JsonOutput::operator\\+=\\(std::basic_string_view<char, std::char_traits<char> >\\)$",
+      "max_bytes": 48
+    },
+    "status_json_chunk_callback": {
+      "pattern": "^daik::detail::json_output<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&\\)::\\{lambda\\(void\\*, std::basic_string_view<char, std::char_traits<char> >\\)#1\\}::_FUN\\(void\\*, std::basic_string_view<char, std::char_traits<char> >\\)$",
+      "max_bytes": 64
+    },
+    "status_chunk_append": {
+      "pattern": "^daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>::append\\(std::basic_string_view<char, std::char_traits<char> >\\)$",
+      "max_bytes": 48
+    },
+    "sdk_http_chunk": {
+      "pattern": "^httpd_resp_send_chunk$",
+      "max_bytes": 64
+    },
+    "sdk_http_send_all": {
+      "pattern": "^httpd_send_all\\$isra\\$0$",
+      "max_bytes": 32
+    },
+    "sdk_http_default_send": {
+      "pattern": "^httpd_default_send$",
+      "max_bytes": 32
+    },
     "status_heating_windows": {
       "pattern": "^void daik::append_heating_windows<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::logic::HydronicMinimumWindows const&, bool\\)$",
       "max_bytes": 32
@@ -3876,8 +3908,10 @@
     "httpd_mcp_status_heating_clock": {"symbols": ["mcp_post", "http_send_status_json", "status_serializer", "status_hydronic", "status_heating_minimum", "modbus_heating_report", "modbus_heating_clock", "room_time_now"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
     "httpd_direct_status_heating_report_lock": {"symbols": ["http_send_status_json", "status_serializer", "status_hydronic", "status_heating_minimum", "modbus_heating_report", "mqtt_input_lock", "sdk_queue_sem_take", "sdk_queue_critical"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
     "httpd_mcp_status_heating_report_lock": {"symbols": ["mcp_post", "http_send_status_json", "status_serializer", "status_hydronic", "status_heating_minimum", "modbus_heating_report", "mqtt_input_lock", "sdk_queue_sem_take", "sdk_queue_critical"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
-    "httpd_direct_status_heating_windows": {"symbols": ["http_send_status_json", "status_serializer", "status_hydronic", "status_heating_minimum", "status_heating_windows", "status_unsigned_number"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
-    "httpd_mcp_status_heating_windows": {"symbols": ["mcp_post", "http_send_status_json", "status_serializer", "status_hydronic", "status_heating_minimum", "status_heating_windows", "status_unsigned_number"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
+    "httpd_direct_status_heating_decimal_chunk": {"symbols": ["http_send_status_json", "status_serializer", "status_hydronic", "status_heating_minimum", "status_hydronic_decimal", "status_hydronic_unsigned", "status_json_output_write", "status_json_chunk_callback", "sdk_http_chunk", "sdk_http_send_all", "sdk_http_default_send", "tls_lwip_send", "tls_netconn_write_partly", "tls_netconn_write_vectors_partly", "tls_netconn_apimsg"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
+    "httpd_direct_status_heating_windows": {"symbols": ["http_send_status_json", "status_serializer", "status_hydronic", "status_heating_minimum", "status_heating_windows", "status_unsigned_number", "status_chunk_append", "sdk_http_chunk", "sdk_http_send_all", "sdk_http_default_send", "tls_lwip_send", "tls_netconn_write_partly", "tls_netconn_write_vectors_partly", "tls_netconn_apimsg"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
+    "httpd_mcp_status_heating_decimal_chunk": {"symbols": ["mcp_post", "http_send_status_json", "status_serializer", "status_hydronic", "status_heating_minimum", "status_hydronic_decimal", "status_hydronic_unsigned", "status_json_output_write", "status_json_chunk_callback", "sdk_http_chunk", "sdk_http_send_all", "sdk_http_default_send", "tls_lwip_send", "tls_netconn_write_partly", "tls_netconn_write_vectors_partly", "tls_netconn_apimsg"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
+    "httpd_mcp_status_heating_windows": {"symbols": ["mcp_post", "http_send_status_json", "status_serializer", "status_hydronic", "status_heating_minimum", "status_heating_windows", "status_unsigned_number", "status_chunk_append", "sdk_http_chunk", "sdk_http_send_all", "sdk_http_default_send", "tls_lwip_send", "tls_netconn_write_partly", "tls_netconn_write_vectors_partly", "tls_netconn_apimsg"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
     "httpd_direct_status_hydronic_clock": {"symbols": ["http_send_status_json", "status_serializer", "status_hydronic", "x10a_hydronic_report", "x10a_hydronic_store", "x10a_hydronic_store_clock", "room_time_now"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
     "httpd_mcp_status_hydronic_clock": {"symbols": ["mcp_post", "http_send_status_json", "status_serializer", "status_hydronic", "x10a_hydronic_report", "x10a_hydronic_store", "x10a_hydronic_store_clock", "room_time_now"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
     "httpd_direct_status_hydronic_store_lock": {"symbols": ["http_send_status_json", "status_serializer", "status_hydronic", "x10a_hydronic_report", "x10a_hydronic_store", "mqtt_input_lock", "sdk_queue_sem_take", "sdk_queue_critical"], "multipliers": {}, "base_bytes": 1536, "max_bytes": 8192},
@@ -20302,6 +20336,8 @@
         "httpd_mcp_status_heating_clock",
         "httpd_direct_status_heating_report_lock",
         "httpd_mcp_status_heating_report_lock",
+        "httpd_direct_status_heating_decimal_chunk",
+        "httpd_mcp_status_heating_decimal_chunk",
         "httpd_direct_status_heating_windows",
         "httpd_mcp_status_heating_windows",
         "httpd_direct_status_hydronic_clock",
