@@ -112,7 +112,7 @@ struct FlashTrendRestoreScratch {
  HistorySample splice_out[HISTORY_SAMPLES];
 };
 FlashJournalRecord stored[4];
-int flash_reads=0,checkup_calls=0,stop_expirations=0,stop_services=0,hydronic_expirations=0,hydronic_services=0; bool queue_reset=false;
+int flash_reads=0,checkup_calls=0,stop_expirations=0,stop_services=0,hydronic_expirations=0,hydronic_services=0,heater_expirations=0,heater_services=0; bool queue_reset=false;
 void diag_printf(const char*,...){}
 const char* esp_err_to_name(int){return "fixture";}
 bool time_synced(){return true;}
@@ -174,6 +174,14 @@ void hydronic_observation_flash_service(HydronicObservationReader reader){
  need(flash_depth==1&&history_depth==0,"hydronic restore service without sole flash owner");
  need(reader==flash_read_hydronic_observation,"hydronic restore received a different reader");++hydronic_services;
 }
+void checkup_heater_context_expire(){
+ need(flash_depth==0&&history_depth==0,"heater expiry acquired under a journal/history owner");
+ ++heater_expirations;
+}
+void flash_progress_heater_context(){
+ need(flash_depth==1&&history_depth==0,"heater restore service without sole flash owner");
+ ++heater_services;
+}
 void history_restore_cycling_flash(uint32_t wait){
  need(flash_depth==1&&history_depth==0&&wait==0,"cycling restore must use the nonblocking flash owner");
 }
@@ -190,7 +198,7 @@ void history_restore_dhw_flash(uint32_t wait){
 void prepare_restore(){
  need(flash_depth==0&&history_depth==0,"fixture leaked owner");
  flash_contended=false;after_flash_release=nullptr;queue_reset=false;
- flash_reads=checkup_calls=stop_expirations=stop_services=hydronic_expirations=hydronic_services=0;
+ flash_reads=checkup_calls=stop_expirations=stop_services=hydronic_expirations=hydronic_services=heater_expirations=heater_services=0;
  Lock flash(s_flash_mtx);
  homehub_ring.reset();
  s_mb_target_fp.store(101);
@@ -237,6 +245,7 @@ void run_restore(){
  need(flash_depth==0&&history_depth==0,"restore released all locks");
  need(stop_expirations==1&&stop_services==1,"independent stop boundary serviced exactly once");
  need(hydronic_expirations==1&&hydronic_services==1,"independent hydronic boundary serviced exactly once");
+ need(heater_expirations==1&&heater_services==1,"independent heater boundary serviced exactly once");
  need(flash_reads==3&&checkup_calls==1,"checkup and HomeHub scanned once under a single flash owner");
  HistorySample value=0;
  need(homehub_ring.count==2,"actual HomeHub source block restored");
@@ -247,6 +256,7 @@ void run_restore(){
  need(flash_depth==0&&history_depth==0,"concurrent reset releases all locks");
  need(stop_expirations==1&&stop_services==1,"source reset cannot skip independent stop boundary");
  need(hydronic_expirations==1&&hydronic_services==1,"source reset cannot skip independent hydronic boundary");
+ need(heater_expirations==1&&heater_services==1,"source reset cannot skip independent heater boundary");
  need(s_mb_target_fp.load()==202 && s_mb_reset_requested.load() &&
       s_mb_identity_generation.load()==2 && s_history_epoch.load()==2,
       "queued actual HomeHub reset retires the restored generation");
@@ -278,6 +288,7 @@ void run_restore(){
  need(owned_reads==before&&flash_reads==0&&checkup_calls==0,"nonblocking restore touches no owned metadata on contention");
  need(stop_expirations==1&&stop_services==0,"contention keeps expiry outside flash and refuses observation service");
  need(hydronic_expirations==1&&hydronic_services==0,"contention keeps hydronic expiry outside flash and refuses observation service");
+ need(heater_expirations==1&&heater_services==0,"contention keeps heater expiry outside flash and refuses observation service");
  flash_contended=false;need(flash_depth==0&&history_depth==0,"contended restore owns nothing");
 }
 }
@@ -314,6 +325,12 @@ try {
     ["hydronic-service-before-flash-lock",
       "void history_service_flash_restore() {",
       "void history_service_flash_restore() { hydronic_observation_flash_service(flash_read_hydronic_observation);"],
+    ["heater-expiry-under-flash-lock",
+      "    flash_progress_heater_context();",
+      "    checkup_heater_context_expire();\n    flash_progress_heater_context();"],
+    ["heater-service-before-flash-lock",
+      "void history_service_flash_restore() {",
+      "void history_service_flash_restore() { flash_progress_heater_context();"],
     ["pending-homehub-splice",
       "if (src == HistorySource::Modbus && s_mb_reset_requested.load()) return false;",
       "if (false) return false;"],
@@ -331,10 +348,12 @@ try {
       "stop-service-before-flash-lock": /stop restore service without sole flash owner/,
       "hydronic-expiry-under-flash-lock": /hydronic expiry acquired under a journal\/history owner/,
       "hydronic-service-before-flash-lock": /hydronic restore service without sole flash owner/,
+      "heater-expiry-under-flash-lock": /heater expiry acquired under a journal\/history owner/,
+      "heater-service-before-flash-lock": /heater restore service without sole flash owner/,
       "pending-homehub-splice": /final splice refuses an old block/,
       "pending-homehub-source-stalled": /a pending HomeHub reset skips that source/,
     }[name];
     assert.match(bad.stderr,diagnostic);
   }
-  console.log("history flash restore: HomeHub target reset, checkup and hourly observation ownership; eight compiling controls rejected");
+  console.log("history flash restore: HomeHub target reset, checkup and hourly observation ownership; ten compiling controls rejected");
 } finally { fs.rmSync(dir,{recursive:true,force:true}); }

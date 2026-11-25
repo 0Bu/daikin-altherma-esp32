@@ -113,6 +113,14 @@ std::string                    x10a_payload;
 daik::logic::CheckupCyclingEvidence                                cycling;
 daik::logic::CheckupCyclingEvidence                                modbus_cycling;
 daik::CheckupStopContextReport                                     stop_context;
+daik::logic::heater_context::Totals                                heater_totals[2];
+daik::logic::HeaterContextPayloadFields                            heater_last_snapshot;
+daik::HeaterContextStatus                                          heater_meta;
+unsigned                    heater_snapshot_calls = 0, heater_expire_calls = 0;
+bool                        heater_expire_retires = false, heater_snapshot_before_expire = false;
+bool                        heater_task_oom_once = false;
+bool                        stop_task_oom_once   = false;
+unsigned                    stop_snapshot_calls  = 0;
 daik::CrashInfo             boot, live_crash;
 daik::EthInfo               ethernet;
 daik::NetLink               link            = daik::NetLink::None;
@@ -232,7 +240,25 @@ void                  checkup_dhw_reset() {}
 logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source) {
     return source == DiagnosticsSource::Modbus ? adapter::modbus_cycling : adapter::cycling;
 }
-CheckupStopContextReport      checkup_stop_context_report() { return adapter::stop_context; }
+CheckupStopContextReport checkup_stop_context_report() {
+    ++adapter::stop_snapshot_calls;
+    if (adapter::stop_task_oom_once) {
+        adapter::stop_task_oom_once = false;
+        sdk::fail_next_new          = true;
+    }
+    return adapter::stop_context;
+}
+void checkup_heater_context_expire() {
+    ++adapter::heater_expire_calls;
+    if (adapter::heater_expire_retires) adapter::heater_meta.confirmed = false;
+}
+void heater_context_payload(logic::HeaterContextPayloadFields& out) {
+    ++adapter::heater_snapshot_calls;
+    adapter::heater_snapshot_before_expire |=
+        adapter::heater_snapshot_calls > adapter::heater_expire_calls;
+    logic::heater_context_payload_project(out, adapter::heater_totals, adapter::heater_meta);
+    adapter::heater_last_snapshot = out;
+}
 CheckupHydronicReport         checkup_hydronic_report() { return {}; }
 CrashInfo             diag_crash_info() { return adapter::boot; }
 CrashInfo             diag_crash_info_live() { return adapter::live_crash; }
@@ -1117,6 +1143,381 @@ void wire_number(cJSON* object, const char* key, double expected, const char* or
 void wire_text(cJSON* object, const char* key, const char* expected, const char* oracle) {
     const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
     require(cJSON_IsString(item) && std::strcmp(item->valuestring, expected) == 0, oracle);
+}
+void heater_setup() {
+    using namespace daik::logic;
+    for (auto& c : adapter::heater_totals) c = {};
+    adapter::heater_meta = {};
+    auto& m              = adapter::heater_meta;
+    m.epoch              = 73;
+    m.capabilities =
+        heater_context::ALL ^ heater_context::mask(heater_context::Category::ColdOutdoor);
+    m.supported_heaters = 3;
+    m.confirmed = m.dated = true;
+    m.restore_pending     = false;
+    m.persistence_pending = true;
+    m.flags               = heater_cohort::Partial | heater_cohort::Loss;
+    m.dropped             = 3;
+    for (unsigned h = 0; h < 2; ++h) {
+        auto& c             = adapter::heater_totals[h];
+        m.observed_hours[h] = uint8_t(h + 1);
+        c.readable_us       = (h ? 20 : 10) * 1000000u;
+        c.on_us             = (h ? 7 : 3) * 1000000u;
+        c.off_us            = c.readable_us - c.on_us;
+        c.samples = c.readable_samples = h ? 5 : 4;
+        c.on_samples                   = h ? 3 : 2;
+        c.unknown_context_us           = c.on_us;
+        c.union_us                     = (h ? 5 : 3) * 1000000u;
+        c.unclassified_us              = c.on_us - c.union_us;
+        const auto emergency           = size_t(heater_context::Category::Emergency),
+                   silent              = size_t(heater_context::Category::Silent);
+        c.positive_us[emergency]       = (h ? 5 : 1) * 1000000u;
+        c.evaluable_on_us[emergency] = c.evaluable_on_us[silent] = c.on_us;
+        c.evaluable_on_samples[emergency] = c.evaluable_on_samples[silent] = c.on_samples;
+        c.positive_samples[emergency]                                      = 1;
+        if (!h) {
+            c.positive_us[silent]      = 2000000;
+            c.positive_samples[silent] = 1;
+        }
+        // Deliberately retained old counters: a withdrawn capability must hide them on the wire.
+        const auto cold     = size_t(heater_context::Category::ColdOutdoor);
+        c.positive_us[cold] = c.evaluable_on_us[cold] = c.on_us;
+        c.positive_samples[cold] = c.evaluable_on_samples[cold] = c.on_samples;
+    }
+}
+void heater_null(cJSON* doc, const char* name, const char* oracle) {
+    require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(doc, name)), oracle);
+}
+int heater_pair() {
+    const auto snapshots = adapter::heater_snapshot_calls, expires = adapter::heater_expire_calls;
+    const int  first    = sdk::publish_calls;
+    const bool activity = daik::mqtt_publish_network_quiesced();
+    daik::publish_heater_context();
+    require(adapter::heater_snapshot_calls == snapshots + 1 &&
+                adapter::heater_expire_calls == expires + 1 &&
+                !adapter::heater_snapshot_before_expire,
+            "HEATER_ONE_ATOMIC_PAIR_SNAPSHOT_AFTER_EXPIRY");
+    require(sdk::publish_calls == first + 2, "HEATER_EXACT_TWO_INDEPENDENT_MESSAGES");
+    for (unsigned h = 0; h < 2; ++h) {
+        const auto& trace = sdk::published[size_t(first) + h];
+        require(trace.topic.data() == daik::s_base + (h ? "/heater/bsh" : "/heater/buh") &&
+                    trace.qos == 0 && trace.retain == 0 && !trace.enqueued,
+                "HEATER_OWN_TOPICS_QOS0_NONRETAINED");
+        require(trace.length > 0 && trace.length <= 2048 &&
+                    size_t(trace.length) == std::strlen(trace.payload.data()),
+                "HEATER_MESSAGE_AT_MOST_2048_BYTES");
+        std::string reference;
+        daik::logic::append_heater_context_json(reference, adapter::heater_last_snapshot, true, h);
+        require(reference == trace.payload.data(),
+                "HEATER_SHARED_OUTPUT_MATCHES_ORIGINAL_SELECTED_BUILDER");
+        daik::JsonGuard doc(parse_wire(trace));
+        wire_number(doc.get(), "heater", h, "HEATER_CHANNEL_INDEX_MATCHES_TOPIC");
+        wire_number(doc.get(), "max_gap_s", 15, "HEATER_PROJECT_GAP_ON_WIRE");
+        wire_number(doc.get(), "recovery_s", 300, "HEATER_PROJECT_RECOVERY_ON_WIRE");
+        wire_number(doc.get(), "notice_s", 900, "HEATER_PROJECT_NOTICE_ON_WIRE");
+        wire_number(doc.get(), "mild_boundary_tenths_c", 20,
+                    "HEATER_PROJECT_OUTDOOR_SPLIT_ON_WIRE");
+        require(!cJSON_GetObjectItemCaseSensitive(doc.get(), "buh") &&
+                    !cJSON_GetObjectItemCaseSensitive(doc.get(), "bsh"),
+                "HEATER_MESSAGE_CONTAINS_ONE_FLAT_CHANNEL");
+    }
+    require(sdk::locks == 0 && sdk::takes == sdk::gives &&
+                daik::mqtt_publish_network_quiesced() == activity,
+            "HEATER_PUBLICATION_PRESERVES_CALLER_ACTIVITY_AND_LOCKS");
+    return first;
+}
+void outgoing_heater_context() {
+    initial_config();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    heater_setup();
+    sdk::on_publish = [](const sdk::PublishTrace& trace) {
+        if (std::strstr(trace.topic.data(), "/heater/buh")) {
+            adapter::heater_meta.epoch      = 99;
+            adapter::heater_totals[1].on_us = 99000000;
+        }
+    };
+    const int first = heater_pair();
+    sdk::on_publish = nullptr;
+    for (unsigned h = 0; h < 2; ++h) {
+        daik::JsonGuard doc(parse_wire(sdk::published[size_t(first) + h]));
+        wire_number(doc.get(), "epoch", 73, "HEATER_BOTH_CHANNELS_KEEP_SAME_SNAPSHOT_EPOCH");
+        wire_number(doc.get(), "on_s", h ? 7 : 3, "HEATER_INDEPENDENT_BUH_BSH_CLOCKS");
+        wire_number(doc.get(), "silent_positive_s", h ? 0 : 2, "HEATER_EVALUABLE_ZERO_IS_NUMERIC");
+        wire_number(doc.get(), "silent_evaluable_on_s", h ? 7 : 3,
+                    "HEATER_OWN_EVALUABLE_ON_DENOMINATOR");
+        wire_number(doc.get(), "cold_outdoor_supported", 0,
+                    "HEATER_WITHDRAWN_CATEGORY_UNSUPPORTED");
+        heater_null(doc.get(), "cold_outdoor_positive_s",
+                    "HEATER_UNSUPPORTED_CATEGORY_CANNOT_LEAK_COUNTERS");
+    }
+    daik::JsonGuard heartbeat(cJSON_Parse(daik::build_heartbeat_payload().c_str()));
+    require(!cJSON_GetObjectItemCaseSensitive(heartbeat.get(), "heater_context") &&
+                !cJSON_GetObjectItemCaseSensitive(heartbeat.get(), "buh_on_s"),
+            "HEATER_DOMAIN_DOES_NOT_EXPAND_TECHNICAL_HEARTBEAT");
+}
+void outgoing_heater_populations() {
+    initial_config();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    for (unsigned mode = 0; mode < 3; ++mode) {
+        heater_setup();
+        if (mode == 0) adapter::heater_meta.confirmed = false;
+        if (mode == 1)
+            for (auto& c : adapter::heater_totals) c = {};
+        if (mode == 2) adapter::heater_meta.supported_heaters = 0;
+        const int first = heater_pair();
+        for (unsigned h = 0; h < 2; ++h) {
+            daik::JsonGuard doc(parse_wire(sdk::published[size_t(first) + h]));
+            heater_null(doc.get(), "on_s", "HEATER_UNREAD_OR_UNSUPPORTED_ON_TIME_IS_NULL");
+            heater_null(doc.get(), "emergency_positive_s",
+                        "HEATER_UNREAD_OR_UNSUPPORTED_CATEGORY_IS_NULL");
+            if (mode == 0) {
+                heater_null(doc.get(), "epoch", "HEATER_UNCONFIRMED_EPOCH_IS_NULL");
+                heater_null(doc.get(), "supported", "HEATER_UNCONFIRMED_CAPABILITY_IS_UNKNOWN");
+            } else {
+                wire_number(doc.get(), "supported", mode == 1 ? 1 : 0,
+                            "HEATER_UNREADABLE_DIFFERS_FROM_UNSUPPORTED");
+                if (mode == 1)
+                    wire_number(doc.get(), "samples", 0, "HEATER_KNOWN_ZERO_SAMPLES_IS_NUMERIC");
+                else
+                    heater_null(doc.get(), "samples",
+                                "HEATER_UNSUPPORTED_SAMPLE_POPULATION_IS_NULL");
+            }
+        }
+    }
+}
+void outgoing_heater_seams() {
+    initial_config();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    heater_setup();
+    for (unsigned h = 0; h < 2; ++h) {
+        auto& c       = adapter::heater_totals[h];
+        c             = {};
+        c.readable_us = c.on_us = c.union_us = c.unknown_context_us = (h ? 3 : 2) * 1000000u;
+        c.positive_us[0] = c.evaluable_on_us[0] = c.on_us;
+    }
+    int first = heater_pair();
+    for (unsigned h = 0; h < 2; ++h) {
+        daik::JsonGuard doc(parse_wire(sdk::published[size_t(first) + h]));
+        wire_number(doc.get(), "on_s", h ? 3 : 2, "HEATER_TIME_ONLY_SEAM_RETAINS_ON_TIME");
+        wire_number(doc.get(), "emergency_positive_s", h ? 3 : 2,
+                    "HEATER_TIME_ONLY_SEAM_RETAINS_QUALIFIED_TIME");
+        wire_number(doc.get(), "emergency_evaluable_on_s", h ? 3 : 2,
+                    "HEATER_TIME_ONLY_SEAM_RETAINS_DENOMINATOR");
+        wire_number(doc.get(), "samples", 0, "HEATER_TIME_ONLY_SEAM_HAS_ZERO_LOCAL_ENDPOINTS");
+    }
+    for (auto& c : adapter::heater_totals) {
+        c               = {};
+        c.unreadable_us = 2000000;
+    }
+    first = heater_pair();
+    for (unsigned h = 0; h < 2; ++h) {
+        daik::JsonGuard doc(parse_wire(sdk::published[size_t(first) + h]));
+        wire_number(doc.get(), "unreadable_s", 2, "HEATER_UNKNOWN_ONLY_SEAM_RETAINS_GAP_TIME");
+        heater_null(doc.get(), "on_s", "HEATER_UNKNOWN_ONLY_SEAM_CANNOT_INVENT_OFF");
+    }
+    auto& c       = adapter::heater_totals[0];
+    c             = {};
+    c.readable_us = c.on_us = c.union_us = c.unknown_context_us = 500000;
+    c.samples = c.readable_samples = c.on_samples = 2;
+    c.positive_us[0] = c.evaluable_on_us[0] = 500000;
+    c.positive_samples[0]                   = 1;
+    c.evaluable_on_samples[0]               = 2;
+    first                                   = heater_pair();
+    daik::JsonGuard doc(parse_wire(sdk::published[size_t(first)]));
+    wire_number(doc.get(), "on_s", 0, "HEATER_SUBSECOND_TIME_IS_NUMERIC_ZERO");
+    wire_number(doc.get(), "emergency_positive_samples", 1,
+                "HEATER_SUBSECOND_POSITIVE_SAMPLE_SURVIVES");
+}
+void outgoing_heater_maximum() {
+    initial_config();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    heater_setup();
+    adapter::heater_meta.epoch        = UINT32_MAX;
+    adapter::heater_meta.capabilities = adapter::heater_meta.flags = adapter::heater_meta.dropped =
+        UINT16_MAX;
+    for (auto& c : adapter::heater_totals) {
+        c.readable_us = c.on_us = c.off_us = c.transition_us = c.unreadable_us = UINT64_MAX;
+        c.union_us = c.overlap_us = c.unknown_context_us = c.unclassified_us =
+            c.complete_context_us                        = UINT64_MAX;
+        c.samples = c.readable_samples = c.on_samples = UINT32_MAX;
+        for (size_t k = 0; k < daik::logic::heater_context::CATEGORIES; ++k) {
+            c.positive_us[k] = c.evaluable_on_us[k] = UINT64_MAX;
+            c.positive_samples[k] = c.evaluable_on_samples[k] = UINT32_MAX;
+        }
+    }
+    const int first = heater_pair();
+    for (unsigned h = 0; h < 2; ++h) {
+        daik::JsonGuard doc(parse_wire(sdk::published[size_t(first) + h]));
+        wire_number(doc.get(), "on_s", UINT32_MAX, "HEATER_MAXIMUM_DURATION_IS_BOUNDED");
+        wire_number(doc.get(), "saturated", 1, "HEATER_MAXIMUM_DURATION_IS_LOWER_BOUND");
+    }
+}
+void outgoing_heater_failures() {
+    initial_config();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    heater_setup();
+    for (int failure = 0; failure < 2; ++failure) {
+        const int  first        = sdk::publish_calls;
+        const bool activity     = daik::mqtt_publish_network_quiesced();
+        cpp_witness::attempted  = 0;
+        cpp_witness::fail_after = failure;
+        bool threw              = false;
+        try {
+            daik::publish_heater_context();
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        cpp_witness::fail_after = -1;
+        require(threw && cpp_witness::attempted == failure + 1 &&
+                    sdk::publish_calls == first + failure,
+                "HEATER_OOM_BEFORE_OR_BETWEEN_CHANNELS_HAS_NO_FABRICATED_SEND");
+        require(sdk::locks == 0 && sdk::takes == sdk::gives &&
+                    daik::mqtt_publish_network_quiesced() == activity,
+                "HEATER_OOM_PRESERVES_CALLER_ACTIVITY_AND_LOCKS");
+        (void)heater_pair();
+    }
+    const int first          = sdk::publish_calls;
+    sdk::reject_next_publish = true;
+    (void)heater_pair();
+    require(!sdk::published[size_t(first)].accepted && sdk::published[size_t(first + 1)].accepted,
+            "HEATER_REJECTION_NEVER_RETRIES_OR_SKIPS_INDEPENDENT_CHANNEL");
+    adapter::heater_expire_retires = true;
+    const int expired              = heater_pair();
+    for (unsigned h = 0; h < 2; ++h) {
+        daik::JsonGuard doc(parse_wire(sdk::published[size_t(expired) + h]));
+        wire_number(doc.get(), "confirmed", 0, "HEATER_EXPIRY_PRECEDES_PUBLICATION");
+        heater_null(doc.get(), "on_s", "HEATER_EXPIRED_COUNTERS_CANNOT_LEAK");
+    }
+}
+void outgoing_heater_task_recovery() {
+    initial_config();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    heater_setup();
+    adapter::heater_task_oom_once = true;
+    sdk::on_publish               = [](const sdk::PublishTrace& trace) {
+        if (adapter::heater_task_oom_once && std::strstr(trace.topic.data(), "/heartbeat")) {
+            adapter::heater_task_oom_once = false;
+            sdk::fail_next_new = true; // first heater reserve, after actual heartbeat acceptance
+        }
+    };
+    sdk::on_delay = [](TickType_t delay) {
+        check_cycle(delay);
+        unsigned channels = 0;
+        for (int i = 0; i < sdk::publish_calls; ++i)
+            if (std::strstr(sdk::published[size_t(i)].topic.data(), "/heater/")) ++channels;
+        if (sdk::delays == 1) {
+            require(adapter::heater_snapshot_calls == 1 && channels == 0,
+                    "HEATER_TASK_CADENCE_EXECUTES_PUBLISHER_BEFORE_OOM");
+            require(daik::mqtt_skip_stats().skipped == 1 && adapter::skipped_logs == 1,
+                    "HEATER_TASK_OOM_COUNTS_AND_LOGS_ONE_EPISODE");
+        } else {
+            require(sdk::delays == 2 && adapter::heater_snapshot_calls == 2 && channels == 2 &&
+                        daik::mqtt_skip_stats().skipped == 1 && adapter::skipped_logs == 1,
+                    "HEATER_TASK_NEXT_NORMAL_ITERATION_RECOVERS_PAIR");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+    sdk::on_publish = nullptr;
+}
+void outgoing_stop_context_output() {
+    initial_config();
+    adapter::stop_context.observation.confirmed   = true;
+    adapter::stop_context.observation.readable_us = 60000000;
+    adapter::stop_context.capability_mask         = daik::logic::STOP_CONTEXT_ALL;
+    const auto  payload                           = daik::build_heartbeat_payload();
+    std::string production_reference;
+    daik::append_stop_context_json(production_reference,
+                                   daik::stop_context_payload_fields(adapter::stop_context), true);
+    require(payload.find(production_reference) != std::string::npos,
+            "PRODUCTION_HEARTBEAT_USES_ORIGINAL_STOP_EMITTER_BYTES");
+    for (unsigned mode = 0; mode < 32; ++mode) {
+        daik::HeartbeatFields f;
+        f.version             = "version\"\\\n";
+        f.platform            = "esp32s3";
+        f.uptime_ms           = mode ? UINT64_MAX : 0;
+        auto& s               = f.stop_context;
+        s.confirmed           = mode & 1;
+        s.has_readable        = mode & 2;
+        s.dated               = mode & 4;
+        s.pending             = mode & 8;
+        s.coverage_partial    = mode & 16;
+        s.restore_pending     = !(mode & 8);
+        s.persistence_pending = mode & 16;
+        s.readable_s          = mode ? UINT32_MAX : 0;
+        s.observed_hours = s.dropped     = mode ? UINT16_MAX : 0;
+        s.capability_mask                = uint8_t(mode);
+        auto& c                          = s.counters;
+        c.witnessed_stops_recent_heating = UINT16_MAX;
+        c.unclassified = c.unknown = c.partial = c.censored = c.target_changed = c.time_overflow =
+            UINT16_MAX;
+        c.saturated = mode & 4;
+        for (size_t k = 0; k < daik::logic::STOP_CONTEXT_CATEGORIES; ++k)
+            c.positive[k] = c.evaluable[k] = c.complete[k] = uint16_t(mode ? UINT16_MAX : 0);
+        for (bool flat : {false, true}) {
+            std::string original = flat ? "{\"prefix\":7" : "prefix:", shared = original;
+            daik::append_stop_context_json(original, s, flat);
+            auto sink = daik::detail::json_output(shared);
+            daik::append_stop_context_json(sink, s, flat);
+            require(original == shared, "STOP_SHARED_OUTPUT_MATCHES_ORIGINAL_BUILDER_BYTES");
+            require(flat ? shared.find(",\"stop_context_confirmed\":") != std::string::npos
+                         : shared.find("prefix:{\"confirmed\":") != std::string::npos,
+                    "STOP_FLAT_PREFIX_COMMA_AND_BOOLEAN_FORM_PRESERVED");
+        }
+    }
+    std::string digits;
+    auto        sink = daik::detail::json_output(digits);
+    sink += std::string_view("18446744073709551615");
+    require(digits == "18446744073709551615", "SHARED_SINK_PRESERVES_FULL_UINT64_DECIMAL_VIEW");
+    daik::HeartbeatFields f;
+    f.stop_context          = daik::stop_context_payload_fields(adapter::stop_context);
+    cpp_witness::attempted  = 0;
+    cpp_witness::fail_after = INT_MAX;
+    const auto baseline     = daik::build_heartbeat_json(f, daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
+    const int  allocations  = cpp_witness::attempted;
+    cpp_witness::fail_after = -1;
+    require(allocations > 0, "SHARED_HEARTBEAT_ALLOCATION_SWEEP_ENTERS_ACTUAL_BUILDER");
+    for (int failure = 0; failure < allocations; ++failure) {
+        cpp_witness::attempted  = 0;
+        cpp_witness::fail_after = failure;
+        bool threw              = false;
+        try {
+            (void)daik::build_heartbeat_json(f, daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        cpp_witness::fail_after = -1;
+        require(threw && sdk::locks == 0 && sdk::takes == sdk::gives,
+                "SHARED_STOP_HEARTBEAT_OOM_PROPAGATES_WITHOUT_RETAINED_LOCK");
+        require(daik::build_heartbeat_json(f, daik::HYDRONIC_FLAT_JSON_MAX_BYTES) == baseline,
+                "SHARED_STOP_HEARTBEAT_RECOVERS_AFTER_EVERY_ALLOCATION_FAILURE");
+    }
+}
+void outgoing_stop_task_recovery() {
+    initial_config();
+    daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    adapter::stop_task_oom_once = true;
+    sdk::on_delay               = [](TickType_t delay) {
+        check_cycle(delay);
+        unsigned heartbeats = 0;
+        for (int i = 0; i < sdk::publish_calls; ++i)
+            if (std::strstr(sdk::published[size_t(i)].topic.data(), "/heartbeat")) ++heartbeats;
+        if (sdk::delays == 1) {
+            require(adapter::stop_snapshot_calls == 1 && heartbeats == 0 &&
+                                      daik::mqtt_skip_stats().skipped == 1 && adapter::skipped_logs == 1,
+                                  "SHARED_STOP_TASK_OOM_RETURNS_TO_NORMAL_DELAY");
+        } else {
+            require(sdk::delays == 2 && adapter::stop_snapshot_calls == 2 && heartbeats == 1 &&
+                                      daik::mqtt_skip_stats().skipped == 1 && adapter::skipped_logs == 1,
+                                  "SHARED_STOP_TASK_NEXT_CYCLE_RECOVERS_HEARTBEAT");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
 }
 void outgoing_heartbeat() {
     initial_config();
@@ -3657,6 +4058,22 @@ int main(int argc, char** argv) {
             sdk_event_stack_owner();
         else if (std::strcmp(scenario, "outgoing_heartbeat") == 0)
             outgoing_heartbeat();
+        else if (std::strcmp(scenario, "outgoing_stop_context_output") == 0)
+            outgoing_stop_context_output();
+        else if (std::strcmp(scenario, "outgoing_stop_task_recovery") == 0)
+            outgoing_stop_task_recovery();
+        else if (std::strcmp(scenario, "outgoing_heater_context") == 0)
+            outgoing_heater_context();
+        else if (std::strcmp(scenario, "outgoing_heater_populations") == 0)
+            outgoing_heater_populations();
+        else if (std::strcmp(scenario, "outgoing_heater_seams") == 0)
+            outgoing_heater_seams();
+        else if (std::strcmp(scenario, "outgoing_heater_maximum") == 0)
+            outgoing_heater_maximum();
+        else if (std::strcmp(scenario, "outgoing_heater_failures") == 0)
+            outgoing_heater_failures();
+        else if (std::strcmp(scenario, "outgoing_heater_task_recovery") == 0)
+            outgoing_heater_task_recovery();
         else if (std::strcmp(scenario, "scalar_snapshot_helpers") == 0)
             scalar_snapshot_helpers();
         else if (std::strcmp(scenario, "real_json_consumers") == 0)

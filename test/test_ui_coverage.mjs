@@ -167,7 +167,8 @@ try {
       setCheckupHook: (fn) => { checkupCardHtml = fn; },
       applyStaticI18n, labelSchematicHits, wire,
       renderApp, renderCards, renderHeaderMeta,
-      checkupOutdoorContext, checkupMetricValue, checkupValue,
+      checkupDefrostCheck, checkupFreshDefrostCheck, checkupDefrostInspectorRows,
+      checkupMetricValue, checkupValue,
       checkupCardHtml, refrigerantServiceRowHtml, checkupDetailHtml,
       cyclingPeriodDetailsHtml: (scope, from, to) => cyclingPeriodDetailsHtml(_cyclingModels.get(scope), from, to),
       checkupCyclingTimelineHtml,
@@ -180,18 +181,64 @@ try {
   ui.labelSchematicHits();
   ui.wire();
 
-  // Exercise checkupOutdoorContext: missing fields, invalid/zero samples, known & unknown sources, equal vs range.
-  for (const c of [
+  // Defrost is selected from the X10A report, with measurements and notes limited to fresh input.
+  const observedDefrost = { id: "defrost", verdict: "info", count: 3, defrost_s: 151, run_s: 1000 };
+  const defrostStatus = (c = observedDefrost, health = {}, diagnostics = {}) => ({
+    diagnostics: { enabled: true, ...diagnostics },
+    health: { source: "x10a", source_fresh: true, checks: [{ id: "flow" }, c], ...health },
+  });
+  for (const status of [
+    undefined,
     {},
-    { outdoor_source: null },
-    { outdoor_source: "x10a", outdoor_min_c: NaN },
-    { outdoor_source: "x10a", outdoor_min_c: 1.0, outdoor_mean_c: NaN },
-    { outdoor_source: "x10a", outdoor_min_c: 1.0, outdoor_mean_c: 1.0, outdoor_samples: 0 },
-    { outdoor_source: "x10a", outdoor_min_c: 1.0, outdoor_mean_c: 1.0, outdoor_samples: 3 },
-    { outdoor_source: "homehub", outdoor_min_c: -2.0, outdoor_mean_c: 0.5, outdoor_samples: 6 },
-    { outdoor_source: "env3", outdoor_min_c: 3.2, outdoor_mean_c: 4.1, outdoor_samples: 2 },
-    { outdoor_source: "future_source", outdoor_min_c: -1.0, outdoor_mean_c: 1.0, outdoor_samples: 2 },
-  ]) ui.checkupOutdoorContext(c);
+    { diagnostics: { enabled: true } },
+    defrostStatus(observedDefrost, {}, { enabled: false }),
+    defrostStatus(observedDefrost, { source: "modbus" }),
+    defrostStatus(observedDefrost, { source: undefined }, { effective_source: "modbus" }),
+    defrostStatus(observedDefrost, { persist: "unknown" }),
+    defrostStatus(observedDefrost, { checks: null }),
+    defrostStatus(observedDefrost, { checks: [{ id: "flow" }] }),
+  ]) {
+    assert.ok(!ui.checkupDefrostCheck(status));
+    assert.equal(ui.checkupFreshDefrostCheck(status), null);
+    assert.equal(ui.checkupDefrostInspectorRows(status), "");
+  }
+  for (const status of [
+    defrostStatus(),
+    defrostStatus(observedDefrost, { source: undefined }),
+    defrostStatus(observedDefrost, { source: undefined }, { effective_source: "x10a" }),
+  ]) {
+    assert.equal(ui.checkupDefrostCheck(status), observedDefrost);
+    assert.equal(ui.checkupFreshDefrostCheck(status), observedDefrost);
+  }
+  for (const [status, statusStale] of [
+    [defrostStatus(), true],
+    [defrostStatus(observedDefrost, { source_fresh: false }), false],
+    [defrostStatus({ ...observedDefrost, reason: "source_stale" }), false],
+  ]) {
+    assert.ok(ui.checkupDefrostCheck(status), "stale X10A can still identify its historical source");
+    assert.equal(ui.checkupFreshDefrostCheck(status, statusStale), null);
+    assert.equal(ui.checkupDefrostInspectorRows(status, statusStale), "");
+  }
+  const valueRow = (label, value) => `<div class="inspect-row"><span>${label}</span><span>${value}</span></div>`;
+  for (const [fields, expectedCount, expectedShare] of [
+    [{}, "3", "15.1 %"],
+    [{ count: 0, defrost_s: 0 }, "0", "0 %"],
+    [{ defrost_s: 1 }, "3", "&lt;1 %"],
+    [{ defrost_s: 3, run_s: 20 }, "3", "15 %"],
+    [{ defrost_s: 12959, run_s: 86393 }, "3", "15.00005 %"],
+    [{ count: null }, "—", "15.1 %"],
+    [{ count: -1 }, "—", "15.1 %"],
+    [{ defrost_s: null }, "3", "—"],
+    [{ defrost_s: -1 }, "3", "—"],
+    [{ run_s: NaN }, "3", "—"],
+    [{ run_s: 0 }, "3", "—"],
+    [{ run_s: 1, share_pct: 15 }, "3", "15 %"],
+  ]) {
+    const html = ui.checkupDefrostInspectorRows(defrostStatus({ ...observedDefrost, ...fields }));
+    assert.equal(html, valueRow("Observed defrost starts", expectedCount) + valueRow("Defrost share", expectedShare));
+  }
+  assert.equal(ui.checkupDefrostInspectorRows(defrostStatus({ id: "defrost", verdict: "collecting" })), "");
+  assert.equal(ui.checkupDefrostInspectorRows(defrostStatus({ ...observedDefrost, verdict: "unavailable" })), "");
 
   // Exercise checkupMetricValue & checkupValue across every switch branch and fallback.
   ui.checkupValue(null);
@@ -201,13 +248,6 @@ try {
     { id: "cycling", verdict: "ok", starts: 0 },
     { id: "cycling", verdict: "warn", starts: 12 },
     { id: "cycling", verdict: "ok", starts: -1 },
-    { id: "defrost", verdict: "unavailable", count: 1 },
-    { id: "defrost", verdict: "collecting", count: null },
-    { id: "defrost", verdict: "collecting", count: 2, outdoor_source: "x10a", outdoor_min_c: 1, outdoor_mean_c: 2, outdoor_samples: 3 },
-    { id: "defrost", verdict: "info", count: 3, paired_count: null, share_pct: null, defrost_s: 60, run_s: 600 },
-    { id: "defrost", verdict: "info", count: 3, paired_count: 3, share_pct: 15, defrost_s: 90, run_s: 600,
-      outdoor_source: "env3", outdoor_min_c: -1.0, outdoor_mean_c: -1.0, outdoor_samples: 2 },
-    { id: "defrost", verdict: "ok", count: null, paired_count: null, share_pct: null },
     { id: "dhw_loss", verdict: "collecting", blocked: true, aborts: 1, abort_reasons: ["blind"], best_aborted_s: 300, required_s: 3600 },
     { id: "dhw_loss", verdict: "collecting", blocked: false, windows: 0, required_s: 3600 },
     { id: "dhw_loss", verdict: "collecting", blocked: false, windows: 2, required_s: 3600 },
@@ -338,6 +378,14 @@ try {
   });
   ui.S._values = [{ label: "Leaving water temperature before BUH", value: "35.0", unit: "°C" }];
   ui.renderApp();
+  const freshDiagnosis = ui.checkupCardHtml();
+  assert.match(freshDiagnosis, /data-defrost-inspect/);
+  assert.match(freshDiagnosis, />1 note</);
+  assert.doesNotMatch(freshDiagnosis, /model:health_defrost/);
+  ui.S.status.health.source_fresh = false;
+  assert.doesNotMatch(ui.checkupCardHtml(), /data-defrost-inspect|>1 note</,
+    "a retained X10A report does not expose or count a current defrost note");
+  ui.S.status.health.source_fresh = true;
   // Focus inside refrigerant item while live, then mark transportUnavailable so focus hops to active tab.
   const refBtn = appDoc.getElementById("valueGroups").querySelector('[data-desc="service:refrigerant"]');
   assert.ok(refBtn, "diagnostic render must mount service:refrigerant item");
@@ -412,12 +460,6 @@ try {
   ui.checkupCyclingTimelineHtml(timeline, "cov-scope", cyclingCheck, "x10a");
   ui.cyclingPeriodDetailsHtml("cov-scope", 22, 23);
   ui.checkupDetailHtml(cyclingCheck, true, ui.S.status.health);
-  ui.checkupDetailHtml({
-    id: "defrost", verdict: "info", evidence: "measured", count: 3, paired_count: 3, share_pct: 15,
-    defrost_s: 120, run_s: 800,
-    outdoor_source: "x10a", outdoor_min_c: -4.0, outdoor_mean_c: -2.0, outdoor_samples: 5,
-    last_observed_start: { unix_s: 1794580000, route: "space_heating", outdoor_c: -3.0 },
-  }, true, ui.S.status.health);
   for (const ck of [
     { id: "fault", verdict: "warn", evidence: "manufacturer", active: 1, observed_s: 3600,
       latest: { code: "E5", base_code: "E5", subcode: "", ongoing: true, duration_s: 60 },
@@ -430,7 +472,19 @@ try {
     { id: "pressure", verdict: "info", min_bar: 0.8, current_bar: 1.2, observed_s: 3600, required_s: 3600 },
     { id: "flow", verdict: "ok", min_l_min: 14.0, observed_s: 3600, required_s: 3600,
       hydronic: { confirmed: true, current: true, dated: true, samples: 5, spread_k: { min: 1.5, mean: 2.0, max: 3.0 } } },
-    { id: "heater", verdict: "ok", buh_s: 60, bsh_s: 120, buh_observed_s: 3600, bsh_observed_s: 3600, observed_s: 3600 },
+    { id: "heater", verdict: "ok", buh_s: 60, bsh_s: 120, buh_observed_s: 3600, bsh_observed_s: 3600, observed_s: 3600,
+      context: { confirmed: true, dated: true, coverage_partial: true, restore_pending: false, persistence_pending: true,
+        archive_incomplete: false, clock_uncertain: false, storage_loss: false, dropped: 0,
+        buh: { supported: true, on_s: 60, union_s: 30, overlap_s: 10, unknown_context_s: 30, unclassified_s: 30,
+          readable_s: 3600, saturated: false, quiet_mild_notice: true,
+          categories: { emergency: { supported: true, positive_s: 0, evaluable_on_s: 60, positive_samples: 1 },
+            error: { supported: false }, silent: { supported: true, positive_s: null, evaluable_on_s: null, positive_samples: null },
+            dhw_route: { supported: true, positive_s: 30, evaluable_on_s: 60, positive_samples: 2 } } },
+        bsh: { supported: false } } },
+    { id: "heater", verdict: "collecting", buh_s: null, bsh_s: null, observed_s: 0,
+      context: { confirmed: false, dated: false, coverage_partial: false, restore_pending: true, persistence_pending: false,
+        archive_incomplete: true, clock_uncertain: true, storage_loss: true, dropped: 3,
+        buh: { supported: true, saturated: true }, bsh: { supported: true, saturated: true } } },
     { id: "retries", verdict: "info", seen: true, observed_s: 3600, required_s: 3600 },
   ]) ui.checkupDetailHtml(ck, true, { source: "x10a", span_s: 86400, source_fresh: true });
 
@@ -471,7 +525,10 @@ try {
   assert.ok(mcpCov, "missing V8 ScriptCoverage for mcp_dashboard.js");
 
   const targets = [
-    ["checkupOutdoorContext", appCov, appAst, rawAppSource],
+    ["checkupDefrostShare", appCov, appAst, rawAppSource],
+    ["checkupDefrostCheck", appCov, appAst, rawAppSource],
+    ["checkupFreshDefrostCheck", appCov, appAst, rawAppSource],
+    ["checkupDefrostInspectorRows", appCov, appAst, rawAppSource],
     ["checkupMetricValue", appCov, appAst, rawAppSource],
     ["checkupValue", appCov, appAst, rawAppSource],
     ["refrigerantServiceRowHtml", appCov, appAst, rawAppSource],
@@ -495,7 +552,7 @@ try {
   assert.ok(floor.blockRatio >= 0.55,
     `checkup helper V8 block coverage regression: ${(floor.blockRatio * 100).toFixed(1)}% < 55.0%`);
 
-  console.log(`UI V8 coverage passed: 7/7 critical functions 100% block/function covered; ` +
+  console.log(`UI V8 coverage passed: ${targets.length}/${targets.length} critical functions 100% block/function covered; ` +
     `checkup floor ${floor.coveredFns}/${floor.fnCount} fns (${(floor.blockRatio * 100).toFixed(1)}% bytes)`);
 } finally {
   session.disconnect();

@@ -191,10 +191,7 @@ function recoverOpenHistory() {
   const host = globalThis.document?.getElementById(dashboard ? "valueGroups" : "settingsCards");
   const rows = dashboard ? ".vgroup:not([hidden]) .vitem.open [data-trend]" : ".vitem.open [data-trend]";
   for (const button of host?.querySelectorAll(rows) || []) {
-    const started = button.dataset.desc === "model:health_pressure"
-      ? ensureHist(button.dataset.trend, "x10a", "refresh")
-      : ensureHistPair(button.dataset.trend, "refresh");
-    if (started) break;
+    if (ensureHistPair(button.dataset.trend, "refresh")) break;
   }
 }
 
@@ -1010,9 +1007,8 @@ function statusCardsHtml() {
 
 // ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, legacy-208/legacy-349) ─────────
 // The dashboard already answers what the plant is doing NOW (the schematic) and what one reading did
-// today (a value row's trend). This is the third question, and the only one that needs counting
-// rather than reading: how often the compressor started, what share of runtime went into defrosting,
-// how low the water pressure got. The firmware does all of it — every verdict, every threshold and
+// today (a value row's trend). The diagnosis asks how often the compressor started and what share
+// of runtime went into defrosting. The firmware does all of it — every verdict, every threshold and
 // every coverage decision arrives in /status.health, judged. Nothing is re-decided here.
 //
 // That split is deliberate and load-bearing. The rules live in a host-tested C++ header that CI gates
@@ -1020,8 +1016,7 @@ function statusCardsHtml() {
 // of the same judgement, which is precisely how lwt_select's rule came to be re-opened by a looser
 // copy of itself. The browser's job is words and colour.
 //
-// Rendered in the order received: logic/checkup.hpp declares the checks in reading order, so there is
-// no second opinion here about which row matters most.
+// Inventory of visible diagnoses in firmware order. Pressure is presented in its schematic inspector.
 const CHECKUP_ROW = {
   fault:    "check.fault",
   dhw_loss: "check.dhw_loss",
@@ -2128,7 +2123,7 @@ function syncCheckupFaultPanel(panel) {
   }
 }
 
-// H1 is an independent dated population, not a new verdict or a replacement for min_l_min.
+// Hydronic evidence is an independent dated population with its own method and identity.
 function checkupHydronicKnown(h) {
   return h?.method === 2 && h.confirmed === true && h.dated === true &&
     typeof h.first_evidence_unix_s === "number" && Number.isFinite(h.first_evidence_unix_s) &&
@@ -2143,14 +2138,28 @@ function checkupFlowReport() {
   const health = S.status.health;
   if (health?.persist === "unknown" || !Array.isArray(health?.checks)) return null;
   const reported = health.checks.find(c => c?.id === "flow");
-  const source = health.source || S.status.diagnostics.effective_source || "x10a";
-  if (!reported || (source !== "x10a" && source !== "modbus")) return null;
+  if (!reported) return null;
+  // The selected minimum has its own source. The older fields belong to the active checkup.
+  const activeSource = health.source || S.status.diagnostics.effective_source || "x10a";
   const heating = reported.hydronic;
-  const value = heating?.flow_l_min?.min;
-  const minimum = source === "x10a" && checkupHydronicKnown(heating) &&
-    Number.isSafeInteger(heating.samples) && heating.samples > 0 &&
-    Number.isFinite(value) && value > 0 ? value : null;
-  const w = reported.minimum_windows;
+  const selected = reported.heating_minimum;
+  const hasSelected = Object.prototype.hasOwnProperty.call(reported, "heating_minimum");
+  if (hasSelected && !["observed", "collecting", "unsupported"].includes(selected?.reason)) return null;
+  const source = hasSelected ? selected.source : activeSource;
+  if (source !== "x10a" && source !== "modbus") return null;
+  let value, w, unsupported;
+  if (hasSelected) {
+    if (selected.reason === "observed") value = selected.min_l_min;
+    w = selected.minimum_windows;
+    unsupported = selected.reason === "unsupported";
+  } else {
+    if (source === "x10a" && checkupHydronicKnown(heating) &&
+        Number.isSafeInteger(heating.samples) && heating.samples > 0)
+      value = heating.flow_l_min?.min;
+    w = reported.minimum_windows;
+    unsupported = source !== "x10a" || heating?.reason === "unsupported";
+  }
+  const minimum = Number.isFinite(value) && value > 0 ? value : null;
   const windows = minimum !== null && Number.isSafeInteger(w?.t0) && w.t0 >= 0 &&
     w.t0 % 3600 === 0 && w.t0 <= 8640000000000 - 86400 && w.slot_s === 300 &&
     Array.isArray(w.hour_masks) && w.hour_masks.length === 24 &&
@@ -2158,7 +2167,7 @@ function checkupFlowReport() {
     ? w : null;
   const locationsMissing = minimum !== null &&
     (!windows || windows.locations_missing === true || !windows.hour_masks.some(Boolean));
-  const a = source === "x10a" && reported.water_agreement && typeof reported.water_agreement === "object" &&
+  const a = activeSource === "x10a" && reported.water_agreement && typeof reported.water_agreement === "object" &&
     reported.water_agreement.method === 2 ? reported.water_agreement : null;
   const agreement = a ? {
     known: checkupHydronicKnown(heating),
@@ -2166,7 +2175,7 @@ function checkupFlowReport() {
     saturated: heating?.population_saturated === true,
     data: a,
   } : null;
-  return { source, minimum, windows, locationsMissing, unsupported: heating?.reason === "unsupported", agreement };
+  return { source, minimum, windows, locationsMissing, unsupported, agreement };
 }
 
 function checkupWaterAgreementHtml(agreement) {
@@ -2218,15 +2227,85 @@ function checkupWaterAgreementHtml(agreement) {
     `<p>${esc(ameta[2])}</p>`;
 }
 
+function inspectDiagnosisResultHtml(label, value) {
+  return `<div class="inspect-diagnosis-result"><span>${esc(label)}</span>` +
+    `<strong class="num">${esc(value)}</strong></div>`;
+}
+
 function checkupFlowBriefHtml({ source, minimum, locationsMissing, unsupported, agreement }) {
-  if (source !== "x10a") return `<p>${esc(t("check.flow.x10a_only"))}</p>`;
+  const name = source === "modbus" ? "Modbus" : "X10A";
   const head = minimum === null
-    ? `<p>${esc(t(unsupported ? "check.status.unavailable" : "check.flow.waiting"))}</p>`
-    : `<div class="inspect-flow-result"><span>${esc(t("check.flow.lowest"))} · X10A</span>` +
-      `<strong class="num">${esc(histFmt1(minimum))} l/min</strong></div>` +
+    ? `<p>${esc(t(unsupported ? "check.flow.unavailable" : "check.flow.waiting"))}</p>`
+    : inspectDiagnosisResultHtml(`${t("check.flow.lowest")} · ${name}`, `${histFmt1(minimum)} l/min`) +
       `<p>${esc(t("check.flow.runup"))}</p>` +
       (locationsMissing ? `<p>${esc(t("check.flow.locations_missing"))}</p>` : "");
   return head + checkupWaterAgreementHtml(agreement);
+}
+
+function checkupHeaterContextHtml(c) {
+  const s = c.context;
+  if (!s || typeof s !== "object" || Array.isArray(s)) return "";
+  const splitSegs = (key, count) => {
+    const raw = t(key);
+    const parts = typeof raw === "string" ? raw.split("|") : [];
+    return parts.length === count ? parts : null;
+  };
+  const states = splitSegs("check.heater_context.states", 9);
+  const labels = splitSegs("check.heater_context.categories", 9);
+  const columns = splitSegs("check.heater_context.columns", 3);
+  const totals = splitSegs("check.heater_context.totals", 6);
+  if (!states || !labels || !columns || !totals) return "";
+  const state = [];
+  if (s.confirmed !== true) state.push(states[0]);
+  if (s.dated !== true) state.push(states[1]);
+  if (s.coverage_partial === true) state.push(states[2]);
+  const droppedLabel = Number.isFinite(s.dropped) && s.dropped > 0
+    ? ` (≥${s.dropped.toLocaleString(LANG)})` : "";
+  if (s.archive_incomplete === true) state.push(states[5] + droppedLabel);
+  else if (s.storage_loss === true || s.dropped > 0) state.push(states[5] + droppedLabel);
+  else if (s.restore_pending === true) state.push(states[3]);
+  if (s.persistence_pending === true) state.push(states[4]);
+  if (s.clock_uncertain === true) state.push(states[6]);
+  if (s.buh?.saturated === true || s.bsh?.saturated === true) state.push(states[7]);
+  const channels = [s.buh, s.bsh].map(h => (h && typeof h === "object" && !Array.isArray(h) ? h : null));
+  const title = descParaHtml(`<span class="vdesc-n">${esc(t("check.heater_context.title"))}</span>`);
+  const hasHeater = channels.some(h => h?.supported === true);
+  if (!hasHeater && s.confirmed === true) state.push(states[8]);
+  const status = state.length ? descParaHtml(esc(state.join(" · "))) : "";
+  if (s.confirmed !== true || !hasHeater) return title + status + descParaHtml(esc(t("check.heater_context.limits")));
+  const number = (n, saturated, unit = " s") => Number.isFinite(n) && n >= 0
+    ? `${saturated ? "≥" : ""}${Math.floor(n).toLocaleString(LANG)}${unit}` : t("sys.nodata");
+  const row = (label, value) => `<tr><th scope="row">${esc(label)}</th><td>${esc(value)}</td></tr>`;
+  const categoryIds = ["emergency", "error", "defrost_recovery", "dhw_route", "silent",
+    "cold_outdoor", "mild_outdoor", "compressor_off", "quiet_mild_heating"];
+  const countsCaption = t("check.heater_context.counts");
+  const table = channels.map((h, heater) => {
+    const name = columns[heater + 1];
+    if (h?.supported !== true) return descParaHtml(esc(`${name}: ${h?.supported === false ? states[8] : t("sys.nodata")}`));
+    const categoryRows = categoryIds.map((id, k) => {
+      const v = h.categories?.[id];
+      let value = t("sys.nodata");
+      if (v?.supported === false) value = states[8];
+      else if (v?.supported === true && (v.positive_s ?? v.evaluable_on_s ?? v.positive_samples) != null) {
+        const saturated = h.saturated === true;
+        const positive = !saturated && v.positive_s === 0 &&
+          Number.isFinite(v.positive_samples) && v.positive_samples > 0
+          ? "<1 s" : number(v.positive_s, saturated);
+        value = `${positive} / ${number(v.evaluable_on_s, saturated)} · ${number(v.positive_samples, saturated, "")}`;
+      }
+      return row(labels[k], value);
+    });
+    const totalRows = ["on_s", "union_s", "overlap_s", "unknown_context_s", "unclassified_s",
+      "readable_s"].map((key, k) => row(totals[k], number(h[key], h.saturated === true)));
+    return `<table class="heater-context"><caption>${esc(countsCaption)}</caption>` +
+      `<thead><tr><th scope="col">${esc(columns[0])}</th><th scope="col">${esc(name)}</th></tr></thead>` +
+      `<tbody>${categoryRows.join("")}${totalRows.join("")}</tbody></table>`;
+  }).join("");
+  const notice = channels.some(h => h?.supported === true && h.quiet_mild_notice === true)
+    ? descParaHtml(esc(t("check.heater_context.notice"))) : "";
+  return title + status + table + notice +
+    descParaHtml(esc(t("check.heater_context.rule"))) +
+    descParaHtml(esc(t("check.heater_context.limits")));
 }
 
 function checkupStatusKey(c) {
@@ -2647,16 +2726,13 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   const statusKey = checkupStatusKey(c);
   const metric = checkupMetricValue(c);
   const parts = metric.split(" · ");
-  const compactMetric = ["dhw_loss", "defrost"].includes(c.id);
+  const compactMetric = c.id === "dhw_loss";
   const value = (compactMetric ? parts.shift() : metric) || checkupStatusText(c);
   const description = MODEL_DESCRIPTIONS[`health_${c.id}`];
   const copy = modelDescriptionCopy(`health_${c.id}`);
   const base = LANG === "de" && description.de ? description.de : description;
   const what = copy ? copy[0] : base.what;
   const normal = copy ? copy[1] : base.normal;
-  if (c.id === "pressure" && c.verdict !== "unavailable" && hasHist("water_pressure")) {
-    return descNoteHtml(t("normal.label"), normal);
-  }
   let detail;
   // Discard reasons are aggregates, without a per-candidate cause ranking. Missing readings
   // include necessary valve/heater/pump inputs as well as tank temperature; missing X10A/HomeHub
@@ -2700,29 +2776,12 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   }
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
-    defrost_events_insufficient: "defrost_events_insufficient",
     source_stale: isModbus ? "source_stale_modbus" : "source_stale",
-    no_paired_runtime: "no_paired_runtime",
   }[c.reason];
   if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
-  if (compactMetric && c.id !== "dhw_loss" && parts.length) detail += ` ${parts.join(" · ")}.`;
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
     detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c, isModbus),
                 checkupDuration(c.best_aborted_s));
-  if (c.id === "defrost") {
-    if (checkupOutdoorContext(c)) detail += t("check.detail.outdoor_defrost");
-    const start = c.last_observed_start;
-    if (start && typeof start === "object") {
-      const missing = t("sys.nodata");
-      const date = Number.isInteger(start.unix_s) && start.unix_s > 0 && start.unix_s <= 0xffffffff
-        ? new Date(start.unix_s * 1000).toLocaleString(LANG,
-            { dateStyle: "short", timeStyle: "short" }) : missing;
-      const route = start.route === "space_heating" ? t("check.defrost.route_space")
-        : start.route === "dhw_route" ? t("check.defrost.route_dhw") : missing;
-      const outdoor = Number.isFinite(start.outdoor_c) ? `${checkupFmt1(start.outdoor_c)} °C` : missing;
-      detail += ` ${t("check.defrost.last_start", date, route, outdoor)}`;
-    }
-  }
   // Three paragraphs: observation with its real time scope, current interpretation, then normal
   // context. A report window is never a verdict's "since" timestamp.
   const time = [];
@@ -2741,12 +2800,6 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   if (statusKey === "collecting" && Number(c.required_s) > Number(c.observed_s))
     detail += ` ${t("check.detail.coverage_missing",
                     Math.ceil(c.required_s - c.observed_s).toLocaleString(LANG))}`;
-  // Only the bounded daily assessments need a complete day; flow waits for eligible pump time.
-  if (["pressure", "defrost"].includes(c.id) && statusKey === "collecting" &&
-      fullSpan === false && Number.isFinite(report.span_s) &&
-      ["day_incomplete", "input_coverage"].includes(c.reason))
-    detail += ` ${t("check.detail.horizon_wait",
-                   checkupDuration(Math.max(0, 86400 - report.span_s)))}`;
   if (c.id === "dhw_loss" && checkupDhwHasRate(c) && !c.blocked &&
       Number.isFinite(c.pump_windows) && Number.isFinite(c.draw_windows) &&
       Number.isFinite(c.quiet_high_windows))
@@ -2762,22 +2815,47 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
          descParaHtml(esc(detail)) +
+         (c.id === "heater" && report?.source === "x10a" ? checkupHeaterContextHtml(c) : "") +
          descNoteHtml(t("normal.label"), normal);
 }
 
 function checkupDefrostShare(c) {
-  const part = Number(c.defrost_s), total = Number(c.run_s);
-  if (Number.isFinite(part) && part >= 0 && Number.isFinite(total) && total > 0) {
+  const part = c.defrost_s, total = c.run_s;
+  if (Number.isFinite(part) && part >= 0 && Number.isFinite(total) && total > 0 && part <= total) {
     if (part === 0) return "0 %";
     const exact = part * 100 / total;
     if (exact < 1) return "<1 %";
-    // Five decimals keep every rational step distinguishable around an integer-percent boundary for
-    // a denominator up to this 86,400-second window. Floor rather than round so the renderer never
-    // crosses any firmware-owned limit, without copying that limit into the browser.
-    const hundredThousandth = Math.floor(exact * 100000) / 100000;
-    return `${hundredThousandth.toFixed(5).replace(/\.?0+$/, "")} %`;
+    // Retain more precision where truncation would make a value just above an
+    // integer percentage look exactly on the firmware's boundary.
+    const digits = exact > Math.floor(exact) && Math.floor(exact * 100) % 100 === 0 ? 5 : 2;
+    const scale = 10 ** digits;
+    return `${(Math.floor(exact * scale) / scale).toLocaleString(LANG, { maximumFractionDigits: digits })} %`;
   }
-  return c.share_pct == null ? "" : `${c.share_pct} %`; // older firmware
+  return Number.isFinite(c.share_pct) ? `${c.share_pct.toLocaleString(LANG)} %` : "";
+}
+
+function checkupDefrostCheck(status) {
+  const report = status?.health;
+  const source = report?.source || status?.diagnostics?.effective_source || "x10a";
+  if (status?.diagnostics?.enabled !== true || source !== "x10a" || report?.persist === "unknown") return null;
+  return Array.isArray(report?.checks) ? report.checks.find(check => check.id === "defrost") : null;
+}
+
+function checkupFreshDefrostCheck(status, statusStale = false) {
+  const c = checkupDefrostCheck(status);
+  return c && !statusStale && status.health.source_fresh !== false && c.reason !== "source_stale" ? c : null;
+}
+
+function checkupDefrostInspectorRows(status, statusStale = false) {
+  const c = checkupFreshDefrostCheck(status, statusStale);
+  if (!c || c.verdict === "unavailable") return "";
+
+  const count = Number.isInteger(c.count) && c.count >= 0 ? c.count.toLocaleString(LANG) : "";
+  const share = checkupDefrostShare(c);
+  if (!count && !share) return "";
+  return [["check.defrost.starts_label", count], ["check.defrost.share", share]]
+    .map(([key, value]) => `<div class="inspect-row"><span>${esc(t(key))}</span><span>${esc(value || "—")}</span></div>`)
+    .join("");
 }
 
 function checkupHeaterRuntime(seconds, minutes) {
@@ -2800,28 +2878,6 @@ function checkupHeaterValue(c) {
   return parts.length ? t("check.min", parts.join(" · ")) : "";
 }
 
-const CHECKUP_OUTDOOR_SOURCE_LABELS = new Map([
-  ["homehub", "Modbus"],
-  ["x10a", "X10A"],
-  ["env3", "ENV III"],
-]);
-
-function checkupOutdoorContext(c) {
-  if (typeof c.outdoor_source !== "string" ||
-      !Number.isFinite(c.outdoor_min_c) || !Number.isFinite(c.outdoor_mean_c) ||
-      !(Number(c.outdoor_samples) > 0)) return "";
-  const fmt = (n) => n.toLocaleString(LANG,
-    { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const source = CHECKUP_OUTDOOR_SOURCE_LABELS.get(c.outdoor_source) ?? "—";
-  return c.outdoor_min_c === c.outdoor_mean_c
-    ? t("check.outdoor_one", source, fmt(c.outdoor_mean_c))
-    : t("check.outdoor_range", source, fmt(c.outdoor_min_c), fmt(c.outdoor_mean_c));
-}
-
-function checkupWithOutdoor(c, value) {
-  return [value, checkupOutdoorContext(c)].filter(Boolean).join(" · ");
-}
-
 function checkupCyclingCountPrefix(n) {
   return n > 0 ? "≥" : "";
 }
@@ -2831,11 +2887,7 @@ function checkupCyclingCountPrefix(n) {
 // stale one", applied to a count).
 function checkupMetricValue(c) {
   const v = c.verdict;
-  // Count-only defrost evidence without an RPS witness or positive runtime denominator is a supported
-  // observation. `unavailable` means the defrost row itself was absent, so even a legacy payload's
-  // numeric zero proves nothing.
   if (v === "unavailable") return "";
-  const collecting = v === "collecting";
   switch (c.id) {
     case "fault":
       if (v === "warn") return t("check.fault_err");
@@ -2857,22 +2909,6 @@ function checkupMetricValue(c) {
     case "cycling":
       return Number.isInteger(c.starts) && c.starts >= 0
         ? checkupCyclingCountPrefix(c.starts) + t("check.starts", c.starts) : "";
-    case "defrost": {
-      if (c.count == null) return "";
-      const n = t("check.cycles", c.count);
-      if (collecting) return checkupWithOutdoor(c, n);
-      const share = checkupDefrostShare(c);
-      const paired = c.paired_count == null ? "" : t("check.paired_cycles", c.paired_count);
-      return checkupWithOutdoor(c, [n, paired, share].filter(Boolean).join(" · "));
-    }
-    case "pressure": {
-      if (v === "warn" && Number.isFinite(c.min_bar))
-        return `${t("check.detail.pressure.warn")} · ${checkupFmt1(c.min_bar)} bar`;
-      if (v === "info" && Number.isFinite(c.min_bar))
-        return `${t("check.detail.pressure.info")} · ${checkupFmt1(c.min_bar)} bar`;
-      const shown = Number.isFinite(c.current_bar) ? c.current_bar : c.min_bar;
-      return !Number.isFinite(shown) ? "" : `${checkupFmt1(shown)} bar`;
-    }
     case "flow":
       return !Number.isFinite(c.min_l_min) ? "" : `${checkupFmt1(c.min_l_min)} l/min`;
     case "heater": {
@@ -2913,19 +2949,11 @@ function checkupValue(c) {
   if (c.id === "cycling")
     return Number.isFinite(c.starts) && c.starts >= 0
       ? checkupCyclingCountPrefix(c.starts) + c.starts.toLocaleString(LANG) : st;
-  if (c.id === "defrost") {
-    const share = c.verdict !== "collecting" && checkupDefrostShare(c);
-    return share || (Number.isFinite(c.count) && c.count >= 0 ? t("check.cycles", c.count) : st);
-  }
   if (c.id === "heater") return checkupHeaterValue(c) || st;
   return checkupMetricValue(c) || st;
 }
 
-function checkupPressureHistoryHtml(id, unit, label) {
-  return cachedHistoryHtml(S.hist.get(id), id, unit, label, "x10a", true);
-}
-
-const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "pressure", "retries"]);
+const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "retries"]);
 function checkupCardHtml(includeHealth = true) {
   const h = S.status?.health;
   const source = h?.source || S.status?.diagnostics?.effective_source || "x10a";
@@ -2937,26 +2965,33 @@ function checkupCardHtml(includeHealth = true) {
                   : t("card.checkup");
   let healthRows = "";
   const unreadable = includeHealth && h?.persist === "unknown";
+  const defrost = includeHealth && checkupFreshDefrostCheck(S.status,
+    S.otaCached || S.transportUnavailable === "status");
   const visibleChecks = includeHealth && Array.isArray(h?.checks)
-    ? h.checks.filter(c => c.id !== "flow" && !(isModbus && MODBUS_HIDDEN_CHECKS.has(c.id)))
+    ? h.checks.filter(c => Object.hasOwn(CHECKUP_ROW, c.id) && c.id !== "flow" && c.id !== "pressure" &&
+                          (c.id !== "defrost" || c === defrost) &&
+                          !(isModbus && MODBUS_HIDDEN_CHECKS.has(c.id)))
     : [];
   if (unreadable) healthRows = `<span class="empty">${esc(t("sys.nodata"))}</span>`;
   if (!unreadable && visibleChecks.length) {
     for (const c of visibleChecks) {
       const key = CHECKUP_ROW[c.id];
-      if (!key) continue;                             // a check this UI does not know: skipped, never guessed at
+      if (c.id === "defrost") {
+        if (c.verdict === "info") {
+          healthRows += `<button type="button" class="vrow vrow-btn" data-defrost-inspect aria-controls="inspect">` +
+            `<span class="vrow-label">${esc(t(key))}</span>` +
+            `<span class="vrow-end"><span class="vrow-val warn">${esc(checkupStatusText(c))}</span>` +
+            `<span class="vrow-chev" aria-hidden="true">›</span></span></button>`;
+        }
+        continue;
+      }
       const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
-      const isPressure = c.id === "pressure" && c.verdict !== "unavailable" && hasHist("water_pressure");
       const rowVal = c.id === "fault" ? checkupFaultRow(c) : { text: checkupValue(c), aria: "" };
+      const detail = checkupDetailHtml(c, h.full_span === true, h);
       healthRows += modelDescRow(`health_${c.id}`, t(key), rowVal.text,
                                  { cls: `checkup-val${tone ? ` ${tone}` : ""}`,
                                    ariaValue: rowVal.aria,
-                                   bodyHtml: checkupDetailHtml(c, h.full_span === true, h),
-                                   trendId: isPressure ? "water_pressure" : "",
-                                   histUnit: isPressure ? "bar" : "",
-                                   paused: isPressure ? ("diagnosis" !== S.dashboardCard) : undefined,
-                                   renderHistory: isPressure ? checkupPressureHistoryHtml : undefined,
-                                   chartFirst: isPressure });
+                                   bodyHtml: detail });
     }
   }
   // This row remains independent of /status.health and is not counted by the badge below.
@@ -2968,12 +3003,16 @@ function checkupCardHtml(includeHealth = true) {
   // Findings are counts of serialized verdicts, not a health score or a second threshold rule.
   const warnings = visibleChecks.filter(c => c.verdict === "warn").length;
   const notes = visibleChecks.filter(c => c.verdict === "info").length;
+  const assessed = visibleChecks.filter(c => c.id !== "dhw_loss" && c.id !== "retries" &&
+    c.evidence !== "observation" && c.evidence !== "experimental");
+  const summary = assessed.some(c => c.verdict === "collecting") ? "collecting"
+                : assessed.some(c => c.verdict === "ok") ? "ok" : "unavailable";
   const badge = warnings ? t("check.summary.warnings", warnings)
               : notes ? t("check.summary.notes", notes)
-              : h.status === "ok" ? t("check.summary.ok")
-              : h.status === "collecting" ? t("check.summary.collecting")
+              : summary === "ok" ? t("check.summary.ok")
+              : summary === "collecting" ? t("check.summary.collecting")
               : t("check.summary.observations");
-  const badgeCls = { warn: "err", ok: "ok", collecting: "dim", unavailable: "dim" }[h.status] || "";
+  const badgeCls = warnings ? "err" : notes ? "" : summary === "ok" ? "ok" : "dim";
   return vcard(cardTitle, rows, badge, badgeCls, "diagnosis", t("nav.diagnosis"));
 }
 

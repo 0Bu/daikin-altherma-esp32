@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { readAppSource } from "../ui/read_app_source.mjs";
-import { auditEvidenceContract, OBSERVATION_SOURCE_FILES } from "./evidence_contract.mjs";
+import { auditEvidenceContract, OBSERVATION_SOURCE_FILES, HEATER_CONTEXT_SOURCE_FILES } from "./evidence_contract.mjs";
 
 let root = process.cwd();
 let appArg = "main/www/app.sources";
@@ -82,6 +82,7 @@ for (const relative of [
   "main/checkup.cpp",
   "main/logic/fault_state.hpp",
   ...OBSERVATION_SOURCE_FILES,
+  ...HEATER_CONTEXT_SOURCE_FILES,
 ]) {
   fingerprintText(relative, read(path.join(root, relative), relative));
 }
@@ -95,8 +96,16 @@ if (pollContract.split("\n").filter(Boolean).length < 5) {
 }
 fingerprintText("main/hp_poll.cpp:checkup-contract", pollContract);
 
+const modbus = read(path.join(root, "main/hp_modbus.cpp"), "main/hp_modbus.cpp");
+const modbusStart = modbus.indexOf("static void mb_poll_once() {");
+const modbusEnd = modbus.indexOf("static void mb_task_start_if_enabled() noexcept;", modbusStart);
+if (modbusStart < 0 || modbusEnd < 0) {
+  die(2, "cannot isolate the Modbus poll observation contract — refusing to pass vacuously");
+}
+fingerprintText("main/hp_modbus.cpp:poll-observations", modbus.slice(modbusStart, modbusEnd));
+
 const httpStatus = read(path.join(root, "main/http_status.cpp"), "main/http_status.cpp");
-const hydronicJsonStart = httpStatus.search(/\bvoid\s+append_hydronic_status\(/);
+const hydronicJsonStart = httpStatus.search(/\bvoid\s+append_heating_windows\(/);
 const hydronicJsonEnd = httpStatus.indexOf("append_status_service_metric(", hydronicJsonStart);
 if (hydronicJsonStart < 0 || hydronicJsonEnd < 0) {
   die(2, "cannot isolate the /status.health hydronic JSON contract — refusing to pass vacuously");

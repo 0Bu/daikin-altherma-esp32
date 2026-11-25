@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -174,7 +174,7 @@ I18N.pl = localeValues([
   /* check.fault */ "Usterka jednostki",
   /* check.dhw_loss */ "Wychładzanie CWU",
   /* check.cycling */ "Starty sprężarki",
-  /* check.defrost */ "Odszraniania",
+  /* check.defrost */ "Odszranianie",
   /* check.pressure */ "Ciśnienie wody",
   /* check.flow */ "Min. przepływ",
   /* check.flow.lowest */ "Najniższy przepływ podczas ogrzewania",
@@ -185,7 +185,7 @@ I18N.pl = localeValues([
   /* check.flow.show */ "Pokaż minimum na wykresie",
   /* check.flow.readout */ (value) => `W tym przedziale co najmniej raz zmierzono ${value}. Ogrzewanie pomieszczeń trwało już od co najmniej dziesięciu minut.`,
   /* check.flow.locations_missing */ "Nie zapisano czasu starszych pomiarów o tej wartości.",
-  /* check.flow.x10a_only */ "Najniższy przepływ podczas ogrzewania jest obliczany na podstawie pomiarów X10A.",
+  /* check.flow.unavailable */ "Brakuje pomiarów potrzebnych do ustalenia najniższego przepływu podczas ogrzewania.",
   /* check.flow.waiting */ "Oczekiwanie na okres ogrzewania spełniający warunki pomiaru.",
   /* check.heater */ "Grzałki",
   /* check.retries */ "Liczniki ochrony",
@@ -237,7 +237,6 @@ I18N.pl = localeValues([
   /* check.detail.fault.past */ "Obecnie brak komunikatu; w tym okresie zapisano komunikat. Zniknięcie nie potwierdza przyczyny ani usunięcia problemu.",
   /* check.detail.fault.past_unknown */ "Zapisano komunikat; bieżący stan usterki jest nieczytelny.",
   /* check.detail.collecting */ (a, b) => `Czytelne sygnały: ${a} z wymaganych ${b}.`,
-  /* check.detail.outdoor_defrost */ " Dane zewnętrzne X10A obejmują tylko świeże próbki, gdy stan odszraniania i sprężarki był czytelny, a sprężarka pracowała. Stanowią kontekst i nie zmieniają progu ani oceny odszraniania.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Przyjęte okna godzinowe: ${a}; bieżący kandydat: ${c} z ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Przyjęte okna godzinowe: ${a}; wykryto ładowanie lub grzałkę zasobnika. Pozostały czas stabilizacji: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Przyjęte okna godzinowe: ${a}; oczekiwanie na kolejną odpowiednią godzinę.`,
@@ -254,8 +253,6 @@ I18N.pl = localeValues([
   /* check.detail.experimental */ "Liczniki eksperymentalne; stabilność nie wyklucza ograniczeń.",
   /* check.detail.unavailable */ "Brak ocenialnego sygnału w tym profilu.",
   /* check.starts */ (n) => `${n} ${plNoun(n, "uruchomienie", "uruchomienia", "uruchomień")}`,
-  /* check.cycles */ (n) => `${n} ${plNoun(n, "cykl", "cykle", "cykli")}`,
-  /* check.paired_cycles */ (n) => `${n} ${plNoun(n, "sparowany", "sparowane", "sparowanych")}`,
   /* check.cycling.runs */ (n) => `${n} ${plNoun(n, "cykl", "cykle", "cykli")}`,
   /* check.cycling.mean */ (d) => `Śr. ${d}`,
   /* check.cycling.completed */ "Zakończone cykle",
@@ -321,8 +318,15 @@ I18N.pl = localeValues([
   /* check.cycling.e_ongoing */ "Praca przy ostatnim odczycie.",
   /* check.cycling.cause_unavailable */ "Brak szczegółów",
   /* check.cycling.cause_older_unavailable */ "Brak zapisanych szczegółów uruchomienia i zatrzymania dla tych wcześniejszych cykli.",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · średnia ${mean} °C`,
+  /* check.heater_context.title */ "Kontekst zgłoszonych flag grzałek",
+  /* check.heater_context.columns */ "Kontekst|BUH|BSH",
+  /* check.heater_context.counts */ "Czas dodatni / ocenialny czas ON · dodatnie próbki",
+  /* check.heater_context.categories */ "flaga pracy awaryjnej|stan błędu|odszranianie/powrót|obieg ciepłej wody|flaga Silent Mode|na zewnątrz ≤+2°C|na zewnątrz >+2°C|sprężarka zgłoszona jako zatrzymana|Silent Mode + grzanie przy łagodnej pogodzie",
+  /* check.heater_context.totals */ "zgłoszone ON|suma zbiorów kontekstów|nakładanie|nieznany kontekst|brak dodatniej kategorii|czas czytelnej flagi",
+  /* check.heater_context.states */ "Źródło niepotwierdzone|Obserwacje bez daty|Niepełne 24 h|Archiwum jeszcze niezweryfikowane|Zapis oczekuje|Archiwum niedostępne: uszkodzone lub nieodczytane rekordy|Niepewny czas|Nasycenie: dolne granice|Nieobsługiwane",
+  /* check.heater_context.notice */ "Co najmniej 15 minut zgłoszonej pracy grzałki z Silent Mode, grzaniem i łagodną temperaturą zewnętrzną: wstępna wskazówka projektu.",
+  /* check.heater_context.rule */ "Czytelne końce przedziału, luki ≤15 s. Powrót trwa najwyżej 300 s po zaobserwowanym końcu odszraniania podczas grzania. Podział przy +2°C i wskazówka po 900 s są heurystykami projektu.",
+  /* check.heater_context.limits */ "Kategorie nakładają się osobno dla każdej grzałki. Brakujący kontekst pozostaje nieznany. Nie ustala się energii, przyczyny pracy, biwalencji ani konieczności. Ostrzeżenie nie oznacza pracy awaryjnej; Low noise control pozostaje bez klasyfikacji. Stany między próbkami pozostają nieznane.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `zbiornik ${d}`,
   /* check.buh_runtime */ (d) => `dodatkowa ${d}`,
@@ -382,19 +386,23 @@ I18N.pl = localeValues([
   /* check.detail.period_label */ "Okres danych:",
   /* check.detail.period */ (a) => `${a}, maks. 24 h; możliwe luki`,
   /* check.detail.age_label */ "Wiek ostatniego pomiaru:",
-  /* check.detail.horizon_wait */ (a) => `Brakuje pełnego okna 24 godzin: pozostało ${a}.`,
   /* check.detail.fault.ok */ "Brak bieżącego lub zapisanego komunikatu w czytelnych sygnałach usterek.",
-  /* check.detail.defrost.info */ "≥3 powiązane odszraniania przekraczają 15% czytelnego czasu sprężarki: wskazówka projektu.",
-  /* check.detail.defrost.ok */ "Bez wskazówki udziału; pogoda i luki nieocenione.",
-  /* check.defrost.last_start */ (date, route, outdoor) => `Ostatni zaobserwowany początek odszraniania · ${date} · Obieg ${route} · Powietrze zewnętrzne ${outdoor}`,
-  /* check.defrost.route_space */ "Ogrzewanie pomieszczeń",
-  /* check.defrost.route_dhw */ "Zasobnik ciepłej wody",
+  /* check.defrost.normal */ "Krótkie cykle odszraniania są typowe przy chłodnej, wilgotnej pogodzie. Udział odszraniania pokazuje, jaka część czasu pracy sprężarki ze znanym stanem odszraniania przypadła na odszranianie.",
+  /* check.defrost.modbus.about */ "Modbus używa jednego sygnału dla odszraniania i przygotowania do ponownego rozruchu sprężarki.",
+  /* check.defrost.modbus.normal */ "Podczas stabilnej pracy sygnał jest nieaktywny. Obie fazy mogą go włączyć.",
+  /* check.defrost.starts_label */ "Zarejestrowane rozpoczęcia odszraniania",
+  /* check.defrost.share */ "Udział odszraniania",
+  /* check.defrost.notice */ "Wysoki udział odszraniania",
   /* check.detail.pressure.info */ "Niskie",
   /* check.detail.pressure.warn */ "Krytyczne",
   /* check.detail.pressure.ok */ "W normie",
-  /* check.detail.defrost_events_insufficient */ "Mniej niż trzy powiązane odszraniania; bez oceny udziału.",
+  /* check.pressure.finding */ "Potwierdzony wynik",
+  /* check.pressure.sustained */ (a) => `Ciśnienie ${a} lub niższe przez co najmniej 60 sekund bez przerwy.`,
+  /* check.pressure.clear */ "Nie potwierdzono utrzymującego się niskiego ciśnienia.",
+  /* check.pressure.rules */ "Jak ocenia się ciśnienie?",
+  /* check.pressure.unavailable */ "Diagnostyka ciśnienia X10A jest niedostępna.",
+  /* check.pressure.pending */ "Odczyt w zakresie krytycznym. Czas trwania jest jeszcze nieznany.",
   /* check.detail.source_stale */ "Brak świeżego odczytu X10A; bieżący stan nieznany. Historia zachowana.",
-  /* check.detail.no_paired_runtime */ "Brak powiązanego czytelnego czasu; tylko liczba.",
   /* check.detail.current_label */ "≤1,0 bar niskie",
   /* check.detail.minimum_time_label */ "≤0,5 bar krytyczne",
   /* check.detail.coverage_missing */ (a) => `Brakujący czytelny czas: ${a} s.`,
@@ -506,7 +514,7 @@ I18N.pl = localeValues([
   /* hist.boost_active */ "Wzmocnienie aktywne",
   /* hist.boost_inactive */ "Wzmocnienie wyłączone",
   /* hist.boost_aria */ plAria("stanu Smart Grid ze wszystkimi czterema trybami"),
-  /* hist.defrost_total */ (d) => `Zaobserwowane aktywne odszranianie · ${d} próbkowanego czasu`,
+  /* hist.defrost_total */ (d) => `Bloki 5-minutowe z odszranianiem · ${d}`,
   /* hist.defrost_none */ "Nie zaobserwowano cyklu odszraniania w zarejestrowanym okresie.",
   /* hist.defrost_active */ "Odszranianie aktywne",
   /* hist.defrost_inactive */ "Odszranianie wyłączone",
@@ -634,7 +642,7 @@ I18N.pl = localeValues([
   /* schem.card_aria */ "Schemat instalacji na żywo: jednostka zewnętrzna, obieg czynnika chłodniczego, wymiennik płytowy, obieg wody z grzałką pomocniczą i zaworem 3-drogowym, zasobnik CWU i obieg domu",
   /* schem.group_aria */ "Schemat instalacji na żywo — wybierz wartość lub element, aby wyświetlić objaśnienie",
   /* schem.outdoor_unit */ "JEDNOSTKA ZEWNĘTRZNA",
-  /* schem.defrost_pill */ "❄ odszran.",
+  /* schem.defrost_pill */ "odszran.",
   /* schem.outdoor */ "Zewn.",
   /* insp.close */ "Zamknij",
   /* schem.defrost_transfer */ "Podczas potwierdzonego odszraniania ciepło może przepływać z wody do czynnika chłodniczego. Rury wskazują ten kierunek tylko wtedy, gdy potwierdzają go bieżący przepływ i temperatury.",
@@ -1114,7 +1122,7 @@ INSPECT_I18N.pl = inspectValues(
     ["Przewód powrotny do PHE", 0, "Wspólny powrót do R4T po połączeniu gałęzi zbiornika i domu. W ogrzewaniu jest zwykle chłodniejszy od R1T, w aktywnym chłodzeniu cieplejszy; R4T nie jest czujnikiem przy odbiornikach.", (d) => waterMoving(d) ? `Powrót: ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Pompa i przepływ nie potwierdzają cyrkulacji w przewodzie powrotnym."], // wret
     ["Przepływ wody", 0, "Przepływ wspólnego obiegu; wymagane minimum zależy od modelu i trybu."], // flow
     ["Stan styku przepływu", 0, "Stan binarny X10A; nie mierzy l/min ani nie potwierdza minimum modelu.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A WŁ.; porównaj z pompą i ${fmt1(d.flow)} l/min.` : `X10A WYŁ.; przy pracy pompy porównaj ${fmt1(d.flow)} l/min i błąd 7H/C0.`], // flow_switch
-    ["Ciśnienie wody", 0, "Ciśnienie w zamkniętym obiegu hydraulicznym. Dozwolony zakres zależy od modelu, wysokości instalacji i naczynia przeponowego; porównaj z instrukcją urządzenia."], // wp
+    ["Ciśnienie wody", 0], // wp
   ],
 );
 
@@ -1196,7 +1204,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["R1T mierzy wodę z PHE przed BUH; tryb, R4T i przepływ określają sens i szacunek mocy."], // 34
   ["R4T jest wspólnym powrotem do PHE; R1T−R4T to ΔT PHE, nie odbiorników."], // 35
   ["Szybkość obiegu wody we wspólnym układzie ogrzewania/chłodzenia i CWU."], // 36
-  ["Ciśnienie wody; zakres zależy od modelu, przy ≤1,0 bar sprawdź jego instrukcję."], // 37
+  ["Ciśnienie wody w zamkniętym obiegu hydraulicznym.","Dopuszczalny zakres ciśnienia zależy od modelu, wysokości instalacji i naczynia przeponowego. Przy 1,0 bar lub mniej sprawdź instrukcję konkretnego urządzenia."], // 37
   ["Odwrócone polecenie X10A: 0 = maks, 100 = stop ([0, 100] → 100–0 %). Nie mierzy RPM ani nie dowodzi obrotów, wysokości czy przepływu; czytaj WŁ./WYŁ. i przepływ osobno."], // 38
   ["Praca pompy obiegowej nie dowodzi przekazywania ciepła; potwierdź przepływem."], // 39
   ["Stan pompy solarnej, niezależnej od pompy obiegowej układu pompy ciepła."], // 40
@@ -1207,9 +1215,9 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["Bieżący tryb domu to ogrzewanie/chłodzenie bez trybu automatycznego; nie dowodzi pracy sprężarki."], // 45
   ["Ustawiony wybór HomeHub: Auto, ogrzewanie lub chłodzenie."], // 46
   ["Stan jednostki zewnętrznej: postój, ogrzewanie lub chłodzenie; nie dowodzi przekazywania ciepła."], // 47
-  ["Łączny znacznik odszraniania i restartu sprężarki w rejestrze 35; OFF = praca normalna, ON = odszranianie lub przygotowanie restartu."], // 48
+  ["Rejestr 35 HomeHub łączy stany odszraniania i ponownego uruchamiania sprężarki.", "W ustalonym trybie pracy sygnał jest wyłączony. Włączenie oznacza odszranianie lub przygotowanie do ponownego uruchomienia."], // 48
   ["Znacznik gorącego startu w rejestrze 36; OFF = praca ciągła, ON = krótkie podgrzanie wymiennika."], // 49
-  ["Odszranianie jest normalne w zimnej, wilgotnej pogodzie; sam bit bez wilgotności nie ocenia częstotliwości."], // 50
+  ["Odszranianie usuwa szron z wymiennika jednostki zewnętrznej.", "W zimną i wilgotną pogodę odszranianie jest normalne. Sam sygnał bez informacji o wilgotności nie pozwala ocenić częstotliwości cykli."], // 50
   ["Klasa aktywnej usterki: stan normalny, błąd, ostrzeżenie albo przestroga."], // 51
   ["Znaczenie aktualnie zgłoszonego kodu usterki."], // 52
   ["Tryb awaryjny po usterce pompy ciepła."], // 53

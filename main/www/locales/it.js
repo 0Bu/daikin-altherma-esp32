@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -169,7 +169,7 @@ I18N.it = localeValues([
   /* check.fault */ "Guasto dell'unità",
   /* check.dhw_loss */ "Raffreddamento ACS",
   /* check.cycling */ "Avvii compressore",
-  /* check.defrost */ "Sbrinamenti",
+  /* check.defrost */ "Sbrinamento",
   /* check.pressure */ "Pressione acqua",
   /* check.flow */ "Portata min.",
   /* check.flow.lowest */ "Portata minima in riscaldamento",
@@ -180,7 +180,7 @@ I18N.it = localeValues([
   /* check.flow.show */ "Mostra un minimo nel grafico",
   /* check.flow.readout */ (value) => `In questo intervallo è stato misurato almeno un valore di ${value}. Il riscaldamento degli ambienti era attivo da almeno dieci minuti.`,
   /* check.flow.locations_missing */ "L’orario delle misure precedenti con questo valore non è stato salvato.",
-  /* check.flow.x10a_only */ "La portata minima in riscaldamento è calcolata a partire dalle misure X10A.",
+  /* check.flow.unavailable */ "Mancano le misure necessarie per determinare la portata minima in riscaldamento.",
   /* check.flow.waiting */ "In attesa di un periodo di riscaldamento che soddisfi le condizioni di misura.",
   /* check.heater */ "Resistenze",
   /* check.retries */ "Contatori protezione",
@@ -232,7 +232,6 @@ I18N.it = localeValues([
   /* check.detail.fault.past */ "Nessun messaggio attivo; ne è stato registrato uno nel periodo. La scomparsa non dimostra causa né risoluzione.",
   /* check.detail.fault.past_unknown */ "È stato registrato un messaggio; lo stato attuale del guasto non è leggibile.",
   /* check.detail.collecting */ (a, b) => `Segnali leggibili: ${a} su ${b} richiesti.`,
-  /* check.detail.outdoor_defrost */ " I dati esterni X10A comprendono solo campioni recenti mentre lo stato di sbrinamento e del compressore erano leggibili e il compressore era in funzione. Forniscono contesto e non modificano la soglia o il verdetto sullo sbrinamento.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Finestre orarie accettate: ${a}; candidata attuale: ${c} su ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Finestre orarie accettate: ${a}; rilevata carica o resistenza del serbatoio. Stabilizzazione restante: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Finestre orarie accettate: ${a}; attesa della prossima ora idonea.`,
@@ -249,8 +248,6 @@ I18N.it = localeValues([
   /* check.detail.experimental */ "Contatori sperimentali; stabilità non esclude limitazioni.",
   /* check.detail.unavailable */ "Nessun segnale valutabile in questo profilo.",
   /* check.starts */ (n) => `${n} ${n === 1 ? "avvio" : "avvii"}`,
-  /* check.cycles */ (n) => `${n} ${n === 1 ? "ciclo" : "cicli"}`,
-  /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "abbinato" : "abbinati"}`,
   /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "ciclo" : "cicli"}`,
   /* check.cycling.mean */ (d) => `Media ${d}`,
   /* check.cycling.completed */ "Cicli completati",
@@ -316,8 +313,15 @@ I18N.it = localeValues([
   /* check.cycling.e_ongoing */ "Attivo all’ultima lettura.",
   /* check.cycling.cause_unavailable */ "Nessun dettaglio",
   /* check.cycling.cause_older_unavailable */ "Per questi cicli precedenti non sono disponibili dettagli salvati sull’avvio e sull’arresto.",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · media ${mean} °C`,
+  /* check.heater_context.title */ "Contesto dei flag dei riscaldatori segnalati",
+  /* check.heater_context.columns */ "Contesto|BUH|BSH",
+  /* check.heater_context.counts */ "Tempo positivo / tempo ON valutabile · campioni positivi",
+  /* check.heater_context.categories */ "flag di emergenza|stato di errore|sbrinamento/recupero|circuito acqua calda|flag Silent Mode|esterno ≤+2°C|esterno >+2°C|compressore segnalato fermo|Silent Mode + riscaldamento con clima mite",
+  /* check.heater_context.totals */ "ON segnalato|unione dei contesti|sovrapposizione|contesto sconosciuto|nessuna categoria positiva|tempo con flag leggibile",
+  /* check.heater_context.states */ "Fonte non confermata|Osservazioni senza data|24 h incomplete|Archivio non ancora validato|Salvataggio in attesa|Archivio non disponibile: record danneggiati o non letti|Ora incerta|Saturazione: limiti inferiori|Non supportato",
+  /* check.heater_context.notice */ "Almeno 15 minuti di riscaldatore segnalato con Silent Mode, riscaldamento e clima mite: avviso provvisorio del progetto.",
+  /* check.heater_context.rule */ "Estremi leggibili, intervalli mancanti ≤15 s. Il recupero è limitato a 300 s dopo una fine sbrinamento osservata durante il riscaldamento. La soglia di +2°C e l’avviso di 900 s sono euristiche del progetto.",
+  /* check.heater_context.limits */ "Le categorie si sovrappongono separatamente per ogni riscaldatore. Il contesto mancante resta sconosciuto. Non si dimostrano energia, causa di funzionamento, bivalenza o necessità. Un avviso non è emergenza; Low noise control non viene classificato. Gli stati tra i campioni restano sconosciuti.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `serbatoio ${d}`,
   /* check.buh_runtime */ (d) => `ausiliaria ${d}`,
@@ -377,19 +381,23 @@ I18N.it = localeValues([
   /* check.detail.period_label */ "Periodo dei dati:",
   /* check.detail.period */ (a) => `${a}, massimo 24 h; possibili lacune`,
   /* check.detail.age_label */ "Età dell’ultima misura:",
-  /* check.detail.horizon_wait */ (a) => `La finestra completa di 24 ore manca ancora: restano ${a}.`,
   /* check.detail.fault.ok */ "Nessun messaggio attuale o salvato nei segnali di guasto leggibili.",
-  /* check.detail.defrost.info */ "≥3 sbrinamenti associati superano 15% del tempo leggibile del compressore: indizio del progetto.",
-  /* check.detail.defrost.ok */ "Nessun indizio sulla quota; meteo e lacune non valutati.",
-  /* check.defrost.last_start */ (date, route, outdoor) => `Ultimo avvio di sbrinamento osservato · ${date} · Circuito ${route} · Aria esterna ${outdoor}`,
-  /* check.defrost.route_space */ "Riscaldamento",
-  /* check.defrost.route_dhw */ "Serbatoio dell’acqua calda",
+  /* check.defrost.normal */ "Brevi sbrinamenti sono comuni con tempo freddo e umido. La quota di sbrinamento indica quanta parte del tempo di funzionamento del compressore con stato di sbrinamento leggibile è stata dedicata allo sbrinamento.",
+  /* check.defrost.modbus.about */ "Modbus usa lo stesso segnale per lo sbrinamento e la preparazione al riavvio del compressore.",
+  /* check.defrost.modbus.normal */ "Il segnale è inattivo a regime stabile. Può attivarsi in entrambe le fasi.",
+  /* check.defrost.starts_label */ "Avvii di sbrinamento osservati",
+  /* check.defrost.share */ "Quota di sbrinamento",
+  /* check.defrost.notice */ "Quota di sbrinamento elevata",
   /* check.detail.pressure.info */ "Bassa",
   /* check.detail.pressure.warn */ "Critica",
   /* check.detail.pressure.ok */ "Normale",
-  /* check.detail.defrost_events_insufficient */ "Meno di tre sbrinamenti associati; nessun giudizio sulla quota.",
+  /* check.pressure.finding */ "Esito confermato",
+  /* check.pressure.sustained */ (a) => `Pressione pari o inferiore a ${a} per almeno 60 secondi consecutivi.`,
+  /* check.pressure.clear */ "Nessuna pressione bassa prolungata confermata.",
+  /* check.pressure.rules */ "Come viene valutata la pressione?",
+  /* check.pressure.unavailable */ "Diagnosi della pressione X10A non disponibile.",
+  /* check.pressure.pending */ "Valore nella fascia critica. La durata è ancora sconosciuta.",
   /* check.detail.source_stale */ "Nessuna lettura X10A recente; stato attuale sconosciuto. Storia conservata.",
-  /* check.detail.no_paired_runtime */ "Nessuna durata leggibile associata; solo conteggio.",
   /* check.detail.current_label */ "≤1,0 bar bassa",
   /* check.detail.minimum_time_label */ "≤0,5 bar critica",
   /* check.detail.coverage_missing */ (a) => `Tempo leggibile mancante: ${a} s.`,
@@ -501,7 +509,7 @@ I18N.it = localeValues([
   /* hist.boost_active */ "Potenziamento attivo",
   /* hist.boost_inactive */ "Potenziamento inattivo",
   /* hist.boost_aria */ itAria("dello stato Smart Grid con tutte e quattro le modalità"),
-  /* hist.defrost_total */ (d) => `Sbrinamento · ${d}`,
+  /* hist.defrost_total */ (d) => `Blocchi di 5 min con sbrinamento · ${d}`,
   /* hist.defrost_none */ "Nessun ciclo di sbrinamento osservato nel periodo registrato.",
   /* hist.defrost_active */ "Sbrinamento",
   /* hist.defrost_inactive */ "Nessuno sbrinamento",
@@ -629,7 +637,7 @@ I18N.it = localeValues([
   /* schem.card_aria */ "Schema in tempo reale del sistema: unità esterna, circuito frigorifero, scambiatore a piastre, circuito idraulico con riscaldatore ausiliario e valvola a 3 vie, serbatoio ACS e circuito ambienti",
   /* schem.group_aria */ "Schema in tempo reale — seleziona un valore o componente per una spiegazione",
   /* schem.outdoor_unit */ "UNITÀ ESTERNA",
-  /* schem.defrost_pill */ "❄ sbrinamento",
+  /* schem.defrost_pill */ "sbrinamento",
   /* schem.outdoor */ "Esterno",
   /* insp.close */ "Chiudi",
   /* schem.defrost_transfer */ "Durante uno sbrinamento confermato, il calore può passare dall’acqua al refrigerante. Le tubazioni indicano questa direzione solo se la portata e le temperature attuali la confermano.",
@@ -1106,7 +1114,7 @@ INSPECT_I18N.it = inspectValues(
     ["Tubo ingresso PHE", "Tubo di ingresso PHE", "Ritorno comune al PHE tramite R4T dopo l’unione dei rami. In riscaldamento è normalmente più freddo di R1T, in raffrescamento attivo più caldo; R4T non è un sensore dedicato sugli emettitori.", (d) => waterMoving(d) ? `Ritorno a ${degC(d.ret)}, ${fmt1(d.flow)} l/min e ${fmt1(d.wp)} bar.` : "Pompa e portata non dimostrano circolazione nel ritorno."], // wret
     ["Portata", "Portata acqua", "Portata del circuito comune. Il minimo dipende dal modello; leggerla con pompa e pressione."], // flow
     ["Stato flussostato", 0, "Ingresso binario X10A; non misura l/min né conferma la portata minima.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A attivo; confrontare con pompa e ${fmt1(d.flow)} l/min.` : `X10A inattivo; con pompa attiva confrontare ${fmt1(d.flow)} l/min e guasti 7H/C0.`], // flow_switch
-    ["Pressione acqua", 0, "Pressione del circuito idraulico, non del refrigerante. L’intervallo ammesso dipende da modello e impianto; consultare il manuale esatto."], // wp
+    ["Pressione acqua", 0], // wp
   ],
 );
 
@@ -1188,7 +1196,7 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["R1T esce dal PHE prima di BUH; con R4T e portata stima la potenza per modo, ma la posizione dipende dall’unità."], // 34
   ["Temperatura R4T in ingresso PHE sul ritorno comune; il ΔT va valutato col modo, non con 5 K universali."], // 35
   ["Portata nel circuito idronico comune; il minimo dipende da modello e modo e una portata bassa può causare 7H."], // 36
-  ["Pressione del circuito idronico; molti manuali richiedono >1 bar, ma a ≤1,0 bar va consultato il modello esatto."], // 37
+  ["Pressione dell’acqua nel circuito idraulico chiuso.","Molti manuali Altherma richiedono più di 1 bar all’ingresso della pompa. L’intervallo ammesso dipende dal modello, dall’altezza dell’impianto e dal vaso di espansione. A 1,0 bar o meno, consultare il manuale dell’unità esatta."], // 37
   ["Comando X10A invertito: 0 = max, 100 = stop ([0, 100] → 100–0 %). Non misura RPM né prova rotazione, prevalenza o portata; leggere ON/OFF e portata a parte."], // 38
   ["Stato della pompa idronica; il funzionamento non prova da solo uno scambio termico utile."], // 39
   ["Stato della pompa di un circuito solare termico, distinta dalla pompa idronica della pompa di calore."], // 40
@@ -1199,9 +1207,9 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["Modalità ambienti attuale, riscaldamento o raffrescamento; non prova che il compressore sia attivo."], // 45
   ["Selezione HomeHub configurata: Auto, Riscaldamento o Raffrescamento; non è lo stato esterno attuale."], // 46
   ["Stato comunicato dall’unità esterna, per esempio Stop, Riscaldamento o Raffrescamento; non prova calore utile."], // 47
-  ["Flag combinato sbrinamento e riavvio compressore su registro 35; OFF = normale, ON = sbrinamento o preparazione al riavvio."], // 48
+  ["Il registro 35 di HomeHub indica sia lo sbrinamento sia il riavvio del compressore.", "Il segnale è spento durante il funzionamento stabile. Con il segnale acceso è in corso lo sbrinamento o la preparazione al riavvio."], // 48
   ["Flag avvio a caldo su registro 36; OFF = regime normale, ON = breve preriscaldamento dello scambiatore."], // 49
-  ["Sbrinamento dell’unità esterna; normale col freddo umido, ma il solo bit non diagnostica cicli eccessivi."], // 50
+  ["Lo sbrinamento rimuove la brina dallo scambiatore dell’unità esterna.", "È normale con tempo freddo e umido. Il solo segnale non basta per stabilire se i cicli siano troppo frequenti."], // 50
   ["Classe del guasto attivo: Normale, Errore, Avviso o Attenzione."], // 51
   ["Significato del codice guasto comunicato ora"], // 52
   ["Funzionamento di emergenza dopo un guasto della pompa di calore, con eventuale BUH o caldaia."], // 53

@@ -248,7 +248,8 @@
                 </g>
                 <g id="gDefrostState" class="sc-snow sc-hit" data-insp="defrost" role="button" tabindex="0">
                   <rect class="sc-pill sc-ou-mode-pill" x="62" y="348" width="104" height="22" rx="11"/>
-                  <text class="sc-val" x="114" y="363" text-anchor="middle" data-i18n="schem.defrost_pill">❄ defrost</text>
+                  <!-- A hidden twin balances the warning's width, keeping the translated label centred. -->
+                  <text class="sc-val" x="114" y="363" text-anchor="middle"><tspan class="sc-defrost-warning-spacer" aria-hidden="true">⚠︎ </tspan><tspan data-i18n="schem.defrost_pill">defrost</tspan><tspan class="sc-defrost-warning" aria-hidden="true"> ⚠︎</tspan></text>
                 </g>
                 <!-- Low-noise mode: a state OF the outdoor unit (fan/compressor capped), so it sits
                      on the outdoor unit like the defrost pill. Both remain visible while inactive. -->
@@ -748,10 +749,11 @@
                      quantity error the pills exist to prevent. A sub-label that is the measurement's
                      NAME is exactly what §5.3 allows a pill to carry — it is attribution, not the
                      commentary that was taken out of the drawing earlier. -->
-                <g class="sc-hit" data-insp="wp" role="button" tabindex="0">
+                <g id="gWaterPressure" class="sc-hit" data-insp="wp" role="button" tabindex="0">
                   <rect class="sc-pill" x="383" y="386" width="66" height="22" rx="11"/>
+                  <circle id="svWpSignal" class="sc-pressure-dot" cx="446" cy="390" r="4" aria-hidden="true"/>
                   <text class="sc-val" x="416" y="401" text-anchor="middle"><tspan id="svWp">—</tspan> bar</text>
-                  <text class="sc-sub" x="416" y="380" text-anchor="middle" style="font-size:8.5px" data-i18n="schem.water_press">water pressure</text>
+                  <text class="sc-sub" x="416" y="380" text-anchor="middle" style="font-size:8.5px"><tspan data-i18n="schem.water_press">water pressure</tspan><tspan class="sc-pressure-warning" aria-hidden="true">&#8239;⚠︎</tspan></text>
                   <path class="sc-tie" d="M416 408 V 416"/>
                 </g>
                 <!-- Room reading: BARE text inside the heating box, like the tank's value in its
@@ -807,6 +809,9 @@
                   <div class="inspect-hist" id="inspHist" hidden></div>
                   <div class="inspect-rows" id="inspRows"></div>
                   <div class="inspect-flow-diagnosis" id="inspFlowDiagnosis" hidden></div>
+                  <div id="inspPressure" hidden>
+                    <div class="vdesc-p checkup-pressure-finding" id="inspPressureFinding"></div>
+                  </div>
                 </div>
               </div>
             </div>

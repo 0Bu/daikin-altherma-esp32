@@ -77,6 +77,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
       .replace(/\s*\((kW|A|rps|pls|step|l\/min)\)\s*$/i, "")
       .replace(/\s*\([^)]*On\s*:[^)]*Off\s*:[^)]*\)\s*$/i, "").trim(),
     displayHomeHubLabel: (r) => String(r?.label ?? "").trim(),
+    checkupFreshDefrostCheck: () => null,
     t: (k, a, b) => (k === "src.disagree" ? "sources disagree"
                    : k === "src.agree" ? "agree"
                    : k === "src.delta" ? `Difference ${a} ${b}`
@@ -291,7 +292,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   const elements = {
     gBshState: { values: new Map() },
     gSgRequest: { values: new Map() },
-    gDefrostState: { values: new Map() },
+    gDefrostState: { values: new Map(), classList: { toggle() {} }, querySelector: () => null },
     gQuietState: { values: new Map() },
     g2wv: { values: new Map() },
   };

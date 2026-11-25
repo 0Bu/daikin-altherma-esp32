@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <initializer_list>
 #include <map>
 #include <new>
@@ -37,10 +38,10 @@ daik::Config         current;
 std::vector<uint8_t> service, link, gas;
 const char*          oracle = "initial";
 unsigned             checks = 0, saves = 0, service_writes = 0, link_writes = 0, gas_writes = 0,
-         config_reads        = 0;
-unsigned             reboots = 0, delays = 0, runtime_changes = 0, env_probes = 0, body_reads = 0;
+         config_reads = 0;
+unsigned reboots = 0, delays = 0, runtime_changes = 0, env_probes = 0, body_reads = 0;
 unsigned mqtt_inits = 0, mqtt_starts = 0, mqtt_stops = 0, mqtt_destroys = 0, semaphore_deletes = 0;
-unsigned             dns_calls = 0, socket_calls = 0, socket_closes = 0;
+unsigned dns_calls = 0, socket_calls = 0, socket_closes = 0;
 unsigned post_write_allocations = 0, stale_attempts = 0, save_fault = 0;
 
 unsigned detection_writes = 0, link_snapshot_reads = 0, restart_guard_calls = 0;
@@ -71,7 +72,9 @@ bool                     ota_downgrade = false;
 // generation the handler handed to the live checkup producer.
 uint32_t random_value = 0x10203040U, runtime_generation = 0;
 unsigned random_calls = 0, runtime_generation_calls = 0;
-unsigned modbus_checkup_resets = 0;
+unsigned modbus_checkup_resets       = 0;
+unsigned profile_layout_preparations = 0, profile_layout_commits = 0;
+bool     verify_profile_layout_staging = false;
 
 [[noreturn]] void fail(const char* reason) {
     std::fprintf(stderr, "FAIL oracle=%s: %s\n", oracle, reason);
@@ -122,28 +125,28 @@ void reset() {
     current.profile            = "generic";
     current.board_user_set     = false;
     current.board_preset_id    = daik::BoardPresetId::Custom;
-    current.led_gpio = current.btn_gpio    = -1;
-    current.env3_enabled                   = false;
-    current.wifi_ssid                      = "test-wifi";
-    current.wifi_pass                      = "fixture-old-pass";
-    current.mqtt_uri                       = "mqtts://old.invalid";
-    current.mqtt_user                      = "old-user";
-    current.mqtt_pass                      = "old-password";
-    current.mqtt_base                      = "fixture-old-base";
-    current.syslog_host                    = "old.invalid";
-    current.syslog_port                    = 514;
-    current.ntp_server                     = "old.pool.invalid";
-    current.mb_host                        = "old-hh.invalid";
-    current.mb_port                        = 502;
-    current.mb_unit_id                     = 1;
-    current.mb_discovery_done              = true;
-    current.circulation_topic              = "fixture/old-circ";
-    current.circulation_power_path         = "apower";
-    current.circulation_time_path          = "timestamp";
-    current.diagnostics_enabled            = true;
-    current.diagnostics_generation         = 9;
-    current.ota_channel                    = daik::OtaChannel::Release;
-    current.ui_lang                        = daik::UiLang::Auto;
+    current.led_gpio = current.btn_gpio = -1;
+    current.env3_enabled                = false;
+    current.wifi_ssid                   = "test-wifi";
+    current.wifi_pass                   = "fixture-old-pass";
+    current.mqtt_uri                    = "mqtts://old.invalid";
+    current.mqtt_user                   = "old-user";
+    current.mqtt_pass                   = "old-password";
+    current.mqtt_base                   = "fixture-old-base";
+    current.syslog_host                 = "old.invalid";
+    current.syslog_port                 = 514;
+    current.ntp_server                  = "old.pool.invalid";
+    current.mb_host                     = "old-hh.invalid";
+    current.mb_port                     = 502;
+    current.mb_unit_id                  = 1;
+    current.mb_discovery_done           = true;
+    current.circulation_topic           = "fixture/old-circ";
+    current.circulation_power_path      = "apower";
+    current.circulation_time_path       = "timestamp";
+    current.diagnostics_enabled         = true;
+    current.diagnostics_generation      = 9;
+    current.ota_channel                 = daik::OtaChannel::Release;
+    current.ui_lang                     = daik::UiLang::Auto;
     service = daik::config_blob_serialize(daik::config_blob_from(current));
     link    = daik::link_blob_serialize({current.rx_pin, current.tx_pin,
                                          static_cast<char>(current.proto), current.x10a_identity_fp});
@@ -182,7 +185,9 @@ void reset() {
     ota_downgrade                           = false;
     random_value                            = 0x10203040U;
     random_calls = runtime_generation = runtime_generation_calls = 0;
-    modbus_checkup_resets = 0;
+    modbus_checkup_resets                                        = 0;
+    profile_layout_preparations = profile_layout_commits = 0;
+    verify_profile_layout_staging                        = false;
 }
 using Handler = esp_err_t (*)(httpd_req_t*);
 struct Route {
@@ -413,7 +418,19 @@ void         checkup_modbus_reset() {
     ++fixture::modbus_checkup_resets;
     ++fixture::runtime_changes;
 }
-void     checkup_reset_on_detect(const char*, uint32_t) { ++fixture::runtime_changes; }
+void checkup_profile_layout(const char*, CheckupProfileLayout& out) {
+    if (fixture::verify_profile_layout_staging)
+        fixture::check(!fixture::durable_started, "profile layout must stage before persistence");
+    ++fixture::profile_layout_preparations;
+    out          = {};
+    out.model_fp = 0x48c0a231u;
+}
+void checkup_reset_on_detect(const CheckupProfileLayout& layout, uint32_t) {
+    if (fixture::verify_profile_layout_staging)
+        fixture::check(layout.model_fp == 0x48c0a231u, "commit did not receive prepared layout");
+    ++fixture::profile_layout_commits;
+    ++fixture::runtime_changes;
+}
 void     dwell_reset() { ++fixture::runtime_changes; }
 void     dwell_reset_on_detect(const char*) { ++fixture::runtime_changes; }
 void     history_reset() { ++fixture::runtime_changes; }
@@ -456,7 +473,7 @@ esp_err_t http_send_json(httpd_req_t* request, const char* body) {
     return ESP_OK;
 }
 void http_set_nodelay(httpd_req_t*, bool) noexcept {}
-int http_read_body(httpd_req_t* request, char* buffer, size_t capacity) {
+int  http_read_body(httpd_req_t* request, char* buffer, size_t capacity) {
     ++fixture::body_reads;
     fixture::body_capacity = capacity;
     if (request->body_failed || request->body.size() >= capacity) return -1;
@@ -756,7 +773,7 @@ void unchanged() {
         const auto before_service = service, before_link = fixture::link;
         saves = service_writes = link_writes = reboots = delays = runtime_changes = 0;
 
-        durable_started                                         = false;
+        durable_started   = false;
         const auto result = invoke(candidate.handler, candidate.valid);
         check(result.status == "200 OK", "unchanged request must remain successful");
         if (std::strcmp(candidate.name, "wifi") == 0)
@@ -1223,9 +1240,9 @@ void board_draft_revision() {
 void diagnostics_source() {
     reset();
     const auto send = [](Handler handler, const std::string& body) {
-        saves = service_writes = link_writes = runtime_changes                   = 0;
-        modbus_checkup_resets                                                    = 0;
-        durable_started                                                          = false;
+        saves = service_writes = link_writes = runtime_changes = 0;
+        modbus_checkup_resets                                  = 0;
+        durable_started                                        = false;
         return invoke(handler, body);
     };
     const auto persisted = [] {
@@ -1362,10 +1379,35 @@ void gas_comparison() {
           "clear must zero both tariffs while keeping currency valid and cfg untouched");
 #endif
 }
+void profile_layout_staging() {
+    reset();
+    verify_profile_layout_staging = true;
+    durable_started               = false;
+    check(invoke(daik::set_hp, R"({"rx":9,"tx":10})").status == "200 OK" &&
+              profile_layout_preparations == 1 && profile_layout_commits == 1 &&
+              post_write_allocations == 0,
+          "X10A reconfiguration stages checkup profile layout before durable persistence");
+    durable_started = false;
+    save_fault      = 2;
+    check(invoke(daik::set_hp, R"({"rx":10,"tx":9})").status == "500 Internal Server Error" &&
+              profile_layout_preparations == 2 && profile_layout_commits == 1,
+          "failed durable persistence skips runtime layout commit");
+    durable_started = false;
+    save_fault      = 0;
+    check(invoke(daik::set_hp, R"({"mb_host":"staged-hh.invalid"})").status == "200 OK" &&
+              profile_layout_preparations == 2 && profile_layout_commits == 1,
+          "HomeHub reconfiguration does not touch X10A checkup layout");
+}
 } // namespace test
 
 int main(int argc, char** argv) {
     using namespace fixture;
+    if (argc == 2 && std::strcmp(argv[1], "profile_layout_staging") == 0) {
+        oracle = "profile_layout_staging";
+        test::profile_layout_staging();
+        std::printf("PASS profile_layout_staging assertions=%u\n", checks);
+        return 0;
+    }
     struct Case {
         const char* name;
         void (*run)();

@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1002, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1010, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -95,15 +95,9 @@ for (const code of codes) {
   assert.equal(savedTime.match(/12:34/g)?.length, 1, `${code} preserves the supplied saved time`);
   assert.notEqual(savedTime, dict["check.hour.ending"]("12:34"),
     `${code} distinguishes saved times from interval ends`);
-  const startArgs = ["12:34", dict["check.defrost.route_dhw"], "0 °C"];
-  const start = dict["check.defrost.last_start"](...startArgs);
-  for (const arg of startArgs) {
-    assert.ok(arg.trim(), `${code} defrost start argument is empty`);
-    assert.equal(start.split(arg).length, 2, `${code} defrost start must render ${arg} exactly once`);
-  }
-  assert.ok(dict["check.defrost.route_space"].trim(), `${code} space-heating route is empty`);
-  assert.notEqual(dict["check.defrost.route_space"], dict["check.defrost.route_dhw"],
-    `${code} distinguishes space heating from the hot-water tank route`);
+  assert.ok(dict["check.defrost.normal"].toLocaleLowerCase(code)
+    .includes(dict["check.defrost.share"].toLocaleLowerCase(code)),
+    `${code} Normal wording must explain the defrost share`);
   if (code !== "en") {
     assert.ok(translatedStrings > stringCount * 0.65,
       `${code} translates too little of the catalog (${translatedStrings}/${stringCount})`);
@@ -132,6 +126,10 @@ for (const code of codes) {
     ["check.hydronic.agree_reasons", 5],
     ["check.hydronic.agree_limits", 2],
     ["check.hydronic.agree_meta", 3],
+    ["check.heater_context.columns", 3],
+    ["check.heater_context.categories", 9],
+    ["check.heater_context.totals", 6],
+    ["check.heater_context.states", 9],
   ]) {
     const parts = dict[key].split("|");
     assert.equal(parts.length, segments, `${code}/${key} segment count`);
@@ -168,15 +166,14 @@ for (const code of lazyDomainCodes) {
 
 // Polish uses one / 2-4 (except 12-14) / remaining forms. These counters routinely cross five and
 // the cycling diagnosis starts judging at twelve, so a binary singular/plural split is visibly wrong.
-for (const [count, cycle, start, gap] of [
-  [1, "1 cykl", "1 uruchomienie", "1 przerwa — brak pomiaru"],
-  [2, "2 cykle", "2 uruchomienia", "2 przerwy — brak pomiaru"],
-  [5, "5 cykli", "5 uruchomień", "5 przerw — brak pomiaru"],
-  [12, "12 cykli", "12 uruchomień", "12 przerw — brak pomiaru"],
-  [22, "22 cykle", "22 uruchomienia", "22 przerwy — brak pomiaru"],
-  [25, "25 cykli", "25 uruchomień", "25 przerw — brak pomiaru"],
+for (const [count, start, gap] of [
+  [1, "1 uruchomienie", "1 przerwa — brak pomiaru"],
+  [2, "2 uruchomienia", "2 przerwy — brak pomiaru"],
+  [5, "5 uruchomień", "5 przerw — brak pomiaru"],
+  [12, "12 uruchomień", "12 przerw — brak pomiaru"],
+  [22, "22 uruchomienia", "22 przerwy — brak pomiaru"],
+  [25, "25 uruchomień", "25 przerw — brak pomiaru"],
 ]) {
-  assert.equal(catalog.pl["check.cycles"](count), cycle);
   assert.equal(catalog.pl["check.starts"](count), start);
   assert.equal(catalog.pl["hist.gaps"](count), gap);
   assert.match(catalog.pl["nav.settings_alert"](count), new RegExp(
@@ -222,15 +219,11 @@ assert.doesNotMatch(catalog.zh["check.detail.dhw_blocked_link"](2, 20), /有问�
 assert.match(catalog.ja["check.detail.dhw_reason.blind"], /一時停止/);
 assert.match(catalog.ja["check.detail.dhw_blocked_link"](2, 20), /応答欠落|ポーリング停止/);
 assert.match(catalog.cs["check.detail.dhw_blocked_link"](2, 20), /Chybějící odpovědi či pauzy dotazování/);
-assert.equal(catalog.de["check.paired_cycles"](1), "1 zugeordnet");
 assert.match(catalog.es["check.detail.dhw_blocked"](1, "x", 20), /Ventanas descartadas: 1 \(x\)/);
 assert.match(catalog.es["check.detail.dhw_blocked"](2, "x", 20), /Ventanas descartadas: 2 \(x\)/);
-assert.equal(catalog.es["check.paired_cycles"](1), "1 emparejado");
 assert.equal(catalog.es["check.cycling.runs"](1), "1 ciclo");
 assert.match(catalog.fr["check.detail.dhw_blocked_link"](1, 20), /Fenêtres interrompues : 1,/);
-assert.equal(catalog.fr["check.paired_cycles"](1), "1 apparié");
 assert.equal(catalog.fr["check.cycling.runs"](1), "1 cycle");
-assert.equal(catalog.it["check.paired_cycles"](1), "1 abbinato");
 assert.equal(catalog.it["check.cycling.runs"](1), "1 ciclo");
 assert.deepEqual([1, 2, 12].map(catalog.cs["check.cycling.runs"]), ["1 cyklus", "2 cykly", "12 cyklů"]);
 assert.deepEqual([1, 2, 12].map(catalog.pl["check.cycling.runs"]), ["1 cykl", "2 cykle", "12 cykli"]);
@@ -421,6 +414,8 @@ assert.equal(vm.runInContext(`(() => {
   FAULT_CODE_I18N.de = saved;
   return ready;
 })()`, catalogContext), false, "German must not mark ready without its external fault-code table");
+const pressureDescriptionIndex = descriptionSchema.findIndex(row => row.what === "Water pressure in the sealed hydronic circuit.");
+assert.ok(pressureDescriptionIndex >= 0, "the shared water pressure description must exist");
 for (const code of codes.slice(2)) {
   const inspect = catalogContext.__inspectCopy[code];
   assert.ok(inspect, `${code} specialist inspector copy did not register itself`);
@@ -429,8 +424,12 @@ for (const code of codes.slice(2)) {
   for (const key of inspectKeys) {
     assert.ok(["string", "function"].includes(typeof inspect[key].t),
       `${code}/INSPECT.${key}.t is missing`);
-    assert.ok(["string", "function"].includes(typeof inspect[key].what),
-      `${code}/INSPECT.${key}.what is missing`);
+    if (key === "wp") {
+      assert.equal(inspect[key].what, undefined, `${code} must use the shared pressure description`);
+    } else {
+      assert.ok(["string", "function"].includes(typeof inspect[key].what),
+        `${code}/INSPECT.${key}.what is missing`);
+    }
     assert.equal(typeof inspect[key].aria, "string", `${code}/INSPECT.${key}.aria is missing`);
     if (inspectNowKeys.has(key)) assert.equal(typeof inspect[key].now, "function",
       `${code}/INSPECT.${key}.now is missing`);
@@ -448,6 +447,8 @@ for (const code of codes.slice(2)) {
 
   checkLocalizedRows(code, catalogContext.__descriptionCopy[code], descriptionSchema,
     "value-description");
+  assert.equal(catalogContext.__descriptionCopy[code][pressureDescriptionIndex].length, 2,
+    `${code} pressure copy needs separate description and normal text`);
   const modelCopy = catalogContext.__modelDescriptionCopy[code] || {};
   const modelRows = Object.values(modelCopy);
   checkLocalizedRows(code, modelRows, Object.values(modelSchema), "model-description");
@@ -507,6 +508,9 @@ for (const code of codes.slice(2)) {
       const html = api.descBodyHtml(entry, "", localized);
       assert.ok(html.includes(api.esc(localized[0])),
         `${code} value-description ${index} renderer did not use its native text`);
+      if (entry.re.test("Defrost Operation") || entry.re.test("Defrost / Restart"))
+        assert.ok(localized[1]?.trim() && html.includes(api.esc(localized[1])),
+          `${code} defrost descriptions need a separate localized Normal section`);
     });
     for (const [id, entry] of Object.entries(api.MODEL_DESCRIPTIONS)) {
       const localized = api.modelDescriptionCopy(id);

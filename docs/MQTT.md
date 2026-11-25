@@ -50,6 +50,18 @@ values remain null. Range fields include `hydronic_spread_mean_k`, `hydronic_flo
 `hydronic_pump_command_mean_pct`. MQTT uses the numeric qualification reason. No HA discovery
 entities subscribe to these fields.
 
+With diagnostics enabled, `<base>/heater/buh` and `<base>/heater/bsh` publish separate
+**non-retained, QoS 0** X10A heater-context snapshots on the ten-second heartbeat cadence. The
+technical heartbeat is unchanged. Both messages use one atomic two-heater snapshot; `heater` is 0
+for BUH and 1 for BSH. Their common metadata and heater fields follow
+[`heater.context`](API.md#history-and-24-hour-checks), with numeric 0/1 booleans. Category leaves
+are flat, for example `emergency_positive_s`, `emergency_evaluable_on_s`,
+`emergency_positive_samples` and `emergency_supported`. Each message carries one heater's
+population, not the sum of both heaters. Nulls remain null. These observations cover retained
+hourly buckets, not present plant states or metered energy. A received message does not renew an
+old sensor reading; consumers must age missing messages independently. Disabling diagnostics stops
+this non-retained publication.
+
 An initial transport-start rejection retains the initialized client and retries with bounded
 backoff. Failed event registration prevents transport start and reports an explicit error.
 

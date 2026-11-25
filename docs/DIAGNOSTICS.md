@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: b8779f56d71a82ae48b384e1d2200245804a2b390daf3c4bf9e247c77cddd1a5 -->
+<!-- user-docs-contract: a9597ef0ee6218516dc3d583e43b7fd23f6bba47c8b6254b81d02524a8549ed8 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -180,24 +180,33 @@ has no count label.
 <!-- user-docs: health_defrost -->
 ### Defrost events
 
-**In plain language:** The board counts observed defrost starts and the seconds spent defrosting
-while the compressor ran and both signals were readable.
-The detail can show the last start observed this boot, with the heating or hot-water route and
-outdoor air temperature when they were readable and qualified. Missing details remain unknown.
-This start detail expires after 24 hours; pausing diagnostics (`Off`) hides the card and does
-not carry a start transition across the pause. When a factory reset starts forgetting history,
-the board hides the detail for the rest of that boot, including if erasure fails.
+**In plain language:** Open **Defrost** on the outdoor unit to see its current state and trend. Tap
+the trend to read the selected interval and state below the chart. The chart shows observed
+activity in five-minute blocks. With current X10A diagnostics, the two rows below it show observed
+starts and the percentage of compressor running time spent defrosting while both states were
+readable. **Normal** explains the percentage in the card. A dash marks a missing value when the
+other is available. A current **NOTE** adds an amber warning triangle after the **Defrost** label.
+Its entry in Plant diagnostics opens the same card.
 
-**Meaning:** At least **three paired events** and more than **15%** defrost share produce **NOTE**.
-Both are project heuristics. Fewer events or no paired compressor runtime remain **MEASURED**;
-no readable defrost observation remains **CHECKING**.
-A reassuring assessment additionally needs a full day and 90% paired signal coverage.
+The API can report the last start observed this boot,
+including the heating or hot-water route and outdoor air temperature when qualified. This detail
+expires after 24 hours. Pausing diagnostics (`Off`) clears the start transition across the pause.
+When a factory reset starts forgetting history, the board hides the detail for the rest of that
+boot, including if erasure fails.
 
-**Important limit:** Temperature, humidity and coil icing affect normal defrost needs. These signals
-do not establish blocked airflow, refrigerant shortage or a sensor defect. Outdoor min/mean and the
-separate live de-icer temperature provide context, without changing the rule; geothermal two-phase
-sensors are not treated as an outdoor air coil, and coil temperature spread or post-defrost recovery
-are not evaluated.
+**Meaning:** The displayed count includes all observed starts. A start qualifies for the assessment
+when the compressor state is readable immediately before and at the start. The project rule
+produces **NOTE** at **three or more qualifying starts** and more than **15%** defrost share.
+With a readable defrost-state interval, fewer qualifying starts or no eligible runtime gives
+**MEASURED**. Supported profiles start in **CHECKING** while a readable interval is missing.
+A reassuring assessment requires a full day and 90% paired signal coverage. The inspector shows
+measurements as they become available. Profiles without an X10A defrost signal have no assessment.
+
+**Important limit:** Temperature, humidity and coil icing affect normal defrost needs. This assessment
+cannot establish blocked airflow, refrigerant shortage or a sensor defect. The API's outdoor
+minimum and mean and the separate live de-icer reading provide context. The assessment also leaves
+coil temperature spread and post-defrost recovery open. Geothermal two-phase sensors are distinct
+from outdoor air coils.
 The route describes the mode and valve signal reported by the controller. Physical valve position,
 water flow and tank charging require separate evidence.
 
@@ -206,8 +215,14 @@ water flow and tank charging require separate evidence.
 <!-- user-docs: health_pressure -->
 ### Water pressure
 
-**In plain language:** The card plots the 24-hour X10A water-pressure history using 5-minute
-minimums, alongside the live pressure when fresh or the confirmed Low / Critical state.
+**In plain language:** Open Water pressure on the schematic to see the current reading and the
+24-hour chart of 5-minute minimums. The X10A finding follows any second-source pressure reading.
+A confirmed Low or Critical finding includes its lowest reading and the observation time, when known.
+A marker highlights the matching X10A sample when it can be identified in the chart. When the X10A
+history and assessment are available, select a position in the chart to show the assessment criteria
+directly below it. A red warning triangle after the Water pressure label signals a confirmed Critical
+finding in the 24-hour window. An amber dot signals a current critical reading with the duration
+still open.
 
 **Meaning:** Readings above **1.0 bar** are shown as normal. At least **60 continuously observed
 seconds** at or below **1.0 bar** (`0.6–1.0 bar`) produce **NOTE** (*Low*), and at least
@@ -227,22 +242,25 @@ within the 24-hour window.
 ### Lowest water flow
 
 **In plain language:** Open **Flow rate** in the schematic for its current reading and 24-hour
-trend. When X10A is the active source for Plant diagnostics, the card can also show the lowest
-reading recorded after at least ten minutes of continuous space heating. When Modbus is active,
-the card explains that the heating minimum requires X10A.
+trend. The card can also show the lowest reading recorded after at least ten minutes of continuous
+space heating. It uses X10A when an eligible minimum is available and otherwise uses a supported
+HomeHub Modbus result. The label names the source of the reported minimum.
 
-**Meaning:** Shading under the X10A curve marks covered parts of recorded five-minute windows
-containing that minimum. Select a shaded area or use the legend to see when it occurred directly
-below the chart. The legend is available when a recorded window overlaps the dated chart and an
-X10A sample is visible. It can also open windows inside curve gaps. The summary at the bottom of
-the card can show the minimum even if older records lack a time. During quiescent pump-only X10A
-circulation (`>= 5.0 l/min` for at least `600 s` with compressor, defrost, and heaters off,
-unchanged 3-way valve, and `<= 0.5 K` drift over `300 s` on both sensors of a pair), the same
-inspector also separately shows 24-hour signed leaving water before the backup heater minus return
-water (`R1T−R4T`) and (when supported and readable) post-heater minus pre-heater (`R2T−R1T`)
-ranges, qualified duration, episode windows, and reading counts; switching to Modbus hides
-water-temperature agreement. It follows the available Modbus comparison, water pressure and
-requested pump percentage.
+**Meaning:** Shading under the matching source's curve marks covered parts of recorded five-minute
+windows containing the minimum. Select a shaded area or the legend to see the window below the chart.
+Select the legend again to close the explanation. Reopening it shows the next window. The legend also
+reaches windows inside gaps when the source has a visible reading elsewhere on the chart.
+The summary at the bottom of the card can show the minimum even
+if older X10A records lack a time. Modbus observations accumulate again after a restart.
+
+With X10A active for Plant diagnostics, the inspector also shows water-temperature agreement
+during settled pump-only circulation. It reports 24-hour ranges, qualified duration, episode
+windows and reading counts for the difference between leaving water before the backup heater and
+return water (`R1T−R4T`), and between water after and before the heater (`R2T−R1T`) when both
+sensors are readable.
+The pump must run at `>= 5.0 l/min` for at least `600 s` with the compressor, defrost and heaters
+off and the 3-way valve unchanged. The readings of both sensors in a pair must drift by no more
+than `0.5 K` over `300 s`.
 
 **Important limit:** The required flow depends on the model and operating mode. Shading gives the
 time window of a reading, with no claim about how long the flow stayed there. The `600 s`
@@ -263,8 +281,20 @@ electric backup heater (**BUH**) and tank electric booster heater (**BSH**).
 wait for a full day. A reported zero applies only to the observed intervals. A missing heater signal
 remains absent, rather than being counted as off.
 
+When the card displays **X10A**, the expanded row also shows **reported heater flag context**
+separately for each heater (hidden in **Modbus** mode). The table gives positive time, evaluable ON
+time and positive samples for overlapping operating contexts. Unknown input stays unknown. A
+context with zero positive samples is limited to its evaluated population; it is not an absence
+finding for the whole day. The provisional Silent Mode + mild heating notice needs 15 minutes
+(900 s) of qualified accumulated flag-time, not necessarily one continuous run.
+
 **Important limit:** Runtime does not establish electricity consumed, necessity or a defect.
 Controller settings, weather and operating schedules can make this activity intentional.
+The contexts report co-occurrence, not a controller's reason, calibration, or bivalence. Samples can
+miss intermediate changes. If stored records cannot be read or validated, totals are marked
+incomplete. Previously validated totals may remain visible during the same boot; new live
+observations remain separate. Reset, clock and incomplete-record safeguards are described in the
+evidence.
 
 **Evidence and limits:** [Electric heaters](DIAGNOSTIC_EVIDENCE.md#diagnosis-heater)
 

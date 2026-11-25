@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -169,7 +169,7 @@ I18N.ja = localeValues([
   /* check.fault */ "機器異常",
   /* check.dhw_loss */ "給湯タンク温度低下",
   /* check.cycling */ "圧縮機起動",
-  /* check.defrost */ "霜取り回数",
+  /* check.defrost */ "霜取り",
   /* check.pressure */ "水圧",
   /* check.flow */ "最低流量",
   /* check.flow.lowest */ "暖房時の最低流量",
@@ -180,7 +180,7 @@ I18N.ja = localeValues([
   /* check.flow.show */ "グラフで最低点を表示",
   /* check.flow.readout */ (value) => `この区間では、${value} が少なくとも1回測定されました。その時点で室内暖房は10分以上続いていました。`,
   /* check.flow.locations_missing */ "この値を示した過去の測定の時刻は保存されていません。",
-  /* check.flow.x10a_only */ "暖房時の最低流量はX10Aの測定値から求めます。",
+  /* check.flow.unavailable */ "暖房時の最低流量を求めるために必要な測定値がありません。",
   /* check.flow.waiting */ "集計対象となる暖房運転を待っています。",
   /* check.heater */ "電気ヒーター",
   /* check.retries */ "保護カウンタ",
@@ -232,7 +232,6 @@ I18N.ja = localeValues([
   /* check.detail.fault.past */ "現在の通知はありませんが、この期間に記録されました。消えたことは原因や解決の証明ではありません。",
   /* check.detail.fault.past_unknown */ "通知が記録されました。現在の異常状態は読めません。",
   /* check.detail.collecting */ (a, b) => `読取可能な信号：${a}、必要量${b}。`,
-  /* check.detail.outdoor_defrost */ " X10A室外値は、霜取り・圧縮機状態を読めて圧縮機が運転中の新鮮な試料だけです。参考情報で、しきい値や判定は変えません。",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `採用した時間窓：${a}。現在の候補：${c}/${d}。`,
   /* check.detail.dhw_settling */ (a, b, c) => `採用した時間窓：${a}。タンク加熱またはヒーターを検出。安定待ち残り：${c}。`,
   /* check.detail.dhw_waiting */ (a, b) => `採用した時間窓：${a}。次の適合する1時間を待っています。`,
@@ -249,8 +248,6 @@ I18N.ja = localeValues([
   /* check.detail.experimental */ "試験的カウンタ。安定でも制限を否定しません。",
   /* check.detail.unavailable */ "このプロファイルに評価可能な信号なし。",
   /* check.starts */ (n) => `${n}回起動`,
-  /* check.cycles */ (n) => `${n}サイクル`,
-  /* check.paired_cycles */ (n) => `${n}組`,
   /* check.cycling.runs */ (n) => `${n} 回`,
   /* check.cycling.mean */ (d) => `平均 ${d}`,
   /* check.cycling.completed */ "終了した運転",
@@ -316,8 +313,15 @@ I18N.ja = localeValues([
   /* check.cycling.e_ongoing */ "最新測定時も運転中。",
   /* check.cycling.cause_unavailable */ "詳細なし",
   /* check.cycling.cause_older_unavailable */ "これらの過去の運転については、保存された起動・停止の詳細がありません。",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
+  /* check.heater_context.title */ "報告されたヒーターフラグの状況",
+  /* check.heater_context.columns */ "状況|BUH|BSH",
+  /* check.heater_context.counts */ "陽性時間 / 評価可能な ON 時間 · 陽性サンプル数",
+  /* check.heater_context.categories */ "緊急運転フラグ|エラー状態|除霜/回復|給湯経路|Silent Mode フラグ|外気 ≤+2°C|外気 >+2°C|圧縮機が停止と報告|Silent Mode + 温暖時の暖房",
+  /* check.heater_context.totals */ "報告 ON|状況の和集合|重複|不明な状況|陽性カテゴリなし|フラグが読めた時間",
+  /* check.heater_context.states */ "発生源未確認|日時未確定の観測|24 時間未充足|アーカイブ未検証|保存待ち|アーカイブ利用不可：破損または未読の記録|時刻不確定|飽和：下限値|非対応",
+  /* check.heater_context.notice */ "Silent Mode、暖房、温暖な外気条件で報告されたヒーター時間が 15 分以上：プロジェクトの暫定的な注記です。",
+  /* check.heater_context.rule */ "区間両端が読め、欠測は 15 秒以下。回復は暖房中に観測した除霜終了後 300 秒以内に限ります。+2°C の区分と 900 秒の注記はプロジェクト独自の経験則です。",
+  /* check.heater_context.limits */ "カテゴリはヒーターごとに重複します。欠けた状況は不明のままです。エネルギー、運転原因、二熱源運転の理由、必要性は確定しません。警告は緊急運転ではなく、Low noise control は分類しません。 サンプル間の状態は不明のままです。",
   /* check.min */ (m) => `${m}分`,
   /* check.tank_runtime */ (d) => `タンク ${d}`,
   /* check.buh_runtime */ (d) => `補助 ${d}`,
@@ -377,19 +381,23 @@ I18N.ja = localeValues([
   /* check.detail.period_label */ "データ期間：",
   /* check.detail.period */ (a) => `${a}、最大24時間。欠測の可能性`,
   /* check.detail.age_label */ "最終測定からの時間：",
-  /* check.detail.horizon_wait */ (a) => `完全な24時間窓にはまだ ${a} 必要です。`,
   /* check.detail.fault.ok */ "読めた異常信号に現在または保存通知はありません。",
-  /* check.detail.defrost.info */ "対応除霜3回以上が読めた圧縮機運転時間の15%超：プロジェクト参考値。",
-  /* check.detail.defrost.ok */ "除霜割合の参考所見なし。天候と欠測は未評価。",
-  /* check.defrost.last_start */ (date, route, outdoor) => `最後に確認した霜取り開始 · ${date} · 循環先 ${route} · 外気温 ${outdoor}`,
-  /* check.defrost.route_space */ "暖房",
-  /* check.defrost.route_dhw */ "給湯タンク",
+  /* check.defrost.normal */ "寒く湿った天候では、短時間の霜取りはよくあります。霜取りの割合は、霜取り状態を読み取れた圧縮機運転時間のうち、霜取りに使われた分を示します。",
+  /* check.defrost.modbus.about */ "Modbus は霜取りと圧縮機の再始動準備を同じ信号で示します。",
+  /* check.defrost.modbus.normal */ "定常運転中はオフです。どちらの段階でもオンになります。",
+  /* check.defrost.starts_label */ "観測された霜取りの開始回数",
+  /* check.defrost.share */ "霜取りの割合",
+  /* check.defrost.notice */ "霜取りの割合が高い",
   /* check.detail.pressure.info */ "低い",
   /* check.detail.pressure.warn */ "危険",
   /* check.detail.pressure.ok */ "正常",
-  /* check.detail.defrost_events_insufficient */ "対応除霜3回未満。割合判定なし。",
+  /* check.pressure.finding */ "確認済みの判定",
+  /* check.pressure.sustained */ (a) => `${a} 以下の状態が連続で 60 秒以上続きました。`,
+  /* check.pressure.clear */ "低い水圧の持続は確認されませんでした。",
+  /* check.pressure.rules */ "水圧はどのように判定されますか？",
+  /* check.pressure.unavailable */ "X10A の水圧診断を利用できません。",
+  /* check.pressure.pending */ "測定値は危険範囲です。継続時間は未確認です。",
   /* check.detail.source_stale */ "新鮮なX10A試料なし。現在状態不明。過去記録は保持。",
-  /* check.detail.no_paired_runtime */ "対応する読取可能時間なし。回数のみ。",
   /* check.detail.current_label */ "≤1.0 bar 低い",
   /* check.detail.minimum_time_label */ "≤0.5 bar 危険",
   /* check.detail.coverage_missing */ (a) => `不足する読取可能時間：${a} s。`,
@@ -501,7 +509,7 @@ I18N.ja = localeValues([
   /* hist.boost_active */ "ブースト作動",
   /* hist.boost_inactive */ "ブースト停止",
   /* hist.boost_aria */ jaAria("Smart-Grid 4モードの推移"),
-  /* hist.defrost_total */ (d) => `霜取り作動を観測 · 標本時間 ${d}`,
+  /* hist.defrost_total */ (d) => `霜取りを検出した5分区間 · ${d}`,
   /* hist.defrost_none */ "記録期間に霜取りを観測せず。",
   /* hist.defrost_active */ "霜取り作動",
   /* hist.defrost_inactive */ "霜取り停止",
@@ -629,7 +637,7 @@ I18N.ja = localeValues([
   /* schem.card_aria */ "システムのライブ図：室外機、冷媒回路、プレート式熱交換器、補助ヒーターと3方弁を備えた水回路、給湯タンク、室内回路",
   /* schem.group_aria */ "システムのライブ図——値または部品を選ぶと説明を表示します",
   /* schem.outdoor_unit */ "室外機",
-  /* schem.defrost_pill */ "❄ 霜取り",
+  /* schem.defrost_pill */ "霜取り",
   /* schem.outdoor */ "外気",
   /* insp.close */ "閉じる",
   /* schem.defrost_transfer */ "霜取り運転が確認されると、水から冷媒へ熱が移ることがあります。現在の流量と温度がその方向を裏付ける場合にだけ、配管にその方向を表示します。",
@@ -1044,7 +1052,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
   ["PHE後・BUH前のR1T。R4Tと流量、運転モードを合わせて熱出力を推定します。残熱にも注意します。"], // 34
   ["PHE共通戻りのR4T。R1T−R4TはPHEのΔTで、放熱器のΔTではなく一律5 K基準も使えません。"], // 35
   ["共通水回路の流量。必要最小値は機種とモードで異なり、低流量は7Hの原因になり得ます。"], // 36
-  ["閉水回路の圧力。許容範囲は機種依存で、≤1.0 barなら該当機種の説明書を確認します。"], // 37
+  ["閉じた水回路の水圧です。","許容圧力の範囲は機種、設置時の高低差、膨張タンクによって異なります。1.0 bar 以下なら該当機種の説明書を確認してください。"], // 37
   ["反転 X10A 指令：生値 0 = 最大、100 = 停止（[0, 100] → 100–0 %）。RPM を測らず回転・揚程・流量を証明しません。入/切と流量を別に確認。"], // 38
   ["水循環ポンプの状態。運転だけでは有効な熱移動を証明せず、実流量と照合します。"], // 39
   ["設定済み太陽熱回路のポンプ状態。ヒートポンプ側の水循環ポンプとは別です。"], // 40
@@ -1055,9 +1063,9 @@ DESCRIPTION_I18N.ja = descriptionValues([
   ["現在の室内モードは暖房または冷房（自動なし）。圧縮機運転は証明しません。"], // 45
   ["HomeHubに設定された自動／暖房／冷房の選択。現在の室外運転状態ではありません。"], // 46
   ["室外機が報告する停止／暖房／冷房状態。選択中でも圧縮機停止や熱移動なしの場合があります。"], // 47
-  ["入力レジスタ35の除霜・圧縮機再起動複合フラグ。OFF=通常運転、ON=除霜または再起動準備中（逆サイクル除霜かの区別なし）。"], // 48
+  ["HomeHubの入力レジスタ35は、霜取りと圧縮機の再起動準備を1つの信号で示します。", "安定運転中はオフです。オンは霜取り中か再起動準備中を示します。"], // 48
   ["入力レジスタ36のホットスタートフラグ。OFF=定常運転、ON=通常暖房再開前の熱交換器予熱中です。"], // 49
-  ["室外熱交換器の除霜。低温多湿時は正常ですが、湿度なしでは1ビットだけで頻度を評価できません。"], // 50
+  ["霜取りは室外熱交換器に付いた霜を取り除きます。", "低温多湿のときの霜取りは正常です。この信号だけでは霜取りの頻度が高すぎるか判断できません。"], // 50
   ["現在の異常区分：正常、エラー、警告、注意。正常以外なら故障コードを確認します。"], // 51
   ["現在報告中の故障コードの意味。"], // 52
   ["ヒートポンプ故障後の非常運転。設定によりBUHまたはボイラーが暖房／DHWを補います。"], // 53
@@ -1298,7 +1306,7 @@ INSPECT_I18N.ja = inspectValues(
     ["PHE戻り配管", "PHE戻り配管", "タンクと室内分岐の合流後、R4Tへ戻る共通配管です。通常、暖房ではR1Tより低く、冷房では高く、R4Tは端末付近ではありません。", (d) => waterMoving(d) ? `戻り ${degC(d.ret)}、${fmt1(d.flow)} l/min、${fmt1(d.wp)} bar。` : "戻り配管の循環は未確認です。"], // wret
     ["水流量", "水流量", "共通水回路の流量です。必要最小値は機種とモードで異なります。"], // flow
     ["流量スイッチ", "流量スイッチ状態", "X10Aの2値状態です。l/minを測らず、機種の最小流量も確認しません。", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A 入。ポンプと ${fmt1(d.flow)} l/minを比較してください。` : `X10A 切。ポンプ運転中は ${fmt1(d.flow)} l/minと7H/C0異常を確認してください。`], // flow_switch
-    ["水圧", "水圧", "閉じた水回路の圧力です。許容範囲は機種、高低差、膨張タンクで異なるため取扱説明書を参照してください。"], // wp
+    ["水圧", "水圧"], // wp
   ],
 );
 

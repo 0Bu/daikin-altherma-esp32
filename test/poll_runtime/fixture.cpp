@@ -56,10 +56,12 @@ struct CheckupCall {
     size_t   count;
     uint32_t source_generation;
     uint32_t consent_epoch;
+    bool     completed_sweep;
 };
 CheckupCall checkup_calls[4]{};
 size_t      checkup_call_count              = 0;
 unsigned    checkup_gaps_preserving_profile = 0;
+unsigned    checkup_completed_sweeps = 0, checkup_completed_gaps = 0;
 } // namespace adapter
 namespace daik {
 Config config() {
@@ -177,7 +179,8 @@ void history_record(const CachedValue* values, size_t count, uint32_t) {
 }
 void     history_reset_on_detect(uint32_t) {}
 uint32_t history_x10a_identity(const char*, int32_t, int32_t, char) { return 0x13103; }
-void     checkup_reset_on_detect(const char*, uint32_t) {}
+void     checkup_profile_layout(const char*, CheckupProfileLayout& out) { out = {}; }
+void     checkup_reset_on_detect(const CheckupProfileLayout&, uint32_t) {}
 void     dwell_reset_on_detect(const char*) {}
 uint32_t checkup_consent_epoch() {
     ++adapter::consent_reads;
@@ -189,12 +192,15 @@ void checkup_set_diagnostics(bool, uint32_t) {
 }
 void checkup_record(const CachedValue* values, size_t       count, bool, bool,
                     const logic::CheckupCoverage&, uint32_t generation, uint32_t consent_epoch,
-                    bool profile_confirmed, int64_t) {
+                    bool profile_confirmed, bool completed_sweep, int64_t) {
     if (adapter::checkup_call_count < 4)
-        adapter::checkup_calls[adapter::checkup_call_count] = {count, generation, consent_epoch};
+        adapter::checkup_calls[adapter::checkup_call_count] = {count, generation, consent_epoch,
+                                                               completed_sweep};
     ++adapter::checkup_call_count;
+    if (completed_sweep) ++adapter::checkup_completed_sweeps;
     if (!values && !count) {
         ++sdk::checkup_unread;
+        if (completed_sweep) ++adapter::checkup_completed_gaps;
         if (!profile_confirmed) ++adapter::checkup_gaps_preserving_profile;
     }
 }
@@ -266,6 +272,8 @@ static void after_delay(TickType_t ticks) {
                "oom_records_unread_observation");
         oracle(adapter::checkup_gaps_preserving_profile == sdk::checkup_unread,
                "empty_gap_preserves_profile_capability");
+        oracle(!adapter::checkup_calls[1].completed_sweep,
+               "oom_gap_is_not_a_completed_heater_sweep");
         sdk::now_us = good_time + 16000000;
     } else if (sdk::delay_count == 3) {
         oracle(hp_skipped_cycles() == 2 && sdk::failures == 2, "repeated_failure_survived");
@@ -325,6 +333,8 @@ static void after_delay(TickType_t ticks) {
                "episodes_have_balanced_completion");
         oracle(sdk::checkup_unread == 4 && adapter::checkup_gaps_preserving_profile == 4,
                "all_oom_and_tls_gaps_preserve_profile_capability");
+        oracle(adapter::checkup_completed_sweeps == 3 && adapter::checkup_completed_gaps == 0,
+               "only_successful_sweeps_complete_heater_admission");
         throw sdk::Stop{};
     } else
         oracle(false, "bounded_task_execution");
@@ -353,6 +363,22 @@ static void setup(const char* profile = "auto") {
     adapter::cfg.tx_pin           = 43;
     adapter::cfg.x10a_identity_fp = 0x13103;
     daik::hp_poll_start();
+}
+
+static void heater_auto_gap_delay(TickType_t) {
+    oracle(adapter::checkup_call_count == 1 && sdk::checkup_unread == 1 &&
+               !adapter::checkup_calls[0].completed_sweep,
+           "auto_detection_is_not_a_completed_heater_sweep");
+    throw sdk::Stop{};
+}
+
+static void run_heater_auto_gap() {
+    setup();
+    sdk::on_delay = heater_auto_gap_delay;
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const sdk::Stop&) {}
+    oracle(sdk::delay_count == 1, "bounded_auto_heater_gap");
 }
 
 static daik::DetectResult incomplete(const char* profile) {
@@ -1189,11 +1215,11 @@ static void run_consent(const char* name) {
            config ? "poll_consent_token_precedes_config" : "poll_consent_forwards_original_token");
     oracle(adapter::consent_reads == reads_before + 1, "poll_consent_single_capture_per_sweep");
     if (unread)
-        oracle(old.count == 0 && sdk::queries == queries_before &&
+        oracle(old.count == 0 && !old.completed_sweep && sdk::queries == queries_before &&
                    sdk::history_commits == history_before && sdk::checkup_unread == 1,
                "poll_consent_unread_uart_path_preserves_token");
     else
-        oracle(old.count > 0 && sdk::queries > queries_before &&
+        oracle(old.count > 0 && old.completed_sweep && sdk::queries > queries_before &&
                    sdk::history_commits == history_before + 1,
                "poll_consent_actual_sweep_precedes_submission");
 
@@ -1202,6 +1228,7 @@ static void run_consent(const char* name) {
     sdk::now_us += 1000000;
     daik::poll_once();
     oracle(adapter::checkup_call_count == 2 && adapter::checkup_calls[1].count > 0 &&
+               adapter::checkup_calls[1].completed_sweep &&
                adapter::checkup_calls[1].consent_epoch == adapter::consent_epoch &&
                adapter::checkup_calls[1].consent_epoch != consent_before &&
                adapter::checkup_calls[1].source_generation == generation &&
@@ -1211,7 +1238,9 @@ static void run_consent(const char* name) {
 
 int main(int argc, char** argv) {
     const char* name = argc > 1 ? argv[1] : "oom_raii";
-    if (!std::strcmp(name, "oom_raii"))
+    if (!std::strcmp(name, "heater_auto_gap"))
+        run_heater_auto_gap();
+    else if (!std::strcmp(name, "oom_raii"))
         run_oom();
     else if (!std::strncmp(name, "detect_", 7))
         run_detect(name);

@@ -47,6 +47,7 @@ def execute(command, expected=0):
 source_path = ROOT / 'main/mqtt_ha.cpp'
 source = source_path.read_text()
 source_input_sha = digest(source_path)
+fixture_input_sha = digest(HERE / 'fixture.cpp')
 frozen = OUT / 'current-mqtt_ha.cpp'
 frozen.write_text(source)
 assert digest(frozen) == source_input_sha, 'the snapshot must match the complete production TU'
@@ -54,14 +55,23 @@ execute([os.environ.get('CC', 'cc'), '-std=c99', *SAN_FLAGS, '-I'+str(CJSON), '-
          CJSON/'cJSON.c', '-o', OUT/'cjson.o'])
 
 deps = set()
-def compile(name, source_file):
+def compile(name, source_file, header_overrides=None):
     dep = OUT / (name+'.d')
     binary = OUT / name
+    override_flags = []
+    if header_overrides:
+        override_root = OUT / (name+'-headers')
+        for relative, text in header_overrides.items():
+            target = override_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
+        override_flags = ['-I'+str(override_root)]
     command = [os.environ.get('CXX', 'c++'), '-std=c++17', *SAN_FLAGS,
                '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
                '-ffunction-sections', '-fdata-sections', '-MMD', '-MF', dep,
                f'-DMQTT_PRODUCTION_SOURCE="{source_file}"',
-               '-I'+str(HERE/'stubs'), '-I'+str(CJSON), '-I'+str(ROOT/'main'),
+               '-I'+str(HERE/'stubs'), '-I'+str(CJSON), *override_flags, '-I'+str(ROOT/'main'),
+               *(['-I'+str(ROOT/'main/logic')] if header_overrides else []),
                HERE/'fixture.cpp', OUT/'cjson.o',
                '-Wl,-dead_strip' if platform.system() == 'Darwin' else '-Wl,--gc-sections',
                '-o', binary]
@@ -105,7 +115,11 @@ scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guar
              'probe_disabled_unsubscribe_rejection', 'shared_subscription_owners',
              'probe_active_replacement', 'probe_active_replacement_retire_rejection',
              'probe_saved_config_without_owner', 'probe_active_shared_prior_owner',
-             'sdk_event_stack_owner', 'outgoing_heartbeat', 'scalar_snapshot_helpers',
+             'sdk_event_stack_owner', 'outgoing_heartbeat',
+             'outgoing_stop_context_output', 'outgoing_stop_task_recovery',
+             'outgoing_heater_context', 'outgoing_heater_populations', 'outgoing_heater_seams',
+             'outgoing_heater_maximum', 'outgoing_heater_failures',
+             'outgoing_heater_task_recovery', 'scalar_snapshot_helpers',
              'discovery_topic_roundtrip', 'callback_fragments', 'callback_payload_bounds',
              'callback_epoch_cutover', 'callback_queue_full', 'callback_timestamp_order',
              'probe_capture_generation', 'probe_proof_expiry']
@@ -113,7 +127,13 @@ if args.scenario:
     assert set(args.scenario) <= set(scenarios), 'unknown requested scenario'
     scenarios = [scenario for scenario in scenarios if scenario in args.scenario]
 binary = compile('production-mqtt', frozen)
-deps.update([source_path, CJSON/'cJSON.c', CJSON/'cJSON.h', lock_path, HERE/'run.py'])
+header_source_path = ROOT/'main/logic/heater_context_payload.hpp'
+heartbeat_path = ROOT/'main/logic/heartbeat.hpp'
+json_output_path = ROOT/'main/logic/json_output.hpp'
+header_source = header_source_path.read_text()
+heartbeat_source = heartbeat_path.read_text()
+deps.update([source_path, header_source_path, heartbeat_path, json_output_path,
+             CJSON/'cJSON.c', CJSON/'cJSON.h', lock_path, HERE/'run.py'])
 inputs_before = {path: digest(path) for path in deps if path.is_file()}
 results = {}
 for scenario in scenarios:
@@ -122,6 +142,32 @@ for scenario in scenarios:
     print(result.stdout.strip())
 
 mutations = [
+    ('wrong-stop-heartbeat-emitter', 'outgoing_stop_context_output',
+     'f.stop_context = stop_context_payload_fields(checkup_stop_context_report());',
+     'f.stop_context = {};',
+     'PRODUCTION_HEARTBEAT_USES_ORIGINAL_STOP_EMITTER_BYTES', 1),
+    ('heater-snapshot-refetched-per-channel', 'outgoing_heater_context',
+     'append_heater_context_json(json, fields, true, h);',
+     'heater_context_payload(fields); append_heater_context_json(json, fields, true, h);',
+     'HEATER_ONE_ATOMIC_PAIR_SNAPSHOT_AFTER_EXPIRY', 1),
+    ('heater-bsh-published-on-buh-topic', 'outgoing_heater_context',
+     'mqtt_publish(h ? s_heater_bsh_topic : s_heater_buh_topic, json.c_str(),',
+     'mqtt_publish(s_heater_buh_topic, json.c_str(),',
+     'HEATER_OWN_TOPICS_QOS0_NONRETAINED', 1),
+    ('heater-retained-qos1', 'outgoing_heater_context',
+     'static_cast<int>(json.size()), 0, 0);', 'static_cast<int>(json.size()), 1, 1);',
+     'HEATER_OWN_TOPICS_QOS0_NONRETAINED', 1),
+    ('heater-expiry-omitted', 'outgoing_heater_failures',
+     'checkup_heater_context_expire();', '/* mutation: omit producerless expiry */',
+     'HEATER_ONE_ATOMIC_PAIR_SNAPSHOT_AFTER_EXPIRY', 1),
+    ('heater-combined-message-exceeds-bound', 'outgoing_heater_maximum',
+     'append_heater_context_json(json, fields, true, h);',
+     'append_heater_context_json(json, fields, false, h);',
+     'HEATER_MESSAGE_AT_MOST_2048_BYTES', 1),
+    ('heater-task-cadence-omitted', 'outgoing_heater_task_recovery',
+     'if (cycle_config.diagnostics_enabled) publish_heater_context();',
+     '/* mutation: omit heater task delivery */',
+     'HEATER_TASK_CADENCE_EXECUTES_PUBLISHER_BEFORE_OOM', 1),
     ('periodic-rejected-delete-advance', 'periodic_discovery_delivery',
      'if (!retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic)) return;',
      '(void)retire_exact_topic(MqttRetirementOwner::PeriodicDiscovery, topic);',
@@ -515,6 +561,53 @@ mutations.extend([
      '(void)topic; (void)binding; return false;',
      'DISCOVERY_EXACT_SAVED_CIRCULATION_RECEIVES_EARLY_RETAINED_DATA', 1),
 ])
+header_mutations = [
+    ('heater-time-only-observation-lost', 'outgoing_heater_seams',
+     'logic/heater_context_payload.hpp', header_source,
+     r'const bool\s+observed\s*= f\.confirmed && supported && c\.has_observed;',
+     'const bool observed = f.confirmed && supported && c.samples > 0;',
+     'HEATER_TIME_ONLY_SEAM_RETAINS_ON_TIME'),
+    ('heater-time-only-readable-lost', 'outgoing_heater_seams',
+     'logic/heater_context_payload.hpp', header_source,
+     r'const bool\s+readable\s*= observed && c\.has_readable;',
+     'const bool readable = observed && c.readable_samples > 0;',
+     'HEATER_TIME_ONLY_SEAM_RETAINS_ON_TIME'),
+    ('heater-unconfirmed-source-leak', 'outgoing_heater_populations',
+     'logic/heater_context_payload.hpp', header_source,
+     r'const bool\s+observed\s*= f\.confirmed && supported && c\.has_observed;',
+     'const bool observed = supported && c.has_observed;',
+     'HEATER_UNREAD_OR_UNSUPPORTED_ON_TIME_IS_NULL'),
+    ('heater-unsupported-channel-leak', 'outgoing_heater_populations',
+     'logic/heater_context_payload.hpp', header_source,
+     r'const bool\s+observed\s*= f\.confirmed && supported && c\.has_observed;',
+     'const bool observed = f.confirmed && c.has_observed;',
+     'HEATER_UNREAD_OR_UNSUPPORTED_ON_TIME_IS_NULL'),
+    ('stop-shared-dispatch-flips-flat', 'outgoing_stop_context_output',
+     'logic/heartbeat.hpp', heartbeat_source,
+     r'if\s*\(flat\)\s*j\s*\+=\s*"stop_context_";',
+     'if (!flat) j += "stop_context_";',
+     'STOP_FLAT_PREFIX_COMMA_AND_BOOLEAN_FORM_PRESERVED'),
+    ('heater-shared-dispatch-forces-buh', 'outgoing_heater_context',
+     'logic/heater_context_payload.hpp', header_source,
+     r'detail::append_heater_context_json_impl\(sink,\s*f,\s*flat,\s*selected_heater\);',
+     'detail::append_heater_context_json_impl(sink, f, flat, selected_heater == 1 ? 0 : selected_heater);',
+     'HEATER_CHANNEL_INDEX_MATCHES_TOPIC'),
+]
+for name, scenario, rel_header, rel_source, before, after, assertion in header_mutations:
+    if scenario not in scenarios:
+        continue
+    pattern = re.compile(before)
+    assert len(pattern.findall(rel_source)) == 1, name+': unique header anchor required'
+    mutant = compile('mutation-'+name, frozen,
+                     {rel_header: pattern.sub(lambda match: after, rel_source)})
+    result = execute([mutant, scenario], expected=None)
+    output = result.stdout + result.stderr
+    assert result.returncode == 2 and f'ASSERTION {assertion} FAILED' in output, \
+        f'{name}: rejected by wrong boundary: {result.returncode}\n{output}'
+    mutation_results[name] = {'scenario': scenario, 'assertion': assertion,
+                              'returncode': result.returncode, 'output': output.strip()}
+    print(f'REJECTED {name}: {assertion}')
+
 for name, scenario, before, after, assertion, count in mutations:
     if scenario not in scenarios:
         continue
@@ -538,6 +631,7 @@ deps.update([CJSON/'cJSON.c', CJSON/'cJSON.h', lock_path, HERE/'run.py'])
 inputs = {str(path): digest(path) for path in sorted(deps) if path.is_file()}
 assert all(path.is_file() and digest(path) == value for path, value in inputs_before.items()), \
     'production compile inputs changed during the witness'
+assert digest(HERE / 'fixture.cpp') == fixture_input_sha, 'fixture changed after source capture'
 # A read-only container mount may lack a worktree's external .git directory. The source/input
 # hashes remain authoritative; represent unavailable Git metadata explicitly instead of inventing it.
 git_head = execute(['git', 'rev-parse', 'HEAD'], expected=None)

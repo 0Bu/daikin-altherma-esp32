@@ -2,29 +2,30 @@
 // thresholds and the verdicts) lives in logic/checkup.hpp and is host-tested; this file is storage,
 // one mutex, and the fold from a poll cycle into the open hour.
 #include "checkup.hpp"
+#include "heater_context_store.hpp"
 #include "diag_log.hpp"
 #include "history.hpp" // startup journal availability, after history_start
 #include "logic/checkup.hpp"
-#include "logic/checkup_persist.hpp"  // WHEN a persisted window may be believed
-#include "logic/crashinfo.hpp"        // crash_reason_slug — one reset vocabulary
+#include "logic/checkup_persist.hpp" // WHEN a persisted window may be believed
+#include "logic/crashinfo.hpp"       // crash_reason_slug — one reset vocabulary
 #include "logic/defrost_start.hpp"
 #include "logic/history.hpp" // history_parse_tenths — the ONE parse of a cached value
 #include "logic/hydronic_input.hpp"
 #include "logic/stop_context_input.hpp"
-#include "safe_mode.hpp"         // safe_mode_active — nothing ages the window there
-#include "mqtt_ha.hpp"           // independent circulation-pump electrical witness
-#include "config.hpp"            // allocation-free circulation identity snapshot
-#include "def/homehub.hpp"       // same HomeHub/Altherma4 register semantics as hp_modbus
-#include "def/overlay.hpp"       // same resolved decoder rows as the poll engine
-#include "hp_modbus.hpp"         // mb_target_generation_matches
-#include "sntp_time.hpp"         // pressure minimum carries a real source observation timestamp
+#include "safe_mode.hpp"   // safe_mode_active — nothing ages the window there
+#include "mqtt_ha.hpp"     // independent circulation-pump electrical witness
+#include "config.hpp"      // allocation-free circulation identity snapshot
+#include "def/homehub.hpp" // same HomeHub/Altherma4 register semantics as hp_modbus
+#include "def/overlay.hpp" // same resolved decoder rows as the poll engine
+#include "hp_modbus.hpp"   // mb_target_generation_matches
+#include "sntp_time.hpp"   // pressure minimum carries a real source observation timestamp
 
-#include "esp_attr.h"            // __NOINIT_ATTR — warm handoff and startup integrity metadata
-#include "esp_system.h"          // esp_reset_reason
+#include "esp_attr.h"   // __NOINIT_ATTR — warm handoff and startup integrity metadata
+#include "esp_system.h" // esp_reset_reason
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
+#include "rtos_guard.hpp" // SemGuard — the ONE unwind-safe mutex guard
 
 #include <atomic>
 #include <cmath>
@@ -43,12 +44,12 @@ namespace {
 // state is also reconstructed into an ordinary static, but only from the separately sealed one-shot
 // handoff an intentional esp_restart writes below.
 struct PersistedDhwHandoff {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t reserved;
-    uint32_t layout_fp;
-    uint32_t model_fp;
-    uint32_t crc;
+    uint32_t                     magic;
+    uint16_t                     version;
+    uint16_t                     reserved;
+    uint32_t                     layout_fp;
+    uint32_t                     model_fp;
+    uint32_t                     crc;
     logic::DhwLossHandoffPayload payload;
 };
 
@@ -71,11 +72,11 @@ struct PersistedCheckup {
     uint32_t model_fp;               // detected profile
     uint32_t source_fp;              // full detected X10A profile/link identity
     uint32_t diagnostics_generation; // consent interval; old intervals never cross a new enable
-    int64_t  span_us;       // lifecycle observed up to the last commit, carried as a duration
+    int64_t  span_us; // lifecycle observed up to the last commit, carried as a duration
     uint32_t crc;
-    logic::CheckupRing  ring;
-    logic::DhwLossRing  dhw;
-    logic::EnergyRing   energy;
+    logic::CheckupRing ring;
+    logic::DhwLossRing dhw;
+    logic::EnergyRing  energy;
     // One-shot checkpoint written by esp_restart's shutdown handler.  It has its own seal because
     // ring integrity must remain usable to validate the handoff while this open state is changing.
     // checkup_start consumes it before any producer exists and retires all completed RAM hours.
@@ -103,7 +104,7 @@ struct PersistedCheckup {
 // so nothing is read before it is written.
 union PersistStore {
     PersistedCheckup v;
-    PersistStore() {}      // deliberately leaves v untouched
+    PersistStore() {} // deliberately leaves v untouched
     ~PersistStore() {}
 };
 __NOINIT_ATTR PersistStore s_store;
@@ -191,14 +192,14 @@ struct CheckupSlot {
     uint8_t live_commit_count      = 0; // completed in THIS monotonic clock, max 23
     logic::CheckupJournalRevision revision{};
     std::atomic<int64_t>          revision_acked{INT64_MIN};
-    int64_t                       journal_label_offset = INT64_MIN;
-    bool                          dhw_restart_armed    = false;
-    uint32_t                      dhw_restart_bucket   = 0;
+    int64_t                       journal_label_offset  = INT64_MIN;
+    bool                          dhw_restart_armed     = false;
+    uint32_t                      dhw_restart_bucket    = 0;
     bool                          energy_restart_armed  = false;
     uint32_t                      energy_restart_bucket = 0;
-    int64_t                       seal_bucket          = INT64_MIN;
-    int64_t                       seal_end_unix_s      = INT64_MIN;
-    bool                          flash_pending        = false;
+    int64_t                       seal_bucket           = INT64_MIN;
+    int64_t                       seal_end_unix_s       = INT64_MIN;
+    bool                          flash_pending         = false;
 
     // Append optional runtime detail so existing field offsets and stack budgets stay unchanged.
     // Exact windows use their own flash page, separate from hourly aggregates.
@@ -244,6 +245,9 @@ bool stop_context_suppressed_locked() {
 }
 
 logic::HydronicTracker             s_hydronic;
+logic::ModbusHeatingFlow           s_modbus_heating;
+uint32_t                           s_modbus_heating_target = 0;
+uint32_t                           s_modbus_heating_link   = 0;
 logic::HydronicInputPlan           s_hydronic_inputs;
 uint32_t                           s_hydronic_generation    = 0;
 bool                               s_hydronic_allow_restore = true;
@@ -251,6 +255,9 @@ int64_t                            s_hydronic_read_fence_us = -1;
 uint8_t                            s_hydronic_limitations   = 0;
 uint8_t                            s_agree_limitations      = 0;
 constexpr logic::HydronicInputPlan kEmptyHydronicInputs{};
+logic::heater_context_input::Plan  s_heater_inputs;
+bool                               s_heater_allow_restore = true;
+int64_t                            s_heater_read_fence_us = -1;
 
 __attribute__((noinline)) void clear_hydronic_runtime_locked() {
     s_hydronic.reset();
@@ -295,6 +302,29 @@ bool consent_admitted(uint32_t consent_epoch) {
 
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 using Lock = SemGuard;
+
+logic::heater_context_input::Binding heater_binding_locked(uint32_t source_generation) {
+    return {s_x10a.source_fp, s_x10a.model_fp, source_generation, s_diagnostics_generation,
+            s_diagnostics_epoch.load(std::memory_order_acquire)};
+}
+
+void bind_heater_locked(const logic::heater_context_input::Layout& layout,
+                        uint32_t source_generation, bool allow_restore,
+                        bool owner_retired = false) {
+    const auto next =
+        logic::heater_context_input::bind_plan(layout, heater_binding_locked(source_generation));
+    if (!owner_retired && s_heater_inputs.valid &&
+        !logic::heater_context_input::same_lifecycle(s_heater_inputs, next)) {
+        // Retire every identity dimension before installing its replacement, including a live
+        // consent epoch whose saved generation or profile name happened to be reused.
+        heater_context_reset();
+        allow_restore = false;
+    }
+    s_heater_inputs = next;
+    heater_context_bind(next.binding.source_fp, next.binding.model_fp, next.inputs.schema_fp,
+                        next.binding.source_generation, next.capability_mask,
+                        next.supported_heaters, allow_restore);
+}
 
 void retire_cycling_locked(CheckupSlot& slot) {
     slot.cycling_restore_allowed = false;
@@ -475,20 +505,22 @@ uint32_t circulation_identity() {
         slot.energy_cov.ct_rows > 0, slot.energy_cov.has_inv && slot.energy_cov.has_rps);
 }
 
-// The row a locator addresses, or -1. Composes logic/checkup.hpp's pure predicate rather than taking
-// the parallel-array checkup_select(): building (reg, off, conv) views for a full resolved profile
-// would consume material space on the POLL TASK's 8 KB stack every second, and that stack fails
-// silently on this board (AGENTS.md → Memory, concurrency, and HTTP safety). checkup_select() still
-// exists — it is what the catalog test sweeps the whole profile set with.
+// The row a locator addresses, or -1. Composes logic/checkup.hpp's pure predicate rather than
+// taking the parallel-array checkup_select(): building (reg, off, conv) views for a full resolved
+// profile would consume material space on the POLL TASK's 8 KB stack every second, and that stack
+// fails silently on this board (AGENTS.md → Memory, concurrency, and HTTP safety). checkup_select()
+// still exists — it is what the catalog test sweeps the whole profile set with.
 int find_row(const CachedValue* v, size_t n, const logic::CheckupLocator& l) {
     for (size_t i = 0; i < n; i++)
-        if (logic::checkup_row_matches(l, v[i].reg, v[i].off, v[i].conv)) return static_cast<int>(i);
+        if (logic::checkup_row_matches(l, v[i].reg, v[i].off, v[i].conv))
+            return static_cast<int>(i);
     return -1;
 }
 
 // A cached value as tenths of its unit. logic/history.hpp's parse, not a local strtod: the trends
-// ask the same question of the same string one call later, and two parses that disagreed about, say,
-// a non-numeric flag would make the observation counters and the charts describe different plants.
+// ask the same question of the same string one call later, and two parses that disagreed about,
+// say, a non-numeric flag would make the observation counters and the charts describe different
+// plants.
 bool tenths(const CachedValue& cv, int& out) {
     return logic::history_parse_tenths(cv.value.c_str(), out);
 }
@@ -524,10 +556,10 @@ const def::HomeHubReg* modbus_row_for_cv(const CachedValue& cv, ModbusProfile pr
 // A BIT-FLAG row's state. Since legacy-210 every flag reaches the cache as the numeric "1"/"0", so
 // this is a plain parse — and a legacy textual "ON"/"OFF" is refused by the parse and reads as
 // UNKNOWN, which is the safe direction: logic/checkup.hpp never folds unknown into off.
-void flag_state(const CachedValue* v, size_t n, const logic::CheckupLocator& l,
-                bool& known, bool& on) {
-    known = false;
-    on    = false;
+void flag_state(const CachedValue* v, size_t n, const logic::CheckupLocator& l, bool& known,
+                bool& on) {
+    known       = false;
+    on          = false;
     const int i = find_row(v, n, l);
     if (i < 0) return;
     int t = 0;
@@ -553,7 +585,7 @@ bool reading(const CachedValue* v, size_t n, const logic::CheckupLocator& l, int
 
 // WHAT THE SEAL COVERS — and the fields it deliberately does not.
 uint32_t checkup_persist_crc(const CheckupSlot& slot) {
-    uint32_t crc = CONFIG_CRC32_INIT;
+    uint32_t    crc = CONFIG_CRC32_INIT;
     const auto& p   = slot.P();
     const auto& r   = p.ring;
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(r.buf), sizeof(r.buf));
@@ -874,7 +906,7 @@ bool sealed_flash_next_locked(const CheckupSlot& slot, int64_t after_bucket, int
         payload.pel_source_fp = 0;
         payload.energy        = kEmptyEnergyBucket;
     }
-    bucket                         = slot.seal_bucket;
+    bucket = slot.seal_bucket;
     return logic::checkup_journal_bucket(payload.end_unix_s) == bucket;
 }
 
@@ -939,6 +971,7 @@ void checkup_reboot_save() {
         stop_observation_seal();
     }
     hydronic_observation_seal();
+    heater_context_seal();
     for (int si = 0; si < 2; ++si) {
         CheckupSlot* const slot = si ? &s_modbus : &s_x10a;
         seal_open_hour_locked(*slot);
@@ -1012,11 +1045,39 @@ __attribute__((noinline)) void record_hydronic_locked(const CachedValue* values,
     }
 }
 
+[[gnu::noinline]] void record_heater_locked(const CachedValue* values, size_t count,
+                                            int64_t sample_us, uint32_t source_generation,
+                                            bool completed_sweep) {
+    namespace input = logic::heater_context_input;
+    if (!s_x10a.source_confirmed || !completed_sweep || !count ||
+        sample_us <= s_heater_read_fence_us) {
+        heater_context_pause();
+        return;
+    }
+    if (source_generation != s_heater_inputs.binding.source_generation) {
+        s_heater_allow_restore = false;
+        bind_heater_locked(s_heater_inputs.inputs, source_generation, false);
+    }
+    const input::Sweep sweep{heater_binding_locked(source_generation), true,
+                             s_x10a.source_confirmed, completed_sweep};
+    const auto         snapshot = input::collect(s_heater_inputs, values, count, sweep);
+    // Check the owner's current binding, not just the copied plan/snapshot. The HP generation
+    // is atomic: an HTTP cutover can advance it while waiting for this checkup lock.
+    const input::Sweep current{heater_binding_locked(source_generation),
+                               s_diagnostics_enabled.load(std::memory_order_acquire),
+                               s_x10a.source_confirmed, completed_sweep};
+    if (hp_poll_generation_matches(source_generation) &&
+        input::still_current(s_heater_inputs, snapshot, current))
+        heater_context_record(sample_us, snapshot.sample);
+    else
+        heater_context_pause();
+}
+
 void slot_start(CheckupSlot& slot, bool diagnostics_enabled, uint32_t diagnostics_generation,
                 uint32_t dhw_fp, bool flash_pending) {
-    slot.last_commit_us          = kNoCommitUs;
-    slot.live_commit_count       = 0;
-    slot.dhw_source_fp           = dhw_fp;
+    slot.last_commit_us            = kNoCommitUs;
+    slot.live_commit_count         = 0;
+    slot.dhw_source_fp             = dhw_fp;
     slot.modbus_profile            = ModbusProfile::Auto;
     slot.energy_cov                = kEmptyEnergyCoverage;
     slot.energy_acc                = kEmptyEnergyAccumulator;
@@ -1024,12 +1085,12 @@ void slot_start(CheckupSlot& slot, bool diagnostics_enabled, uint32_t diagnostic
     slot.energy_carried_span_us    = 0;
     slot.energy_restart_armed      = false;
     slot.energy_restart_bucket     = 0;
-    slot.cycling_restore_allowed = !safe_mode_active();
-    slot.fault_restore_allowed   = !safe_mode_active();
+    slot.cycling_restore_allowed   = !safe_mode_active();
+    slot.fault_restore_allowed     = !safe_mode_active();
     slot.dhw_trace_restore_allowed = !safe_mode_active();
-    const uint32_t want_fp       = logic::checkup_layout_fingerprint();
-    const uint32_t reason        = static_cast<uint32_t>(esp_reset_reason());
-    slot.persist_verdict         = logic::checkup_restore_verdict(
+    const uint32_t want_fp         = logic::checkup_layout_fingerprint();
+    const uint32_t reason          = static_cast<uint32_t>(esp_reset_reason());
+    slot.persist_verdict           = logic::checkup_restore_verdict(
         reason, slot.P().magic, slot.P().version, slot.P().layout_fp, want_fp, slot.P().crc,
         checkup_persist_crc(slot), safe_mode_active(), diagnostics_enabled,
         slot.P().diagnostics_generation, diagnostics_generation, slot.P().boots_since_commit,
@@ -1173,22 +1234,26 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
         s_mtx = xSemaphoreCreateMutex();
         if (!s_mtx) diag_printf("checkup: mutex alloc failed — observation disabled this boot\n");
     }
-    s_stop_context          = {};
-    s_stop_inputs           = {};
-    s_defrost_start         = {};
+    s_stop_context  = {};
+    s_stop_inputs   = {};
+    s_defrost_start = {};
     reset_run_ctx_locked();
     s_rwt_locator           = {};
     s_defrost_air_supported = false;
     s_rwt_supported         = false;
-    s_stop_generation    = 0;
-    s_stop_allow_restore = true;
-    s_stop_read_fence_us = -1;
+    s_stop_generation       = 0;
+    s_stop_allow_restore    = true;
+    s_stop_read_fence_us    = -1;
     stop_observation_start(diagnostics_enabled, diagnostics_generation);
     clear_hydronic_runtime_locked();
     s_hydronic_inputs        = kEmptyHydronicInputs;
     s_hydronic_generation    = 0;
     s_hydronic_allow_restore = true;
     if (s_mtx) hydronic_observation_start(diagnostics_enabled, diagnostics_generation);
+    s_heater_inputs        = {};
+    s_heater_allow_restore = true;
+    s_heater_read_fence_us = -1;
+    heater_context_start(diagnostics_enabled, diagnostics_generation);
     const uint32_t dhw_fp = circulation_identity();
     s_requested_dhw_source_fp.store(dhw_fp);
     s_diagnostics_enabled.store(diagnostics_enabled, std::memory_order_release);
@@ -1246,6 +1311,18 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
         stop_observation_bind(s_x10a.source_fp, s_x10a.model_fp, s_stop_inputs.schema_fp,
                               s_stop_generation, !generation_changed && s_stop_allow_restore);
     set_hydronic_diagnostics_locked(enabled, generation, generation_changed);
+    s_heater_read_fence_us = esp_timer_get_time();
+    if (generation_changed) {
+        s_modbus_heating.reset();
+        s_heater_allow_restore = false;
+        heater_context_set_diagnostics(enabled, generation);
+        if (s_x10a.source_confirmed)
+            bind_heater_locked(s_heater_inputs.inputs, hp_poll_generation(), false, true);
+    } else {
+        s_modbus_heating.break_run();
+        s_heater_inputs.binding.consent_epoch = s_diagnostics_epoch.load(std::memory_order_acquire);
+        heater_context_set_enabled(enabled);
+    }
     slot_set_diagnostics(s_x10a, enabled, generation_changed);
     slot_set_diagnostics(s_modbus, enabled, generation_changed);
 }
@@ -1271,7 +1348,11 @@ void checkup_reset() {
     s_hydronic_inputs        = kEmptyHydronicInputs;
     s_hydronic_allow_restore = false;
     hydronic_observation_reset();
-    s_defrost_start         = {};
+    s_heater_inputs        = {};
+    s_heater_allow_restore = false;
+    s_heater_read_fence_us = esp_timer_get_time();
+    heater_context_reset();
+    s_defrost_start = {};
     reset_run_ctx_locked();
     s_rwt_locator           = {};
     s_defrost_air_supported = false;
@@ -1293,6 +1374,9 @@ void checkup_modbus_reset() {
     retire_cycling_locked(s_modbus);
     retire_fault_locked(s_modbus);
     retire_dhw_trace_locked(s_modbus);
+    s_modbus_heating.reset();
+    s_modbus_heating_target           = 0;
+    s_modbus_heating_link             = 0;
     s_modbus.boot_handoff_valid       = false;
     s_modbus.fault_boot_handoff_valid = false;
     s_modbus.source_confirmed         = false;
@@ -1327,10 +1411,10 @@ energy_coverage_from_view(const logic::ProfileView& view) {
     return e_cov;
 }
 
-__attribute__((noinline)) void reset_hydronic_on_detect_locked(const char* profile_id,
-                                                               uint32_t source_fp, uint32_t fp,
-                                                               bool first) {
-    logic::fill_hydronic_input_plan(s_hydronic_inputs, profile_id, def::lookup_view(profile_id));
+__attribute__((noinline)) void
+reset_hydronic_on_detect_locked(const logic::HydronicInputPlan& hydronic, uint32_t source_fp,
+                                uint32_t fp, bool first) {
+    s_hydronic_inputs = hydronic;
     clear_hydronic_runtime_locked();
     s_hydronic_generation = s_stop_generation;
     if (!first) {
@@ -1348,13 +1432,21 @@ __attribute__((noinline)) void reset_hydronic_on_detect_locked(const char* profi
     return {row.reg, row.offset, row.conv};
 }
 
-void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
-    const auto                  view        = def::lookup_view(profile_id);
-    const uint32_t              fp          = logic::checkup_model_fingerprint(profile_id, view);
-    const auto                  stop_inputs = logic::stop_context_input_plan(profile_id, view);
-    const bool                  defrost_air = defrost_air_supported(view);
-    const logic::CheckupLocator rwt_loc     = resolve_rwt_locator(view);
-    const auto                  e_cov       = energy_coverage_from_view(view);
+void checkup_profile_layout(const char* profile_id, CheckupProfileLayout& out) {
+    const auto view = def::lookup_view(profile_id);
+    out.model_fp    = logic::checkup_model_fingerprint(profile_id, view);
+    out.stop        = logic::stop_context_input_plan(profile_id, view);
+    out.heater      = logic::heater_context_input::resolve_layout(profile_id, view);
+    logic::fill_hydronic_input_plan(out.hydronic, profile_id, view);
+    out.rwt_locator = resolve_rwt_locator(view);
+    out.energy_cov  = energy_coverage_from_view(view);
+    out.defrost_air = defrost_air_supported(view);
+}
+
+void checkup_reset_on_detect(const CheckupProfileLayout& layout, uint32_t source_fp) {
+    const uint32_t fp          = layout.model_fp;
+    const auto&    stop_inputs = layout.stop;
+    const auto&    e_cov       = layout.energy_cov;
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
@@ -1368,17 +1460,21 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_stop_inputs           = stop_inputs;
     s_defrost_start         = {};
     reset_run_ctx_locked();
-    s_rwt_locator           = rwt_loc;
-    s_defrost_air_supported = defrost_air;
-    s_rwt_supported         = rwt_loc.conv >= 0;
+    s_rwt_locator           = layout.rwt_locator;
+    s_defrost_air_supported = layout.defrost_air;
+    s_rwt_supported         = layout.rwt_locator.conv >= 0;
     s_stop_generation       = hp_poll_generation();
-    reset_hydronic_on_detect_locked(profile_id, source_fp, fp, first);
+    reset_hydronic_on_detect_locked(layout.hydronic, source_fp, fp, first);
     if (!first) {
         s_stop_allow_restore = false;
         stop_observation_reset();
+        s_heater_allow_restore = false;
+        s_heater_read_fence_us = esp_timer_get_time();
+        heater_context_reset();
     }
-    stop_observation_bind(source_fp, fp, s_stop_inputs.schema_fp, s_stop_generation,
+    stop_observation_bind(source_fp, fp, stop_inputs.schema_fp, s_stop_generation,
                           s_stop_allow_restore);
+    bind_heater_locked(layout.heater, s_stop_generation, s_heater_allow_restore, !first);
     if (first) {
         // The stored startup scope was only an expectation. This call confirms the current source.
         if (s_x10a.source_confirmed && s_x10a.boot_handoff_valid &&
@@ -1447,6 +1543,9 @@ void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp) {
     if (!lk.acquired()) return;
     if (s_modbus.source_confirmed && s_modbus.model_fp == fp && s_modbus.source_fp == source_fp)
         return;
+    s_modbus_heating.reset();
+    s_modbus_heating_target = 0;
+    s_modbus_heating_link   = 0;
     if (modbus_confirm_commit_locked(profile, fp, source_fp)) {
         if (s_modbus.source_confirmed && s_modbus.boot_handoff_valid &&
             !s_modbus.reset_requested.load() && !s_modbus.dhw_reset_requested.load() &&
@@ -1669,68 +1768,9 @@ void checkup_dhw_reset() {
 
 uint32_t checkup_consent_epoch() { return s_diagnostics_epoch.load(std::memory_order_acquire); }
 
-void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
-                    const logic::CheckupCoverage& coverage, uint32_t source_generation,
-                    uint32_t consent_epoch, bool profile_confirmed, int64_t sweep_started_us) {
-    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
-    if (!s_mtx) return;   // checkup_start() creates it; absent means its alloc failed -> no observation
-    if (!v && n) return;
-
-    logic::CheckupSample s;
-    int64_t              unix_s  = -1;
-    int32_t              unix_ms = 0;
-    time_now(unix_s, unix_ms);
-    if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
-    s.rps_known   = rps_known;
-    s.rps_running = rps_running;
-    s.x10a_blind  = !n; // a held or failed cycle read nothing: bounded blind time, not a lost row
-
-    flag_state(v, n, logic::CHECKUP_LOC_DEFROST, s.defrost_known, s.defrost_on);
-    flag_state(v, n, logic::CHECKUP_LOC_PUMP,    s.pump_known,    s.pump_on);
-    flag_state(v, n, logic::CHECKUP_LOC_BSH,     s.bsh_known,     s.bsh_on);
-    flag_state(v, n, logic::CHECKUP_LOC_VALVE,   s.valve_known,   s.valve_dhw);
-    s.operating_mode = operating_mode(v, n);
-    // Either active step proves the aggregate BUH is on. Proving it is OFF needs every step carried
-    // by this profile to be readable; one readable zero plus one timed-out step remains unknown.
-    bool b1_known = false, b1_on = false, b2_known = false, b2_on = false;
-    flag_state(v, n, logic::CHECKUP_LOC_BUH1, b1_known, b1_on);
-    flag_state(v, n, logic::CHECKUP_LOC_BUH2, b2_known, b2_on);
-    s.buh_on    = b1_on || b2_on;
-    s.buh_known = s.buh_on ||
-                  ((coverage.buh1 || coverage.buh2) &&
-                   (!coverage.buh1 || b1_known) &&
-                   (!coverage.buh2 || b2_known));
-
-    s.bar_ok  = reading(v, n, logic::CHECKUP_LOC_PRESSURE, s.bar_tenths);
-    s.flow_ok = reading(v, n, logic::CHECKUP_LOC_FLOW,     s.flow_tenths);
-    s.r5t_ok  = reading(v, n, logic::CHECKUP_LOC_R5T,      s.r5t_tenths);
-    // Page 0x20 can answer with the last run's outdoor value while the unit sleeps. The shared
-    // evidence helper therefore requires THIS-cycle row presence plus a positively running RPS
-    // witness. In particular, `held == false` with unknown RPS is not freshness.
-    const int outdoor_row = find_row(v, n, logic::CHECKUP_LOC_OUTDOOR);
-    int outdoor_tenths = 0;
-    bool      fresh_outdoor  = false;
-    if (outdoor_row >= 0 && tenths(v[static_cast<size_t>(outdoor_row)], outdoor_tenths)) {
-        const auto& outdoor_value = v[static_cast<size_t>(outdoor_row)];
-        fresh_outdoor             = !outdoor_value.held && !outdoor_value.held_unknown;
-        s.outdoor = logic::outdoor_x10a_evidence(
-            true, rps_known, rps_running, static_cast<double>(outdoor_tenths) / 10.0);
-    }
-    const uint32_t dhw_generation         = s_dhw_identity_generation.load();
-    const uint32_t circulation_generation = circulation_source_generation();
-    // Allocation-free, including on the OOM catch and TLS hold paths: the applied source epoch
-    // alone withdraws a replaced witness, so no Config copy is needed on this per-cycle path.
-    const CirculationPumpSample circulation = circulation_pump_sample();
-    s.circulation_configured                = circulation.configured;
-    s.circulation_known                     = circulation.known;
-    s.circulation_on                        = circulation.on;
-    s.retry_expected_mask                   = coverage.retry_mask;
-    logic::EnergyStepInput ein;
-    energy_extract_input(v, n, rps_known, rps_running, s, outdoor_tenths, ein);
-
-    // Fault class is matched by converter because a profile carries it on the outdoor page AND the
-    // hydronic one. Retry counters use exact page/offset/converter identities because conv 311 also
-    // names unrelated values elsewhere. For faults the WORST readable class wins.
+[[gnu::noinline]] static logic::FaultSampleDetail
+collect_x10a_fault_and_retries(const CachedValue* v, size_t n, uint8_t coverage_fault_rows,
+                               logic::CheckupSample& s) {
     uint8_t    fault_rows_read = 0;
     FaultClass out_cls = FaultClass::Unknown, in_cls = FaultClass::Unknown,
                other_cls = FaultClass::Unknown;
@@ -1740,9 +1780,12 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         if (logic::checkup_is_fault_class(cv.conv)) {
             const FaultClass c = fault_class_from_text(cv.value.c_str());
             if (c != FaultClass::Unknown && fault_rows_read < UINT8_MAX) fault_rows_read++;
-            if (fault_error_active(c)) s.fault = FaultClass::Error;
-            else if (fault_warning_active(c) && !fault_error_active(s.fault)) s.fault = c;
-            else if (c == FaultClass::Normal && s.fault == FaultClass::Unknown) s.fault = c;
+            if (fault_error_active(c))
+                s.fault = FaultClass::Error;
+            else if (fault_warning_active(c) && !fault_error_active(s.fault))
+                s.fault = c;
+            else if (c == FaultClass::Normal && s.fault == FaultClass::Unknown)
+                s.fault = c;
             if (cv.reg == 0x10u) {
                 out_cls = c;
             } else if (cv.reg == 0x60u) {
@@ -1776,13 +1819,80 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         }
     }
     // An active class on either unit is still a finding. "Normal" requires every fault-class row
-    // supplied by the profile; otherwise a timed-out outdoor page could be cleared by the indoor row.
+    // supplied by the profile; otherwise a timed-out outdoor page could be cleared by the indoor
+    // row.
     if (!fault_error_active(s.fault) && !fault_warning_active(s.fault) &&
-        fault_rows_read < coverage.fault_rows)
+        fault_rows_read < coverage_fault_rows)
         s.fault = FaultClass::Unknown;
 
+    return logic::checkup_x10a_fault_detail(s.fault, out_cls, out_code, in_cls, in_code,
+                                            other_code);
+}
+
+void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
+                    const logic::CheckupCoverage& coverage, uint32_t source_generation,
+                    uint32_t consent_epoch, bool profile_confirmed, bool completed_sweep,
+                    int64_t sweep_started_us) {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
+    if (!s_mtx)
+        return; // checkup_start() creates it; absent means its alloc failed -> no observation
+    if (!v && n) return;
+
+    logic::CheckupSample s;
+    int64_t              unix_s  = -1;
+    int32_t              unix_ms = 0;
+    time_now(unix_s, unix_ms);
+    if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
+    s.rps_known   = rps_known;
+    s.rps_running = rps_running;
+    s.x10a_blind  = !n; // a held or failed cycle read nothing: bounded blind time, not a lost row
+
+    flag_state(v, n, logic::CHECKUP_LOC_DEFROST, s.defrost_known, s.defrost_on);
+    flag_state(v, n, logic::CHECKUP_LOC_PUMP, s.pump_known, s.pump_on);
+    flag_state(v, n, logic::CHECKUP_LOC_BSH, s.bsh_known, s.bsh_on);
+    flag_state(v, n, logic::CHECKUP_LOC_VALVE, s.valve_known, s.valve_dhw);
+    s.operating_mode = operating_mode(v, n);
+    // Either active step proves the aggregate BUH is on. Proving it is OFF needs every step carried
+    // by this profile to be readable; one readable zero plus one timed-out step remains unknown.
+    bool b1_known = false, b1_on = false, b2_known = false, b2_on = false;
+    flag_state(v, n, logic::CHECKUP_LOC_BUH1, b1_known, b1_on);
+    flag_state(v, n, logic::CHECKUP_LOC_BUH2, b2_known, b2_on);
+    s.buh_on    = b1_on || b2_on;
+    s.buh_known = s.buh_on || ((coverage.buh1 || coverage.buh2) && (!coverage.buh1 || b1_known) &&
+                               (!coverage.buh2 || b2_known));
+
+    s.bar_ok  = reading(v, n, logic::CHECKUP_LOC_PRESSURE, s.bar_tenths);
+    s.flow_ok = reading(v, n, logic::CHECKUP_LOC_FLOW, s.flow_tenths);
+    s.r5t_ok  = reading(v, n, logic::CHECKUP_LOC_R5T, s.r5t_tenths);
+    // Page 0x20 can answer with the last run's outdoor value while the unit sleeps. The shared
+    // evidence helper therefore requires THIS-cycle row presence plus a positively running RPS
+    // witness. In particular, `held == false` with unknown RPS is not freshness.
+    const int outdoor_row    = find_row(v, n, logic::CHECKUP_LOC_OUTDOOR);
+    int       outdoor_tenths = 0;
+    bool      fresh_outdoor  = false;
+    if (outdoor_row >= 0 && tenths(v[static_cast<size_t>(outdoor_row)], outdoor_tenths)) {
+        const auto& outdoor_value = v[static_cast<size_t>(outdoor_row)];
+        fresh_outdoor             = !outdoor_value.held && !outdoor_value.held_unknown;
+        s.outdoor                 = logic::outdoor_x10a_evidence(true, rps_known, rps_running,
+                                                                 static_cast<double>(outdoor_tenths) / 10.0);
+    }
+    const uint32_t dhw_generation         = s_dhw_identity_generation.load();
+    const uint32_t circulation_generation = circulation_source_generation();
+    // Allocation-free, including on the OOM catch and TLS hold paths: the applied source epoch
+    // alone withdraws a replaced witness, so no Config copy is needed on this per-cycle path.
+    const CirculationPumpSample circulation = circulation_pump_sample();
+    s.circulation_configured                = circulation.configured;
+    s.circulation_known                     = circulation.known;
+    s.circulation_on                        = circulation.on;
+    s.retry_expected_mask                   = coverage.retry_mask;
+    logic::EnergyStepInput ein;
+    energy_extract_input(v, n, rps_known, rps_running, s, outdoor_tenths, ein);
+
+    // Fault class is matched by converter because a profile carries it on the outdoor page AND the
+    // hydronic one. Retry counters use exact page/offset/converter identities because conv 311 also
+    // names unrelated values elsewhere. For faults the WORST readable class wins.
     const logic::FaultSampleDetail x10a_fault =
-        logic::checkup_x10a_fault_detail(s.fault, out_cls, out_code, in_cls, in_code, other_code);
+        collect_x10a_fault_and_retries(v, n, coverage.fault_rows, s);
 
     const int64_t  now    = esp_timer_get_time();
     const uint32_t bucket = logic::checkup_bucket(now);
@@ -1798,8 +1908,10 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 
     // A request can arrive while an old-link sweep is in flight. If this cycle consumes it, discard
     // the whole sample after clearing state; otherwise the tail of old poll A would seed the window
-    // that new-link poll B continues. Dropping at most the first new sample is the conservative side.
+    // that new-link poll B continues. Dropping at most the first new sample is the conservative
+    // side.
     if (apply_reset_locked(s_x10a)) return;
+    record_heater_locked(v, n, now, source_generation, completed_sweep);
     const bool s_source_confirmed = s_x10a.source_confirmed;
     if (!stop_context_suppressed_locked() && s_source_confirmed && s_stop_inputs.schema_fp) {
         const auto stop_sample =
@@ -1848,11 +1960,20 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     fold_energy_locked(s_x10a, ein, bucket, discard_energy_sample);
 }
 
+struct ModbusCheckupReadings {
+    logic::CheckupSample sample;
+    int                  fault_sub    = 0;
+    uint16_t             fault_code   = 0;
+    bool                 no_defrost   = false;
+    bool                 no_hot_start = false;
+    bool                 normal_space = false;
+};
+
 [[gnu::noinline]] static void modbus_collect_sample(const CachedValue* v, size_t n,
                                                     ModbusProfile                 profile,
                                                     const logic::CheckupCoverage& cov,
-                                                    logic::CheckupSample&         s,
-                                                    uint16_t& mb_fault_code, int& mb_fault_sub) {
+                                                    ModbusCheckupReadings&        readings) {
+    auto& s = readings.sample;
     for (size_t i = 0; i < n; ++i) {
         const CachedValue&     cv  = v[i];
         const def::HomeHubReg* row = modbus_row_for_cv(cv, profile);
@@ -1870,10 +1991,10 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
             }
             break;
         case 22:
-            mb_fault_code = logic::fault_code_pack(cv.value.c_str());
+            readings.fault_code = logic::fault_code_pack(cv.value.c_str());
             break;
         case 23:
-            if (exact_int(cv, val) && val > 0 && val <= 999) mb_fault_sub = val;
+            if (exact_int(cv, val) && val > 0 && val <= 999) readings.fault_sub = val;
             break;
         case 30:
             if (exact_int(cv, val) && (val == 0 || val == 1)) {
@@ -1892,6 +2013,12 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
                 s.bsh_known = true;
                 s.bsh_on    = (val == 1);
             }
+            break;
+        case 35:
+            readings.no_defrost = exact_int(cv, val) && val == 0;
+            break;
+        case 36:
+            readings.no_hot_start = exact_int(cv, val) && val == 0;
             break;
         case 37:
             if (exact_int(cv, val) && (val == 0 || val == 1)) {
@@ -1925,6 +2052,9 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         case 49:
             if (cov.flow && !cv.modbus_flow_scale_unverified) s.flow_ok = tenths(cv, s.flow_tenths);
             break;
+        case 53:
+            readings.normal_space = exact_int(cv, val) && val == 1;
+            break;
         default:
             break;
         }
@@ -1953,24 +2083,63 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     fold_energy_locked(s_modbus, ein, bucket, discard_energy_sample);
 }
 
+[[gnu::noinline]] static int64_t modbus_heating_wall_us() {
+    int64_t unix_s  = -1;
+    int32_t unix_ms = 0;
+    time_now(unix_s, unix_ms);
+    return unix_s > 0 && unix_s <= UINT32_MAX ? unix_s * 1000000 + unix_ms * 1000 : -1;
+}
+
+[[gnu::noinline]] static void record_modbus_heating_locked(const ModbusCheckupReadings& readings,
+                                                           uint32_t source_generation,
+                                                           bool     source_confirmed,
+                                                           uint32_t link_generation,
+                                                           int64_t  sweep_started_us) {
+    if (!s_modbus.cov.flow || !s_modbus.source_confirmed || hydronic_observation_suppressed()) {
+        s_modbus_heating.reset();
+        s_modbus_heating_target = 0;
+        return;
+    }
+    if (!source_confirmed || !link_generation) {
+        s_modbus_heating.break_run();
+        return;
+    }
+
+    if (s_modbus_heating_target != source_generation) s_modbus_heating.reset();
+    if (s_modbus_heating_link != link_generation) s_modbus_heating.break_run();
+    s_modbus_heating_target = source_generation;
+    s_modbus_heating_link   = link_generation;
+    const auto& s           = readings.sample;
+    const bool  eligible    = s.flow_ok && s.flow_tenths > 0 && s.flow_tenths <= UINT16_MAX &&
+                          s.pump_known && s.pump_on && s.rps_known && s.rps_running &&
+                          s.valve_known && !s.valve_dhw &&
+                          s.operating_mode == logic::CheckupOperatingMode::Heating &&
+                          readings.no_defrost && readings.no_hot_start && readings.normal_space;
+    const int64_t wall_us = modbus_heating_wall_us();
+    s_modbus_heating.record(esp_timer_get_time(), sweep_started_us, wall_us,
+                            eligible ? static_cast<uint16_t>(s.flow_tenths) : 0);
+}
+
 void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
                            uint32_t source_generation, uint32_t consent_epoch,
-                           bool source_confirmed, ModbusProfileBasis basis) {
+                           bool source_confirmed, ModbusProfileBasis basis,
+                           int64_t sweep_started_us, uint32_t link_generation) {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (!s_mtx) return;
     if (!v && n) return;
 
     const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile, basis);
-    logic::CheckupSample         s;
-    int64_t                      unix_s  = -1;
-    int32_t                      unix_ms = 0;
-    time_now(unix_s, unix_ms);
-    if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
+    ModbusCheckupReadings        readings;
+    auto&                        s = readings.sample;
+    {
+        int64_t unix_s  = -1;
+        int32_t unix_ms = 0;
+        time_now(unix_s, unix_ms);
+        if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
+    }
     s.x10a_blind = !n;
 
-    uint16_t mb_fault_code = 0;
-    int      mb_fault_sub  = 0;
-    modbus_collect_sample(v, n, profile, cov, s, mb_fault_code, mb_fault_sub);
+    modbus_collect_sample(v, n, profile, cov, readings);
 
     const uint32_t              dhw_generation         = s_dhw_identity_generation.load();
     const uint32_t              circulation_generation = circulation_source_generation();
@@ -1997,13 +2166,34 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
         s_modbus.cov        = cov;
         s_modbus.energy_cov = logic::energy_modbus_coverage(profile, basis);
     }
+    record_modbus_heating_locked(readings, source_generation, source_confirmed, link_generation,
+                                 sweep_started_us);
     s_modbus.fault_now    = s.fault;
     s_modbus.pressure_now = -1;
     if (n) s_modbus.source_last_us = now;
     if (s_modbus.source_confirmed && now >= 0)
-        modbus_fault_trace_locked(mb_fault_code, mb_fault_sub, s.fault, now);
+        modbus_fault_trace_locked(readings.fault_code, readings.fault_sub, s.fault, now);
     commit_and_fold_locked(s_modbus, s, now, bucket, discard_dhw_sample);
     modbus_fold_energy_locked(v, n, profile, s, now, bucket, discard_energy_sample);
+}
+
+void checkup_modbus_heating_break(uint32_t source_generation, uint32_t consent_epoch) {
+    if (!s_mtx || !s_diagnostics_enabled.load(std::memory_order_acquire)) return;
+    Lock lk(s_mtx);
+    if (lk && consent_admitted(consent_epoch) && mb_target_generation_matches(source_generation))
+        s_modbus_heating.break_run();
+}
+
+logic::ModbusHeatingFlowReport checkup_modbus_heating_report() {
+    if (!s_mtx || safe_mode_active() || hydronic_observation_suppressed()) return {};
+    Lock lk(s_mtx);
+    if (!lk || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
+        !s_modbus.source_confirmed || s_modbus.reset_requested.load() || !s_modbus.cov.flow ||
+        !mb_target_generation_matches(s_modbus_heating_target))
+        return {};
+    const int64_t wall_us = modbus_heating_wall_us();
+    const auto    report  = s_modbus_heating.report(esp_timer_get_time(), wall_us);
+    return hydronic_observation_suppressed() ? logic::ModbusHeatingFlowReport{} : report;
 }
 
 static void expire_restored_locked(CheckupSlot& slot);
@@ -2019,11 +2209,23 @@ void checkup_stop_context_expire(int64_t) {
     // caller timestamp cannot masquerade as a regressed monotonic clock.
     const int64_t now_us = esp_timer_get_time();
     logic::cycling_run_context_expire(s_run_ctx_tracker, now_us);
-    const auto    event  = logic::stop_context_expire(s_stop_context, now_us);
+    const auto event = logic::stop_context_expire(s_stop_context, now_us);
     if (event.valid) {
         stop_observation_record(now_us, false, event);
         s_stop_read_fence_us = now_us;
     }
+}
+
+void checkup_heater_context_expire() {
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (!lk || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
+        s_x10a.reset_requested.load() || s_x10a.seal_bucket != INT64_MIN)
+        return;
+    // Read time after admission. A history tick that waited behind a newer sweep must not
+    // present its earlier timestamp as a clock regression or later admit an older snapshot.
+    s_heater_read_fence_us = esp_timer_get_time();
+    heater_context_expire();
 }
 
 CheckupStopContextReport checkup_stop_context_report() {
@@ -2343,11 +2545,11 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
         slot.P().ring.first_sample_us >= 0 && now_us >= slot.P().ring.first_sample_us
             ? now_us - slot.P().ring.first_sample_us
             : 0;
-    const uint32_t span_s    = static_cast<uint32_t>(std::min<int64_t>(
+    const uint32_t span_s = static_cast<uint32_t>(std::min<int64_t>(
         logic::CHECKUP_WINDOW_S, live_span_us / 1000000 + slot.P().ring.carried_span_us / 1000000));
-    auto           window    = logic::checkup_aggregate(slot.P().ring);
-    window.flags = static_cast<uint8_t>(window.flags | fault_saved_flags_locked(slot, now_us));
-    window.full_span         = span_s >= logic::CHECKUP_WINDOW_S;
+    auto           window = logic::checkup_aggregate(slot.P().ring);
+    window.flags     = static_cast<uint8_t>(window.flags | fault_saved_flags_locked(slot, now_us));
+    window.full_span = span_s >= logic::CHECKUP_WINDOW_S;
     if (dhw_trace) copy_dhw_trace_locked(slot, dhw_trace, now_us, source_fresh);
     // The circulation reset can latch during the optional clock read. Fence the timeline,
     // aggregate, scope age and progress together; only the producer consumes the reset.
@@ -2434,7 +2636,7 @@ bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket, int64_t& bucke
             if (logic::checkup_journal_revision_emit(slot.revision, target, revision))
                 slot.revision_acked.store(INT64_MIN);
 
-            const size_t age = static_cast<size_t>(newest - target);
+            const size_t age    = static_cast<size_t>(newest - target);
             const size_t ring_i = (static_cast<size_t>(slot.P().ring.head) +
                                    logic::CHECKUP_COMPLETED_BUCKETS - 1 - age) %
                                   logic::CHECKUP_COMPLETED_BUCKETS;
@@ -2478,8 +2680,7 @@ void checkup_flash_appended(int64_t bucket, DiagnosticsSource source) {
 
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
                                                 int64_t now_unix_s, DiagnosticsSource source) {
-    if (!s_mtx || now_unix_s < 0 || (!records && count))
-        return CheckupFlashRestoreResult::Ignored;
+    if (!s_mtx || now_unix_s < 0 || (!records && count)) return CheckupFlashRestoreResult::Ignored;
     CheckupSlot& slot = slot_for(source);
     Lock         lk(s_mtx, 0);
     if (!lk.acquired()) return CheckupFlashRestoreResult::Deferred;
@@ -2499,7 +2700,7 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     };
     auto P = [&slot]() -> PersistedCheckup& { return slot.P(); };
 
-    const int64_t now_us          = esp_timer_get_time();
+    const int64_t                 now_us          = esp_timer_get_time();
     const bool                    reset_requested = slot.reset_requested.load();
     logic::CheckupJournalLiveSpan live;
     if (P().ring.count && P().ring.count == P().dhw.count && P().ring.count == P().energy.count &&
@@ -2661,7 +2862,7 @@ CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTra
                                                   const logic::CyclingTraceIdentity& identity,
                                                   int64_t now_unix_s, TickType_t wait_ticks,
                                                   DiagnosticsSource source) {
-    using Result = CheckupFlashRestoreResult;
+    using Result      = CheckupFlashRestoreResult;
     CheckupSlot& slot = slot_for(source);
     if (slot.cycling_forgotten.load(std::memory_order_acquire)) return Result::Ignored;
     if (!s_mtx) return Result::Deferred;

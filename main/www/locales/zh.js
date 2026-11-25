@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -169,7 +169,7 @@ I18N.zh = localeValues([
   /* check.fault */ "机组故障",
   /* check.dhw_loss */ "热水箱降温",
   /* check.cycling */ "压缩机启动",
-  /* check.defrost */ "除霜次数",
+  /* check.defrost */ "除霜",
   /* check.pressure */ "水压",
   /* check.flow */ "最低流量",
   /* check.flow.lowest */ "供暖时的最低流量",
@@ -180,7 +180,7 @@ I18N.zh = localeValues([
   /* check.flow.show */ "在曲线上显示一个最低点",
   /* check.flow.readout */ (value) => `这一时间段内，至少有一次测得 ${value}。测量时，室内供暖已连续运行至少 10 分钟。`,
   /* check.flow.locations_missing */ "未保存此前测得该数值的具体时间。",
-  /* check.flow.x10a_only */ "供暖时的最低流量根据 X10A 的测量值计算。",
+  /* check.flow.unavailable */ "缺少确定供暖时最低流量所需的测量值。",
   /* check.flow.waiting */ "正在等待符合条件的供暖时段。",
   /* check.heater */ "电加热器",
   /* check.retries */ "保护计数器",
@@ -232,7 +232,6 @@ I18N.zh = localeValues([
   /* check.detail.fault.past */ "当前无消息；本时段曾记录消息。消息消失不能证明原因或问题已解决。",
   /* check.detail.fault.past_unknown */ "曾记录消息；当前故障状态无法读取。",
   /* check.detail.collecting */ (a, b) => `可读信号：${a}，要求${b}。`,
-  /* check.detail.outdoor_defrost */ " X10A 室外数据只包含除霜状态和压缩机状态可读且压缩机运行时的近期样本，仅提供背景，不改变除霜阈值或结论。",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `已接受的小时窗口：${a}；当前候选：${c}/${d}。`,
   /* check.detail.dhw_settling */ (a, b, c) => `已接受的小时窗口：${a}；检测到水箱加热或电加热器。剩余稳定时间：${c}。`,
   /* check.detail.dhw_waiting */ (a, b) => `已接受的小时窗口：${a}；等待下一个符合条件的小时。`,
@@ -249,8 +248,6 @@ I18N.zh = localeValues([
   /* check.detail.experimental */ "实验计数器；稳定不排除限流。",
   /* check.detail.unavailable */ "本配置无可评估信号。",
   /* check.starts */ (n) => `${n} 次启动`,
-  /* check.cycles */ (n) => `${n} 个循环`,
-  /* check.paired_cycles */ (n) => `${n} 个已配对`,
   /* check.cycling.runs */ (n) => `${n} 次运行`,
   /* check.cycling.mean */ (d) => `平均 ${d}`,
   /* check.cycling.completed */ "已完成的运行",
@@ -316,8 +313,15 @@ I18N.zh = localeValues([
   /* check.cycling.e_ongoing */ "最近读数时仍在运行。",
   /* check.cycling.cause_unavailable */ "无详情",
   /* check.cycling.cause_older_unavailable */ "这些较早的运行没有可用的已保存启停详情。",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
+  /* check.heater_context.title */ "上报加热器标志的上下文",
+  /* check.heater_context.columns */ "上下文|BUH|BSH",
+  /* check.heater_context.counts */ "阳性时长 / 可评估的 ON 时长 · 阳性样本数",
+  /* check.heater_context.categories */ "应急运行标志|错误状态|除霜/恢复|热水流路|Silent Mode 标志|室外 ≤+2°C|室外 >+2°C|上报压缩机已停止|Silent Mode + 温和室外条件下供暖",
+  /* check.heater_context.totals */ "上报 ON|上下文并集|重叠|未知上下文|无阳性类别|标志可读时长",
+  /* check.heater_context.states */ "来源未确认|未标定日期的观测|24 小时覆盖不完整|存档尚未验证|等待存储|存档不可用：记录损坏或未读取|时间不确定|计数饱和：仅为下界|不支持",
+  /* check.heater_context.notice */ "在 Silent Mode、供暖和温和室外条件下，上报加热器时长至少 15 分钟：项目暂定提示。",
+  /* check.heater_context.rule */ "区间两端可读，缺口 ≤15 秒。恢复期仅限于供暖时观察到除霜结束后的 300 秒内。+2°C 分界和 900 秒提示均为项目启发式规则。",
+  /* check.heater_context.limits */ "每个加热器的类别分别重叠。缺少的上下文仍为未知。这不能确定能耗、运行原因、双热源运行原因或必要性。警告不等于应急运行；Low noise control 不作分类。 采样点之间的状态仍为未知。",
   /* check.min */ (m) => `${m} 分钟`,
   /* check.tank_runtime */ (d) => `水箱 ${d}`,
   /* check.buh_runtime */ (d) => `辅助 ${d}`,
@@ -377,19 +381,23 @@ I18N.zh = localeValues([
   /* check.detail.period_label */ "数据时段：",
   /* check.detail.period */ (a) => `${a}，最多24小时；可能缺测`,
   /* check.detail.age_label */ "最后测量值的年龄：",
-  /* check.detail.horizon_wait */ (a) => `尚未形成完整24小时窗口：还需 ${a}。`,
   /* check.detail.fault.ok */ "可读故障信号中无当前或保存的消息。",
-  /* check.detail.defrost.info */ "至少3次配对除霜超过可读压缩机运行时间的15%：项目提示。",
-  /* check.detail.defrost.ok */ "无项目除霜比例提示；天气和缺口未评估。",
-  /* check.defrost.last_start */ (date, route, outdoor) => `最近一次观察到的除霜启动 · ${date} · 回路 ${route} · 室外气温 ${outdoor}`,
-  /* check.defrost.route_space */ "供暖",
-  /* check.defrost.route_dhw */ "热水罐",
+  /* check.defrost.normal */ "寒冷潮湿时，短时除霜很常见。除霜占比表示在能够读取除霜状态的压缩机运行时间中，有多少时间用于除霜。",
+  /* check.defrost.modbus.about */ "Modbus 用同一个信号表示除霜和压缩机重启准备。",
+  /* check.defrost.modbus.normal */ "稳定运行时信号关闭。这两个阶段均可使信号开启。",
+  /* check.defrost.starts_label */ "记录到的除霜启动次数",
+  /* check.defrost.share */ "除霜占比",
+  /* check.defrost.notice */ "除霜占比较高",
   /* check.detail.pressure.info */ "偏低",
   /* check.detail.pressure.warn */ "危急",
   /* check.detail.pressure.ok */ "正常",
-  /* check.detail.defrost_events_insufficient */ "少于3次配对除霜；不作比例判定。",
+  /* check.pressure.finding */ "已确认的结果",
+  /* check.pressure.sustained */ (a) => `压力连续至少 60 秒不高于 ${a}。`,
+  /* check.pressure.clear */ "未确认有持续低压。",
+  /* check.pressure.rules */ "如何评估水压？",
+  /* check.pressure.unavailable */ "X10A 水压诊断不可用。",
+  /* check.pressure.pending */ "读数处于危险范围，持续时间尚不明确。",
   /* check.detail.source_stale */ "无新鲜X10A样本；当前状态未知。保留历史。",
-  /* check.detail.no_paired_runtime */ "无配对可读运行时间；仅次数。",
   /* check.detail.current_label */ "≤1.0 bar 偏低",
   /* check.detail.minimum_time_label */ "≤0.5 bar 危急",
   /* check.detail.coverage_missing */ (a) => `缺少可读时间：${a} s。`,
@@ -501,7 +509,7 @@ I18N.zh = localeValues([
   /* hist.boost_active */ "增载中",
   /* hist.boost_inactive */ "未增载",
   /* hist.boost_aria */ zhAria("Smart Grid 四种状态的历史"),
-  /* hist.defrost_total */ (d) => `除霜 · ${d}`,
+  /* hist.defrost_total */ (d) => `检测到除霜的 5 分钟区段 · ${d}`,
   /* hist.defrost_none */ "记录期内未观察到除霜循环。",
   /* hist.defrost_active */ "正在除霜",
   /* hist.defrost_inactive */ "未除霜",
@@ -629,7 +637,7 @@ I18N.zh = localeValues([
   /* schem.card_aria */ "系统实时示意图：室外机、制冷剂回路、板式换热器、带备用加热器和三通阀的水回路、生活热水箱和空间调温回路",
   /* schem.group_aria */ "系统实时示意图——选择数值或部件可查看说明",
   /* schem.outdoor_unit */ "室外机",
-  /* schem.defrost_pill */ "❄ 除霜",
+  /* schem.defrost_pill */ "除霜",
   /* schem.outdoor */ "室外",
   /* insp.close */ "关闭",
   /* schem.defrost_transfer */ "确认正在除霜时，热量可能从水传向制冷剂。只有当前流量和温度支持这一判断时，管路才会显示该方向。",
@@ -1104,7 +1112,7 @@ INSPECT_I18N.zh = inspectValues(
     ["PHE 回水管", "PHE 回水管", "支路汇合后经 R4T 回 PHE；不是末端专用传感器。", (d) => waterMoving(d) ? `${degC(d.ret)}，${fmt1(d.flow)} l/min，${fmt1(d.wp)} bar。` : "泵/流量未证明回水循环。"], // wret
     ["流量", "水流量", "公共水路流量；最低值随型号，须结合泵和压力。"], // flow
     ["流量开关状态", "流量开关状态", "X10A 二进制输入；不测 l/min 或确认最低流量。", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A 启动；结合泵和 ${fmt1(d.flow)} l/min。` : `X10A 未启动；结合 ${fmt1(d.flow)} l/min 与 7H/C0。`], // flow_switch
-    ["水压", "水路压力", "水压，非制冷剂压力；范围取决于型号/安装。"], // wp
+    ["水压", "水路压力"], // wp
   ],
 );
 
@@ -1186,7 +1194,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
   ["PHE 后、BUH 前 R1T；配合 R4T/流量估算功率，位置随型号。"], // 34
   ["PHE 回水 R4T；须结合流量/压缩机/模式，无统一 5 K。"], // 35
   ["公共水流量；最低值随型号/模式，过低可触发 7H。"], // 36
-  ["水压；许多手册要求 >1 bar，≤1.0 bar 时查确切型号手册。"], // 37
+  ["封闭液压回路中的水压。","许多 Altherma 手册要求泵入口的压力高于 1 bar。允许的压力范围取决于机型、安装高度和膨胀罐。压力为 1.0 bar 或更低时，请查阅相应机型的手册。"], // 37
   ["反向 X10A 指令：0 = 最大，100 = 停机（[0, 100] → 100–0 %）。不测 RPM 也不证明旋转、扬程或流量；请分开查看开关状态与流量。"], // 38
   ["泵状态；须结合流量，运行不证明换热。"], // 39
   ["太阳能回路泵状态；不同于热泵水路泵。"], // 40
@@ -1197,9 +1205,9 @@ DESCRIPTION_I18N.zh = descriptionValues([
   ["当前空间冷暖模式；不证明压缩机启动。"], // 45
   ["HomeHub 配置的自动/暖/冷选择；非室外机当前状态。"], // 46
   ["室外机停/暖/冷状态；停机仍可保留选择，不证明供热。"], // 47
-  ["输入寄存器 35 中的化霜与压缩机重启合并标志；OFF = 正常，ON = 化霜或重启准备。"], // 48
+  ["HomeHub 输入寄存器 35 合并了除霜和压缩机重启两种状态。", "稳定运行时信号关闭。信号开启表示正在除霜或准备重启。"], // 48
   ["输入寄存器 36 中的热启动标志；OFF = 稳定运行，ON = 恢复供水前的短暂换热器预热。"], // 49
-  ["室外机除霜；寒湿时正常，单个位不能诊断过多。"], // 50
+  ["除霜用于清除室外换热器上的霜。", "寒冷潮湿时除霜属正常现象。仅凭此信号无法判断除霜是否过于频繁。"], // 50
   ["当前故障严重级别：正常、错误、警告或提醒。"], // 51
   ["当前所报告故障代码的含义"], // 52
   ["故障后应急运行，可使用 BUH/锅炉。"], // 53

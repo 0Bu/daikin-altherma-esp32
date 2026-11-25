@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -169,7 +169,7 @@ I18N.sv = localeValues([
   /* check.fault */ "Anläggningsfel",
   /* check.dhw_loss */ "Tankavsvalning",
   /* check.cycling */ "Kompressorstarter",
-  /* check.defrost */ "Avfrostningar",
+  /* check.defrost */ "Avfrostning",
   /* check.pressure */ "Vattentryck",
   /* check.flow */ "Lägsta vattenflöde",
   /* check.flow.lowest */ "Lägsta flöde vid uppvärmning",
@@ -180,7 +180,7 @@ I18N.sv = localeValues([
   /* check.flow.show */ "Visa ett lägsta värde i grafen",
   /* check.flow.readout */ (value) => `Under det här tidsavsnittet uppmättes ${value} minst en gång. Rumsuppvärmningen hade då pågått i minst tio minuter.`,
   /* check.flow.locations_missing */ "Tidpunkten för äldre mätningar med det här värdet sparades inte.",
-  /* check.flow.x10a_only */ "Det lägsta flödet vid uppvärmning beräknas från X10A-mätningar.",
+  /* check.flow.unavailable */ "De mätvärden som behövs för att fastställa det lägsta flödet vid uppvärmning saknas.",
   /* check.flow.waiting */ "Väntar på en uppvärmningsperiod som uppfyller mätvillkoren.",
   /* check.heater */ "Elpatroner",
   /* check.retries */ "Skyddsräknare",
@@ -232,7 +232,6 @@ I18N.sv = localeValues([
   /* check.detail.fault.past */ "Inget meddelande är aktivt nu; ett registrerades under perioden. Att det försvann bevisar varken orsak eller lösning.",
   /* check.detail.fault.past_unknown */ "Ett meddelande registrerades; aktuellt feltillstånd kan inte läsas.",
   /* check.detail.collecting */ (a, b) => `Läsbara signaler: ${a} av ${b} krävs.`,
-  /* check.detail.outdoor_defrost */ " X10A-utomhusdata är endast aktuella mätningar medan avfrostning och kompressorstatus var läsbara och kompressorn gick. De är sammanhang och ändrar inte gränsen eller bedömningen.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Godkända timfönster: ${a}; aktuell kandidat: ${c} av ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Godkända timfönster: ${a}; tankladdning eller tankvärmare upptäckt. Återstående stabilisering: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Godkända timfönster: ${a}; väntar på nästa lämpliga timme.`,
@@ -249,8 +248,6 @@ I18N.sv = localeValues([
   /* check.detail.experimental */ "Experimentella räknare; stabilitet utesluter inte begränsning.",
   /* check.detail.unavailable */ "Ingen bedömbar signal i denna profil.",
   /* check.starts */ (n) => `${n} ${n === 1 ? "start" : "starter"}`,
-  /* check.cycles */ (n) => `${n} ${n === 1 ? "cykel" : "cykler"}`,
-  /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "klassificerad" : "klassificerade"}`,
   /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "körning" : "körningar"}`,
   /* check.cycling.mean */ (d) => `Snitt ${d}`,
   /* check.cycling.completed */ "Avslutade körningar",
@@ -316,8 +313,15 @@ I18N.sv = localeValues([
   /* check.cycling.e_ongoing */ "Aktiv vid senaste mätning.",
   /* check.cycling.cause_unavailable */ "Inga detaljer",
   /* check.cycling.cause_older_unavailable */ "Sparade start- och stoppuppgifter saknas för de här äldre körningarna.",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
+  /* check.heater_context.title */ "Sammanhang för rapporterade värmarflaggor",
+  /* check.heater_context.columns */ "Sammanhang|BUH|BSH",
+  /* check.heater_context.counts */ "Positiv tid / bedömbar ON-tid · positiva mätpunkter",
+  /* check.heater_context.categories */ "nöddriftsflagga|felstatus|avfrostning/återhämtning|varmvattenväg|Silent Mode-flagga|uteluft ≤+2°C|uteluft >+2°C|kompressorn rapporterad stoppad|Silent Mode + uppvärmning vid milt väder",
+  /* check.heater_context.totals */ "rapporterad ON|union av sammanhang|överlappning|okänt sammanhang|ingen positiv kategori|tid med läsbar flagga",
+  /* check.heater_context.states */ "Källan är obekräftad|Odaterade observationer|Ofullständiga 24 h|Arkivet är ännu inte validerat|Lagring väntar|Arkivet är otillgängligt: skadade eller olästa poster|Osäker tid|Mättnad: undre gränser|Stöds inte",
+  /* check.heater_context.notice */ "Minst 15 minuter rapporterad värmartid med Silent Mode, uppvärmning och mild uteluft: preliminär projektanmärkning.",
+  /* check.heater_context.rule */ "Läsbara intervalländar, luckor ≤15 s. Återhämtningen begränsas till 300 s efter observerat avfrostningsslut under uppvärmning. Gränsen +2°C och anmärkningen efter 900 s är projektheuristiker.",
+  /* check.heater_context.limits */ "Kategorierna överlappar separat för varje värmare. Saknat sammanhang förblir okänt. Energi, driftorsak, bivalens eller nödvändighet är inte fastställd. En varning är inte nöddrift; Low noise control är oklassificerad. Tillstånd mellan mätpunkterna förblir okända.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `Tank ${d}`,
   /* check.buh_runtime */ (d) => `Tillsats ${d}`,
@@ -377,19 +381,23 @@ I18N.sv = localeValues([
   /* check.detail.period_label */ "Dataperiod:",
   /* check.detail.period */ (a) => `${a}, högst 24 h; möjliga luckor`,
   /* check.detail.age_label */ "Senaste mätningens ålder:",
-  /* check.detail.horizon_wait */ (a) => `Ett helt 24-timmarsfönster saknas ännu: ${a} återstår.`,
   /* check.detail.fault.ok */ "Inget aktuellt eller sparat meddelande i läsbara felsignaler.",
-  /* check.detail.defrost.info */ "≥3 parade avfrostningar överstiger 15% av läsbar kompressortid: projekttips.",
-  /* check.detail.defrost.ok */ "Inget avfrostningsandelstips; väder och luckor ej bedömda.",
-  /* check.defrost.last_start */ (date, route, outdoor) => `Senast observerade avfrostningsstart · ${date} · Krets ${route} · Uteluft ${outdoor}`,
-  /* check.defrost.route_space */ "Rumsuppvärmning",
-  /* check.defrost.route_dhw */ "Varmvattentank",
+  /* check.defrost.normal */ "Kort avfrostning är vanligt i kallt, fuktigt väder. Avfrostningsandelen visar hur stor del av kompressorns drifttid med känd avfrostningsstatus som gick till avfrostning.",
+  /* check.defrost.modbus.about */ "Modbus använder samma signal för avfrostning och förberedelse för omstart av kompressorn.",
+  /* check.defrost.modbus.normal */ "Signalen är av vid stabil drift. Båda faserna kan aktivera den.",
+  /* check.defrost.starts_label */ "Registrerade avfrostningsstarter",
+  /* check.defrost.share */ "Avfrostningsandel",
+  /* check.defrost.notice */ "Hög avfrostningsandel",
   /* check.detail.pressure.info */ "Lågt",
   /* check.detail.pressure.warn */ "Kritiskt",
   /* check.detail.pressure.ok */ "Normalt",
-  /* check.detail.defrost_events_insufficient */ "Färre än tre parade avfrostningar; ingen andelsbedömning.",
+  /* check.pressure.finding */ "Bekräftat fynd",
+  /* check.pressure.sustained */ (a) => `Tryck på ${a} eller lägre i minst 60 sekunder i följd.`,
+  /* check.pressure.clear */ "Inget ihållande lågt tryck har bekräftats.",
+  /* check.pressure.rules */ "Hur bedöms trycket?",
+  /* check.pressure.unavailable */ "X10A-tryckdiagnosen är inte tillgänglig.",
+  /* check.pressure.pending */ "Mätvärdet ligger i det kritiska området. Varaktigheten är fortfarande okänd.",
   /* check.detail.source_stale */ "Inget färskt X10A-prov; aktuellt tillstånd okänt. Historik behålls.",
-  /* check.detail.no_paired_runtime */ "Ingen parad läsbar drifttid; bara antal.",
   /* check.detail.current_label */ "≤1,0 bar lågt",
   /* check.detail.minimum_time_label */ "≤0,5 bar kritiskt",
   /* check.detail.coverage_missing */ (a) => `Saknad läsbar tid: ${a} s.`,
@@ -501,7 +509,7 @@ I18N.sv = localeValues([
   /* hist.boost_active */ "Boost aktiv",
   /* hist.boost_inactive */ "Boost av",
   /* hist.boost_aria */ svAria("Smart Grid-historik med fyra lägen"),
-  /* hist.defrost_total */ (d) => `Avfrostning registrerad · ${d} i 5-minutersintervall`,
+  /* hist.defrost_total */ (d) => `5-minutersblock med avfrostning · ${d}`,
   /* hist.defrost_none */ "Ingen avfrostning registrerad i perioden.",
   /* hist.defrost_active */ "Avfrostning aktiv",
   /* hist.defrost_inactive */ "Avfrostning av",
@@ -629,7 +637,7 @@ I18N.sv = localeValues([
   /* schem.card_aria */ "Live systemschema: utomhusenhet, köldmediekrets, plattvärmeväxlare, vattenkrets med tillsatsvärmare och 3-vägsventil, varmvattentank och rumskrets",
   /* schem.group_aria */ "Live systemschema — välj ett värde eller en komponent för en förklaring",
   /* schem.outdoor_unit */ "Utomhusenhet",
-  /* schem.defrost_pill */ "❄ Avfrostning",
+  /* schem.defrost_pill */ "Avfrostning",
   /* schem.outdoor */ "Ute",
   /* insp.close */ "Stäng",
   /* schem.defrost_transfer */ "Vid bekräftad avfrostning kan värme överföras från vattnet till köldmediet. Rören visar den riktningen bara när flödet och temperaturerna just nu stöder den.",
@@ -1121,7 +1129,7 @@ INSPECT_I18N.sv = inspectValues(
     ["PHE-inloppsrör", "Inloppsrör till PHE", "Gemensam retur via R4T; inte en särskild givare vid avgivarna.", (d) => waterMoving(d) ? `${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Pump/flöde bevisar inte returcirkulation."], // wret
     ["Vattenflöde", 0, "Gemensamt vattenflöde; miniminivån beror på modell och ska tolkas med pump/tryck."], // flow
     ["Flödesvakt", 0, "Binär X10A-status; mäter inte l/min eller bekräftar minimiflöde.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? d.flow == null ? "X10A-status aktiv; flödesmätning saknas." : `X10A-status aktiv; jämför pump och ${fmt1(d.flow)} l/min.` : d.flow == null ? "X10A-status inaktiv; flödesmätning saknas." : `X10A-status inaktiv; jämför ${fmt1(d.flow)} l/min och 7H/C0.`], // flow_switch
-    ["Vattentryck", 0, "Vattentryck, inte köldmedietryck; tillåtet intervall beror på modell/installation."], // wp
+    ["Vattentryck", 0], // wp
   ],
 );
 
@@ -1203,7 +1211,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
   ["R1T från PHE före BUH; R4T/flöde ger en uppskattning vars placering är modellberoende."], // 34
   ["R4T-retur till PHE; bedöm ΔT med flöde, kompressor och läge, inte en universell 5 K-regel."], // 35
   ["Vattenflöde i gemensam krets; minimum beror på modell/läge och lågt värde kan utlösa 7H."], // 36
-  ["Hydraultryck: många handböcker kräver >1 bar; vid ≤1,0 bar gäller handboken för exakt modell."], // 37
+  ["Vattentrycket i den slutna vattenkretsen.","Många Altherma-handböcker kräver över 1 bar vid pumpinloppet. Tillåtet tryckintervall beror på modell, installationshöjd och expansionskärl. Vid 1,0 bar eller lägre, läs handboken för den aktuella enheten."], // 37
   ["Inverterat X10A-kommando: 0 = max, 100 = stopp ([0, 100] → 100–0 %). Mäter inga RPM och bevisar inte rotation, tryckhöjd eller flöde; läs PÅ/AV och flöde separat."], // 38
   ["Pumpstatus; bevisar inte nyttig värme och kan vara aktiv utan kompressor. Jämför flödet."], // 39
   ["Status för pumpen i en konfigurerad solvärmekrets."], // 40
@@ -1214,9 +1222,9 @@ DESCRIPTION_I18N.sv = descriptionValues([
   ["Aktuellt rumsläge värme/kyla utan Auto; kräver aktivitetssignal och bevisar inte kompressordrift."], // 45
   ["HomeHub-val Auto/värme/kyla; konfiguration, inte aktuell drift eller bevis på aktivitet."], // 46
   ["Utomhusstatus stopp/värme/kyla; kan stå kvar med kompressorn av och bevisar inte värme."], // 47
-  ["Kombinerad flagga för avfrostning och kompressoromstart i register 35; OFF = normal drift, ON = avfrostning eller omstartsförberedelse."], // 48
+  ["HomeHub-register 35 kombinerar avfrostning och förberedelse för kompressorns omstart.", "Vid stabil drift är signalen av. En aktiv signal betyder avfrostning eller omstartsförberedelse."], // 48
   ["Varmstartsflagga i register 36; OFF = stabil drift, ON = kort förvärmning av värmeväxlaren innan värmedrift fortsätter."], // 49
-  ["Avfrostning av utomhusenheten; normalt i kallt/fuktigt väder, men biten diagnostiserar inte frekvens."], // 50
+  ["Avfrostning tar bort frost från utomhusenhetens värmeväxlare.", "Avfrostning är normalt vid kallt och fuktigt väder. Signalen ensam kan inte avgöra om cyklerna är för täta."], // 50
   ["Allvarlighetsklass för aktivt meddelande: Normal, Fel, Varning eller Försiktighet."], // 51
   ["Betydelsen av felkoden som rapporteras nu."], // 52
   ["Nöddrift efter värmepumpsfel."], // 53

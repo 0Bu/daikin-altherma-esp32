@@ -26,6 +26,7 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools/stack"))
+import heater_context as heater_stack
 import stop_observation as stop_stack
 from packed_config import CONFIG_PACKED_SYMBOLS, restore_packed_config, self_test as packed_config_self_test
 DEFAULT_BUDGETS = REPO / "tools/stack/budgets.json"
@@ -51,6 +52,8 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'httpd_recv_with_opt',
     'httpd_recv',
     'httpd_resp_send',
+    'httpd_resp_send_chunk',
+    'httpd_default_send',
     'httpd_req_recv',
     'httpd_req_async_handler_begin',
     'httpd_req_async_handler_complete',
@@ -746,11 +749,11 @@ def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> 
     serializer = re.compile(budgets["symbols"]["status_serializer"]["pattern"])
     direct = re.compile(r"^\s*[0-9a-f]+:\s+[0-9a-f]+\s+call8\s+[0-9a-f]+\s+<"
                         + re.escape(STATUS_HEALTH_NUMBER_SYMBOL) + r">\s*$")
-    # The compiler merges one branch tail from the 37 source invocations into 36 calls.
-    if (len(references) != 36
+    # All 37 source invocations remain distinct direct calls.
+    if (len(references) != 37
             or any(not serializer.search(caller) or not direct.match(line)
                    for caller, line in references)):
-        raise BudgetError("diagnosis numeric calls: 36 direct serializer calls require review")
+        raise BudgetError("diagnosis numeric calls: 37 direct serializer calls require review")
 
 
 @lru_cache(maxsize=4)
@@ -773,6 +776,7 @@ def _frame_rule_matcher(patterns: tuple[str, ...]) -> Callable[[str], tuple[int,
 def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dict[str, int]:
     validate_poll_inlining(disassembly)
     stop_stack.validate_inlining(disassembly, BudgetError)
+    heater_stack.validate_inlining(disassembly, BudgetError)
     if budgets is None:
         budgets = load_budgets(DEFAULT_BUDGETS)
     required = _compiled_frame_patterns(tuple(rule["pattern"] for rule in budgets["symbols"].values()))
@@ -1258,6 +1262,7 @@ def shutdown_path_members() -> dict[str, list[str]]:
                                         "checkup_shutdown_reset"]
     paths["poll_board_journal"] = ["poll_task", "history_board", "history_journal", "history_append"]
     paths.update({name: spec[1] for name, spec in stop_stack.shutdown_specs().items()})
+    paths.update({name: spec[1] for name, spec in heater_stack.shutdown_specs().items()})
     return paths
 
 
@@ -1580,7 +1585,7 @@ def validate_ota_upload_paths(budgets: dict[str, Any], sources: dict[str, str]) 
 
 def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
     expected = shutdown_path_members()
-    reviewed_specs = stop_stack.shutdown_specs()
+    reviewed_specs = {**heater_stack.shutdown_specs(), **stop_stack.shutdown_specs()}
     modeled = {name for name in budgets["paths"]
                if "_shutdown" in name or name == "poll_board_journal"}
     if modeled != set(expected):
@@ -1717,6 +1722,8 @@ def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> No
                 expected = "ota_health"
             if path in stop_stack.PATHS:
                 expected = stop_stack.PATHS[path][0]
+            if path in heater_stack.rules.PATHS:
+                expected = heater_stack.rules.PATHS[path][0]
             if expected is None:
                 candidates = [owner for owner in tasks if path.startswith(owner + "_")]
                 if len(candidates) != 1:
@@ -2154,6 +2161,12 @@ CONFIG_DOCUMENT_PATHS = frozenset({
 CONFIG_DOCUMENT_PATHS |= frozenset(
     name for name, (owner, rule) in stop_stack.PATHS.items()
     if owner == "httpd" and set(rule["symbols"]) & CONFIG_DOCUMENT_OWNERS)
+CONFIG_DOCUMENT_PATHS |= frozenset(
+    name for name, (owner, rule) in heater_stack.rules.PATHS.items()
+    if owner == "httpd" and set(rule["symbols"]) & CONFIG_DOCUMENT_OWNERS)
+STAGED_MUTATION_PATHS = frozenset(
+    sorted(path for path in CONFIG_DOCUMENT_PATHS if "_heater_" not in path)
+    + sorted(heater_stack.mutation_path_names() & CONFIG_DOCUMENT_PATHS))
 STAGED_STACK_LIMITS = {"config_document": 48, "http_values_snapshot": 208,
                        "mqtt_modbus_count": 80, "mqtt_modbus_emit": 48}
 CONFIG_DOCUMENT_CALLS = {
@@ -2238,6 +2251,7 @@ CHECKUP_SCHEMA_CHAIN = [
     "checkup_schema_crc", "checkup_schema_profile_lookup", "checkup_schema_profile_view",
     "cycling_seal", "cycling_crc",
     "fault_handoff_decode", "fault_page_decode",
+    *list(heater_stack.rules.SCHEMA_CHAIN),
 ]
 
 
@@ -2256,16 +2270,19 @@ def validate_checkup_schema_paths(budgets: dict[str, Any], sources: dict[str, st
             raise BudgetError(f"checkup schema path {name}: reviewed caller/continuation changed")
     for path, caller in (("main/hp_poll.cpp", "poll_detect"),
                          ("main/http_config.cpp", "set_hp")):
-        if not re.search(r"\bcheckup_reset_on_detect\s*\(",
-                         stack_function_body(sources[path], caller)):
-            raise BudgetError(f"checkup schema caller {caller}: reset path moved")
-    reset = stack_function_body(sources["main/checkup.cpp"], "checkup_reset_on_detect")
-    if not re.search(r"\bcheckup_model_fingerprint\s*\(", reset):
+        body = stack_function_body(sources[path], caller)
+        layout = re.search(r"\bcheckup_profile_layout\s*\(", body)
+        reset_call = re.search(r"\bcheckup_reset_on_detect\s*\(", body)
+        if not layout or not reset_call or layout.start() > reset_call.start():
+            raise BudgetError(f"checkup schema caller {caller}: reset/layout path moved")
+    layout_body = stack_function_body(sources["main/checkup.cpp"], "checkup_profile_layout")
+    if not re.search(r"\bcheckup_model_fingerprint\s*\(", layout_body):
         raise BudgetError("checkup schema caller: fingerprint path moved")
-    calls = sum(len(re.findall(r"\bcheckup_reset_on_detect\s*\(", stack_source_code(text)))
-                for path, text in sources.items() if path.endswith(".cpp"))
-    if calls != 3:  # definition plus the two measured callers
-        raise BudgetError("checkup schema caller inventory changed")
+    for callee in ("checkup_profile_layout", "checkup_reset_on_detect"):
+        calls = sum(len(re.findall(r"\b" + callee + r"\s*\(", stack_source_code(text)))
+                    for path, text in sources.items() if path.endswith(".cpp"))
+        if calls != 3:  # definition plus the two measured callers
+            raise BudgetError(f"checkup schema caller inventory changed ({callee})")
 
 
 def validate_source_contract(budgets: dict[str, Any]) -> None:
@@ -2273,8 +2290,10 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
                for path, _ in TASK_ALLOCATIONS.values()}
     sources.update({str(path.relative_to(REPO)): path.read_text(encoding="utf-8")
                     for suffix in ("*.cpp", "*.hpp") for path in (REPO / "main").rglob(suffix)})
-    sources.update({path: (REPO / path).read_text(encoding="utf-8") for path in stop_stack.EXTRA_SOURCES})
+    sources.update({path: (REPO / path).read_text(encoding="utf-8")
+                    for path in (*stop_stack.EXTRA_SOURCES, *heater_stack.EXTRA_SOURCES)})
     validate_stop_observation_paths(budgets, sources)
+    heater_stack.validate_sources(budgets, sources, BudgetError)
     validate_task_inventory(sources)
     validate_syslog_queue(sources["main/syslog.cpp"])
     validate_small_task_diagnostics(sources)
@@ -2520,7 +2539,7 @@ def load_budgets(path: Path) -> dict[str, Any]:
     for name, value in sdk["config_macros"].items():
         if value is not None and (not is_json_int(value) or value < 0):
             raise BudgetError(f"SDK public macro {name}: expected non-negative integer or absence")
-    return document
+    return heater_stack.expand_budgets(document, BudgetError)
 
 
 def evaluate(frames: dict[str, int], budgets: dict[str, Any], *, integer_digits_inlined: bool = False) -> dict[str, int]:
@@ -2837,7 +2856,9 @@ def disassemble(elf: Path, objdump: str) -> str:
         text = stack_tool_output([objdump, "-d", "-C", str(elf)])
         text = trim_elf_function_extents(text, data)
         text = restore_raw_detect(text, data, elf, objdump)
-        return restore_packed_config(text, data, elf, objdump, stack_tool_output, raw_detect_body, BudgetError)
+        text = restore_packed_config(text, data, elf, objdump, stack_tool_output, raw_detect_body, BudgetError)
+        heater_stack.validate_storage(data, BudgetError)
+        return heater_stack.restore_packed_output(text, data, elf, objdump, stack_tool_output, raw_detect_body, BudgetError)
     finally:
         try:
             after = hashlib.sha256(elf.read_bytes()).digest()
@@ -2928,8 +2949,12 @@ def raw_detect_self_test(fixture: str, budgets: dict[str, Any]) -> int:
 
             # This isolated ELF fixture owns only hp_detect; the six config bodies have their
             # own complete per-symbol ELF/body tests and are not fabricated inside this image.
-            with patch.object(subprocess, "run", tool), patch.dict(
-                    globals(), restore_packed_config=lambda text, *_args: text):
+            with (
+                patch.object(subprocess, "run", tool),
+                patch.dict(globals(), restore_packed_config=lambda text, *_args: text),
+                patch.object(heater_stack, "validate_storage", lambda *_args: None),
+                patch.object(heater_stack, "restore_packed_output", lambda text, *_args: text),
+            ):
                 return disassemble(elf, objdump), calls
 
     restored, calls = exercise()
@@ -3062,18 +3087,19 @@ def staged_stack_self_test(budgets: dict[str, Any]) -> int:
                          ("mqtt_modbus_build", "mqtt_modbus_payload"),
                          ("mqtt_modbus_build", "mqtt_modbus_count"),
                          ("mqtt_modbus_build", "mqtt_modbus_emit"),
-                         *((path, "config_document") for path in sorted(CONFIG_DOCUMENT_PATHS))):
-        changed = json.loads(json.dumps(budgets))
-        changed["paths"][path]["symbols"].remove(member)
+                         *((path, "config_document") for path in sorted(STAGED_MUTATION_PATHS))):
+        rule = budgets["paths"][path]
+        changed = {**budgets, "paths": {**budgets["paths"], path: {
+            **rule, "symbols": [s for s in rule["symbols"] if s != member]}}}
         reject(f"missing {member} in {path}", changed)
-    for path in sorted(CONFIG_DOCUMENT_PATHS | {"httpd_values", "mqtt_modbus_build"}):
-        changed = json.loads(json.dumps(budgets))
-        del changed["paths"][path]
+    for path in sorted(STAGED_MUTATION_PATHS | {"httpd_values", "mqtt_modbus_build"}):
+        changed = {**budgets, "paths": {k: v for k, v in budgets["paths"].items() if k != path}}
         reject(f"missing phase path {path}", changed)
     for owner, path in (("httpd", "httpd_values"), ("httpd", "httpd_config_hp"),
                         ("mqtt", "mqtt_modbus_build")):
-        changed = json.loads(json.dumps(budgets))
-        changed["tasks"][owner]["paths"].remove(path)
+        task_rule = budgets["tasks"][owner]
+        changed = {**budgets, "tasks": {**budgets["tasks"], owner: {
+            **task_rule, "paths": [p for p in task_rule["paths"] if p != path]}}}
         reject(f"missing {owner} ownership of {path}", changed)
 
     for path, original, replacement in (
@@ -3315,7 +3341,26 @@ def self_test() -> None:
         'daik::checkup_modbus_confirm_source(daik::ModbusProfile, unsigned long)': 48,
         'unsigned long daik::logic::checkup_modbus_model_fingerprint<daik::def::HomeHubReg>(daik::ModbusProfile, daik::def::HomeHubReg const*, int)': 96,
         'daik::logic::dhw_loss_adopt(daik::logic::DhwLossState&, daik::logic::DhwLossCarry const&, long long)': 128,
-        'daik::checkup_record_modbus(daik::CachedValue const*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis)': 192,
+        'daik::checkup_record_modbus(daik::CachedValue const*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis, long long, unsigned long)': 192,
+        'daik::record_modbus_heating_locked(daik::ModbusCheckupReadings const&, unsigned long, bool, unsigned long, long long)': 48,
+        'daik::modbus_heating_wall_us()': 48,
+        'daik::checkup_modbus_heating_break(unsigned long, unsigned long)': 48,
+        'void daik::hydronic_json_decimal<daik::detail::JsonOutput>(daik::detail::JsonOutput&, long long, unsigned long long, bool)': 64,
+        'void daik::hydronic_json_unsigned<daik::detail::JsonOutput>(daik::detail::JsonOutput&, unsigned long long, bool)': 80,
+        'daik::detail::JsonOutput::operator+=(std::basic_string_view<char, std::char_traits<char> >)': 48,
+        'daik::detail::json_output<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&)::{lambda(void*, std::basic_string_view<char, std::char_traits<char> >)\x231}::_FUN(void*, std::basic_string_view<char, std::char_traits<char> >)': 64,
+        'daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>::append(std::basic_string_view<char, std::char_traits<char> >)': 48,
+        'httpd_resp_send_chunk': 64,
+        'httpd_send_all$isra$0': 32,
+        'httpd_default_send': 32,
+        'daik::checkup_modbus_heating_report()': 192,
+        'daik::mb_poll_once()::{lambda(daik::logic::MbBatch const&, bool)\x231}::operator()(daik::logic::MbBatch const&, bool) const': 80,
+        'void daik::append_hydronic_status<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool)': 752,
+        'void daik::append_heating_minimum<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::CheckupHydronicReport const&, bool, bool)': 144,
+        'void daik::append_heating_windows<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::logic::HydronicMinimumWindows const&, bool)': 32,
+        'daik::checkup_hydronic_report()': 400,
+        'daik::hydronic_observation_report()': 64,
+        'daik::(anonymous namespace)::hydronic_store::wall_now()': 48,
         'daik::logic::checkup_modbus_coverage(daik::ModbusProfile, daik::ModbusProfileBasis)': 64,
         'daik::(anonymous namespace)::commit_and_fold_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupSample const&, long long, unsigned long, bool)': 48,
         'daik::(anonymous namespace)::fold_checkup_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupSample const&, long long)': 48,
@@ -3353,7 +3398,7 @@ def self_test() -> None:
      'daik::logic::dhw_loss_progress(daik::logic::DhwLossState const&, long long)': 48,
      'daik::logic::dhw_loss_age_s(long long, long long, unsigned long)': 32,
      '_ZZN4daik5logic18dhw_loss_aggregateERKNS0_11DhwLossRingEENKUlRKNS0_13DhwLossBucketEE_clES6_$isra$0': 32,
-     'daik::checkup_reset_on_detect(char const*, unsigned long)': 64,
+     'daik::checkup_reset_on_detect(daik::CheckupProfileLayout const&, unsigned long)': 64,
      'daik::logic::checkup_model_fingerprint(char const*, daik::logic::ProfileView const&)': 64,
      'daik::logic::checkup_schema_row_fingerprint(daik::logic::ProfileView const&, daik::ValueDef const&)': 32,
      'daik::logic::checkup_consumes_row(daik::ValueDef const&)': 32,
@@ -3906,6 +3951,12 @@ def self_test() -> None:
         'void daik::json_append_escaped<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, std::basic_string_view<char, std::char_traits<char> >)': 64,
         'daik::utf8_sequence_length(std::basic_string_view<char, std::char_traits<char> >)': 48,
     })
+    for rule in heater_stack.rules.SYMBOLS.values():
+        extra_frames.setdefault(exact_symbol_name(rule["pattern"]), 32)
+    for target, callers in heater_stack.rules.CALLBACK_REFERENCES.items():
+        extra_frames.setdefault(target, 32)
+        for caller in callers:
+            extra_frames.setdefault(caller, 32)
     for index, (name, frame) in enumerate(extra_frames.items(), 0x1000):
         fixture += f"\n{index:08x} <{name}>:\n{index:x}: 004136 entry a1, {frame}\n"
         if name == 'daik::(anonymous namespace)::activate_update(daik::(anonymous namespace)::OtaUpdateResources&, esp_partition_t const*, char const*, daik::(anonymous namespace)::OtaUploadRequest*)':
@@ -3973,9 +4024,10 @@ def self_test() -> None:
 229: fff7a5 call8 200 <{double_body}>
 """
     number_calls = "".join(f"{0x3003 + offset:x}: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
-                           for offset in range(36))
+                           for offset in range(37))
     fixture = fixture.replace("   3: 004136          entry a1, 2976\n",
                               "   3: 004136          entry a1, 2976\n" + number_calls)
+    fixture = heater_stack.fixture_dispatch(fixture)
     budgets = load_budgets(DEFAULT_BUDGETS)
     validate_packed_config_inventory(fixture)
     packed_inventory_controls = 0
@@ -4000,19 +4052,27 @@ def self_test() -> None:
             raise AssertionError("accepted config packed word without complete ELF/body " + name)
     raw_detect_controls = raw_detect_self_test(fixture, budgets)
     packed_config_controls = packed_config_self_test(BudgetError, raw_detect_body)
+    heater_packed_controls = heater_stack.packed_self_test(BudgetError, raw_detect_body)
     stop_sources = {str(path.relative_to(REPO)): path.read_text(encoding="utf-8")
                     for suffix in ("*.cpp", "*.hpp") for path in (REPO / "main").rglob(suffix)}
-    stop_sources.update({path: (REPO / path).read_text(encoding="utf-8") for path in stop_stack.EXTRA_SOURCES})
+    stop_sources.update({path: (REPO / path).read_text(encoding="utf-8")
+                         for path in (*stop_stack.EXTRA_SOURCES, *heater_stack.EXTRA_SOURCES)})
     stop_controls = stop_stack.self_test(budgets, stop_sources, BudgetError)
+    heater_controls = heater_stack.self_test(budgets, stop_sources, BudgetError)
+    heater_mechanical_controls = heater_stack.mechanical_self_test(budgets, fixture, BudgetError)
     staged_stack_controls = staged_stack_self_test(budgets)
     validate_source_contract(budgets)
     schema_sources = {path: (REPO / path).read_text(encoding="utf-8")
                       for path in ("main/hp_poll.cpp", "main/http_config.cpp", "main/checkup.cpp")}
-    for mutation in ("omit_member", "omit_continuation", "omit_task", "move_caller", "new_caller"):
+    for mutation in ("omit_member", "omit_heater_schema", "omit_continuation", "omit_task",
+                     "move_caller", "reorder_layout", "new_caller", "new_layout_caller"):
         changed_budget = json.loads(json.dumps(budgets))
         changed_source = dict(schema_sources)
         if mutation == "omit_member":
             changed_budget["paths"]["poll_checkup_schema"]["symbols"].remove("checkup_schema")
+        elif mutation == "omit_heater_schema":
+            changed_budget["paths"]["poll_checkup_schema"]["symbols"].remove(
+                heater_stack.rules.SCHEMA_CHAIN[0])
         elif mutation == "omit_continuation":
             changed_budget["paths"]["httpd_checkup_schema"]["base_bytes"] = 0
         elif mutation == "omit_task":
@@ -4020,6 +4080,11 @@ def self_test() -> None:
         elif mutation == "move_caller":
             changed_source["main/hp_poll.cpp"] = changed_source["main/hp_poll.cpp"].replace(
                 "checkup_reset_on_detect(", "untracked_schema_reset(")
+        elif mutation == "reorder_layout":
+            changed_source["main/hp_poll.cpp"] = changed_source["main/hp_poll.cpp"].replace(
+                "checkup_profile_layout(", "untracked_schema_layout(")
+        elif mutation == "new_layout_caller":
+            changed_source["main/new_task.cpp"] = "void run() { checkup_profile_layout(); }"
         else:
             changed_source["main/new_task.cpp"] = "void run() { checkup_reset_on_detect(); }"
         try:
@@ -4446,11 +4511,11 @@ def self_test() -> None:
                         for path in (REPO / "main").glob("*.cpp")}
     validate_shutdown_paths(budgets, shutdown_sources)
     shutdown_controls = 0
-    encoded_budget = json.dumps(budgets)
     for name, members in shutdown_path_members().items():
+        base_rule = budgets["paths"][name]
         for member in members:
-            changed = json.loads(encoded_budget)
-            changed["paths"][name]["symbols"].remove(member)
+            changed = {**budgets, "paths": {**budgets["paths"], name: {
+                **base_rule, "symbols": [s for s in base_rule["symbols"] if s != member]}}}
             try:
                 validate_shutdown_paths(changed, shutdown_sources)
             except BudgetError as exc:
@@ -4458,8 +4523,7 @@ def self_test() -> None:
             else:
                 raise AssertionError(f"self-test accepted omitted {member} from {name}")
             shutdown_controls += 1
-        changed = json.loads(encoded_budget)
-        changed["paths"][name]["base_bytes"] = 0
+        changed = {**budgets, "paths": {**budgets["paths"], name: {**base_rule, "base_bytes": 0}}}
         try:
             validate_shutdown_paths(changed, shutdown_sources)
         except BudgetError as exc:
@@ -4738,7 +4802,7 @@ def self_test() -> None:
          "20-byte destination"),
         ("ROM division dispatch", fixture.replace("40002544 <__udivdi3>", "40002544 <unreviewed_division>"),
          "ROM continuation"),
-        ("new conversion continuation", fixture.replace("<memcpy>)", "<unreviewed_copy>)"),
+        ("new conversion continuation", fixture.replace("1 <memcpy>)", "1 <unreviewed_copy>)"),
          "ROM continuation"),
         ("new helper caller", fixture + f"\n00000880 <unreviewed_payload()>:\n"
          f"880: 004136 entry a1, 32\n883: fff7a5 call8 800 <{INTEGER_APPEND_SYMBOL}>\n",
@@ -5016,7 +5080,7 @@ def self_test() -> None:
                 "newly outlined MQTT continuation")
             retirement_controls += 1
     assert "unreviewed_packed" not in parse_frames(
-        "00000023 <unreviewed_packed>:\n  23: e2008136 .word 0xe2008136\n")
+        fixture + "\n00000023 <unreviewed_packed>:\n  23: e2008136 .word 0xe2008136\n")
     try:
         validate_http_stack(budgets, "cfg.stack_size = 8192;")
     except BudgetError as exc:
@@ -5428,7 +5492,11 @@ def self_test() -> None:
                 {} if multiplier is None else {"tls_esp_aes_process_dma": multiplier})
             reject_document("changed bounded DMA recursion", mutated, "one-level/sibling recursion contract")
     print(f"stack budget self-test: PASS ({negative_checks} malformed schemas rejected, "
-          f"{stop_controls} stop-source/path/callback/shortcut, {packed_config_controls} complete packed-config controls, "
+          f"{stop_controls} stop-source/path/callback/shortcut, "
+          f"{heater_controls} heater-source/scratch/callback/receipts, "
+          f"{heater_packed_controls} heater-storage/output controls, "
+          f"{heater_mechanical_controls} heater-path/dispatch controls, "
+          f"{packed_config_controls} complete packed-config controls, "
           f"{packed_inventory_controls} exact-config/ELF-only controls, "
           f"{inventory_controls} inventory/growth/allocation/reserve controls, "
           f"6 dynamic/first-prologue, {packed_controls} packed SDK, {raw_detect_controls} raw-app controls, "

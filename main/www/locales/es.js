@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -169,7 +169,7 @@ I18N.es = localeValues([
   /* check.fault */ "Fallo de la unidad",
   /* check.dhw_loss */ "Enfriamiento ACS",
   /* check.cycling */ "Arranques compresor",
-  /* check.defrost */ "Desescarches",
+  /* check.defrost */ "Desescarche",
   /* check.pressure */ "Presión de agua",
   /* check.flow */ "Caudal mín.",
   /* check.flow.lowest */ "Caudal más bajo en calefacción",
@@ -180,7 +180,7 @@ I18N.es = localeValues([
   /* check.flow.show */ "Mostrar un mínimo en el gráfico",
   /* check.flow.readout */ (value) => `En este tramo se midió ${value} al menos una vez. La calefacción llevaba en marcha al menos diez minutos.`,
   /* check.flow.locations_missing */ "No se guardó la hora de las mediciones anteriores con este valor.",
-  /* check.flow.x10a_only */ "El mínimo en calefacción se calcula a partir de las mediciones X10A.",
+  /* check.flow.unavailable */ "Faltan las mediciones necesarias para calcular el caudal más bajo en calefacción.",
   /* check.flow.waiting */ "A la espera de un período de calefacción que cumpla las condiciones.",
   /* check.heater */ "Resistencias",
   /* check.retries */ "Contadores protección",
@@ -232,7 +232,6 @@ I18N.es = localeValues([
   /* check.detail.fault.past */ "Ahora no hay mensaje activo; se registró uno en este periodo. Su desaparición no demuestra la causa ni la resolución.",
   /* check.detail.fault.past_unknown */ "Se registró un mensaje; el estado actual no se puede leer.",
   /* check.detail.collecting */ (a, b) => `Señales legibles: ${a} de ${b} requeridas.`,
-  /* check.detail.outdoor_defrost */ " Las cifras exteriores de X10A solo incluyen muestras recientes cuando tanto el estado de desescarche como el del compresor eran legibles y el compresor estaba funcionando. Sirven de contexto y no cambian el umbral de desescarche ni el veredicto.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Ventanas horarias aceptadas: ${a}; candidata actual: ${c} de ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Ventanas horarias aceptadas: ${a}; carga o calentador del depósito detectados. Estabilización restante: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Ventanas horarias aceptadas: ${a}; esperando la siguiente hora válida.`,
@@ -249,8 +248,6 @@ I18N.es = localeValues([
   /* check.detail.experimental */ "Contadores experimentales; estabilidad no excluye limitación.",
   /* check.detail.unavailable */ "Sin señal evaluable en este perfil.",
   /* check.starts */ (n) => `${n} ${n === 1 ? "arranque" : "arranques"}`,
-  /* check.cycles */ (n) => `${n} ${n === 1 ? "ciclo" : "ciclos"}`,
-  /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "emparejado" : "emparejados"}`,
   /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "ciclo" : "ciclos"}`,
   /* check.cycling.mean */ (d) => `Media ${d}`,
   /* check.cycling.completed */ "Ciclos terminados",
@@ -316,8 +313,15 @@ I18N.es = localeValues([
   /* check.cycling.e_ongoing */ "Activo en última lectura.",
   /* check.cycling.cause_unavailable */ "Sin detalles",
   /* check.cycling.cause_older_unavailable */ "No hay detalles guardados sobre el arranque y la parada de estos ciclos anteriores.",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} mín. ${min} °C · media ${mean} °C`,
+  /* check.heater_context.title */ "Contexto de las señales de calentador notificadas",
+  /* check.heater_context.columns */ "Contexto|BUH|BSH",
+  /* check.heater_context.counts */ "Tiempo positivo / tiempo ON evaluable · muestras positivas",
+  /* check.heater_context.categories */ "señal de emergencia|estado de error|desescarche/recuperación|circuito de agua caliente|señal Silent Mode|exterior ≤+2°C|exterior >+2°C|compresor notificado parado|Silent Mode + calefacción con exterior suave",
+  /* check.heater_context.totals */ "ON notificado|unión de contextos|solapamiento|contexto desconocido|ninguna categoría positiva|tiempo de señal legible",
+  /* check.heater_context.states */ "Fuente sin confirmar|Observaciones sin fecha|24 h incompletas|Archivo aún sin validar|Almacenamiento pendiente|Archivo no disponible: registros dañados o no leídos|Hora incierta|Saturado: límites inferiores|No compatible",
+  /* check.heater_context.notice */ "Al menos 15 minutos de señal de calentador con Silent Mode, calefacción y exterior suave: aviso provisional del proyecto.",
+  /* check.heater_context.rule */ "Extremos legibles, huecos ≤15 s. La recuperación se limita a 300 s tras un fin de desescarche observado durante calefacción. La división de +2°C y el aviso de 900 s son heurísticas del proyecto.",
+  /* check.heater_context.limits */ "Las categorías se solapan por separado para cada calentador. El contexto ausente sigue desconocido. No se demuestra energía, causa de funcionamiento, bivalencia ni necesidad. Una advertencia no es emergencia; Low noise control no se clasifica. Los estados entre muestras siguen siendo desconocidos.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `depósito ${d}`,
   /* check.buh_runtime */ (d) => `apoyo ${d}`,
@@ -377,19 +381,23 @@ I18N.es = localeValues([
   /* check.detail.period_label */ "Periodo de datos:",
   /* check.detail.period */ (a) => `${a}, máximo 24 h; posibles huecos`,
   /* check.detail.age_label */ "Edad de la última lectura:",
-  /* check.detail.horizon_wait */ (a) => `Falta completar la ventana de 24 horas: quedan ${a}.`,
   /* check.detail.fault.ok */ "Sin mensaje actual ni guardado en señales de fallo legibles.",
-  /* check.detail.defrost.info */ "≥3 desescarches asociados superan 15% del tiempo legible del compresor: indicio del proyecto.",
-  /* check.detail.defrost.ok */ "Sin indicio de porcentaje; clima y huecos no evaluados.",
-  /* check.defrost.last_start */ (date, route, outdoor) => `Último inicio de desescarche observado · ${date} · Circuito ${route} · Aire exterior ${outdoor}`,
-  /* check.defrost.route_space */ "Calefacción",
-  /* check.defrost.route_dhw */ "Depósito de agua caliente",
+  /* check.defrost.normal */ "Los desescarches breves son habituales con tiempo frío y húmedo. La proporción de desescarche indica qué parte del tiempo de funcionamiento del compresor con señal de desescarche legible se dedicó a desescarchar.",
+  /* check.defrost.modbus.about */ "Modbus usa la misma señal para el desescarche y la preparación del rearranque del compresor.",
+  /* check.defrost.modbus.normal */ "En funcionamiento estable la señal está desactivada. Puede activarse en ambas fases.",
+  /* check.defrost.starts_label */ "Inicios de desescarche registrados",
+  /* check.defrost.share */ "Proporción de desescarche",
+  /* check.defrost.notice */ "Proporción de desescarche alta",
   /* check.detail.pressure.info */ "Baja",
   /* check.detail.pressure.warn */ "Crítica",
   /* check.detail.pressure.ok */ "Normal",
-  /* check.detail.defrost_events_insufficient */ "Menos de tres desescarches asociados; sin evaluación de porcentaje.",
+  /* check.pressure.finding */ "Resultado confirmado",
+  /* check.pressure.sustained */ (a) => `A ${a} o menos durante al menos 60 segundos consecutivos.`,
+  /* check.pressure.clear */ "No se ha confirmado una presión baja sostenida.",
+  /* check.pressure.rules */ "¿Cómo se evalúa la presión?",
+  /* check.pressure.unavailable */ "Diagnóstico de presión X10A no disponible.",
+  /* check.pressure.pending */ "Lectura en el intervalo crítico. Se desconoce todavía la duración.",
   /* check.detail.source_stale */ "Sin lectura X10A reciente; estado actual desconocido. Historial conservado.",
-  /* check.detail.no_paired_runtime */ "Sin tiempo legible asociado; solo recuento.",
   /* check.detail.current_label */ "≤1,0 bar baja",
   /* check.detail.minimum_time_label */ "≤0,5 bar crítica",
   /* check.detail.coverage_missing */ (a) => `Tiempo legible que falta: ${a} s.`,
@@ -501,7 +509,7 @@ I18N.es = localeValues([
   /* hist.boost_active */ "Refuerzo activo",
   /* hist.boost_inactive */ "Refuerzo inactivo",
   /* hist.boost_aria */ esAria("del estado Smart Grid con los cuatro modos"),
-  /* hist.defrost_total */ (d) => `Desescarche · ${d}`,
+  /* hist.defrost_total */ (d) => `Bloques de 5 min con desescarche · ${d}`,
   /* hist.defrost_none */ "No se observó ningún ciclo de desescarche en el periodo registrado.",
   /* hist.defrost_active */ "Desescarche",
   /* hist.defrost_inactive */ "Sin desescarche",
@@ -629,7 +637,7 @@ I18N.es = localeValues([
   /* schem.card_aria */ "Esquema en vivo del sistema: unidad exterior, circuito frigorífico, intercambiador de placas, circuito de agua con calentador auxiliar y válvula de 3 vías, depósito ACS y circuito de climatización",
   /* schem.group_aria */ "Esquema en vivo — selecciona un valor o componente para ver su explicación",
   /* schem.outdoor_unit */ "UNIDAD EXTERIOR",
-  /* schem.defrost_pill */ "❄ desescarche",
+  /* schem.defrost_pill */ "desescarche",
   /* schem.outdoor */ "Exterior",
   /* insp.close */ "Cerrar",
   /* schem.defrost_transfer */ "Durante un desescarche confirmado, el calor puede pasar del agua al refrigerante. Las tuberías solo indican esa dirección cuando la respaldan el caudal y las temperaturas actuales.",
@@ -1122,7 +1130,7 @@ INSPECT_I18N.es = inspectValues(
     ["Tubería de entrada PHE", "Tubería de entrada del PHE", "Retorno común al PHE por R4T después de unir los ramales. En calefacción suele estar más frío que R1T y en refrigeración activa más caliente; R4T no es un sensor dedicado en los emisores.", (d) => waterMoving(d) ? `Retorno a ${degC(d.ret)}, ${fmt1(d.flow)} l/min y ${fmt1(d.wp)} bar.` : "Bomba y caudal no demuestran circulación en el retorno."], // wret
     ["Caudal", "Caudal de agua", "Caudal del circuito común. El mínimo depende del modelo; interprétalo con bomba y presión."], // flow
     ["Estado del flujostato", 0, "Entrada binaria X10A; no mide l/min ni confirma el caudal mínimo.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A activo; compáralo con bomba y ${fmt1(d.flow)} l/min.` : `X10A inactivo; con bomba activa, compara ${fmt1(d.flow)} l/min y fallos 7H/C0.`], // flow_switch
-    ["Presión de agua", 0, "Presión del circuito hidráulico, no del refrigerante. El intervalo permitido depende del modelo y de la instalación; compárala con el manual exacto."], // wp
+    ["Presión de agua", 0], // wp
   ],
 );
 
@@ -1204,7 +1212,7 @@ DESCRIPTION_I18N.es = descriptionValues([
   ["R1T sale del PHE antes de BUH; con R4T y caudal estima potencia por modo, pero su ubicación depende de la unidad."], // 34
   ["Retorno R4T al PHE; evalúa el ΔT con caudal, compresor y modo, no con 5 K universales."], // 35
   ["Caudal del circuito común; el mínimo depende de modelo y modo, y un valor bajo puede causar 7H."], // 36
-  ["Presión hidráulica: muchos manuales exigen >1 bar, pero a ≤1,0 bar consulta el manual del modelo exacto."], // 37
+  ["Presión del agua en el circuito hidráulico cerrado.","Muchos manuales Altherma requieren más de 1 bar en la entrada de la bomba. El rango permitido depende del modelo, la altura de la instalación y el vaso de expansión. A 1,0 bar o menos, consulta el manual de la unidad exacta."], // 37
   ["Orden X10A invertida: 0 = máx, 100 = paro ([0, 100] → 100–0 %). No mide RPM ni prueba giro, altura ni caudal; lee ON/OFF y caudal por separado."], // 38
   ["Estado de bomba; no prueba calor útil y puede actuar sin compresor: compáralo con caudal."], // 39
   ["Estado de la bomba de un circuito solar térmico configurado."], // 40
@@ -1215,9 +1223,9 @@ DESCRIPTION_I18N.es = descriptionValues([
   ["Modo ambiente vivo calor/frío, sin Auto; no prueba compresor y requiere la actividad."], // 45
   ["Selección HomeHub Auto/calor/frío; es configuración, no estado actual ni prueba actividad."], // 46
   ["Estado exterior parada/calor/frío; puede quedar seleccionado con compresor parado y no prueba calor."], // 47
-  ["Flag combinado de desescarche y reinicio del compresor en el registro 35; OFF = normal, ON = desescarche o preparación de reinicio."], // 48
+  ["El registro 35 de HomeHub combina los estados de desescarche y reinicio del compresor.", "En marcha estable aparece Apagado. Encendido indica desescarche o preparación del reinicio."], // 48
   ["Flag de arranque en caliente en el registro 36; OFF = régimen continuo, ON = precalentamiento breve del intercambiador."], // 49
-  ["Desescarche exterior; es normal con frío húmedo, pero este bit solo no diagnostica ciclos excesivos."], // 50
+  ["El desescarche elimina la escarcha del intercambiador exterior.", "Es normal con tiempo frío y húmedo. Este indicador por sí solo no permite saber si los ciclos son demasiado frecuentes."], // 50
   ["Clase de gravedad del fallo activo: Normal, Error, Aviso o Precaución."], // 51
   ["Significado del código de fallo comunicado actualmente"], // 52
   ["Funcionamiento de emergencia tras un fallo de la bomba de calor."], // 53

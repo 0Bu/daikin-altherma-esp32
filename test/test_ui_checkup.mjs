@@ -57,20 +57,26 @@ for (const key of [
   "draw_windows", "pump_windows", "quiet_high_windows",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
   "aborts", "best_aborted_s", "blocked", "abort_reasons",
-  "minimum_windows", "hour_masks", "locations_missing", "secondary_supply", "delta_k", "zone_context",
+  "heating_minimum", "minimum_windows", "hour_masks", "locations_missing", "secondary_supply", "delta_k", "zone_context",
 ]) {
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
 }
 assert.match(statusSource,
-             /case logic::CheckupCheck::Flow:\s*tenths\("min_l_min", ck\.a\);\s*append_hydronic_status\(j, diag_effective, redact\);/,
+             /case logic::CheckupCheck::Flow:\s*tenths\("min_l_min", ck\.a\);\s*append_hydronic_status\(j, diag_effective, c\.diagnostics_enabled, redact\);/,
              "flow check serializer must retain min_l_min and delegate hydronic details");
 assert.match(normalizedStatusSource,
-             /"minimum_windows":.*?;\s*if \(redact \|\| !observation\.confirmed \|\| !observation\.dated \|\| !observation\.totals\.samples \|\|\s*windows\.first_bucket < 0\)\s*\{\s*j \+= "null";/,
-             "flow minimum windows require unredacted and dated measurements");
+             /"heating_minimum":.*?;\s*if \(!enabled\)\s*\{\s*j \+= "null";/,
+             "the selected heating minimum respects diagnostics consent");
 assert.match(statusSource,
-             /if\s*\(diag_effective == DiagnosticsSource::Modbus\)\s*\{[\s\S]*?report\.observation\.partial\s*=\s*false;[\s\S]*?report\.observation\.restore_pending\s*=\s*false;[\s\S]*?report\.reason\s*=\s*logic::HydronicReason::None;[\s\S]*?\}\s*else\s*\{\s*report\s*=\s*checkup_hydronic_report\(\);\s*\}/,
-             "Modbus diagnostics mode must serialize an empty hydronic observation with reason_code 0 instead of leaking X10A data");
+             /append_heating_windows\(j, use_modbus \? modbus\.windows : obs\.minimum_windows,\s*redact \|\| !observed\);/,
+             "the selected minimum only locates recorded evidence from its own source in unredacted status");
+assert.match(statusSource,
+             /append_heating_windows\(j, windows,\s*redact \|\| !observation\.confirmed \|\| !observation\.dated \|\|\s*!observation\.totals\.samples\);/,
+             "legacy flow windows require confirmed and dated measurements in unredacted status");
+assert.match(statusSource,
+             /if\s*\(diag_effective == DiagnosticsSource::Modbus\)\s*\{\s*report\s*=\s*\{\};\s*report\.observation\.partial\s*=\s*false;\s*report\.observation\.restore_pending\s*=\s*false;[\s\S]*?report\.reason\s*=\s*logic::HydronicReason::None;\s*\}/,
+             "Modbus diagnostics mode keeps the legacy hydronic observation empty with reason_code 0");
 for (const key of [
   "confirmed", "current", "dated", "coverage_partial", "restore_pending", "persistence_pending",
   "dropped", "observed_hours", "method", "window_s", "settling_s", "max_gap_s", "reason_code",
@@ -147,8 +153,13 @@ vm.runInContext(
      metric: checkupMetricValue,
      status: checkupStatusText,
      detail: checkupDetailHtml,
+     heaterContext: checkupHeaterContextHtml,
      flowReport: checkupFlowReport,
      flowBrief: checkupFlowBriefHtml,
+     defrostInspector: (c, health = {}, statusStale = false) => checkupDefrostInspectorRows({
+       diagnostics: { enabled: true },
+       health: { source: "x10a", span_s: 86400, full_span: true, source_fresh: true, ...health, checks: [c] },
+     }, statusStale),
      chart: checkupCyclingChartHtml,
      timeline: checkupCyclingTimelineHtml,
      periodDetails: (trace, checkObj, from, to, source = "x10a") => {
@@ -166,6 +177,7 @@ vm.runInContext(
      card: checkupCardHtml,
      ready: checkupSourceReadyFor,
      copy: I18N,
+     duration: (lang, seconds) => { LANG = lang; return checkupDuration(seconds); },
      text: (lang, key, ...args) => { LANG = lang; return t(key, ...args); },
      setLang: (lang) => { LANG = lang; },
    };`,
@@ -190,40 +202,23 @@ for (const c of [
   { id: "cycling", starts: null }, { id: "defrost", count: null },
   { id: "heater", buh_s: null, bsh_s: null },
 ]) assert.equal(ui.metric({ verdict: "collecting", ...c }), "");
-assert.equal(ui.metric({ id: "pressure", verdict: "unavailable", min_bar: 0 }), "");
-assert.equal(ui.metric({ id: "pressure", verdict: "collecting", min_bar: 0, current_bar: 1.5 }), "1.5 bar");
-assert.equal(ui.metric({ id: "pressure", verdict: "collecting", min_bar: 0 }), "0 bar");
-assert.equal(ui.metric({ id: "pressure", verdict: "info", min_bar: 0.8, confirmed_low: true }), "Low · 0.8 bar");
-assert.equal(ui.metric({ id: "pressure", verdict: "warn", min_bar: 0.4, confirmed_critical: true }), "Critical · 0.4 bar");
-assert.equal(ui.metric({ id: "pressure", verdict: "ok", min_bar: NaN }), "");
 
-// An almost-complete input clock and a partial calendar horizon have different explanations.
+// Collecting cycling fixture reused across the diagnosis cases.
 const collecting = {
   id: "cycling", verdict: "collecting", evidence: "heuristic", reason: "input_coverage",
   starts: 2, observed_s: 77759, required_s: 77760,
 };
-const collectingPressure = { ...collecting, id: "pressure" };
-let detail = ui.detail(collectingPressure, true, { span_s: 86400, source_age_s: 5, source_fresh: true });
-assert.match(detail, /Readable signals: 21 h 35 min of 21 h 36 min required/);
-assert.match(detail, /Missing readable time: 1 s/);
-assert.match(detail, /Data window: 24 h/);
-assert.doesNotMatch(detail, /full 24-hour window is still missing/);
-detail = ui.detail({ ...collectingPressure, observed_s: 77760, reason: "day_incomplete" }, false,
-                   { span_s: 84600, source_age_s: 5, source_fresh: true });
-assert.match(detail, /full 24-hour window is still missing: 30 min remaining/);
-assert.doesNotMatch(detail, /insufficient coverage|Missing readable time/);
+let detail;
 
 // A first-hour flow observation needs eligible pump operation, not the rest of a calendar day.
-// Exercise actual localized details: daily assessments must keep their waiting explanation,
-// while instant/eligible-window observations must preserve scope without inheriting that delay.
+// Exercise localized details to keep instant and eligible-window observations scoped.
 const partialReport = { span_s: 900, source_age_s: 1, source_fresh: true };
 const collectingFlow = {
   id: "flow", verdict: "collecting", evidence: "observation", reason: "input_coverage",
   observed_s: 0, required_s: 0, min_l_min: null,
 };
 for (const lang of locales) {
-  const horizon = ui.text(lang, "check.detail.horizon_wait", "23 h 45 min");
-  const completeHorizon = ui.text(lang, "check.detail.horizon_wait", "0 min");
+  const horizon = ui.duration(lang, 85500);
   const period = `${ui.text(lang, "check.detail.period_label")} 15 min`;
   const ageLabel = ui.text(lang, "check.detail.age_label");
   const flowDetail = ui.detail(collectingFlow, false, partialReport);
@@ -232,15 +227,6 @@ for (const lang of locales) {
   assert.ok(!flowDetail.includes(ageLabel), `${lang} fresh flow need not repeat source age`);
   assert.ok(flowDetail.includes(ui.text(lang, "check.detail.collecting_unknown")),
     `${lang} flow must retain its actual collection state`);
-  for (const id of ["pressure", "defrost"]) {
-    for (const reason of ["day_incomplete", "input_coverage"]) {
-      const daily = { ...collecting, id, reason, observed_s: 900 };
-      assert.ok(ui.detail(daily, false, partialReport).includes(horizon),
-        `${lang}/${id}/${reason} must explain its missing day`);
-      assert.ok(!ui.detail(daily, true, { ...partialReport, span_s: 86400 }).includes(completeHorizon),
-        `${lang}/${id} must not add a day once the horizon is complete`);
-    }
-  }
   for (const id of ["fault", "dhw_loss", "heater", "retries"]) {
     assert.ok(!ui.detail({ ...collectingFlow, id, windows: 0 }, false, partialReport).includes(horizon),
       `${lang}/${id} observations must not inherit a daily prerequisite`);
@@ -981,7 +967,7 @@ assert.match(agreeBrief({ reason_code: 7 }), /Flow below 5\.0 l\/min/);
 assert.doesNotMatch(agreeBrief({ method: 1 }), /Pump-only R1T−R4T/);
 assert.doesNotMatch(agreeBrief(null), /Pump-only R1T−R4T/);
 assert.equal(agreeBrief({}, {}, { diagnostics: { enabled: true, source: "modbus", effective_source: "modbus" }, health: { source: "modbus" } }),
-  `<p>${ui.text("en", "check.flow.x10a_only")}</p>`);
+  `<p>${ui.text("en", "check.flow.unavailable")}</p>`);
 assert.equal(ui.flowReport().agreement, null, "Modbus flow report must omit X10A water agreement");
 assert.match(agreeBrief({}, { dated: false }), /Pump-only R1T−R4T:<\/span> <span class="num">No data<\/span>/);
 assert.doesNotMatch(agreeBrief({
@@ -1000,57 +986,106 @@ for (const lang of locales) {
 }
 context.S.status = savedFlowStatus;
 ui.setLang("en");
-// Water pressure uses 24-hour curve-first diagnosis when X10A history is available, and falls back
-// cleanly to concise threshold state labels when no history buffer is advertised.
+// Pressure has one display in the inspector, with X10A diagnosis separate from the live source.
 const pressure = {
   id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0.8,
-  current_bar: 1.5, min_unix_s: 1791888000, confirmed_low: true, confirmed_critical: false,
+  current_bar: 1.5, min_unix_s: 1791887970, confirmed_low: true, confirmed_critical: false,
 };
-detail = ui.detail(pressure);
-assert.match(detail, /24-hour water-pressure curve/);
-assert.match(detail, /Low/);
-assert.doesNotMatch(detail, /NOTE|WARNING|Minimum recorded at/);
-detail = ui.detail({ ...pressure, verdict: "warn", min_bar: 0.4, current_bar: null, min_unix_s: null,
-                     confirmed_low: true, confirmed_critical: true }, true,
-                   { span_s: 86400, source_age_s: 900, source_fresh: false });
-assert.match(detail, /Critical/);
-assert.match(detail, /No fresh X10A sample/);
-assert.doesNotMatch(detail, /NOTE|WARNING|Minimum recorded at/);
-
-// With water_pressure trend advertised and expanded, checkupCardHtml renders the graph first and
-// only the Normal: reference below — zero prose or label clutter above the curve.
-context.S.stage = "dashboard";
-context.S.dashboardCard = "diagnosis";
-context.S.hist = new Map([["water_pressure", { at: Date.now(), gen: 1, dt: 300, unit: "bar", b0: 380, held: [], v: [15, 12, 9, 4, 8, 15] }]]);
+const pressureRing = { at: Date.now(), gen: 1, dt: 300, unit: "bar", b0: 380,
+  t0: 1791886800, held: [], v: [15, 12, 9, 4, 8, 15] };
+context.S.live = { wp: 1.5 };
+context.S.hist = new Map([["water_pressure", pressureRing]]);
 context.S.histPin = new Map();
 context.S.histHidden = new Map();
 context.S.histBusy = new Set();
 context.S.histRequests = new Map();
 context.S.histEpoch = 1;
-context.S.descOpen = new Set(["model:health_pressure"]);
 context.S.status = {
+  hp: { connected: true },
   diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
   history: { rows: [{ id: "water_pressure", label: "Water Pressure" }] },
   health: { status: "info", span_s: 86400, full_span: true, source_fresh: true, source_age_s: 1, checks: [pressure] },
 };
-detail = ui.detail(pressure);
-assert.match(detail, /^<div class="vdesc-p"><span class="vdesc-n">Normal:<\/span>/);
-assert.doesNotMatch(detail, /24-hour water-pressure curve|NOTE|WARNING|Low|Critical/);
-const pressureCard = ui.card(true);
-assert.ok(pressureCard.indexOf("data-chart") < pressureCard.indexOf("Normal:"),
-          "water_pressure chart must appear before Normal note in expanded diagnosis card");
-assert.match(pressureCard, /vhist-thresh low/);
-assert.match(pressureCard, /vhist-thresh crit/);
-assert.match(pressureCard, /vhist-line warn/);
-assert.match(pressureCard, /vhist-line err/);
-assert.match(pressureCard, /vhist-legend-low/);
-assert.match(pressureCard, /vhist-legend-crit/);
-assert.match(pressureCard, /Low · 0\.8 bar/);
+const pressureState = () => context.pressureDiagnosis();
+const pressureText = () => context.pressureFindingHtml(pressureState());
+const pressureExplanation = () => context.pressureExplanationHtml(pressureState());
+const pressurePlot = () => context.histHtml("water_pressure", "bar", "Water pressure", "", true, null,
+  { pressureDiagnosis: true, finding: pressureState()?.finding, findingExplanation: pressureExplanation() });
+const pressureInspector = pressurePlot();
+assert.doesNotMatch(pressureInspector, /vhist-pressure-explanation/);
+assert.doesNotMatch(pressureInspector, /vhist-head|vhist-range/);
+assert.match(context.histHtml("water_pressure", "bar", "Water pressure"), /vhist-head/);
+assert.match(pressureInspector, /vhist-pressure-finding warn[^>]*left:80\.00%/);
+assert.match(pressureInspector, /vhist-thresh low/);
+assert.match(pressureInspector, /vhist-thresh crit/);
+assert.match(pressureInspector, /vhist-line warn/);
+assert.match(pressureInspector, /vhist-line err/);
+const lowResult = /<div class="inspect-diagnosis-result"><span>Confirmed finding · X10A<\/span><strong class="num">0\.8\u00a0bar<\/strong><\/div>/;
+assert.match(pressureText(), lowResult);
+const lowFindingTime = new Date(pressure.min_unix_s * 1000).toLocaleString("en", { dateStyle: "short", timeStyle: "short" });
+assert.ok(pressureText().endsWith("<p>Low · " + escapeText(lowFindingTime) + "</p>"));
+assert.doesNotMatch(pressureText(), /60 consecutive seconds/);
+assert.match(pressureExplanation(), /^<div class="vdesc-n">X10A · How is pressure assessed\?<\/div><p>At or below 1\.0\u00a0bar for at least 60 consecutive seconds\.<\/p>$/);
+assert.doesNotMatch(ui.card(true), /model:health_pressure|1 note/);
+// A chart minimum elsewhere, a boundary, an unfinished bucket and an undated finding cannot get
+// a marker. The qualified finding stays visible below the related readings.
+for (const time of [1791887670, 1791888000, 1791888301, 1791886499, null]) {
+  context.S.status.health.checks = [{ ...pressure, min_unix_s: time }];
+  assert.match(pressureText(), lowResult);
+  if (time === null) assert.ok(pressureText().endsWith("<p>Low</p>"));
+  assert.doesNotMatch(pressurePlot(), /vhist-pressure-finding/);
+}
+context.S.status.health.checks = [pressure];
+for (const ring of [{ ...pressureRing, t0: null }, { ...pressureRing, held: [[4, 1]] },
+  { ...pressureRing, v: [15, 12, 9, 4, null, 15] }]) {
+  context.S.hist.set("water_pressure", ring);
+  assert.doesNotMatch(pressurePlot(), /vhist-pressure-finding/);
+}
+context.S.hist.set("water_pressure", pressureRing);
+const criticalPressure = { ...pressure, verdict: "warn", min_bar: 0.4, min_unix_s: 1791887670, confirmed_critical: true };
+context.S.status.health.checks = [criticalPressure];
+assert.equal(pressureState().finding.critical, true);
+assert.match(pressureText(), /<strong class="num">0\.4\u00a0bar<\/strong><\/div><p>Critical · /);
+assert.match(pressurePlot(), /vhist-pressure-finding err[^>]*left:60\.00%/);
+assert.match(pressureExplanation(), /At or below 0\.5\u00a0bar for at least 60 consecutive seconds/);
+context.S.status.history.modbus_rows = [{ id: "water_pressure" }];
+context.S.hist.set(vm.runInContext('histCacheKey("water_pressure", "modbus")', context), pressureRing);
+context.S.histPin.set("water_pressure", { bucket: 383, lanes: ["x10a", "modbus"], witnessed: true,
+  source: "", pressureInspector: true });
+assert.match(pressurePlot(), /vhist-pressure-explanation/);
+context.S.histHidden.set("water_pressure", new Set(["x10a"]));
+assert.doesNotMatch(pressurePlot(), /vhist-pressure-finding|vhist-pressure-explanation|data-pressure-assessment/);
+context.S.histPin.delete("water_pressure");
+context.S.histHidden.clear();
+context.S.hist.set("water_pressure", { ...pressureRing, t0: null });
+assert.doesNotMatch(pressurePlot(), /vhist-pressure-finding/);
+context.S.status.health.source_fresh = false;
+assert.equal(pressureState().current, null);
+assert.equal(pressureState().finding.critical, true);
+context.S.status.health.source_fresh = true;
+const unconfirmedPressure = { ...pressure, verdict: "collecting", confirmed_low: false, current_bar: 0.4 };
+context.S.status.health.checks = [unconfirmedPressure];
+context.S.live.wp = 0.4;
+assert.equal(pressureState().pending, true);
+assert.match(pressureText(), /Duration is still unknown/);
+context.S.live.mbFields = new Set(["wp"]);
+assert.equal(pressureState().current, null);
+assert.equal(pressureState().pending, false);
+assert.match(pressureText(), /No current assessment/);
+context.S.status.diagnostics.effective_source = "modbus";
+assert.equal(pressureState(), null);
+assert.match(pressureText(), /X10A pressure diagnosis unavailable/);
+context.S.status.diagnostics.effective_source = "x10a";
+context.S.status.health.checks = [criticalPressure];
+context.S.transportUnavailable = "status";
+assert.equal(pressureState(), null);
+context.S.transportUnavailable = null;
+context.S.status.diagnostics.enabled = false;
+assert.equal(pressureState(), null);
 context.S.status = null;
-context.S.descOpen = new Set();
+context.S.live = null;
 context.S.hist.clear();
 context.S.histPin.clear();
-delete context.S.dashboardCard;
 
 // Cleared and unreadable-current fault states must not promise automatic resolution or no action.
 detail = ui.detail({ id: "fault", verdict: "info", active: 0 });
@@ -1062,23 +1097,33 @@ assert.match(detail, /current fault state is unreadable/);
 assert.match(detail, /No fresh X10A sample/);
 assert.doesNotMatch(detail, /right now.*error|No message is active now/);
 
-// Runtime denominator is truthful even close to thresholds; event-only evidence stays neutral.
+// The inspector shows two plain readings. Missing input stays unknown and cannot produce zero.
 const defrost = { id: "defrost", verdict: "info", evidence: "heuristic", count: 3,
   paired_count: 3, defrost_s: 200, run_s: 1000 };
-assert.equal(ui.metric(defrost), "3 cycles · 3 paired · 20 %");
-assert.equal(ui.metric({ ...defrost, defrost_s: 1 }), "3 cycles · 3 paired · <1 %");
-assert.match(ui.detail({ ...defrost, verdict: "ok", evidence: "observation",
-                        count: 2, paired_count: 2,
-                        reason: "defrost_events_insufficient" }), /Fewer than three paired defrosts/);
-assert.match(ui.detail({ id: "defrost", verdict: "ok", evidence: "observation",
-                         reason: "no_paired_runtime", count: 3 }), /event count only/);
-assert.match(ui.detail({ ...defrost, last_observed_start: {
-  unix_s: null, route: "dhw_route", outdoor_c: 0,
-} }), /Last observed defrost start.*Hot-water tank.*0 °C/);
-assert.match(ui.detail({ ...defrost, last_observed_start: {
-  unix_s: null, route: null, outdoor_c: null,
-} }), /Last observed defrost start.*Outdoor air No data/);
-assert.doesNotMatch(ui.detail({ ...defrost, last_observed_start: null }), /Last observed defrost start/);
+const defrostRow = (label, value) =>
+  `<div class="inspect-row"><span>${label}</span><span>${value}</span></div>`;
+assert.equal(ui.defrostInspector(defrost),
+  defrostRow("Observed defrost starts", "3") + defrostRow("Defrost share", "20 %"));
+assert.match(ui.defrostInspector({ ...defrost, defrost_s: 1 }), /&lt;1 %/);
+assert.match(ui.defrostInspector({ ...defrost, defrost_s: 3, run_s: 20 }), /15 %/);
+assert.match(ui.defrostInspector({ ...defrost, defrost_s: 12959, run_s: 86393 }), /15\.00005 %/);
+assert.equal(ui.defrostInspector({ ...defrost, count: 0, defrost_s: 0 }),
+  defrostRow("Observed defrost starts", "0") + defrostRow("Defrost share", "0 %"));
+assert.equal(ui.defrostInspector({ ...defrost, defrost_s: null }),
+  defrostRow("Observed defrost starts", "3") + defrostRow("Defrost share", "—"));
+assert.equal(ui.defrostInspector({ ...defrost, count: null }),
+  defrostRow("Observed defrost starts", "—") + defrostRow("Defrost share", "20 %"));
+assert.equal(ui.defrostInspector({ id: "defrost", verdict: "collecting" }), "");
+assert.equal(ui.defrostInspector({ ...defrost, verdict: "unavailable" }), "");
+assert.equal(ui.defrostInspector({ ...defrost, reason: "source_stale" }), "");
+assert.equal(ui.defrostInspector(defrost, { source_fresh: false }), "");
+assert.equal(ui.defrostInspector(defrost, {}, true), "");
+assert.equal(ui.defrostInspector(defrost, { source: "modbus" }), "");
+assert.equal(ui.defrostInspector(defrost, { persist: "unknown" }), "");
+ui.setLang("de");
+assert.equal(ui.defrostInspector({ ...defrost, count: 6, defrost_s: 20, run_s: 980 }),
+  defrostRow("Erfasste Abtaustarts", "6") + defrostRow("Abtauanteil", "2,04 %"));
+ui.setLang("en");
 assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "No increase");
 assert.equal(ui.value({ id: "retries", verdict: "info", evidence: "experimental", seen: 1 }), "Increase");
 assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental" }), "TENTATIVE");
@@ -1089,7 +1134,6 @@ assert.equal(ui.value({ id: "fault", verdict: "info", active: 0, latest: { code:
   "U4 · 3 h ago");
 assert.equal(ui.value({ id: "fault", verdict: "info", active: null, latest: { code: "U4", duration_s: 90 } }),
   "U4 · Unknown");
-assert.equal(ui.value({ id: "defrost", verdict: "ok", evidence: "observation", count: 3, defrost_s: 200, run_s: 1000 }), "20 %");
 assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: 0, bsh_s: 59 }),
@@ -1105,7 +1149,8 @@ context.S.status = { health: {
   checks: [dhw, pressure, cycling],
 } };
 let card = ui.card();
-assert.match(card, />3 notes<\/span>/);
+assert.match(card, />2 notes<\/span>/);
+assert.doesNotMatch(card, /model:health_pressure/);
 assert.doesNotMatch(card, /2\/4 checks|checks assessed/);
 assert.match(card, /class="vrow-val checkup-val warn"/);
 assert.doesNotMatch(card, /All clear|healthy|8 values|health score/);
@@ -1123,8 +1168,8 @@ for (const lang of locales) {
 }
 ui.setLang("en");
 context.S.status.health = { status: "warn", checks: [dhw, { ...pressure, verdict: "warn" }] };
-assert.match(ui.card(), />1 warning<\/span>/);
-assert.doesNotMatch(ui.card(), />1 note<\/span>/);
+assert.match(ui.card(), />1 note<\/span>/);
+assert.doesNotMatch(ui.card(), />1 warning<\/span>|section-badge err/);
 context.S.status.health = { status: "ok", checks: [{ id: "fault", verdict: "ok", active: 0 }] };
 assert.match(ui.card(), />No hint in assessed data<\/span>/);
 context.S.status.health = { status: "collecting", checks: [collecting] };
@@ -1181,7 +1226,41 @@ context.S.status.health = { source: "modbus", status: "ok", checks: [heatingFlow
 assert.equal(ui.flowReport().source, "modbus");
 assert.equal(ui.flowReport().minimum, null, "Modbus has no qualified X10A heating minimum");
 assert.equal(ui.flowReport().windows, null);
-assert.ok(ui.flowBrief(ui.flowReport()).includes(ui.text("en", "check.flow.x10a_only")));
+assert.ok(ui.flowBrief(ui.flowReport()).includes(ui.text("en", "check.flow.unavailable")));
+const modbusMinimum = { source: "modbus", reason: "observed", min_l_min: 8.2, minimum_windows: exactWindows };
+context.S.status.health.source = "x10a";
+const setHeatingMinimum = heating_minimum => {
+  context.S.status.health.checks = [{ ...heatingFlowCheck, heating_minimum }];
+};
+setHeatingMinimum(modbusMinimum);
+assert.equal(ui.flowReport().source, "modbus", "the heating minimum gets its source independently of other diagnoses");
+assert.equal(ui.flowReport().minimum, 8.2, "the selected Modbus result replaces the legacy X10A fields");
+assert.equal(ui.flowReport().windows, exactWindows, "windows belong to the selected result");
+for (const lang of locales) {
+  ui.setLang(lang);
+  assert.ok(ui.flowBrief(ui.flowReport()).includes(" · Modbus"), `${lang} identifies the fallback source`);
+  setHeatingMinimum({ ...modbusMinimum, reason: "unsupported" });
+  assert.equal(ui.flowReport().minimum, null, "unsupported input cannot expose an old minimum");
+  assert.equal(ui.flowReport().windows, null);
+  assert.ok(ui.flowBrief(ui.flowReport()).includes(escapeText(ui.text(lang, "check.flow.unavailable"))));
+  setHeatingMinimum(modbusMinimum);
+}
+ui.setLang("en");
+context.S.status.health.source = "modbus";
+setHeatingMinimum({ ...modbusMinimum, source: "x10a", min_l_min: 7.5 });
+assert.equal(ui.flowReport().source, "x10a", "an admitted X10A minimum survives a Modbus diagnosis preference");
+assert.equal(ui.flowReport().minimum, 7.5);
+setHeatingMinimum({ ...modbusMinimum, reason: "collecting" });
+assert.equal(ui.flowReport().minimum, null);
+assert.ok(ui.flowBrief(ui.flowReport()).includes(ui.text("en", "check.flow.waiting")));
+setHeatingMinimum({ ...modbusMinimum, minimum_windows: null });
+assert.equal(ui.flowReport().windows, null, "Modbus records cannot borrow X10A locations");
+assert.equal(ui.flowReport().locationsMissing, true);
+for (const selected of [null, { ...modbusMinimum, source: "sensor" }, { ...modbusMinimum, reason: "unknown" }]) {
+  setHeatingMinimum(selected);
+  assert.equal(ui.flowReport(), null, "absent or unrecognized selection cannot reuse a legacy result");
+}
+setHeatingMinimum(modbusMinimum);
 context.S.otaCached = true;
 assert.equal(ui.flowReport(), null, "cached OTA status cannot publish a flow diagnostic");
 context.S.otaCached = false;
@@ -1221,7 +1300,10 @@ for (const lang of locales) {
     assert.ok(!ui.detail({ ...result, aborts: 0 }).includes(discarded),
       `${lang}/${verdict} must not invent discarded reading-gap evidence`);
   }
-  for (const c of [dhw, pressure, cycling, defrost, waiting, partialModeCycling,
+  const localizedDefrost = ui.defrostInspector(defrost, partialReport);
+  assert.doesNotMatch(localizedDefrost,
+    /check\.defrost\.|undefined|NaN|Infinity/, `missing or misleading ${lang} defrost copy`);
+  for (const c of [dhw, cycling, waiting, partialModeCycling,
       { id: "fault", verdict: "info", active: 0 },
       { id: "fault", verdict: "info", active: null, reason: "source_stale" }]) {
     assert.doesNotMatch(ui.detail(c, false, { span_s: 3600, source_age_s: 900, source_fresh: false }),
@@ -1240,8 +1322,6 @@ assert.match(ui.detail(dhw), /Beispiel für eine Stunde: 200 l Wasser/);
 assert.match(ui.detail(dhw), /0,28 kWh Wärme/);
 assert.match(ui.detail(dhw), /0,09–0,11 kWh Strom/);
 assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursache noch Behebung/);
-assert.equal(ui.metric(pressure), "Niedrig · 0,8 bar");
-assert.match(ui.detail(pressure), /24-Stunden-Wasserdruckverlauf/);
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6,5 l/min");
 assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "");
 assert.equal(ui.value({ id: "fault", verdict: "warn", active: 1, latest: { code: "7H-01", duration_s: 120, age_s: 0 } }),
@@ -1293,8 +1373,8 @@ for (const copy of [model.health_cycling.what, model.health_cycling.normal,
   assert.ok(copy.length <= 265, "cycling help must fit in a short paragraph");
   assert.doesNotMatch(copy, /≥|90 ?%|Daikin|\bOFF\b|\bON\b/);
 }
-assert.match(model.health_defrost.what, /compressor runtime with readable compressor and defrost states/);
-assert.match(descriptionContext.modelDe.health_defrost[0], /Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus/);
+assert.match(model.health_defrost.what, /removes frost from the outdoor unit/);
+assert.match(descriptionContext.modelDe.health_defrost[0], /entfernt die Anlage Reif von der Außeneinheit/);
 assert.match(JSON.stringify(model.health_pressure), /Chart guide:.*>1\.0 bar.*≤1\.0 bar.*≤0\.5 bar.*60 continuous seconds/);
 assert.match(JSON.stringify(model.health_flow), /Not nominal flow or proof of part load/);
 assert.match(JSON.stringify(model.health_retries), /while stopped or at a compressor-state boundary/);
@@ -1317,7 +1397,7 @@ vm.runInContext(`${i18nSource}${dashboardSource}${explanationSource}
   };`, renderedContext);
 for (const lang of locales) {
   renderedContext.rendered.lang(lang);
-  for (const id of Object.keys(model).filter(id => id.startsWith("health_"))) {
+  for (const id of Object.keys(model).filter(id => id.startsWith("health_") && id !== "health_defrost")) {
     for (const verdict of ["ok", "info", "warn", "collecting", "unavailable"]) {
       const c = { ...pressure, id: id.slice(7), verdict };
       const body = renderedContext.rendered.detail(c, false, partialReport);
@@ -1438,15 +1518,6 @@ const mbDetail = ui.detail(
 assert.ok(mbDetail.includes(ui.text("en", "check.detail.dhw_reason.blind_modbus")));
 assert.ok(mbDetail.includes(ui.text("en", "check.detail.source_stale_modbus")));
 assert.doesNotMatch(mbDetail, /X10A|HomeHub/);
-for (const [source, label] of [["homehub", "Modbus"], ["x10a", "X10A"], ["env3", "ENV III"], ["unknown", "—"]]) {
-  const outdoorMetric = ui.metric({
-    id: "defrost", verdict: "ok", count: 3, paired_count: 3, share_pct: 5,
-    outdoor_source: source, outdoor_min_c: 2, outdoor_mean_c: 3, outdoor_samples: 10,
-  });
-  assert.ok(outdoorMetric.includes(ui.text("en", "check.outdoor_range", label, "2.0", "3.0")),
-    `defrost outdoor context uses the display label for ${source}`);
-  assert.doesNotMatch(outdoorMetric, /HomeHub/);
-}
 assert.equal(ui.ready({
   diagnostics: { enabled: true, effective_source: "x10a" },
   hp: { connected: false }, modbus: { connected: false },
@@ -1663,41 +1734,6 @@ assert.equal(ui.ready({
   assert.equal(ui.value({ id: "cycling", verdict: "ok", starts: 0 }), "0");
   assert.equal(ui.value({ id: "cycling", verdict: "warn", starts: 14 }), "≥14");
 
-  // defrost: outdoor_source variants (homehub, x10a, env3, unknown), equal vs distinct temperatures, routes.
-  for (const [src, label] of [["homehub", "Modbus"], ["x10a", "X10A"], ["env3", "ENV III"], ["other", "—"]]) {
-    const out = ui.metric({
-      id: "defrost", verdict: "info", count: 3, paired_count: 3, share_pct: 12,
-      outdoor_source: src, outdoor_min_c: -5.0, outdoor_mean_c: -2.5, outdoor_samples: 8,
-    });
-    assert.ok(out.includes(label) && out.includes("-5.0") && out.includes("-2.5"),
-      `defrost outdoor metric for ${src} must format ${label} range`);
-  }
-  const singleTemp = ui.metric({
-    id: "defrost", verdict: "collecting", count: 1,
-    outdoor_source: "env3", outdoor_min_c: 1.5, outdoor_mean_c: 1.5, outdoor_samples: 4,
-  });
-  assert.ok(singleTemp.includes("ENV III") && singleTemp.includes("1.5"),
-    "defrost equal min/mean outdoor temperature must use single-value wording");
-  assert.equal(ui.metric({
-    id: "defrost", verdict: "ok", count: 2, paired_count: 2, share_pct: 5,
-    outdoor_source: "x10a", outdoor_min_c: -1, outdoor_mean_c: 0, outdoor_samples: 0,
-  }).includes("X10A"), false, "zero outdoor samples must suppress outdoor suffix");
-  assert.equal(ui.value({ id: "defrost", verdict: "collecting", count: 2 }), "2 cycles");
-  assert.equal(ui.value({ id: "defrost", verdict: "collecting", count: null }), "CHECKING");
-  assert.equal(ui.value({ id: "defrost", verdict: "unavailable", count: 2 }), "N/A");
-  for (const [route, expectedRoute] of [
-    ["space_heating", ui.text("en", "check.defrost.route_space")],
-    ["dhw_route", ui.text("en", "check.defrost.route_dhw")],
-    [null, ui.text("en", "sys.nodata")],
-  ]) {
-    const det = ui.detail({
-      id: "defrost", verdict: "info", evidence: "measured", count: 3, paired_count: 3, share_pct: 15,
-      defrost_s: 120, run_s: 800,
-      last_observed_start: { unix_s: route ? 1791900000 : 0, route, outdoor_c: route ? -1.5 : null },
-    }, true, { span_s: 86400 });
-    assert.ok(det.includes(expectedRoute), `defrost route ${route} must render ${expectedRoute}`);
-  }
-
   // fault: every verdict + active combination with and without latest fault code.
   assert.equal(ui.value({ id: "fault", verdict: "unavailable" }), "N/A");
   assert.equal(ui.value({ id: "fault", verdict: "collecting", active: 1 }), "CHECKING");
@@ -1736,6 +1772,102 @@ assert.equal(ui.ready({
   assert.equal(ui.value({ id: "retries", verdict: "collecting", seen: null }), "CHECKING");
   assert.equal(ui.value({ id: "flow", verdict: "ok", min_l_min: 13.4 }), "13.4 l/min");
   assert.equal(ui.value({ id: "flow", verdict: "collecting", min_l_min: null }), "CHECKING");
+}
+
+// Independent heater populations must remain visible on X10A even when legacy runtime is absent,
+// and remain hidden in Modbus mode. Bind category IDs to the shared C++ serializer.
+{
+  const heaterPayloadSource = fs.readFileSync(
+    new URL("../main/logic/heater_context_payload.hpp", import.meta.url), "utf8");
+  const heaterCategories = ["emergency", "error", "defrost_recovery", "dhw_route", "silent",
+    "cold_outdoor", "mild_outdoor", "compressor_off", "quiet_mild_heating"];
+  for (const id of heaterCategories) assert.ok(heaterPayloadSource.includes(`"${id}"`), id);
+  const heaterChannel = () => ({ supported: true, on_s: 30, union_s: 10, overlap_s: 5,
+    unknown_context_s: 20, unclassified_s: 20, readable_s: 120, saturated: false,
+    quiet_mild_notice: false, categories: Object.fromEntries(heaterCategories.map(id =>
+      [id, { supported: true, positive_s: 0, evaluable_on_s: 30, positive_samples: 0 }])) });
+  const heaterContext = { confirmed: true, dated: true, coverage_partial: true,
+    restore_pending: false, persistence_pending: true, archive_incomplete: false,
+    clock_uncertain: false, storage_loss: false, dropped: 0,
+    buh: heaterChannel(), bsh: heaterChannel() };
+  heaterContext.bsh.categories.emergency = { supported: true, positive_s: 5,
+    evaluable_on_s: 10, positive_samples: 2 };
+  const heaterRow = { id: "heater", verdict: "collecting", evidence: "observation",
+    buh_s: null, bsh_s: null, context: heaterContext };
+  ui.setLang("en");
+  assert.equal(ui.heaterContext({}), "", "older firmware must not gain invented context");
+  const heaterHtml = ui.heaterContext(heaterRow);
+  assert.match(heaterHtml, /0 s \/ 30 s · 0/);
+  assert.match(heaterHtml, /5 s \/ 10 s · 2/);
+  assert.equal((heaterHtml.match(/scope="col"/g) || []).length, 4);
+  assert.equal((heaterHtml.match(/scope="row"/g) || []).length, 30);
+  assert.match(ui.detail(heaterRow, false, { source: "x10a" }), /class="heater-context"/,
+    "legacy missing runtime cannot hide independent current flag context on X10A");
+  assert.doesNotMatch(ui.detail(heaterRow, false, { source: "modbus" }), /class="heater-context"/,
+    "Modbus diagnostics must hide X10A heater context");
+  assert.match(heaterHtml, /Categories overlap per heater/);
+  assert.doesNotMatch(heaterHtml, /OK|WARNING|kWh|3–4/);
+  const renderHeater = value => ui.heaterContext({ ...heaterRow, context: value });
+  assert.doesNotMatch(renderHeater({ ...heaterContext, confirmed: false }), /<table|5 s \/ 10 s/,
+    "unconfirmed sources cannot leak cached numeric populations");
+  assert.doesNotMatch(renderHeater({ ...heaterContext, buh: { supported: false },
+    bsh: { supported: false } }), /<table/);
+  const unknownHeater = structuredClone(heaterContext);
+  for (const channel of [unknownHeater.buh, unknownHeater.bsh])
+    for (const category of Object.values(channel.categories))
+      Object.assign(category, { positive_s: null, evaluable_on_s: null, positive_samples: null });
+  assert.doesNotMatch(renderHeater(unknownHeater), /0 s \/ 0 s/,
+    "unread categories remain unknown instead of false negatives");
+  assert.equal((renderHeater(unknownHeater).match(/<td>No data<\/td>/g) || []).length, 18,
+    "each wholly unknown context has one readable cell, without repeating all three missing leaves");
+  const partialHeater = structuredClone(unknownHeater);
+  partialHeater.buh.categories.error.evaluable_on_s = 10;
+  assert.match(renderHeater(partialHeater), /No data \/ 10 s · No data/,
+    "a partial value must not be hidden by the compact wholly unknown presentation");
+  const shortHeater = structuredClone(heaterContext);
+  shortHeater.buh.categories.silent.positive_samples = 1;
+  assert.match(renderHeater(shortHeater), /&lt;1 s \/ 30 s · 1/,
+    "positive sample without a whole elapsed second must remain visible");
+  shortHeater.buh.categories.silent.positive_samples = Infinity;
+  assert.doesNotMatch(renderHeater(shortHeater), /&lt;1 s|Infinity|NaN|undefined/,
+    "an invalid sample count cannot manufacture positive subsecond evidence");
+  const saturatedHeater = structuredClone(heaterContext);
+  saturatedHeater.bsh.saturated = true;
+  assert.match(renderHeater(saturatedHeater), /≥5 s \/ ≥10 s · ≥2/);
+  const unavailableHeater = { ...heaterContext, archive_incomplete: true, restore_pending: true,
+    clock_uncertain: true, dated: false, storage_loss: true, dropped: 4 };
+  assert.match(renderHeater(unavailableHeater),
+    /Archive unavailable: damaged or unread records \(≥4\)/);
+  assert.doesNotMatch(renderHeater(unavailableHeater), /Archive not yet validated/,
+    "a failed archive cannot be presented as an ordinary wait");
+  const escapeHeater = text => String(text).replace(/[&<>"]/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  for (const lang of locales) {
+    ui.setLang(lang);
+    const body = renderHeater({ ...unavailableHeater,
+      bsh: { ...unavailableHeater.bsh, quiet_mild_notice: true } });
+    const labels = ui.text(lang, "check.heater_context.categories").split("|");
+    assert.equal(labels.length, 9, `${lang} has all separate operating contexts`);
+    assert.equal(ui.text(lang, "check.heater_context.totals").split("|").length, 6);
+    assert.equal(ui.text(lang, "check.heater_context.states").split("|").length, 9);
+    for (const label of labels) assert.ok(body.includes(escapeHeater(label)), `${lang}: ${label}`);
+    for (const key of ["title", "counts", "notice", "rule", "limits"]) {
+      const text = ui.text(lang, `check.heater_context.${key}`);
+      assert.ok(body.includes(escapeHeater(text)), `${lang}: ${key}`);
+      if (lang !== "en") assert.notEqual(text, ui.copy.en[`check.heater_context.${key}`]);
+    }
+    assert.doesNotMatch(body, /check\.heater_context\.|undefined|NaN|Infinity/);
+  }
+  ui.setLang("en");
+  assert.equal(renderHeater([]), "", "array context payload must be ignored");
+  const savedCats = ui.copy.en["check.heater_context.categories"];
+  try {
+    ui.copy.en["check.heater_context.categories"] = "broken|only";
+    const truncated = renderHeater(heaterContext);
+    assert.equal(truncated, "", "truncated locale pipe segments must degrade safely without undefined");
+  } finally {
+    ui.copy.en["check.heater_context.categories"] = savedCats;
+  }
 }
 
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

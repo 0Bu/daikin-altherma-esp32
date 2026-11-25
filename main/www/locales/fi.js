@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -169,7 +169,7 @@ I18N.fi = localeValues([
   /* check.fault */ "Yksikön vika",
   /* check.dhw_loss */ "Varaajan jäähtyminen",
   /* check.cycling */ "Kompressorin startit",
-  /* check.defrost */ "Sulatukset",
+  /* check.defrost */ "Sulatus",
   /* check.pressure */ "Vedenpaine",
   /* check.flow */ "Alin virtaama",
   /* check.flow.lowest */ "Pienin virtaama lämmityksen aikana",
@@ -180,7 +180,7 @@ I18N.fi = localeValues([
   /* check.flow.show */ "Näytä alin kohta kuvaajassa",
   /* check.flow.readout */ (value) => `Tällä aikavälillä mitattiin vähintään kerran ${value}. Tilojen lämmitys oli silloin jatkunut vähintään kymmenen minuuttia.`,
   /* check.flow.locations_missing */ "Tämän arvon aiempien mittausten ajankohtaa ei tallennettu.",
-  /* check.flow.x10a_only */ "Lämmityksen pienin virtaama lasketaan X10A-mittauksista.",
+  /* check.flow.unavailable */ "Lämmityksen pienimmän virtaaman määrittämiseen tarvittavat mittaukset puuttuvat.",
   /* check.flow.waiting */ "Odotetaan lämmitysjaksoa, joka täyttää mittausehdot.",
   /* check.heater */ "Sähkövastukset",
   /* check.retries */ "Suojauslaskurit",
@@ -232,7 +232,6 @@ I18N.fi = localeValues([
   /* check.detail.fault.past */ "Nyt ei ole aktiivista ilmoitusta; jaksolla kirjattiin ilmoitus. Poistuminen ei todista syytä eikä ratkaisua.",
   /* check.detail.fault.past_unknown */ "Ilmoitus kirjattiin; nykyistä vikatilaa ei voi lukea.",
   /* check.detail.collecting */ (a, b) => `Luettavat signaalit: ${a}, vaaditaan ${b}.`,
-  /* check.detail.outdoor_defrost */ " X10A-ulkoluvut sisältävät vain tuoreet näytteet, kun sulatus- ja kompressoritila olivat luettavissa ja kompressori kävi. Ne ovat taustatietoa eivätkä muuta rajaa tai arviota.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Hyväksytyt tunti-ikkunat: ${a}; nykyinen ehdokas: ${c}/${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Hyväksytyt tunti-ikkunat: ${a}; varaajan lataus tai vastus havaittu. Vakiintumista jäljellä: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Hyväksytyt tunti-ikkunat: ${a}; odotetaan seuraavaa sopivaa tuntia.`,
@@ -249,8 +248,6 @@ I18N.fi = localeValues([
   /* check.detail.experimental */ "Kokeelliset laskurit; vakaus ei sulje pois rajoitusta.",
   /* check.detail.unavailable */ "Ei arvioitavaa signaalia tässä profiilissa.",
   /* check.starts */ (n) => `${n} käynnistys${n === 1 ? "" : "tä"}`,
-  /* check.cycles */ (n) => `${n} jakso${n === 1 ? "" : "a"}`,
-  /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "paritettu" : "paritettua"}`,
   /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "käyntijakso" : "käyntijaksoa"}`,
   /* check.cycling.mean */ (d) => `Keskim. ${d}`,
   /* check.cycling.completed */ "Päättyneet käyntijaksot",
@@ -316,8 +313,15 @@ I18N.fi = localeValues([
   /* check.cycling.e_ongoing */ "Kävi vielä viime lukemalla.",
   /* check.cycling.cause_unavailable */ "Ei tarkempia tietoja",
   /* check.cycling.cause_older_unavailable */ "Näiden aiempien käyntijaksojen tallennettuja käynnistys- ja pysäytystietoja ei ole saatavilla.",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · keskiarvo ${mean} °C`,
+  /* check.heater_context.title */ "Ilmoitettujen lämmitinlippujen asiayhteys",
+  /* check.heater_context.columns */ "Asiayhteys|BUH|BSH",
+  /* check.heater_context.counts */ "Positiivinen aika / arvioitava ON-aika · positiiviset näytteet",
+  /* check.heater_context.categories */ "hätäkäytön lippu|virhetila|sulatus/palautuminen|käyttövesireitti|Silent Mode -lippu|ulkoilma ≤+2°C|ulkoilma >+2°C|kompressori ilmoitettu pysähtyneeksi|Silent Mode + lämmitys leudolla säällä",
+  /* check.heater_context.totals */ "ilmoitettu ON|asiayhteyksien yhdiste|päällekkäisyys|tuntematon asiayhteys|ei positiivista luokkaa|luettavan lipun aika",
+  /* check.heater_context.states */ "Lähdettä ei vahvistettu|Päiväämättömät havainnot|Puutteelliset 24 h|Arkistoa ei vielä vahvistettu|Tallennus odottaa|Arkisto ei käytettävissä: vaurioituneita tai lukemattomia tietueita|Epävarma kellonaika|Kyllästyminen: alarajat|Ei tuettu",
+  /* check.heater_context.notice */ "Vähintään 15 minuuttia ilmoitettua lämmitinaikaa Silent Mode -tilassa, lämmityksessä ja leudossa ulkoilmassa: alustava projektin huomio.",
+  /* check.heater_context.rule */ "Luettavat aikavälin päät, aukot ≤15 s. Palautuminen rajoittuu 300 sekuntiin lämmityksen aikana havaitun sulatuksen päättymisestä. +2°C:n jako ja 900 sekunnin huomio ovat projektin heuristiikkoja.",
+  /* check.heater_context.limits */ "Luokat menevät päällekkäin erikseen kullekin lämmittimelle. Puuttuva asiayhteys pysyy tuntemattomana. Energiaa, käytön syytä, kahden lämmönlähteen käytön syytä tai tarpeellisuutta ei osoiteta. Varoitus ei ole hätäkäyttö; Low noise control jää luokittelematta. Näytteiden väliset tilat pysyvät tuntemattomina.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `säiliö ${d}`,
   /* check.buh_runtime */ (d) => `vara ${d}`,
@@ -377,19 +381,23 @@ I18N.fi = localeValues([
   /* check.detail.period_label */ "Tietojen aikajakso:",
   /* check.detail.period */ (a) => `${a}, enintään 24 h; mahdollisia aukkoja`,
   /* check.detail.age_label */ "Viimeisen mittauksen ikä:",
-  /* check.detail.horizon_wait */ (a) => `Täysi 24 tunnin ikkuna puuttuu vielä: jäljellä ${a}.`,
   /* check.detail.fault.ok */ "Ei nykyistä tai tallennettua ilmoitusta luettavissa vikasignaaleissa.",
-  /* check.detail.defrost.info */ "≥3 yhdistettyä sulatusta ylittää 15% luettavasta kompressoriajasta: projektin vihje.",
-  /* check.detail.defrost.ok */ "Ei sulatusosuusvihjettä; sää ja aukot arvioimatta.",
-  /* check.defrost.last_start */ (date, route, outdoor) => `Viimeisin havaittu sulatuksen aloitus · ${date} · Piiri ${route} · Ulkoilma ${outdoor}`,
-  /* check.defrost.route_space */ "Tilalämmitys",
-  /* check.defrost.route_dhw */ "Lämminvesivaraaja",
+  /* check.defrost.normal */ "Lyhyet sulatusjaksot ovat tavallisia kylmällä ja kostealla säällä. Sulatuksen osuus kertoo, kuinka suuri osa siitä kompressorin käyntiajasta, jolta sulatustila tunnetaan, kului sulatukseen.",
+  /* check.defrost.modbus.about */ "Modbus käyttää samaa signaalia sulatukseen ja kompressorin uudelleenkäynnistyksen valmisteluun.",
+  /* check.defrost.modbus.normal */ "Vakaassa käytössä signaali on pois päältä. Kumpikin vaihe voi kytkeä sen päälle.",
+  /* check.defrost.starts_label */ "Havaitut sulatuksen käynnistykset",
+  /* check.defrost.share */ "Sulatuksen osuus",
+  /* check.defrost.notice */ "Suuri sulatuksen osuus",
   /* check.detail.pressure.info */ "Matala",
   /* check.detail.pressure.warn */ "Kriittinen",
   /* check.detail.pressure.ok */ "Normaali",
-  /* check.detail.defrost_events_insufficient */ "Alle kolme yhdistettyä sulatusta; ei osuusarviota.",
+  /* check.pressure.finding */ "Vahvistettu havainto",
+  /* check.pressure.sustained */ (a) => `Paine oli enintään ${a} vähintään 60 sekuntia yhtäjaksoisesti.`,
+  /* check.pressure.clear */ "Pitkittynyttä matalaa painetta ei vahvistettu.",
+  /* check.pressure.rules */ "Miten paine arvioidaan?",
+  /* check.pressure.unavailable */ "X10A-painediagnoosi ei ole käytettävissä.",
+  /* check.pressure.pending */ "Mittaus on kriittisellä alueella. Kestoa ei vielä tiedetä.",
   /* check.detail.source_stale */ "Ei tuoretta X10A-näytettä; nykytila tuntematon. Historia säilyy.",
-  /* check.detail.no_paired_runtime */ "Ei yhdistettyä luettavaa aikaa; vain määrä.",
   /* check.detail.current_label */ "≤1,0 bar matala",
   /* check.detail.minimum_time_label */ "≤0,5 bar kriittinen",
   /* check.detail.coverage_missing */ (a) => `Puuttuva luettava aika: ${a} s.`,
@@ -501,7 +509,7 @@ I18N.fi = localeValues([
   /* hist.boost_active */ "Tehostus aktiivinen",
   /* hist.boost_inactive */ "Tehostus pois",
   /* hist.boost_aria */ fiAria("Smart-Gridin neljän tilan aikajana"),
-  /* hist.defrost_total */ (d) => `Sulatus havaittu aktiivisena · ${d} näyteaikaa`,
+  /* hist.defrost_total */ (d) => `5 minuutin jaksot, joissa havaittiin sulatusta · ${d}`,
   /* hist.defrost_none */ "Tallennusjaksolla ei havaittu sulatusta.",
   /* hist.defrost_active */ "Sulatus aktiivinen",
   /* hist.defrost_inactive */ "Sulatus pois",
@@ -629,7 +637,7 @@ I18N.fi = localeValues([
   /* schem.card_aria */ "Järjestelmän reaaliaikainen kaavio: ulkoyksikkö, kylmäainepiiri, levylämmönvaihdin, varalämmittimellä ja 3-tieventtiilillä varustettu vesipiiri, lämminvesivaraaja ja huonepiiri",
   /* schem.group_aria */ "Järjestelmän reaaliaikainen kaavio — valitse arvo tai osa saadaksesi selityksen",
   /* schem.outdoor_unit */ "ULKOYKSIKKÖ",
-  /* schem.defrost_pill */ "❄ sulatus",
+  /* schem.defrost_pill */ "sulatus",
   /* schem.outdoor */ "Ulkoilma",
   /* insp.close */ "Sulje",
   /* schem.defrost_transfer */ "Vahvistetun sulatuksen aikana lämpöä voi siirtyä vedestä kylmäaineeseen. Putkisto näyttää tämän suunnan vain, kun nykyinen virtaus ja lämpötilat tukevat sitä.",
@@ -1044,7 +1052,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["R1T PHE:n jälkeen ennen BUH:ta; R4T:n, virtauksen ja tilan kanssa sillä arvioidaan lämpötehoa."], // 34
   ["R4T yhteisessä PHE-paluussa; R1T−R4T on PHE:n ΔT, ei lämmönluovuttajien eikä yleinen 5 K sääntö."], // 35
   ["Yhteisen vesipiirin virtaus; vähimmäinen riippuu mallista ja tilasta, ja pieni virtaus voi aiheuttaa 7H:n."], // 36
-  ["Suljetun vesipiirin paine; sallittu alue on mallikohtainen, ja arvolla ≤1,0 bar tarkista kyseisen mallin ohje."], // 37
+  ["Suljetun vesikierron paine.","Sallittu painealue riippuu mallista, asennuskorkeudesta ja paisuntasäiliöstä. Jos paine on enintään 1,0 bar, tarkista kyseisen laitteen ohjekirja."], // 37
   ["Käänteinen X10A-komento: 0 = maks, 100 = seis ([0, 100] → 100–0 %). Ei mittaa RPM:ää eikä todista pyörimistä, nostokorkeutta tai virtaamaa; lue PÄÄLLÄ/POIS ja virtaama erikseen."], // 38
   ["Vesikiertopumpun tila; käynti ei yksin todista hyödyllistä lämmönsiirtoa, joten vertaa virtaukseen."], // 39
   ["Määritetyn aurinkolämpöpiirin pumppu, eri kuin lämpöpumpun vesikiertopumppu."], // 40
@@ -1055,9 +1063,9 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["Nykyinen tilakäyttö on lämmitys tai jäähdytys ilman automaattia; ei todista kompressorin käyntiä."], // 45
   ["HomeHubiin määritetty automaatti-/lämmitys-/jäähdytysvalinta, ei ulkoyksikön nykyinen toiminta."], // 46
   ["Ulkoyksikön ilmoittama pysäytys/lämmitys/jäähdytys; valittu tila ei takaa kompressoria tai lämmönsiirtoa."], // 47
-  ["Rekisterin 35 yhdistetty sulatus- ja kompressorin uudelleenkäynnistyslippu; OFF = normaali, ON = sulatus tai käynnistysvalmistelu."], // 48
+  ["HomeHubin rekisteri 35 yhdistää sulatuksen ja kompressorin uudelleenkäynnistyksen valmistelun.", "Vakaassa käytössä signaali on pois päältä. Aktiivinen signaali tarkoittaa sulatusta tai uudelleenkäynnistyksen valmistelua."], // 48
   ["Rekisterin 36 kuumakäynnistyslippu; OFF = jatkuva käynti, ON = lämmönvaihtimen lyhyt esilämmitys ennen käynnin jatkumista."], // 49
-  ["Ulkokennon sulatus on normaalia kylmässä kosteassa säässä; bitti ilman kosteutta ei arvioi toistuvuutta."], // 50
+  ["Sulatus poistaa huurteen ulkoyksikön lämmönvaihtimesta.", "Sulatus on normaalia kylmällä ja kostealla säällä. Pelkkä tilatieto ei kerro, tapahtuuko sulatus liian usein."], // 50
   ["Nykyinen vikaluokka: normaali, virhe, varoitus tai huomautus; muu kuin normaali vaatii vikakoodin tarkistuksen."], // 51
   ["Parhaillaan ilmoitetun vikakoodin merkitys."], // 52
   ["Hätäkäyttö lämpöpumpun vian jälkeen; asetuksesta riippuen BUH tai kattila voi hoitaa lämmityksen/DHW:n."], // 53
@@ -1298,7 +1306,7 @@ INSPECT_I18N.fi = inspectValues(
     ["PHE:n paluuputki", "PHE:n paluuputki", "Yhteinen paluu R4T:lle säiliö- ja tilahaarojen yhdistyttyä. Lämmityksessä yleensä R1T:tä kylmempi, jäähdytyksessä lämpimämpi; R4T ei ole lämmönluovuttimien lähellä.", (d) => waterMoving(d) ? `Paluu ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Paluuputken kiertoa ei ole vahvistettu."], // wret
     ["Vesivirtaama", "Vesivirtaama", "Yhteisen piirin virtaama; vaadittu minimi riippuu mallista ja tilasta."], // flow
     ["Virtauskytkimen tila", "Virtauskytkimen tila", "X10A:n binääritila; ei mittaa l/min-arvoa eikä vahvista mallin minimivirtaamaa.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A PÄÄLLÄ; vertaa pumppuun ja arvoon ${fmt1(d.flow)} l/min.` : `X10A POIS; pumpun käydessä vertaa arvoa ${fmt1(d.flow)} l/min ja vikaa 7H/C0.`], // flow_switch
-    ["Vedenpaine", "Vedenpaine", "Suljetun vesipiirin paine. Sallittu alue riippuu mallista, korkeuserosta ja paisuntasäiliöstä; katso ohjekirja."], // wp
+    ["Vedenpaine", "Vedenpaine"], // wp
   ],
 );
 

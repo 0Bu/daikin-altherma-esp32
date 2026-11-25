@@ -14,8 +14,10 @@ const commands=[];
 const paths={ common:"main/http_common.cpp",status:"main/http_status.cpp",dwell:"main/state_dwell.cpp",
   chunks:"main/logic/chunk_sink.hpp",json:"main/logic/json.hpp",identity:"main/logic/values_identity.hpp",
   dwellLogic:"main/logic/state_dwell.hpp",heartbeat:"main/logic/heartbeat.hpp",
-  hydronicPayload:"main/logic/hydronic_payload.hpp" };
+  hydronicPayload:"main/logic/hydronic_payload.hpp",
+  heater:"main/logic/heater_context_payload.hpp",jsonOutput:"main/logic/json_output.hpp" };
 const sources=Object.fromEntries(Object.entries(paths).map(([key,file])=>[key,fs.readFileSync(path.join(root,file),"utf8")]));
+const fixtureSource=fs.readFileSync(path.join(fixture,"fixture.cpp"),"utf8");
 const frozen=JSON.parse(fs.readFileSync(path.join(fixture,"legacy_handlers.json"),"utf8"));
 assert.equal(frozen.base_commit,"e99da78f38901cfc1421cec7f74e44dbbb632486");
 // Complete pre-streaming handler from c9835ea0fa1862615b7cceb71cf8a6e43c199547.
@@ -45,7 +47,7 @@ const cxx=process.env.CXX||"c++";
 const sanitizer=process.argv.includes("--sanitizer=undefined");
 function execute(command,args,required=true) {
   commands.push([command,...args]);
-  const result=spawnSync(command,args,{cwd:root,encoding:"utf8",timeout:60000,maxBuffer:2*1024*1024});
+  const result=spawnSync(command,args,{cwd:root,encoding:"utf8",timeout:60000,maxBuffer:8*1024*1024});
   if(required) assert.equal(result.status,0,`${command}: ${result.error||""}\n${result.stdout.split("\n").filter(line=>!line.startsWith("WIRE ")).join("\n")}${result.stderr}`);
   return result;
 }
@@ -57,6 +59,7 @@ function copyHeaders(from,to) {
   }
 }
 function compile(tag,mutation) {
+  assert.equal(fs.readFileSync(path.join(fixture,"fixture.cpp"),"utf8"),fixtureSource,"fixture changed after capture");
   const directory=path.join(temporary,tag),main=path.join(directory,"main");
   copyHeaders(path.join(root,"main"),main);
   const effective={...sources};
@@ -168,8 +171,11 @@ const mutations=[
     before:/append_stop_context_json\(\s*j,\s*diag_effective == DiagnosticsSource::Modbus\s*\?\s*StopContextPayloadFields\{\}\s*:\s*stop_context_payload_fields\(checkup_stop_context_report\(\)\)\);/,
     after:'j += "null";'},
   {name:"leaked-x10a-hydronic-on-modbus",file:"status",scenario:"status_modbus_diagnostics",
-    before:/CheckupHydronicReport\s+report\{\};\s*if\s*\(diag_effective == DiagnosticsSource::Modbus\)\s*\{[\s\S]*?\}\s*else\s*\{\s*report\s*=\s*checkup_hydronic_report\(\);\s*\}/,
-    after:"const CheckupHydronicReport report = checkup_hydronic_report();"},
+    before:/if \(diag_effective == DiagnosticsSource::Modbus\) \{\s*report\s*=\s*\{\};/,
+    after:"if (diag_effective == DiagnosticsSource::Modbus) {"},
+  {name:"leaked-heating-minimum-windows",file:"status",scenario:"heating_minimum_status",
+    before:/append_heating_windows\(j, use_modbus \? modbus\.windows : obs\.minimum_windows,\s*redact \|\| !observed\);/,
+    after:"append_heating_windows(j, use_modbus ? modbus.windows : obs.minimum_windows, !observed);"},
   {name:"unsupported-stop-count-leak",file:"heartbeat",scenario:"stop_context_populated",
     before:"number(c.positive[k], known && supported);",after:"number(c.positive[k], known);"},
   {name:"elapsed-on-closed-hour",file:"status",scenario:"cycling_hours_wire",
@@ -214,12 +220,39 @@ const mutations=[
   {name:"stale-agreement-current-limits",file:"hydronicPayload",scenario:"hydronic_status",
     before:'w.u64("current_limitations_mask", report.agree_limitations, report.current);',
     after:'w.u64("current_limitations_mask", report.agree_limitations, true);'},
+  {name:"omitted-heater-context",file:"status",scenario:"heater_context_populated",
+    before:"append_heater_context_status(j, diag_effective);",after:'j += ",\\"context\\":null";'},
+  {name:"leaked-x10a-heater-on-modbus",file:"status",scenario:"status_modbus_diagnostics",
+    before:"if (diag_effective != DiagnosticsSource::Modbus) {\n        checkup_heater_context_expire();\n        heater_context_payload(fields);\n    }",
+    after:"checkup_heater_context_expire();\n    heater_context_payload(fields);"},
+  {name:"heater-snapshot-refetched",file:"status",scenario:"heater_context_atomic",
+    before:"heater_context_payload(fields);",after:"heater_context_payload(fields); heater_context_payload(fields);"},
+  {name:"heater-expiry-omitted",file:"status",scenario:"heater_context_failures",
+    before:"checkup_heater_context_expire();",after:"/* mutation: no expiry */"},
+  {name:"heater-time-only-observation-lost",file:"heater",scenario:"heater_context_seams",
+    before:/const bool\s+observed\s*= f\.confirmed && supported && c\.has_observed;/,
+    after:"const bool observed = f.confirmed && supported && c.samples > 0;"},
+  {name:"heater-time-only-readable-lost",file:"heater",scenario:"heater_context_seams",
+    before:/const bool\s+readable\s*= observed && c\.has_readable;/,
+    after:"const bool readable = observed && c.readable_samples > 0;"},
+  {name:"heater-unsupported-category-leaked",file:"heater",scenario:"heater_context_populated",
+    before:/const bool\s+known\s*= readable && capable && \(c\.evaluable_mask & \(1u << k\)\);/,
+    after:"const bool known = readable && (c.evaluable_mask & (1u << k));"},
+  {name:"heater-legacy-buh-clock-replaced",file:"status",scenario:"heater_context_populated",
+    before:'num("buh_s", ck.a);',after:'num("buh_s", 0);'},
+  {name:"heater-legacy-bsh-clock-coupled",file:"status",scenario:"heater_context_populated",
+    before:'num("bsh_s", ck.b);',after:'num("bsh_s", ck.a);'},
+  {name:"heater-shared-engine-forces-flat-sink",file:"heater",scenario:"heater_context_populated",
+    before:"detail::append_heater_context_json_impl(sink, f, flat, selected_heater);",
+    after:"detail::append_heater_context_json_impl(sink, f, true, selected_heater);"},
+  {name:"stop-shared-engine-flips-flat",file:"heartbeat",scenario:"stop_context_populated",
+    before:'if (flat) j += "stop_context_";',after:'if (!flat) j += "stop_context_";'},
 ];
 try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,34);
+  assert.equal(caseCount,42);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -242,6 +275,20 @@ try {
       source:{reg:101,offset:4,conv:105},zone_context:"unknown",
     }],
     ["secondary-expired",null],
+  ]);
+  const heatingWindows=(hour,mask)=>({t0:1800000000,slot_s:300,
+    hour_masks:Array.from({length:24},(_,i)=>i===hour?mask:0),locations_missing:false});
+  const modbusHeating={source:"modbus",reason:"observed",min_l_min:5.2,
+    minimum_windows:heatingWindows(23,4)};
+  const x10aHeating={source:"x10a",reason:"observed",min_l_min:7.125,
+    minimum_windows:heatingWindows(22,16)};
+  const heatingWires=new Map([
+    ["status-modbus-diagnostics",{source:"modbus",report:modbusHeating}],
+    ["heating-modbus-fallback",{source:"x10a",report:modbusHeating}],
+    ["heating-modbus-redacted",{source:"x10a",report:{...modbusHeating,minimum_windows:null}}],
+    ["heating-x10a-priority",{source:"x10a",report:x10aHeating}],
+    ["heating-x10a-with-modbus-diagnostics",{source:"modbus",report:x10aHeating}],
+    ["heating-disabled",{source:"x10a",report:null}],
   ]);
   const cyclingWires=new Map([
     ["cycling-partial",{bucket:0,elapsed_s:450,starts:1,run_s:180,observed_s:420,space_s:0,dhw_s:60}],
@@ -319,6 +366,11 @@ try {
     "dhw_transition","route_mode_transition"];
   const stopCountKeys=["witnessed_stops_recent_heating","unclassified_stops","unknown_stops",
     "partial_stops","censored_stops","target_changed","time_overflow","saturated"];
+  const heaterWires=new Set(["heater-unconfirmed","heater-unreadable","heater-unsupported",
+    "heater-populated","heater-time-only","heater-unknown-only","heater-subsecond",
+    "heater-atomic","heater-maximum","heater-expired","heater-recovered"]);
+  const heaterIds=["emergency","error","defrost_recovery","dhw_route","silent",
+    "cold_outdoor","mild_outdoor","compressor_off","quiet_mild_heating"];
   const refrigerantWires=new Set(["refrigerant-populated","refrigerant-populated-redacted",
     "refrigerant-selected-unread","refrigerant-selected-unread-redacted",
     "refrigerant-missing","refrigerant-gap","refrigerant-new-source",
@@ -533,6 +585,7 @@ try {
       assert.equal(flow?.water_agreement,null,name);
     }
     if(name==="status-x10a-defrost-outdoor") {
+      assert.equal(doc.health.source_fresh,true,name);
       const defrost=doc.health.checks.find(check=>check.id==="defrost");
       assert.equal(defrost?.verdict,"info",name);
       assert.equal(defrost?.outdoor_source,"x10a",name);
@@ -541,6 +594,16 @@ try {
       assert.equal(defrost?.outdoor_samples,12,name);
       assert.deepEqual(defrost?.last_observed_start,{unix_s:2000000000,route:"space_heating",outdoor_c:-2.5},name);
       defrostOutdoorSeen=true;
+    }
+    if(heatingWires.has(name)) {
+      const {source,report}=heatingWires.get(name);
+      assert.equal(doc.health.source,source,name);
+      const flow=doc.health.checks.find(check=>check.id==="flow");
+      assert.deepEqual(flow?.heating_minimum,report,name);
+      assert.deepEqual(flow?.minimum_windows,name==="heating-x10a-priority"
+        ?x10aHeating.minimum_windows:null,`${name}: legacy X10A windows`);
+      assert.equal(flow?.min_l_min,source==="x10a"&&report?6.5:null,`${name}: legacy pump minimum`);
+      heatingWires.delete(name);
     }
     if(stopWires.has(name)) {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
@@ -597,6 +660,62 @@ try {
         assert.equal(s.restore_pending,false);assert.equal(s.persistence_pending,true);
       }
       stopWires.delete(name);
+    }
+    if(heaterWires.has(name)) {
+      heaterWires.delete(name);
+      assert.equal(doc.health.checks.length,8,"heater context remains within its existing check row");
+      const row=doc.health.checks.find(check=>check.id==="heater"),s=row.context;
+      assert.ok(s,`${name}: actual status must include the independent typed context`);
+      assert.equal(s.max_gap_s,15);assert.equal(s.recovery_s,300);assert.equal(s.notice_s,900);
+      assert.equal(s.mild_boundary_tenths_c,20);assert.equal(s.categories_overlap,true);
+      for(const h of [s.buh,s.bsh]) {
+        assert.deepEqual(Object.keys(h.categories),heaterIds);
+        assert.ok(Buffer.byteLength(JSON.stringify(h))<=2048,`${name}: per-heater wire object bound`);
+      }
+      if(name==="heater-populated") {
+        assert.deepEqual([row.buh_s,row.bsh_s,row.buh_observed_s,row.bsh_observed_s],[17,29,111,222]);
+      } else assert.deepEqual([row.buh_s,row.bsh_s,row.buh_observed_s,row.bsh_observed_s],[null,null,null,null],
+        `${name}: independent context must never backfill legacy BUH/BSH clocks`);
+      if(name==="heater-unconfirmed"||name==="heater-expired") {
+        assert.equal(s.confirmed,false);assert.equal(s.epoch,null);assert.equal(s.capability_mask,null);
+        for(const h of [s.buh,s.bsh]) {
+          assert.equal(h.supported,null);assert.equal(h.on_s,null);assert.equal(h.samples,null);
+          for(const category of Object.values(h.categories)) assert.deepEqual(category,
+            {supported:null,positive_s:null,evaluable_on_s:null,positive_samples:null});
+        }
+      } else if(name==="heater-unreadable"||name==="heater-unsupported") {
+        assert.equal(s.confirmed,true);
+        for(const h of [s.buh,s.bsh]) {
+          assert.equal(h.supported,name==="heater-unreadable");
+          assert.equal(h.readable_s,null);assert.equal(h.on_s,null);
+          assert.equal(h.samples,name==="heater-unreadable"?0:null);
+        }
+      } else if(name==="heater-time-only") {
+        assert.equal(s.epoch,73);
+        for(const [h,wanted] of [[s.buh,2],[s.bsh,3]]) {
+          assert.equal(h.on_s,wanted);assert.equal(h.readable_s,wanted);assert.equal(h.samples,0);
+          assert.deepEqual(h.categories.emergency,{supported:true,positive_s:wanted,evaluable_on_s:wanted,positive_samples:0});
+        }
+      } else if(name==="heater-unknown-only") {
+        for(const h of [s.buh,s.bsh]) {
+          assert.equal(h.unreadable_s,2);assert.equal(h.samples,0);assert.equal(h.readable_s,0);
+          assert.equal(h.on_s,null);assert.equal(h.categories.emergency.positive_s,null);
+        }
+      } else if(name==="heater-subsecond") {
+        assert.equal(s.buh.on_s,0);assert.equal(s.buh.samples,2);
+        assert.deepEqual(s.buh.categories.emergency,{supported:true,positive_s:0,evaluable_on_s:0,positive_samples:1});
+      } else if(name==="heater-maximum") {
+        assert.equal(s.epoch,4294967295);
+        for(const h of [s.buh,s.bsh]) {
+          assert.equal(h.on_s,4294967295);assert.equal(h.samples,4294967295);assert.equal(h.saturated,true);
+        }
+      } else {
+        assert.equal(s.epoch,73);assert.equal(s.dropped,3);assert.equal(s.persistence_pending,true);
+        assert.equal(s.buh.on_s,3);assert.equal(s.bsh.on_s,7);
+        assert.deepEqual(s.bsh.categories.silent,{supported:true,positive_s:0,evaluable_on_s:7,positive_samples:0});
+        for(const h of [s.buh,s.bsh]) assert.deepEqual(h.categories.cold_outdoor,
+          {supported:false,positive_s:null,evaluable_on_s:null,positive_samples:null});
+      }
     }
     if(configCases.has(name)) {
       const expected=configCases.get(name);
@@ -699,6 +818,7 @@ try {
   assert.equal(configCases.size,0,"all plain/redacted stored and absent configuration cases must run");
   assert.equal(retirementWires.size,0,"all retirement and retained-source wire oracles must run");
   assert.equal(stopWires.size,0,"all unknown, covered-zero and populated stop-context wire oracles must run");
+  assert.equal(heaterWires.size,0,"all independent heater population/seam/lifecycle wire oracles must run");
   assert.equal(cyclingWires.size,0,"both partially elapsed and start-edge cycling frames must run");
   assert.deepEqual([...dhwSeen].sort(),[...dhwCases.keys()].sort(),
     "all DHW source, frame, admission, OOM, redaction and MCP wire oracles must run exactly once");
@@ -707,6 +827,7 @@ try {
   assert.ok(defrostOutdoorSeen,"X10A defrost outdoor status snapshot must run");
   assert.equal(refrigerantWires.size,0,"all populated, missing, reset and omitted refrigerant wire oracles must run");
   assert.equal(secondaryWires.size,0,"all secondary-supply wire cases must be present");
+  assert.equal(heatingWires.size,0,"all heating-minimum wire cases must be present");
   const wireUiCount=renderWireSnapshots(wires);
   console.log(`WIRE->UI contract bridge: ${wireUiCount} C++ snapshot scenarios rendered through strict DOM`);
   const controls=[];
@@ -731,6 +852,7 @@ try {
     assert.equal(fs.readFileSync(path.join(root,file),"utf8"),sources[key],`source changed during test: ${file}`);
     return [file,createHash("sha256").update(sources[key]).digest("hex")];
   }));
+  assert.equal(fs.readFileSync(path.join(fixture,"fixture.cpp"),"utf8"),fixtureSource,"fixture changed during test");
   const dependencies=fs.readFileSync(path.join(temporary,"production/inputs.d"),"utf8").replace(/\\\n/g," ");
   const compiledInputs={};
   for(const file of dependencies.slice(dependencies.indexOf(":")+1).trim().split(/\s+/).filter(Boolean)) {
@@ -742,8 +864,8 @@ try {
       hashes[path.relative(root,original)]=hash;
     }
   }
-  for(const file of ["main/logic/dhw_loss_trace.hpp","main/logic/mcp.hpp"])
-    assert.ok(Object.hasOwn(hashes,file),`new DHW/framing input must appear in compiler dependency hashes: ${file}`);
+  for(const file of ["main/logic/dhw_loss_trace.hpp","main/logic/mcp.hpp","main/logic/heater_context_payload.hpp","main/logic/json_output.hpp"])
+    assert.ok(Object.hasOwn(hashes,file),`new DHW/framing/heater input must appear in compiler dependency hashes: ${file}`);
   for(const file of ["main/hp_poll.cpp","test/http_stream_runtime/legacy_handlers.json","test/test_http_stream_runtime.mjs"])
     hashes[file]=createHash("sha256").update(fs.readFileSync(path.join(root,file))).digest("hex");
   const record={compiler,sanitizer:sanitizer?"undefined-no-recover":"none",sanitizerControl,commands,hashes,compiledInputs,wires,controls,

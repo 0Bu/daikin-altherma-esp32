@@ -1,4 +1,4 @@
-// translation-source: ad4ff89e52033b8003c73ce3d81feb7c857d4b6087b3d22a72233cff7684699d
+// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -169,7 +169,7 @@ I18N.nb = localeValues([
   /* check.fault */ "Anleggsfeil",
   /* check.dhw_loss */ "Tankavkjøling",
   /* check.cycling */ "Kompressorstarter",
-  /* check.defrost */ "Avriminger",
+  /* check.defrost */ "Avriming",
   /* check.pressure */ "Vanntrykk",
   /* check.flow */ "Laveste vannmengde",
   /* check.flow.lowest */ "Laveste vannmengde under oppvarming",
@@ -180,7 +180,7 @@ I18N.nb = localeValues([
   /* check.flow.show */ "Vis et lavpunkt i grafen",
   /* check.flow.readout */ (value) => `I dette tidsrommet ble ${value} målt minst én gang. Romoppvarmingen hadde da vært i gang i minst ti minutter.`,
   /* check.flow.locations_missing */ "Tidspunktet for eldre målinger med denne verdien ble ikke lagret.",
-  /* check.flow.x10a_only */ "Den laveste vannmengden under oppvarming beregnes fra X10A-målinger.",
+  /* check.flow.unavailable */ "Målingene som trengs for å finne den laveste vannmengden under oppvarming, mangler.",
   /* check.flow.waiting */ "Venter på en oppvarmingsperiode som oppfyller målekravene.",
   /* check.heater */ "Elkolber",
   /* check.retries */ "Beskyttelsestellere",
@@ -232,7 +232,6 @@ I18N.nb = localeValues([
   /* check.detail.fault.past */ "Ingen melding er aktiv nå; en ble registrert i perioden. At den forsvant, beviser verken årsak eller løsning.",
   /* check.detail.fault.past_unknown */ "En melding ble registrert; gjeldende feiltilstand kan ikke leses.",
   /* check.detail.collecting */ (a, b) => `Lesbare signaler: ${a} av påkrevde ${b}.`,
-  /* check.detail.outdoor_defrost */ " X10A-utedata er bare ferske målinger mens avriming og kompressorstatus var lesbare og kompressoren gikk. De er kontekst og endrer ikke grensen eller vurderingen.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Godtatte timesvinduer: ${a}; aktuell kandidat: ${c} av ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Godtatte timesvinduer: ${a}; tanklading eller tankvarmer oppdaget. Gjenværende stabilisering: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Godtatte timesvinduer: ${a}; venter på neste egnede time.`,
@@ -249,8 +248,6 @@ I18N.nb = localeValues([
   /* check.detail.experimental */ "Eksperimentelle tellere; stabilitet utelukker ikke begrensning.",
   /* check.detail.unavailable */ "Ingen vurderbare signaler i denne profilen.",
   /* check.starts */ (n) => `${n} ${n === 1 ? "start" : "starter"}`,
-  /* check.cycles */ (n) => `${n} ${n === 1 ? "syklus" : "sykluser"}`,
-  /* check.paired_cycles */ (n) => `${n} klassifisert`,
   /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "kjøring" : "kjøringer"}`,
   /* check.cycling.mean */ (d) => `Snitt ${d}`,
   /* check.cycling.completed */ "Fullførte kjøringer",
@@ -316,8 +313,15 @@ I18N.nb = localeValues([
   /* check.cycling.e_ongoing */ "Aktiv ved siste avlesning.",
   /* check.cycling.cause_unavailable */ "Ingen detaljer",
   /* check.cycling.cause_older_unavailable */ "Lagrede start- og stoppdetaljer er ikke tilgjengelige for disse eldre syklusene.",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
+  /* check.heater_context.title */ "Kontekst for rapporterte varmeflagg",
+  /* check.heater_context.columns */ "Kontekst|BUH|BSH",
+  /* check.heater_context.counts */ "Positiv tid / vurderbar ON-tid · positive målepunkter",
+  /* check.heater_context.categories */ "nøddriftsflagg|feilstatus|avriming/gjenoppretting|varmtvannsvei|Silent Mode-flagg|uteluft ≤+2°C|uteluft >+2°C|kompressor rapportert stoppet|Silent Mode + oppvarming ved mildvær",
+  /* check.heater_context.totals */ "rapportert ON|forening av kontekster|overlapp|ukjent kontekst|ingen positiv kategori|tid med lesbart flagg",
+  /* check.heater_context.states */ "Kilden er ubekreftet|Udaterte observasjoner|Ufullstendige 24 t|Arkivet er ikke validert ennå|Venter på lagring|Arkivet er utilgjengelig: skadde eller uleste poster|Usikkert klokkeslett|Metning: nedre grenser|Ikke støttet",
+  /* check.heater_context.notice */ "Minst 15 minutter rapportert varmetid med Silent Mode, oppvarming og mild uteluft: foreløpig prosjektmerknad.",
+  /* check.heater_context.rule */ "Lesbare intervallender, hull ≤15 s. Gjenoppretting er begrenset til 300 s etter observert avrimingsslutt under oppvarming. Skillet ved +2°C og merknaden etter 900 s er prosjektheuristikker.",
+  /* check.heater_context.limits */ "Kategoriene overlapper separat for hver varmer. Manglende kontekst forblir ukjent. Energi, driftsårsak, bivalens eller nødvendighet er ikke fastslått. En advarsel er ikke nøddrift; Low noise control er uklassifisert. Tilstander mellom målepunktene forblir ukjente.",
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `Tank ${d}`,
   /* check.buh_runtime */ (d) => `Tillegg ${d}`,
@@ -377,19 +381,23 @@ I18N.nb = localeValues([
   /* check.detail.period_label */ "Dataperiode:",
   /* check.detail.period */ (a) => `${a}, høyst 24 h; mulige hull`,
   /* check.detail.age_label */ "Alder på siste måling:",
-  /* check.detail.horizon_wait */ (a) => `Et helt 24-timersvindu mangler fortsatt: ${a} gjenstår.`,
   /* check.detail.fault.ok */ "Ingen aktuell eller lagret melding i lesbare feilsignaler.",
-  /* check.detail.defrost.info */ "≥3 parede avriminger overstiger 15% av lesbar kompressortid: prosjekthint.",
-  /* check.detail.defrost.ok */ "Ingen avrimingsandelshint; vær og hull ikke vurdert.",
-  /* check.defrost.last_start */ (date, route, outdoor) => `Siste observerte avrimingsstart · ${date} · Krets ${route} · Uteluft ${outdoor}`,
-  /* check.defrost.route_space */ "Romoppvarming",
-  /* check.defrost.route_dhw */ "Varmtvannstank",
+  /* check.defrost.normal */ "Kort avriming er vanlig i kaldt, fuktig vær. Avrimingsandelen viser hvor mye av kompressorens driftstid med kjent avrimingsstatus som gikk til avriming.",
+  /* check.defrost.modbus.about */ "Modbus bruker samme signal for avriming og klargjøring for omstart av kompressoren.",
+  /* check.defrost.modbus.normal */ "Signalet er av under stabil drift. Begge fasene kan slå det på.",
+  /* check.defrost.starts_label */ "Registrerte avrimingsstarter",
+  /* check.defrost.share */ "Avrimingsandel",
+  /* check.defrost.notice */ "Høy avrimingsandel",
   /* check.detail.pressure.info */ "Lavt",
   /* check.detail.pressure.warn */ "Kritisk",
   /* check.detail.pressure.ok */ "Normalt",
-  /* check.detail.defrost_events_insufficient */ "Færre enn tre parede avriminger; ingen andelsdom.",
+  /* check.pressure.finding */ "Bekreftet funn",
+  /* check.pressure.sustained */ (a) => `Trykk på ${a} eller lavere i minst 60 sammenhengende sekunder.`,
+  /* check.pressure.clear */ "Det er ikke bekreftet vedvarende lavt trykk.",
+  /* check.pressure.rules */ "Hvordan vurderes trykket?",
+  /* check.pressure.unavailable */ "X10A-trykkdiagnose er utilgjengelig.",
+  /* check.pressure.pending */ "Målingen er i kritisk område. Varigheten er fortsatt ukjent.",
   /* check.detail.source_stale */ "Ingen fersk X10A-prøve; aktuell tilstand ukjent. Historikk beholdt.",
-  /* check.detail.no_paired_runtime */ "Ingen paret lesbar kjøretid; bare antall.",
   /* check.detail.current_label */ "≤1,0 bar lavt",
   /* check.detail.minimum_time_label */ "≤0,5 bar kritisk",
   /* check.detail.coverage_missing */ (a) => `Manglende lesbar tid: ${a} s.`,
@@ -501,7 +509,7 @@ I18N.nb = localeValues([
   /* hist.boost_active */ "Boost aktiv",
   /* hist.boost_inactive */ "Boost av",
   /* hist.boost_aria */ nbAria("Smart Grid-historikk med fire moduser"),
-  /* hist.defrost_total */ (d) => `Avriming registrert · ${d} i 5-minuttersintervaller`,
+  /* hist.defrost_total */ (d) => `5-minuttersblokker med avriming · ${d}`,
   /* hist.defrost_none */ "Ingen avriming registrert i perioden.",
   /* hist.defrost_active */ "Avriming aktiv",
   /* hist.defrost_inactive */ "Avriming av",
@@ -629,7 +637,7 @@ I18N.nb = localeValues([
   /* schem.card_aria */ "Live systemskjema: utedel, kuldemediekrets, platevarmeveksler, vannkrets med tilleggsvarmer og 3-veisventil, varmtvannstank og romkrets",
   /* schem.group_aria */ "Live systemskjema — velg en verdi eller komponent for en forklaring",
   /* schem.outdoor_unit */ "UTEDEL",
-  /* schem.defrost_pill */ "❄ Avriming",
+  /* schem.defrost_pill */ "Avriming",
   /* schem.outdoor */ "Ute",
   /* insp.close */ "Lukk",
   /* schem.defrost_transfer */ "Under bekreftet avriming kan varme gå fra vannet til kuldemediet. Rørene viser bare denne retningen når den støttes av gjennomstrømningen og temperaturene som måles nå.",
@@ -1121,7 +1129,7 @@ INSPECT_I18N.nb = inspectValues(
     ["PHE-innløpsrør", "Innløpsrør til PHE", "Felles retur til PHE via R4T etter at grenene møtes. Vanligvis kaldere enn R1T ved varme og varmere ved aktiv kjøling; R4T sitter ikke ved avgiverne.", (d) => waterMoving(d) ? `Retur ${degC(d.ret)}, ${fmt1(d.flow)} l/min og ${fmt1(d.wp)} bar.` : "Pumpe og vannmengde bekrefter ikke retursirkulasjon."], // wret
     ["Vannmengde", "Vannmengde", "Vannmengde i felleskretsen. Minstekravet avhenger av modell; tolk med pumpe og trykk."], // flow
     ["Strømningsbryter", 0, "Binær X10A-status; måler ikke l/min og bekrefter ikke minste vannmengde.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A aktiv; sammenlign med pumpe og ${fmt1(d.flow)} l/min.` : `X10A inaktiv; med aktiv pumpe, sammenlign ${fmt1(d.flow)} l/min og feil 7H/C0.`], // flow_switch
-    ["Vanntrykk", 0, "Trykk i vannkretsen, ikke kjølemediet. Tillatt område avhenger av modell/anlegg; bruk riktig håndbok."], // wp
+    ["Vanntrykk", 0], // wp
   ],
 );
 
@@ -1203,7 +1211,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["R1T ut av PHE før BUH; med R4T/vannmengde anslås moduseffekt, men plasseringen er modellavhengig."], // 34
   ["R4T-retur til PHE; vurder ΔT med vannmengde, kompressor og modus, ikke en universell 5 K-regel."], // 35
   ["Vannmengde i felleskretsen; minimum avhenger av modell/modus, og lav verdi kan utløse 7H."], // 36
-  ["Hydraulikktrykk: mange håndbøker krever >1 bar; ved ≤1,0 bar, bruk håndboken for nøyaktig modell."], // 37
+  ["Vanntrykk i den lukkede vannkretsen.","Mange Altherma-håndbøker krever over 1 bar ved pumpeinnløpet. Tillatt trykkområde avhenger av modell, installasjonshøyde og ekspansjonskar. Ved 1,0 bar eller lavere, sjekk håndboken for den nøyaktige enheten."], // 37
   ["Invertert X10A-kommando: 0 = maks, 100 = stopp ([0, 100] → 100–0 %). Måler ingen RPM og beviser ikke rotasjon, løftehøyde eller vannmengde; les PÅ/AV og mengde hver for seg."], // 38
   ["Pumpestatus; beviser ikke nyttig varme og kan være aktiv uten kompressor. Sammenlign vannmengde."], // 39
   ["Status for pumpen i en konfigurert solvarmekrets."], // 40
@@ -1214,9 +1222,9 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["Aktuell rommodus varme/kjøling uten Auto; beviser ikke kompressor og krever aktivitetssignal."], // 45
   ["HomeHub-valg Auto/varme/kjøling; konfigurasjon, ikke aktuell drift eller bevis på aktivitet."], // 46
   ["Utestatus stopp/varme/kjøling; kan forbli valgt med kompressoren av og beviser ikke varme."], // 47
-  ["Kombinert avrimings- og omstartsflagg i register 35; OFF = vanlig drift, ON = avriming eller klargjøring for omstart."], // 48
+  ["HomeHub-register 35 kombinerer avriming og klargjøring for omstart av kompressoren.", "Signalet er av ved stabil drift. På betyr avriming eller klargjøring for omstart."], // 48
   ["Varmstartflagg i register 36; OFF = stabil drift, ON = kort forvarming av varmeveksleren etter oppstart eller avriming."], // 49
-  ["Avriming av utedel; normalt i kaldt/fuktig vær, men biten alene diagnostiserer ikke for mange sykluser."], // 50
+  ["Avriming fjerner rim fra varmeveksleren i utedelen.", "Avriming er normalt i kaldt og fuktig vær. Signalet alene kan ikke avgjøre om syklusene er for hyppige."], // 50
   ["Alvorlighetsklasse for aktiv melding: Normal, Feil, Advarsel eller Forsiktig."], // 51
   ["Betydningen av feilkoden som meldes nå."], // 52
   ["Nøddrift etter varmepumpefeil."], // 53

@@ -257,7 +257,8 @@ contract in `main/logic/redact.hpp` with this table and the serializer.
 Redacted status omits the optional compressor cycling `timeline`, `run_contexts` and
 `flow_typical_l_min`, DHW tank-cooling `timeline`, unit-fault `timeline` (and wall-clock
 `latest.start_unix_s`/`end_unix_s`). These can reveal event timing. Redacted status also sets
-`flow.minimum_windows` to `null`, removing the five-minute masks for the heating minimum.
+`flow.minimum_windows` and `flow.heating_minimum.minimum_windows` to `null`, removing the
+five-minute masks for the heating minimum.
 It still includes the hydronic aggregates and their first and last accepted timestamps in seconds.
 The dashboard and the LAN MCP `get_status` tool use ordinary unredacted status.
 

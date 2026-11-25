@@ -227,24 +227,28 @@ whatever the first cycle read.
   spaces, so a full cycle is ten requests. The per-request cap is 16 registers, far below the
   protocol's 125: a batch is the unit of *loss* as much as of saving, and the longest run here is six.
 * **Two cadences.** A **full** cycle runs every fifth poll tick. The four intervening cycles read
-  three fast batches, including inputs 53 (normal space operation), 37 (space or DHW routing),
-  38 (operating mode) and 44 (outdoor temperature). Inputs 53 and 38 can refresh `/status.modbus`.
-  Neighbouring registers ride these batches because leaving them out saves no request. Only eligible
-  full polls supply measurements to the plant checkup, including input 44 for outdoor context.
+  three standard fast batches, including inputs 53 (normal space operation), 37 (space or DHW
+  routing), 38 (operating mode) and 44 (outdoor temperature). Inputs 53 and 38 can refresh
+  `/status.modbus`. With Plant diagnostics enabled on an affirmatively identified EKRHH map, fast
+  cycles also read the contiguous input batch 30–33 for the pump and compressor witnesses (30 and
+  31). Neighbouring registers ride these batches because leaving them out saves no request. Only
+  eligible full polls supply measurements to the plant checkup, including input 44 for outdoor
+  context and input 49 for the heating flow minimum. Fast polls check the operating state between
+  those flow measurements.
 * **Five poll ticks.** Chosen from the *dashboard*, not from how fast the values move: the
   browser polls `/values` every two seconds, and a HomeHub reading up to ten seconds old beside a
   one-second X10A reading of the same quantity invites exactly the "which of these is current?"
   question the two-array `/values` shape exists to make answerable. This is nominal cadence with
   short replies; bounded network waits add time and are included in the separate cache-age bound.
-* **A fast cycle commits no value cache.** Its fifteen gate/context-batch registers are not a cache and its
-  position on the raster is not a sample, so `/values` and the trend rings stay with the last full
-  cycle rather than publishing fifteen rows and 22 apparent read failures. Network waits add to
-  the intervening poll delays. `connected` reports this cycle's transport state; reply age detects
-  stalled progress independently of the larger full-cache allowance.
+* **A fast cycle commits no value cache.** `/values` and the trend rings stay with the last full
+  cycle. The fast registers only update their status and diagnostic witnesses. Network waits add
+  to the intervening poll delays. `connected` reports this cycle's transport state, while reply age
+  detects stalled progress independently of the larger full-cache allowance.
 * **An exception splits its batch.** A Modbus exception is a valid reply about **one** register, and
   a batched request cannot say which — so a batch that excepts is re-read register by register, and
   stays split for the session (the usual cause, a register this hub does not implement, does not go
-  away). A reconnect forgets it: a different hub deserves the cheap plan again.
+  away). For the additional fast heating batch, the split fast read retries just the pump and
+  compressor inputs. A reconnect forgets the split, and the full batch can be tried again.
   Every read request, including each fallback single read and profile probe, feeds the task watchdog
   before transport begins; feeding once per batch does not bound a slow split batch.
 * **Only a full cycle proves recovery.** `/status.modbus` carries one current error for the whole
@@ -260,9 +264,10 @@ fast-cycle replies continue. These bounds are liveness filters, not proof of sim
 A target change immediately resets the public profile to Auto/Probing, before name resolution;
 only work for that target generation can publish a new classification.
 
-**37 → 4.4 requests/poll-second, ~380 000 a day.** The plan is resolved at compile time and lives in flash;
-`hp_modbus.cpp` `static_assert`s that batching still collapses the map, so a future register added
-into a gap re-prices the link visibly instead of quietly restoring the per-register sweep.
+The EKRHH plan averages **4.4 requests per nominal one-second tick** (~380,000 a day), or **5.2**
+(~449,000 a day) with the additional heating-diagnostics batch. This count covers ordinary cycles.
+The plan is resolved at compile time and lives in flash. Compile-time assertions in `hp_modbus.cpp`
+guard the batch plans.
 
 ## Daikin Altherma 4 Modbus TCP support
 
@@ -419,7 +424,7 @@ arrived. Its rows belong to that live session's latest **full** cycle, subject t
 full-cache and seven-second reply-age bounds described above; bounded network reads add to the
 four intervening fast polls. At native promotion, the answered pressure probe alone is exposed
 until the following full native sweep. Fast cycles update the link and the separate status
-observations without turning their fifteen rows into a partial value cache. These are transport
+observations without committing a partial value cache. These are transport
 limits, not proof that every row was observed simultaneously. Liveness and the cache sit behind two
 different mutexes, so every successful TCP connect gets a generation and every cache commit records
 the generation that produced it. `mb_values_snapshot()` reports live only when the post-copy link

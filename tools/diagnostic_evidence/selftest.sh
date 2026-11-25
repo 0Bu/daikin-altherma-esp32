@@ -28,11 +28,20 @@ reset() {
        main/logic/hydronic_observation.hpp main/logic/hydronic_input.hpp \
        main/logic/hydronic_hourly.hpp main/logic/hydronic_payload.hpp \
        main/logic/working_figure.hpp main/logic/gas_comparison.hpp \
+       main/logic/modbus_heating_flow.hpp main/logic/modbus_plan.hpp \
        "$WORK/main/logic/"
     cp main/stop_observation_store.hpp main/stop_observation_store.cpp \
        main/hydronic_observation_store.hpp main/hydronic_observation_store.cpp \
        main/history.cpp "$WORK/main/"
+    cp main/logic/heater_context.hpp main/logic/heater_context_input.hpp \
+       main/logic/heater_context_hourly.hpp main/logic/heater_context_cohort.hpp \
+       main/logic/heater_independent_hour.hpp \
+       main/logic/heater_context_payload.hpp main/logic/history_persist.hpp \
+       main/logic/json_output.hpp "$WORK/main/logic/"
+    cp main/heater_context_store.hpp main/heater_context_store.cpp \
+       main/mqtt_ha.cpp "$WORK/main/"
     cp main/hp_poll.cpp "$WORK/main/hp_poll.cpp"
+    cp main/hp_modbus.cpp "$WORK/main/hp_modbus.cpp"
     cp main/http_status.cpp "$WORK/main/http_status.cpp"
     cp main/def/overlay.hpp "$WORK/main/def/overlay.hpp"
     cp docs/REGISTERS.md "$WORK/docs/REGISTERS.md"
@@ -219,6 +228,30 @@ assert helper.count("secondary_supply") == 1
 p.write_text(s[:start] + helper.replace("secondary_supply", "new_secondary_supply") + s[end:])
 PY
 run_case "changed secondary supply output key is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+
+reset
+patch_file "$WORK/main/hp_modbus.cpp" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+old = 'gates.hot_start_clear = raw == 0;'
+assert s.count(old) == 1
+p.write_text(s.replace(old, 'gates.hot_start_clear = true;'))
+PY
+run_case "changed Modbus heating witness is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+
+echo "== Heater context rules and outputs are part of the evidence =="
+for component in main/logic/heater_context.hpp main/logic/heater_context_input.hpp \
+    main/logic/heater_context_hourly.hpp main/logic/heater_context_cohort.hpp \
+    main/logic/heater_independent_hour.hpp \
+    main/logic/heater_context_payload.hpp main/logic/history_persist.hpp \
+    main/logic/json_output.hpp main/heater_context_store.hpp main/heater_context_store.cpp \
+    main/mqtt_ha.cpp; do
+    reset
+    printf '\n// selftest: changed heater evidence contract\n' >> "$WORK/$component"
+    run_case "changed heater source $component is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+done
 
 echo "== 13. reviewed implementation can be deliberately re-stamped =="
 reset

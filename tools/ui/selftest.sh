@@ -445,12 +445,12 @@ cp "$static_tmp/main/www/js/dashboard.js" "$static_tmp/dashboard.orig"
 cp "$static_tmp/main/www/style.css" "$static_tmp/style.orig"
 
 # 1. Undeclared identifier inside an unexecuted branch.
-sed 's/^function checkupOutdoorContext(c) {/function checkupOutdoorContext(c) {\n  if (false) return ghostOutdoorSourceLabel(c);/' \
+sed 's/^function checkupDefrostCheck(status) {/function checkupDefrostCheck(status) {\n  if (false) return ghostDefrostReport(status);/' \
   "$static_tmp/dashboard.orig" > "$static_tmp/main/www/js/dashboard.js"
 if (cd "$static_tmp" && node test/test_ui_static_analysis.mjs >"$static_tmp/static-undef.log" 2>&1); then
   echo "ui selftest: undeclared identifier in unexecuted branch escaped static audit" >&2; exit 1
 fi
-grep -q "undeclared identifier 'ghostOutdoorSourceLabel'" "$static_tmp/static-undef.log" || {
+grep -q "undeclared identifier 'ghostDefrostReport'" "$static_tmp/static-undef.log" || {
   echo "ui selftest: undeclared identifier mutation failed outside expected check" >&2; exit 1; }
 
 # 2. Missing DOM ID queried via $("...").

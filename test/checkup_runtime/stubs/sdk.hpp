@@ -13,6 +13,7 @@ inline constexpr TickType_t portMAX_DELAY = UINT32_MAX;
 struct HostMutex {
     bool owned = false;
 };
+using StaticSemaphore_t = HostMutex;
 using SemaphoreHandle_t = HostMutex*;
 namespace sdk {
 inline int64_t   now_us = 1000000;
@@ -32,6 +33,11 @@ inline const char* esp_err_to_name(esp_err_t) { return "host-adapter"; }
 inline esp_err_t   esp_register_shutdown_handler(void (*fn)()) {
     sdk::shutdown = fn;
     return ESP_OK;
+}
+inline SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t* storage) {
+    if (!storage) return nullptr;
+    *storage = {};
+    return storage;
 }
 inline SemaphoreHandle_t xSemaphoreCreateMutex() {
     if (sdk::fail_create_once) {

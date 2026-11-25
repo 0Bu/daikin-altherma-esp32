@@ -101,7 +101,7 @@ const layoutAudit = `(() => {
     ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .dashboard-card-label, .ota-alert-message, " +
     ".recovery-banner .crash-title, .recovery-banner .crash-meta, " +
     "#valueGroups .vitem.open .vdesc-inner, #valueGroups .vitem.open .vdesc-body, " +
-    "#valueGroups .vitem.open .vdesc-p"
+    "#valueGroups .vitem.open .vdesc-p, .heater-context th, .heater-context td, .heater-context caption"
   );
   for (const el of candidates) {
     if (!shown(el)) continue;
@@ -362,7 +362,6 @@ async function assertLivePollFullDashboard(page, server, context) {
       pollStop();
       pollSchedule = window.__browserPollSchedule;
       S.descOpen.clear();
-      S.descOpen.add("model:health_defrost");
       S.descOpen.add("service:refrigerant");
       S.dashboardCard = "diagnosis";
       pollNow();
@@ -377,7 +376,9 @@ async function assertLivePollFullDashboard(page, server, context) {
       navButtons: document.querySelectorAll("#cardNav [data-card]").length,
       valueRows: document.querySelectorAll("#valueGroups .vrow, #valueGroups .vdesc").length,
       hdrIp: document.getElementById("hdrIp").textContent,
-      defrostText: document.querySelector('[data-desc="model:health_defrost"]')?.closest(".vitem")?.textContent || "",
+      defrostNotice: !!document.querySelector('button[data-defrost-inspect]'),
+      defrostAlert: document.getElementById("gDefrostState").classList.contains("sc-defrost-alert"),
+      duplicateDefrost: !!document.querySelector('[data-desc="model:health_defrost"]'),
       serviceText: document.querySelector('[data-desc="service:refrigerant"]')?.closest(".vitem")?.textContent || "",
     }))()`);
     assert.equal(x10aObserved.pollFails, 0, `${context}/x10a: real poll must reset _pollFails`);
@@ -385,8 +386,8 @@ async function assertLivePollFullDashboard(page, server, context) {
     assert.ok(x10aObserved.navButtons >= 2, `${context}/x10a: #cardNav must be populated`);
     assert.ok(x10aObserved.valueRows > 0, `${context}/x10a: #valueGroups must render live rows`);
     assert.equal(x10aObserved.hdrIp, "192.0.2.99", `${context}/x10a: #hdrIp must show Ethernet net.ip`);
-    assert.ok(x10aObserved.defrostText.includes("-4.5") && x10aObserved.defrostText.includes("X10A"),
-      `${context}/x10a: defrost outdoor context must render through live HTTP poll`);
+    assert.ok(x10aObserved.defrostNotice && x10aObserved.defrostAlert && !x10aObserved.duplicateDefrost,
+      `${context}/x10a: live polling must show a defrost notice without recreating the duplicate details`);
     assert.ok(x10aObserved.serviceText.includes(await page.evaluate(`t("service.help.limited")`)),
       `${context}/x10a: refrigerant service state=limited must render help text`);
     assert.deepEqual(page.diagnostics, [], `${context}/x10a: live poll must emit no browser errors`);
@@ -755,9 +756,10 @@ async function clickElement(page, selector, { touch = false, yFraction = .5 } = 
     const button = document.querySelector(${JSON.stringify(selector)});
     const rect = button.getBoundingClientRect();
     if (!rect.width || !rect.height) throw new Error("hidden pointer target: " + ${JSON.stringify(selector)});
-    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height * ${yFraction} };
-    if (document.elementFromPoint(point.x, point.y)?.closest("button, [role=button]") !==
-        button.closest("button, [role=button]"))
+    const point = { x: rect.left + (button.matches("summary") ? Math.min(20, rect.width / 2) : rect.width / 2),
+      y: rect.top + rect.height * ${yFraction} };
+    const control = "button, [role=button], summary";
+    if (document.elementFromPoint(point.x, point.y)?.closest(control) !== button.closest(control))
       throw new Error("pointer target is obstructed: " + ${JSON.stringify(selector)});
     return point;
   })()`);
@@ -1369,7 +1371,8 @@ async function assertDashboardCardNavigation(page, context, viewport) {
 async function captureNativeEvidence(page, context, target = "valueGroups", ancestor = null) {
   const directory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
   if (!directory || (!/^(desktop\/en|phone\/de)(\/|$)/.test(context) &&
-      !context.endsWith("/diagnosis/cycling"))) return;
+      !context.endsWith("/diagnosis/cycling") && !context.endsWith("/diagnosis/heater") &&
+      !context.endsWith("/diagnosis/heater-partial"))) return;
   assert.ok(path.isAbsolute(directory), "browser evidence directory must be absolute");
   fs.mkdirSync(directory, { recursive: true });
   const elementQuery = ancestor
@@ -1528,6 +1531,12 @@ async function assertFlowInspector(page, context, missingDay) {
     undatedMinimum.includes(await statusCopy("check.flow.locations_missing")) &&
     !undatedMinimum.includes(await page.evaluate("histFmt1(5.9) + ' l/min'")),
   `${context}: older reports retain the heating minimum and explain the missing recorded times`);
+  assert.equal(await page.evaluate(`(() => {
+    const result = document.querySelector("#inspFlowDiagnosis > .inspect-diagnosis-result");
+    return result?.firstElementChild.textContent === t("check.flow.lowest") + " · X10A" &&
+      result.querySelector("strong.num")?.textContent === histFmt1(11) + " l/min" &&
+      document.getElementById("inspPressure").hidden;
+  })()`), true, `${context}: flow retains its labeled minimum in the shared result style`);
   assert.equal(await bandCount(), 0, `${context}: the plot cannot infer locations from an older report or curve samples`);
 
   await page.evaluate(`S.status.health.checks.find(c => c.id === "flow").minimum_windows =
@@ -1571,17 +1580,34 @@ async function assertFlowInspector(page, context, missingDay) {
   const selectedInterval = async ([from, to]) => page.evaluate(`(() => {
     const selected = document.querySelector("#inspHist .vhist-flow-band.selected");
     const readout = document.querySelector("#inspHist .vhist-flow-readout");
+    const legend = document.querySelector("#inspHist [data-flow-min-show]");
     const plot = document.querySelector("#inspHist [data-hist=flow]");
     const rows = document.getElementById("inspRows");
     const format = new Intl.DateTimeFormat(LANG, { dateStyle: "short", timeStyle: "short" });
     const from = new Date(${from} * 1000), to = new Date(${to} * 1000);
     const expectedTime = format.formatRange ? format.formatRange(from, to) : format.format(from) + " – " + format.format(to);
     return Number(selected?.dataset.flowBand) === ${from} && !readout.hidden &&
+      legend.getAttribute("aria-expanded") === "true" && legend.getAttribute("aria-controls") === readout.id &&
       plot.getBoundingClientRect().bottom <= readout.getBoundingClientRect().top &&
       readout.getBoundingClientRect().bottom <= rows.getBoundingClientRect().top &&
       readout.querySelector("strong").textContent === expectedTime &&
       readout.querySelector("span").textContent === t("check.flow.readout", histFmt1(11) + " L/min");
   })()`);
+  const legend = '#inspHist [data-flow-min-show]';
+  const legendClosed = () => page.evaluate(`(() => {
+    const button = document.querySelector(${JSON.stringify(legend)});
+    return document.querySelector("#inspHist .vhist-flow-readout").hidden &&
+      !document.querySelector("#inspHist .vhist-flow-band.selected") &&
+      button.getAttribute("aria-expanded") === "false";
+  })()`);
+  const activateLegend = () => clickElement(page, legend, { touch: context.startsWith("phone/") });
+  assert.equal(await legendClosed(), true, `${context}: the legend starts closed`);
+  await activateLegend();
+  assert.equal(await selectedInterval(intervals[0]), true,
+    `${context}: the legend opens a recorded window even inside a curve gap`);
+  await activateLegend();
+  assert.equal(await legendClosed(), true, `${context}: activating the legend again closes the explanation`);
+  assert.equal(await bandCount(), intervals.length, `${context}: closing the legend keeps all minimum shading`);
   const minimumArea = `#inspHist [data-flow-band="${intervals[1][0]}"]`;
   await clickElement(page, minimumArea, { yFraction: .05 });
   assert.equal(await selectedInterval(intervals[1]), false,
@@ -1593,11 +1619,27 @@ async function assertFlowInspector(page, context, missingDay) {
   await captureNativeEvidence(page, `${context}/tapped`, "#inspFlowDiagnosis", "#inspCard");
   assert.equal(await page.evaluate('S.histPin.has("flow")'), false,
     `${context}: selecting diagnosis evidence leaves the numeric curve unpinned`);
-  const legend = '#inspHist [data-flow-min-show]';
   await page.evaluate(`document.querySelector(${JSON.stringify(legend)}).focus(); true`);
   await page.key("Enter", { code: "Enter", keyCode: 13 });
+  assert.equal(await legendClosed(), true,
+    `${context}: Enter closes the explanation opened by a chart tap`);
+  assert.equal(await page.evaluate(`(() => {
+    const selector = ${JSON.stringify(legend)};
+    const line = "#inspHist .vhist-line:not(.mb)";
+    const wasFocused = document.activeElement.matches(selector);
+    const before = document.querySelector(line).getAttribute("d");
+    const trend = S.hist.get("flow");
+    const v = [...trend.v];
+    v[2] += 10;
+    S.hist.set("flow", { ...trend, gen: trend.gen + 1, v });
+    renderInspect();
+    return before !== document.querySelector(line).getAttribute("d") &&
+      wasFocused && document.activeElement.matches(selector);
+  })()`), true, `${context}: rebuilding a closed explanation preserves legend focus`);
+  assert.equal(await legendClosed(), true, `${context}: rebuilding the chart keeps the explanation closed`);
+  await page.key("Enter", { code: "Enter", keyCode: 13 });
   assert.equal(await selectedInterval(intervals[2]), true,
-    `${context}: the focused legend button moves to the next recorded interval`);
+    `${context}: reopening the explanation moves to the next recorded interval`);
   await page.waitFor("!S.clickHold && !S.scrub && !S.histBusy.size");
   assert.equal(await page.evaluate(`(() => {
     const selected = document.querySelector("#inspHist .vhist-flow-band.selected");
@@ -1699,11 +1741,53 @@ async function assertFlowInspector(page, context, missingDay) {
     S.status.health.checks.find(c => c.id === "flow").min_l_min = 7.3;
     renderInspect();
   })()`);
-  assert.equal(await bandCount(), 0, `${context}: a Modbus report cannot use X10A diagnosis bands`);
+  assert.equal(await bandCount(), 0, `${context}: a legacy Modbus report cannot use X10A diagnosis bands`);
+  assert.equal((await diagnosisText()).trim(), await statusCopy("check.flow.unavailable"),
+    `${context}: legacy Modbus reports have neutral unavailable copy`);
+  const setHeatingMinimum = (source, reason = "observed") => page.evaluate(`(() => {
+    S.status.health.checks.find(c => c.id === "flow").heating_minimum =
+      ${JSON.stringify({ source, reason, min_l_min: reason === "observed" ? 11 : null,
+        minimum_windows: reason === "observed" ? windows : null })};
+    renderInspect();
+    return true;
+  })()`);
+  await setHeatingMinimum("x10a");
+  assert.equal(await bandCount(), intervals.length, `${context}: X10A remains eligible in Modbus diagnosis mode`);
+  const lastMinimumArea = `#inspHist [data-flow-band="${intervals[2][0]}"]`;
+  await clickElement(page, lastMinimumArea, { touch: context.startsWith("phone/"), yFraction: .85 });
+  assert.equal(await selectedInterval(intervals[2]), true, `${context}: the X10A time can be selected before a switch`);
+  await setHeatingMinimum("modbus");
+  assert.equal(await selectedInterval(intervals[2]), false,
+    `${context}: an identical minimum and time from Modbus cannot inherit the X10A selection`);
+  assert.equal(await page.evaluate(`(() => {
+    const plot = document.querySelector("#inspHist [data-hist=flow]");
+    const clip = [...plot.querySelectorAll("#flowObservationClip path")];
+    const areas = [...plot.querySelectorAll("svg > .vhist-area.mb")];
+    return plot.dataset.flowMinSource === "modbus" && clip.length > 0 &&
+      clip.map(p => p.getAttribute("d")).join() === areas.map(p => p.getAttribute("d")).join() &&
+      !clip.some(p => p.isPointInFill(new DOMPoint(3 * HIST_W / 7, HIST_H - 1)));
+  })()`), true, `${context}: the violet area is clipped to the Modbus curve and leaves its gap clear`);
+  assert.ok((await diagnosisText()).includes(" · Modbus"), `${context}: the fallback minimum names Modbus`);
+  await clickElement(page, lastMinimumArea, { touch: context.startsWith("phone/"), yFraction: .85 });
+  assert.equal(await selectedInterval(intervals[2]), true,
+    `${context}: tapping the Modbus area shows its recorded time between the chart and values`);
+  await assertLayout(await page.evaluate(layoutAudit), `${context}/modbus-minimum`);
+  await captureNativeEvidence(page, `${context}/modbus-minimum`, "#inspFlowDiagnosis", "#inspCard");
+  await page.evaluate(`(() => {
+    const windows = S.status.health.checks.find(c => c.id === "flow").heating_minimum.minimum_windows;
+    windows.hour_masks = [1, ...Array(23).fill(0)];
+    renderInspect();
+  })()`);
+  assert.equal(await bandCount(), 1, `${context}: the Modbus fixture has a single minimum window`);
+  await activateLegend();
+  assert.equal(await selectedInterval(intervals[0]), true, `${context}: the lone Modbus window opens`);
+  await activateLegend();
+  assert.equal(await legendClosed(), true, `${context}: a second tap closes the lone Modbus window`);
   await page.evaluate("S._modbus[0].flow_scale_unverified = true; renderApp(); true");
-  assert.equal(await bandCount(), 0, `${context}: provisional Modbus cannot supply heating minimum bands`);
-  assert.equal((await diagnosisText()).trim(), await statusCopy("check.flow.x10a_only"),
-    `${context}: provisional Modbus shows the source caveat without reusing the old minimum`);
+  assert.equal(await bandCount(), 0, `${context}: an unverified Modbus curve cannot be shaded`);
+  await setHeatingMinimum("modbus", "unsupported");
+  assert.equal((await diagnosisText()).trim(), await statusCopy("check.flow.unavailable"),
+    `${context}: an unsupported Modbus report cannot reuse the old minimum`);
   await page.evaluate("S.status.health.persist = 'unknown'; renderInspect(); true");
   assert.equal(await page.evaluate('document.getElementById("inspFlowDiagnosis").hidden'), true,
     `${context}: an unreadable snapshot cannot display a diagnosis`);
@@ -1720,13 +1804,42 @@ async function assertPlantDiagnosis(page, context) {
       hist: new Map(S.hist), histPin: new Map(S.histPin),
       histHidden: new Map(S.histHidden), histEpoch: S.histEpoch,
       histIdentity: S.histIdentity, histUptime: S.histUptime, flowMinSelection: S.flowMinSelection,
+      inspFromDefrostNotice: S.inspFromDefrostNotice,
     };
     S.status = structuredClone(S.status);
+    S.status.hp = { ...S.status.hp, connected: true };
+    S.status.modbus = { ...S.status.modbus, enabled: true, connected: true };
+    S._values = S._values.filter(row => !/^water pressure$|flow (sensor|rate)/i.test(row.label) &&
+      row.concept !== "flow" && row.label !== "Defrost Operation");
+    S._values.push({ label: "Water Pressure", value: "1.5", unit: "bar", reg: 0x62, off: 11, conv: 105,
+      group: "Water circuit", concept: "water_pressure" },
+    { label: "Flow Rate (l/min)", value: "16.1", unit: "L/min", reg: 0x61, group: "Water circuit", concept: "flow" },
+    { label: "Defrost Operation", value: "0", binary: true, concept: "defrost_state", group: "Operation" });
+    S._modbus = [...(S._modbus || []).filter(row => row.concept !== "flow" && row.concept !== "water_pressure"),
+      { label: "Volume flow", value: "19.8", unit: "L/min", concept: "flow", off: 49 }];
+    S.insp = null;
+    const heaterCategories = ["emergency", "error", "defrost_recovery", "dhw_route", "silent",
+      "cold_outdoor", "mild_outdoor", "compressor_off", "quiet_mild_heating"];
+    const heaterChannel = supported => ({ supported,
+      on_s: supported ? 30 : null, union_s: supported ? 0 : null,
+      overlap_s: supported ? 0 : null, unknown_context_s: supported ? 30 : null,
+      unclassified_s: supported ? 30 : null, readable_s: supported ? 7200 : null,
+      saturated: false, quiet_mild_notice: false,
+      categories: Object.fromEntries(heaterCategories.map(id => [id, {
+        supported: supported ? true : null,
+        positive_s: null, evaluable_on_s: null, positive_samples: null }])) });
+    const heaterContext = { confirmed: true, dated: true, coverage_partial: true,
+      restore_pending: false, persistence_pending: true, archive_incomplete: false,
+      clock_uncertain: false, storage_loss: false, dropped: 0,
+      buh: heaterChannel(true), bsh: heaterChannel(false) };
+    heaterContext.buh.categories.emergency = { supported: true,
+      positive_s: 0, evaluable_on_s: 0, positive_samples: 1 };
     S.status.history = {
       ...(S.status.history || {}),
       rows: [
-        ...((S.status.history?.rows || []).filter(row => row.id !== "water_pressure")),
+        ...((S.status.history?.rows || []).filter(row => !["water_pressure", "defrost_state"].includes(row.id))),
         { id: "water_pressure", label: "Water Pressure" },
+        { id: "defrost_state", label: "Defrost Operation" },
       ],
     };
     S.status.refrigerant_service = {
@@ -1747,7 +1860,7 @@ async function assertPlantDiagnosis(page, context) {
       }
     };
     S.status.health = {
-      status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
+      status: "warn", source: "x10a", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
       available: 8, assessable: 2, evaluated: 2,
       checks: [
         { id: "fault", verdict: "info", evidence: "manufacturer", active: 0 },
@@ -1786,24 +1899,32 @@ async function assertPlantDiagnosis(page, context) {
           share_pct: null, defrost_s: 30, run_s: 7200,
           outdoor_source: "x10a", outdoor_min_c: 2, outdoor_mean_c: 3, outdoor_samples: 10,
           last_observed_start: { unix_s: null, route: "dhw_route", outdoor_c: 0 } },
-        { id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0.8,
-          current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: true,
-          confirmed_critical: false, observed_s: 77760, required_s: 77760 },
+        { id: "pressure", verdict: "warn", evidence: "heuristic", min_bar: 0.4,
+          current_bar: 1.5, min_unix_s: 1791869910, confirmed_low: true,
+          confirmed_critical: true, observed_s: 77760, required_s: 77760 },
         { id: "flow", verdict: "ok", evidence: "observation", min_l_min: 10.7,
           observed_s: 60, required_s: 0 },
         { id: "heater", verdict: "ok", evidence: "observation", buh_s: 43200,
           bsh_s: 64800, buh_observed_s: 72000, bsh_observed_s: 72000,
-          observed_s: 72000, required_s: 0 },
+          observed_s: 72000, required_s: 0, context: heaterContext },
         { id: "retries", verdict: "info", evidence: "experimental", seen: 1,
           observed_s: 7200, required_s: 0 }
       ]
     };
-    S.status.diagnostics = { ...(S.status.diagnostics || {}), enabled: true };
+    S.status.diagnostics = { ...(S.status.diagnostics || {}), enabled: true, effective_source: "x10a" };
+    S.status.uptime_s = 86400;
+    S.status.ntp = { ...S.status.ntp, synced: true, time: new Date(1791870900 * 1000).toISOString() };
     syncHistSources();
     S.hist.set("water_pressure", {
       at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: "bar", b0: 280,
-      t0: 1791868800, held: [], v: [15, 15, 12, 9, 4, 8, 15, 15],
+      t0: 1791868800, held: [], v: [15, 15, 12, 9, 4, 8, 3, 15],
     });
+    S.hist.set("defrost_state", {
+      at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: "", b0: 280,
+      t0: 1791868800, held: [], v: [0, 10, 0, null, 0, 10, 0, 0],
+    });
+    S.insp = null;
+    S.inspFromDefrostNotice = false;
     S.descOpen.clear();
     renderApp();
     return true;
@@ -1813,12 +1934,71 @@ async function assertPlantDiagnosis(page, context) {
       !!document.querySelector('#valueGroups [data-dashboard-card="group:Operation"] .vrow-val')`), true,
     `${context}: live value cards render below the schematic with X10A defrost outdoor samples`);
     const selector = "[data-desc^='model:health_']";
-    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 7,
-      `${context}: seven remaining diagnosis rows must render`);
-    await activateDashboardCardForSelector(page, "[data-desc='model:health_pressure']");
+    const defrostAccordion = "[data-desc='model:health_defrost']";
+    const defrostHint = "button[data-defrost-inspect]";
+    const defrostPlot = "#inspHist [data-hist='defrost_state']";
+    const defrostWait = () => page.waitFor(`(() => {
+      const panel = document.getElementById('inspect');
+      return S.insp === 'defrost' && panel.classList.contains('open') &&
+        panel.querySelector(${JSON.stringify(defrostPlot)}) &&
+        panel.getAnimations({ subtree: true }).every(anim =>
+          !(anim instanceof CSSTransition) || anim.playState !== 'running');
+    })()`);
+    const hasElement = selector => page.evaluate(`!!document.querySelector(${JSON.stringify(selector)})`);
+    const expectDefrostPill = async (warning, state) => {
+      const actual = await page.evaluate(`(() => {
+        const pill = document.getElementById('gDefrostState');
+        const label = pill.querySelector('[data-i18n="schem.defrost_pill"]');
+        const triangle = pill.querySelector('.sc-defrost-warning');
+        const shape = pill.querySelector('rect.sc-pill');
+        const icon = triangle?.getBoundingClientRect();
+        const frame = shape.getBoundingClientRect();
+        const text = label.getBoundingClientRect();
+        const center = frame.left + frame.width / 2;
+        const labelCenter = text.left + text.width / 2;
+        const style = triangle && getComputedStyle(triangle);
+        const visible = !!icon?.width && !!icon.height && style.display !== 'none' &&
+          style.visibility !== 'hidden' && Number(style.opacity) > 0;
+        const gap = visible ? triangle.getStartPositionOfChar(1).matrixTransform(triangle.getScreenCTM()).x -
+          label.getEndPositionOfChar(label.getNumberOfChars() - 1).matrixTransform(label.getScreenCTM()).x : 0;
+        return {
+          plainLabel: label.textContent.trim() === t('schem.defrost_pill') && !/[❄❅❆]/.test(pill.textContent),
+          activeClass: pill.classList.contains('sc-defrost-alert'),
+          visible,
+          accessibleNotice: pill.getAttribute('aria-label').includes(t('check.defrost.notice')),
+          centered: Math.abs(labelCenter - center) <= 1,
+          fit: text.left >= frame.left - 0.5 && text.right <= frame.right + 0.5 && (!visible ||
+            (triangle.textContent.includes('⚠') && triangle.getAttribute('aria-hidden') === 'true' &&
+            gap >= -0.5 && gap <= 5 && icon.left >= center && icon.right <= frame.right + 0.5 &&
+            icon.top >= frame.top - 0.5 && icon.bottom <= frame.bottom + 0.5)),
+        };
+      })()`);
+      assert.deepEqual(actual, { plainLabel: true, activeClass: warning, visible: warning,
+        accessibleNotice: warning, centered: true, fit: true },
+      `${context}/${state}: the label stays centered and the accessible notice fits beside it`);
+    };
+    const defrostRows = () => page.evaluate(`Array.from(document.getElementById('inspRows').children, row => ({
+      standard: row.matches('div.inspect-row'),
+      cells: Array.from(row.children, cell => [cell.tagName, cell.childElementCount, cell.innerText]),
+    }))`);
+    const expectDefrostRows = async (count, share) => {
+      const labels = await page.evaluate(`[t('check.defrost.starts_label'), t('check.defrost.share')]`);
+      assert.deepEqual(await defrostRows(), labels.map((label, i) => ({
+        standard: true, cells: [["SPAN", 0, label], ["SPAN", 0, [count, share][i]]],
+      })), `${context}: the inspector ends with only the two standard defrost value rows`);
+    };
+    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 5,
+      `${context}: render the five remaining diagnosis disclosures`);
+    assert.equal(await page.evaluate(`!!document.querySelector(
+      "[data-desc='model:health_pressure'], [data-desc='model:health_flow']")`), false,
+      `${context}: pressure and flow diagnoses belong in their inspectors`);
+    assert.equal(await hasElement(defrostAccordion), false, `${context}: the separate defrost disclosure is gone`);
+    assert.equal(await hasElement(defrostHint), false, `${context}: an observation needs no defrost shortcut`);
+    await expectDefrostPill(false, "observation");
+    await activateDashboardCardForSelector(page, "[data-desc='model:health_fault']");
     await assertDiagnosisSummaryRows(page, `${context}/compact-summary`);
     await captureNativeEvidence(page, `${context}/overview`,
-      "[data-desc='model:health_pressure']", ".card");
+      "[data-desc='model:health_fault']", ".card");
     await page.evaluate(`(() => {
       window.__browserDiagnosisSummaryOriginal = S.status.health.checks;
       S.status.health.checks = structuredClone(S.status.health.checks);
@@ -1851,12 +2031,13 @@ async function assertPlantDiagnosis(page, context) {
       return { id: row.dataset.desc, count: body.children.length,
         firstValue: body.children[0]?.firstElementChild?.className,
         normal: body.children[2]?.querySelector('.vdesc-n')?.innerText,
+        lastNormal: body.lastElementChild?.querySelector('.vdesc-n')?.innerText,
         text: Array.from(body.children, block => block.innerText) };
     })`);
-    assert.equal(blocks.length, 8, `${context}: include the independent refrigerant observation`);
+    assert.equal(blocks.length, 6, `${context}: include the independent refrigerant observation`);
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
-      if (block.id === "model:health_cycling" || block.id === "model:health_pressure") continue;
+      if (block.id === "model:health_cycling") continue;
       if (block.id === "model:health_dhw_loss") {
         const dhw = await page.evaluate(`(() => {
           const body = document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').querySelector('.vdesc-body');
@@ -1893,6 +2074,13 @@ async function assertPlantDiagnosis(page, context) {
         assert.equal(dhw.fabricated, 0, `${context}/${block.id}: totals cannot fabricate chart bars or marker lanes`);
         continue;
       }
+      if (block.id === "model:health_heater") {
+        assert.ok(block.count >= 5, `${context}/${block.id}: includes independent heater context blocks`);
+        assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
+        assert.equal(block.lastNormal, normalLabel, `${context}/${block.id}: Normal last`);
+        assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
+        continue;
+      }
       if (block.id === "model:health_fault") {
         assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
         assert.ok(!block.text.some(text => text.includes(normalLabel)),
@@ -1916,6 +2104,54 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: raw source coordinates stay outside the owner-facing explanation`);
     assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
       `${context}: populated selected metrics do not add a generic source sentence`);
+    const heaterTable = () => page.evaluate(`(() => {
+      const table = document.querySelector("[data-desc='model:health_heater']")
+        .closest('.vitem').querySelector('.heater-context');
+      return table ? { text: table.closest('.vdesc-body').innerText,
+        columns: table.querySelectorAll('thead th[scope=col]').length,
+        rows: table.querySelectorAll('tbody th[scope=row]').length,
+        valueWidth: table.querySelector('tbody td').getBoundingClientRect().width } : null;
+    })()`);
+    const heaterInitial = await heaterTable();
+    assert.ok(heaterInitial, `${context}: actual heater disclosure contains its independent table`);
+    assert.equal(heaterInitial.columns, 2);
+    assert.equal(heaterInitial.rows, 15);
+    assert.ok(heaterInitial.valueWidth >= 100,
+      `${context}: each separate heater table leaves readable space for its values`);
+    assert.ok(heaterInitial.text.includes('<1 s / 0 s · 1'), `${context}: retain early flag sample`);
+    assert.ok(heaterInitial.text.includes(await page.evaluate("t('check.heater_context.states').split('|')[8]")),
+      `${context}: an unsupported heater cannot become reported OFF`);
+    await captureNativeEvidence(page, `${context}/heater`,
+      "[data-desc='model:health_heater']", ".vitem");
+    await page.evaluate(`(() => {
+      const row = S.status.health.checks.find(c => c.id === 'heater');
+      row.buh_s = row.bsh_s = null;
+      row.context.bsh = structuredClone(row.context.buh);
+      Object.assign(row.context.bsh, { on_s: 120, union_s: 3, unclassified_s: 117,
+        unknown_context_s: 120 });
+      row.context.bsh.categories.emergency = { supported: true,
+        positive_s: 3, evaluable_on_s: 10, positive_samples: 2 };
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assert.ok((await heaterTable()).text.includes('3 s / 10 s · 2'),
+      `${context}: second heater keeps its own independent population without legacy runtime`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/heater-both`);
+    await page.evaluate(`(() => {
+      const row = S.status.health.checks.find(c => c.id === 'heater');
+      Object.assign(row.context, { archive_incomplete: true, restore_pending: true });
+      row.context.bsh.saturated = true;
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assert.ok((await heaterTable()).text.includes('≥3 s / ≥10 s · ≥2'),
+      `${context}: saturated values retain lower bounds in the real DOM`);
+    const heaterBody = await page.evaluate(`document.querySelector("[data-desc='model:health_heater']")
+      .closest('.vitem').innerText`);
+    assert.ok(heaterBody.includes(await page.evaluate("t('check.heater_context.states').split('|')[5]")),
+      `${context}: damaged archive is explicit, not an ordinary pending wait`);
+    await captureNativeEvidence(page, `${context}/heater-partial`,
+      "[data-desc='model:health_heater']", ".vitem");
     if (context.split("/")[1] === "en") {
       const serviceRow = "[data-desc='service:refrigerant']";
       await page.evaluate(`(() => {
@@ -2002,41 +2238,183 @@ async function assertPlantDiagnosis(page, context) {
         })()`);
       }
     }
-    const pressureExpanded = await page.evaluate(`(() => {
-      const row = document.querySelector("[data-desc='model:health_pressure']").closest(".vitem");
-      const body = row.querySelector(".vdesc-body");
+    await page.evaluate('S.histPin.delete("water_pressure"); true');
+    await clickElement(page, "#gWaterPressure .sc-pill");
+    await page.waitFor(`S.insp === 'wp' && !S.clickHold &&
+      document.getElementById("inspect").getAnimations({subtree:true})
+        .every(animation => !(animation instanceof CSSTransition) || animation.playState !== "running")`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/schematic-pressure`);
+    const expandedPressure = await page.evaluate(`(() => {
+      const trend = document.querySelector("#inspHist .vhist");
+      const marker = trend.querySelector(".vhist-pressure-finding");
+      const plotRect = trend.querySelector(".vhist-plot").getBoundingClientRect();
+      const yRects = Array.from(trend.querySelectorAll(".vhist-y-label"), label => label.getBoundingClientRect());
+      const thresholdRects = Array.from(trend.querySelectorAll(".vhist-thresh-label"),
+        label => label.getBoundingClientRect());
+      const pill = document.getElementById("gWaterPressure");
+      const dot = document.getElementById("svWpSignal");
+      const finding = document.getElementById("inspPressureFinding");
+      const result = finding.querySelector(".inspect-diagnosis-result");
+      const value = result.querySelector("strong.num");
+      const valueRange = document.createRange();
+      valueRange.selectNodeContents(value);
+      const valueBox = valueRange.getBoundingClientRect();
+      const body = document.getElementById("inspBody");
+      const rows = document.getElementById("inspRows");
+      const description = descFor("Water pressure");
+      const face = pill.querySelector(".sc-pill");
+      const warning = pill.querySelector(".sc-pressure-warning");
+      const label = pill.querySelector("[data-i18n='schem.water_press']");
+      const probe = document.createElement("span");
+      probe.style.color = "var(--err)";
+      probe.style.backgroundColor = "var(--card)";
+      document.body.append(probe);
+      const symbolBox = warning.getBoundingClientRect();
+      const labelBox = label.getBoundingClientRect();
+      // The leading narrow space can overlap the label's SVG bounds by a fraction of a pixel.
+      const glyphStart = warning.getStartPositionOfChar(1).matrixTransform(warning.getScreenCTM());
+      const warningPill = {
+        symbolAfterLabel: warning.previousElementSibling === label && symbolBox.width > 0 &&
+          glyphStart.x >= labelBox.right - 0.5 &&
+          symbolBox.bottom < face.getBoundingClientRect().top && label.textContent === t("schem.water_press"),
+        redSymbol: getComputedStyle(warning).fill === getComputedStyle(probe).color,
+        neutralFill: getComputedStyle(face).fill === getComputedStyle(probe).backgroundColor,
+        hiddenDot: getComputedStyle(dot).display === "none",
+      };
+      probe.remove();
       return {
-        count: body.children.length,
-        firstIsChart: body.children[0]?.hasAttribute("data-chart"),
-        hasPlot: !!body.children[0]?.querySelector(".vhist svg"),
-        hasGrid: body.children[0]?.querySelectorAll(".vhist-grid").length >= 1,
-        hasYLabels: body.children[0]?.querySelectorAll(".vhist-y .vhist-y-label").length >= 1,
-        plotHasNoYLabels: body.children[0]?.querySelectorAll(".vhist-plot .vhist-y-label").length === 0,
-        yLeftOfPlot: (() => {
-          const p = body.children[0].querySelector(".vhist-plot").getBoundingClientRect();
-          const yRects = [...body.children[0].querySelectorAll(".vhist-y-label")].map(el => el.getBoundingClientRect());
-          return yRects.length >= 1 && yRects.every(yr => yr.right <= p.left - 2);
-        })(),
-        noThreshOverlap: (() => {
-          const yRects = [...body.children[0].querySelectorAll(".vhist-y-label")].map(el => el.getBoundingClientRect());
-          const tRects = [...body.children[0].querySelectorAll(".vhist-thresh-label")].map(el => el.getBoundingClientRect());
-          return yRects.every(yr => tRects.every(tr => yr.bottom <= tr.top || yr.top >= tr.bottom));
-        })(),
-        hasLowThresh: !!body.children[0]?.querySelector(".vhist-thresh.low"),
-        hasCritThresh: !!body.children[0]?.querySelector(".vhist-thresh.crit"),
-        hasWarnCurve: !!body.children[0]?.querySelector(".vhist-line.warn"),
-        hasErrCurve: !!body.children[0]?.querySelector(".vhist-line.err"),
-        hasLowLegend: !!body.children[0]?.querySelector(".vhist-legend-low"),
-        hasCritLegend: !!body.children[0]?.querySelector(".vhist-legend-crit"),
-        secondNormal: body.children[1]?.querySelector(".vdesc-n")?.innerText,
+        current: document.getElementById("inspNow").innerText,
+        expectedCurrent: histFmt1(1.5) + "\\u00a0bar",
+        caption: body.firstElementChild?.textContent,
+        expectedCaption: descriptionCopy(description)?.[0] ?? (LANG === "de" ? description.de.what : description.what),
+        normal: body.lastElementChild?.querySelector(".vdesc-n")?.textContent === t("normal.label"),
+        cardOrder: body.nextElementSibling?.id === "inspHist" &&
+          body.nextElementSibling.nextElementSibling === rows &&
+          rows.nextElementSibling?.matches("#inspFlowDiagnosis[hidden]") &&
+          rows.nextElementSibling.nextElementSibling === finding.parentElement,
+        noHeading: !trend.querySelector(".vhist-head, .vhist-range"),
+        hasGrid: trend.querySelectorAll(".vhist-grid").length >= 1,
+        hasYLabels: trend.querySelectorAll(".vhist-y .vhist-y-label").length >= 1,
+        plotHasNoYLabels: trend.querySelectorAll(".vhist-plot .vhist-y-label").length === 0,
+        yLeftOfPlot: yRects.length >= 1 && yRects.every(rect => rect.right <= plotRect.left - 2),
+        noThreshOverlap: yRects.every(label => thresholdRects.every(threshold =>
+          label.bottom <= threshold.top || label.top >= threshold.bottom)),
+        hasLowThresh: !!trend.querySelector(".vhist-thresh.low"),
+        hasCritThresh: !!trend.querySelector(".vhist-thresh.crit"),
+        hasWarnCurve: !!trend.querySelector(".vhist-line.warn"),
+        hasErrCurve: !!trend.querySelector(".vhist-line.err"),
+        hasLowLegend: !!trend.querySelector(".vhist-legend-low"),
+        hasCritLegend: !!trend.querySelector(".vhist-legend-crit"),
+        marker: marker && [marker.style.left, marker.classList.contains("err"), getComputedStyle(marker).pointerEvents],
+        warningPill,
+        flagInName: pill.getAttribute("aria-label").includes(t("check.detail.pressure.warn")),
+        findingLabel: result.querySelector("span").textContent === t("check.pressure.finding") + " · X10A",
+        findingValue: value.textContent === histFmt1(0.4) + "\\u00a0bar",
+        findingSeverity: finding.querySelector("p").textContent.split(" · ")[0] === t("check.detail.pressure.warn"),
+        findingTime: finding.querySelector("p").textContent.split(" · ").slice(1).join(" · ") ===
+          new Date(1791869910 * 1000).toLocaleString(LANG, { dateStyle: "short", timeStyle: "short" }),
+        findingValueFits: valueRange.getClientRects().length === 1 &&
+          valueBox.right <= result.getBoundingClientRect().right + 1 &&
+          valueBox.left >= result.querySelector("span").getBoundingClientRect().right,
+        explanationClosed: !document.querySelector("#inspPressureExplanation"),
+        relatedRowsEmpty: rows.childElementCount === 0,
       };
     })()`);
-    assert.deepEqual(pressureExpanded, {
-      count: 2, firstIsChart: true, hasPlot: true, hasGrid: true, hasYLabels: true,
-      plotHasNoYLabels: true, yLeftOfPlot: true, noThreshOverlap: true,
-      hasLowThresh: true, hasCritThresh: true, hasWarnCurve: true, hasErrCurve: true,
-      hasLowLegend: true, hasCritLegend: true, secondNormal: normalLabel,
-    }, `${context}/model:health_pressure: graph first with Low/Critical thresholds and only Normal below`);
+    const { expectedCurrent, expectedCaption, ...shownPressure } = expandedPressure;
+    assert.deepEqual(shownPressure, {
+      current: expectedCurrent, caption: expectedCaption, normal: true, cardOrder: true,
+      noHeading: true, hasGrid: true, hasYLabels: true, plotHasNoYLabels: true,
+      yLeftOfPlot: true, noThreshOverlap: true, hasLowThresh: true, hasCritThresh: true,
+      hasWarnCurve: true, hasErrCurve: true, hasLowLegend: true, hasCritLegend: true,
+      marker: ["57.14%", true, "none"],
+      warningPill: { symbolAfterLabel: true, redSymbol: true, neutralFill: true, hiddenDot: true },
+      flagInName: true,
+      findingLabel: true, findingValue: true, findingSeverity: true, findingTime: true,
+      findingValueFits: true, explanationClosed: true, relatedRowsEmpty: true,
+    }, `${context}: schematic pressure retains the critical X10A finding alongside a normal current reading`);
+    const pressureTwin = nativeAltherma4Rows.find(row => row.off === 79);
+    const flowTwin = nativeAltherma4Rows.find(row => row.off === 49);
+    const showsOnlyPressureTwin = await page.evaluate(`(() => {
+      const oldStatus = S.status.modbus;
+      const oldRows = S._modbus;
+      const twin = { ...${JSON.stringify(pressureTwin)}, concept: "water_pressure", profile: "altherma4" };
+      S.status.modbus = { ...oldStatus, profile: "altherma4" };
+      S._modbus = [twin, { ...${JSON.stringify(flowTwin)}, concept: "flow", profile: "altherma4" }];
+      try {
+        renderInspect();
+        const rows = Array.from(document.querySelectorAll("#inspRows .inspect-row"));
+        return rows.length === 1 && rows[0].matches(".mb-row") &&
+          rows[0].querySelector(".mb-tag")?.textContent === t("src.modbus_tag") &&
+          rows[0].lastElementChild.textContent === displayValue(twin) + " " + displayUnit(twin) &&
+          document.getElementById("inspRows").getBoundingClientRect().bottom <=
+            document.getElementById("inspPressureFinding").getBoundingClientRect().top;
+      } finally {
+        S.status.modbus = oldStatus;
+        S._modbus = oldRows;
+        renderInspect();
+      }
+    })()`);
+    assert.equal(showsOnlyPressureTwin, true,
+      `${context}: the matching Altherma 4 pressure reading is the only table row and precedes the finding`);
+    const pressurePlot = "#inspHist [data-pressure-assessment]";
+    await clickElement(page, pressurePlot);
+    await page.waitFor('!!document.getElementById("inspPressureExplanation")');
+    const explanation = await page.evaluate(`(() => {
+      const plot = document.querySelector("#inspHist [data-pressure-assessment]");
+      const detail = document.getElementById("inspPressureExplanation");
+      return detail.previousElementSibling.matches(".vhist-graph") &&
+        !!detail.previousElementSibling.querySelector(".vhist-axis") &&
+        detail.closest("#inspHist").nextElementSibling.id === "inspRows" &&
+        plot.getAttribute("aria-describedby") === detail.id &&
+        detail.firstElementChild.matches(".vdesc-n") &&
+        detail.firstElementChild.textContent === "X10A · " + t("check.pressure.rules") &&
+        detail.lastElementChild.matches("p") &&
+        detail.lastElementChild.textContent === t("check.pressure.sustained", histFmt1(0.5) + "\\u00a0bar");
+    })()`);
+    assert.equal(explanation, true, `${context}: tapping the plot reveals the rule below the chart and before the related readings`);
+    await captureNativeEvidence(page, `${context}/schematic-pressure`, "#inspPressure", "#inspCard");
+    if (/\/(en|de)\//.test(context)) {
+      const lifecycle = await page.evaluate(`(() => {
+        const plot = document.querySelector("#inspHist [data-hist='water_pressure']");
+        const explanation = document.getElementById("inspPressureExplanation");
+        const reading = S._values.find(row => row.concept === "water_pressure");
+        const c = S.status.health.checks.find(c => c.id === "pressure");
+        const original = { ...c };
+        reading.value = "1.6"; c.current_bar = 1.6;
+        renderApp();
+        const retained = plot === document.querySelector("#inspHist [data-hist='water_pressure']") &&
+          explanation === document.getElementById("inspPressureExplanation");
+        c.min_unix_s = null;
+        renderApp();
+        const pill = document.getElementById("gWaterPressure");
+        const dot = document.getElementById("svWpSignal");
+        const warning = pill.querySelector(".sc-pressure-warning");
+        const undated = !document.querySelector("#inspHist .vhist-pressure-finding") &&
+          getComputedStyle(warning).display !== "none" && !!document.getElementById("inspPressureExplanation");
+        Object.assign(c, { verdict: "collecting", current_bar: 0.4, confirmed_critical: false, confirmed_low: false });
+        reading.value = "0.4";
+        renderApp();
+        const pending = getComputedStyle(dot).display !== "none" && getComputedStyle(warning).display === "none" &&
+          document.getElementById("inspPressureFinding").textContent === t("check.pressure.pending");
+        S.status.diagnostics.effective_source = "modbus";
+        renderApp();
+        const modbus = getComputedStyle(dot).display === "none" && getComputedStyle(warning).display === "none" &&
+          !document.getElementById("inspPressureExplanation") &&
+          document.getElementById("inspPressureFinding").textContent === t("check.pressure.unavailable");
+        S.status.diagnostics.effective_source = "x10a";
+        Object.assign(c, original); reading.value = "1.5";
+        renderApp();
+        return { retained, undated, pending, modbus };
+      })()`);
+      assert.deepEqual(lifecycle, { retained: true, undated: true, pending: true, modbus: true },
+        `${context}: the pressure plot survives scalar updates and scopes the alert to the X10A assessment`);
+    }
+    await clickElement(page, pressurePlot);
+    await page.waitFor('!document.getElementById("inspPressureExplanation")');
+    assert.equal(await page.evaluate('!document.getElementById("inspPressureFinding").parentElement.hidden'), true,
+      `${context}: clearing the selected sample keeps the finding visible`);
+    await clickElement(page, "#inspClose");
+    await page.waitFor("S.insp === null");
     const cyclingDetail = () => page.evaluate(`(() => {
       const row = document.querySelector("[data-desc='model:health_cycling']").closest(".vitem");
       const body = row.querySelector(".vdesc-body");
@@ -2134,25 +2512,143 @@ async function assertPlantDiagnosis(page, context) {
       assert.ok(openedEnergy.includes(assumption), `${context}: energy assumptions retain ${assumption}`);
     assert.ok((await dhwText()).includes(discardedContext),
       `${context}: opened basis retains discarded reading-gap evidence for the NOTE`);
-    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
-      .closest('.card').querySelector('.section-badge')?.innerText || ''`),
-      await page.evaluate("t('check.summary.notes', 4)"),
-      `${context}: badge counts findings rather than assessed fractions`);
-    assert.equal(await page.evaluate(`(() => {
-      const row = document.querySelector("[data-desc='model:health_defrost']")?.closest('.vitem');
-      return row?.innerText.includes(t("check.defrost.last_start", t("sys.nodata"),
-        t("check.defrost.route_dhw"), checkupFmt1(0) + " °C"));
-    })()`), true, `${context}: defrost start preserves zero and names the tank route`);
-    assert.equal(await page.evaluate(`(() => {
-      const detail = document.querySelector("[data-desc='model:health_defrost']")
-        .closest('.vitem').querySelector('.vdesc-body');
-      const format = new Intl.NumberFormat(LANG, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-      return detail.innerText.includes(t('check.outdoor_range', 'X10A', format.format(2), format.format(3)));
-    })()`), true, `${context}: defrost detail shows sampled X10A temperatures with their source`);
+    const diagnosisBadge = () => page.evaluate(`(() => {
+      const badge = document.querySelector("[data-desc='model:health_fault']").closest('.card').querySelector('.section-badge');
+      return [badge?.innerText, badge?.classList.contains("err")];
+    })()`);
+    assert.deepEqual(await diagnosisBadge(), [await page.evaluate("t('check.summary.notes', 3)"), false],
+      `${context}: pressure is represented only by the schematic signal, not the diagnosis badge`);
     await captureNativeEvidence(page, `${context}/expanded`);
-    for (const id of ["pressure", "dhw_loss", "cycling", "defrost"])
+    for (const id of ["dhw_loss", "cycling"])
       await captureNativeEvidence(page, `${context}/${id}`,
         `[data-desc='model:health_${id}']`, ".vitem");
+    // A finding stays in the diagnosis count and opens the one inspector through native input.
+    await page.evaluate(`(() => {
+      const check = S.status.health.checks[3];
+      Object.assign(check, { verdict: 'info', evidence: 'heuristic', reason: null,
+        count: 6, paired_count: 6, defrost_s: 1440, share_pct: 20 });
+      renderApp(); return true;
+    })()`);
+    await page.waitFor(`document.querySelector(${JSON.stringify(defrostHint)})`);
+    assert.deepEqual(await diagnosisBadge(), [await page.evaluate("t('check.summary.notes', 4)"), false],
+      `${context}: removal of the duplicate details preserves the raised defrost finding`);
+    await expectDefrostPill(true, "fresh-X10A-note");
+    await page.evaluate("S.status.health.source_fresh = false; renderApp(); true");
+    await expectDefrostPill(false, "stale-X10A-note-with-live-link");
+    await page.evaluate("S.status.health.source_fresh = true; S.status.health.source = 'modbus'; renderApp(); true");
+    await expectDefrostPill(false, "Modbus-report-with-live-X10A");
+    await page.evaluate("S.status.health.source = 'x10a'; renderApp(); true");
+    await expectDefrostPill(true, "restored-X10A-note");
+    assert.equal(await hasElement(defrostAccordion), false, `${context}: a hint has no separate defrost disclosure`);
+    await clickElement(page, defrostHint);
+    await defrostWait();
+    assert.equal(await page.evaluate("document.getElementById('inspNow').innerText"),
+      await page.evaluate("t('state.off')"), `${context}: the live header remains distinct from the daily hint`);
+    assert.equal(await hasElement(`${defrostPlot} .vhist-state-on.defrost-on`), true,
+      `${context}: the shortcut opens the original defrost timeline with active samples`);
+    assert.equal(await hasElement(`${defrostPlot} .vhist-state-gap`), true,
+      `${context}: the defrost timeline retains missing samples`);
+    assert.deepEqual(await page.evaluate(`(() => {
+      const card = document.getElementById('inspCard');
+      const src = card.querySelector('#inspSrc');
+      const body = card.querySelector('#inspBody');
+      const desc = descFor('Defrost Operation');
+      const intro = descriptionCopy(desc)?.[0] ?? (LANG === 'de' ? desc.de?.what : desc.what);
+      const live = inspNowText(INSPECT.defrost, S.live);
+      const sections = [card.querySelector('.inspect-head'), src, body, card.querySelector('#inspHist'),
+        ...card.querySelectorAll('#inspRows .inspect-row')].map(node => node?.getBoundingClientRect());
+      return {
+        header: card.querySelector('#inspTitle').textContent === inspTitleText(INSPECT.defrost, S.live) &&
+          !src.hidden && src.innerText === 'Defrost Operation',
+        introduction: body.children[0]?.innerText === intro,
+        normal: body.children[1]?.innerText === t('normal.label') + ' ' + t('check.defrost.normal'),
+        live: !!live && body.children.length === 3 && body.children[2]?.innerText === live,
+        ordered: sections.every((box, i) => box?.height > 0 && (!i || sections[i - 1].bottom <= box.top + 1)),
+        valuesLast: Array.from(card.children).filter(node => !node.hidden).at(-1).id === 'inspRows',
+      };
+    })()`), { header: true, introduction: true, normal: true, live: true, ordered: true, valuesLast: true },
+    `${context}: original title, explanation and live state precede the graph and final readings`);
+    await expectDefrostRows("6", "20 %");
+    const activeBlocks = await page.evaluate(`(() => {
+      const range = document.querySelector('#inspHist .vhist-state .vhist-range');
+      return { text: range.innerText, visible: range.getBoundingClientRect().height > 0 };
+    })()`);
+    assert.deepEqual(activeBlocks, {
+      text: await page.evaluate("t('hist.defrost_total', (2).toLocaleString(LANG))"), visible: true,
+    },
+      `${context}: the chart shows observed five-minute blocks independently of the start count`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/defrost-hint`);
+    await assertAccessibility(page, `${context}/defrost-hint`, { nativeTree: true });
+    await captureNativeEvidence(page, `${context}/defrost-hint`, "inspCard");
+    assert.equal(await page.evaluate("document.activeElement?.id"), "inspClose",
+      `${context}: the diagnosis shortcut transfers focus to the inspector`);
+
+    const { activeSample, gapSample } = await page.evaluate(`(() => {
+      const plot = document.querySelector(${JSON.stringify(defrostPlot)});
+      plot.focus();
+      const values = scrubView(plot).v;
+      return { activeSample: values.indexOf(10), gapSample: values.indexOf(null) };
+    })()`);
+    assert.ok(activeSample > 0 && gapSample > 0, `${context}: the fixture contains an active sample and a gap`);
+    await page.key("Home", { code: "Home", keyCode: 36 });
+    for (let step = 0; step < activeSample; step++)
+      await page.key("ArrowRight", { code: "ArrowRight", keyCode: 39 });
+    await page.key("Enter", { code: "Enter", keyCode: 13 });
+    assert.deepEqual(await page.evaluate(`(() => {
+      const plot = document.querySelector(${JSON.stringify(defrostPlot)});
+      const graph = plot.parentElement;
+      const axis = graph.querySelector('.vhist-axis').getBoundingClientRect();
+      const time = graph.querySelector('.vhist-time.vhist-pinned');
+      const tip = graph.querySelector('.vhist-tip.vhist-pinned');
+      const tipBox = tip?.getBoundingClientRect();
+      const view = scrubView(plot);
+      const interval = scrubTime(view, ${activeSample}) + '–' + scrubTime(view, ${activeSample + 1});
+      return {
+        selectedTime: tip?.textContent.includes(interval),
+        selectedState: tip?.textContent.endsWith(t('hist.defrost_active')),
+        singleReadout: time && getComputedStyle(time).display === 'none',
+        belowScale: !!tipBox?.height && axis.height > 0 &&
+          tipBox.top >= Math.max(plot.getBoundingClientRect().bottom, axis.bottom) - 1,
+      };
+    })()`), { selectedTime: true, selectedState: true, singleReadout: true, belowScale: true },
+    `${context}: a native keyboard selection pins the active state and interval below the time scale`);
+    await captureNativeEvidence(page, `${context}/defrost-selected`, "inspCard");
+    await page.evaluate(`document.querySelector(${JSON.stringify(defrostPlot)}).focus({ preventScroll: true }); true`);
+    await page.key("Home", { code: "Home", keyCode: 36 });
+    for (let step = 0; step < gapSample; step++)
+      await page.key("ArrowRight", { code: "ArrowRight", keyCode: 39 });
+    assert.equal(await page.evaluate(`(() => {
+      const plot = document.querySelector(${JSON.stringify(defrostPlot)});
+      const tip = plot.parentElement.querySelector('.vhist-tip.vhist-live');
+      return !tip.hidden && tip.textContent === scrubTime(scrubView(plot), ${gapSample}) + ' · ' + t('hist.nm');
+    })()`), true, `${context}: a gap shows its selected time and no measurement`);
+    await page.key("Escape", { code: "Escape", keyCode: 27 });
+    await page.evaluate("document.getElementById('inspClose').focus(); true");
+    await page.key("Escape", { code: "Escape", keyCode: 27 });
+    assert.equal(await page.evaluate(`!S.insp && document.activeElement?.matches(${JSON.stringify(defrostHint)})`),
+      true, `${context}: Escape restores focus to the still-mounted notice`);
+    await page.key("Enter", { code: "Enter", keyCode: 13 });
+    await defrostWait();
+
+    // The live state and the timeline do not change when a new daily assessment is accepted.
+    await page.evaluate(`(() => {
+      window.__browserDefrostPlot = document.querySelector(${JSON.stringify(defrostPlot)});
+      Object.assign(S.status.health.checks[3], { verdict: 'ok', defrost_s: 360, share_pct: 5 });
+      renderApp(); return true;
+    })()`);
+    await defrostWait();
+    await expectDefrostRows("6", "5 %");
+    assert.equal(await page.evaluate(`window.__browserDefrostPlot === document.querySelector(${JSON.stringify(defrostPlot)})`),
+      true, `${context}: updating the diagnosis keeps the existing plot mounted`);
+    await page.waitFor("!S.clickHold");
+    await page.evaluate("renderApp(); true");
+    assert.equal(await hasElement(defrostHint), false, `${context}: completed OK has no shortcut in the overview`);
+    await expectDefrostPill(false, "completed-OK");
+    await captureNativeEvidence(page, `${context}/defrost-ok`, "inspCard");
+    await clickElement(page, "#inspClose");
+    await page.waitFor("!S.insp && !S.clickHold");
+    assert.equal(await page.evaluate(`document.activeElement?.matches('#cardNav [data-card="diagnosis"]')`),
+      true, `${context}: closing after the notice disappears restores focus to diagnosis navigation`);
     // Exercise the formerly blind band, then the exact no-window screenshot state, through the
     // real accordion. Ordinary use may explain the drop: it stays MEASURED, with a heat example.
     await page.evaluate(`(() => {
@@ -2265,12 +2761,12 @@ async function assertPlantDiagnosis(page, context) {
     // the day; a flow observation needs eligible pump runtime and must not inherit that wait.
     await page.evaluate(`(() => {
       S.status.health = {
-        status: 'collecting', full_span: false, span_s: 900,
+        source: 'x10a', status: 'collecting', full_span: false, span_s: 900,
         source_fresh: true, source_age_s: 1, available: 3, assessable: 1, evaluated: 0,
         checks: [
-          { id: 'defrost', verdict: 'collecting', evidence: 'observation', reason: 'day_incomplete',
-            count: 0, paired_count: 0, share_pct: null, defrost_s: 0, run_s: 900,
-            observed_s: 900, required_s: 0 },
+          { id: 'defrost', verdict: 'collecting', evidence: 'heuristic', reason: 'day_incomplete',
+            count: 3, paired_count: 3, share_pct: 2, defrost_s: 18, run_s: 900,
+            observed_s: 900, required_s: 77760 },
           { id: 'pressure', verdict: 'collecting', evidence: 'heuristic', reason: 'input_coverage',
             min_bar: 1.5, current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: false,
             confirmed_critical: false, observed_s: 900, required_s: 77760 },
@@ -2284,15 +2780,74 @@ async function assertPlantDiagnosis(page, context) {
     await page.frame();
     assertLayout(await page.evaluate(layoutAudit), `${context}/flow-waiting`);
     await assertAccessibility(page, `${context}/flow-waiting`, { nativeTree: true });
-    const missingDay = await page.evaluate("t('check.detail.horizon_wait', '23 h 45 min')");
-    const defrostDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_defrost']")
-      .closest('.vitem').innerText`);
-    const pressureDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
-      .closest('.vitem').innerText`);
-    assert.ok(defrostDetail.includes(missingDay),
-      `${context}: collecting daily check must retain its missing-day explanation`);
-    assert.ok(!pressureDetail.includes(missingDay),
-      `${context}: collecting graph-first pressure keeps detail free of missing-day prose`);
+    const missingDay = await page.evaluate("checkupDuration(85500)");
+    const waitingStatus = await page.evaluate("S.status");
+    await clickElement(page, '#gDefrostState');
+    await defrostWait();
+    await expectDefrostRows("3", "2 %");
+    assert.equal(await hasElement(defrostHint), false, `${context}: collecting has no hint shortcut`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/defrost-collecting`);
+    await captureNativeEvidence(page, `${context}/defrost-collecting`, "inspCard");
+    await page.evaluate(`Object.assign(S.status.health.checks[0], { share_pct: null, defrost_s: null, run_s: null });
+      renderApp(); true`);
+    await expectDefrostRows("3", "—");
+    await page.evaluate("S.status.health.checks[0].count = null; renderApp(); true");
+    assert.deepEqual(await defrostRows(), [], `${context}: two missing readings leave only the chart`);
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`Object.assign(S.status.health.checks[0], {
+      count: 6, paired_count: 6, defrost_s: 180, run_s: 900, share_pct: 20, verdict: 'info', reason: null,
+    }); S.status.diagnostics.enabled = false; renderApp(); true`);
+    assert.deepEqual(await defrostRows(), [], `${context}: opting out removes diagnosis values`);
+    assert.equal(await hasElement(defrostPlot), true, `${context}: opting out keeps the independent defrost history`);
+    await expectDefrostPill(false, "diagnostics-off-with-X10A-note");
+
+    await page.evaluate(`(() => {
+      const x10a = S.hist.get('defrost_state');
+      S.status.diagnostics.enabled = true;
+      Object.assign(S.status.health, { status: 'info', full_span: true, span_s: 86400, source_fresh: false });
+      Object.assign(S.status.health.checks[0], { verdict: 'info', reason: 'source_stale',
+        count: 6, paired_count: 6, share_pct: 20, defrost_s: 180, run_s: 900 });
+      S.status.hp.connected = false;
+      S.status.modbus = { ...S.status.modbus, enabled: true, connected: true };
+      S._modbus = [{ off: 35, label: 'Defrost / Restart', history: 'modbus_defrost_state', value: '1', binary: true }];
+      S.status.history.modbus_rows = [
+        ...(S.status.history.modbus_rows || []).filter(row => row.id !== 'modbus_defrost_state'),
+        { id: 'modbus_defrost_state', label: 'Defrost / Restart' },
+      ];
+      syncHistSources();
+      S.hist.set('defrost_state', { ...x10a, refreshFailed: true });
+      S.hist.set(histCacheKey('modbus_defrost_state', 'modbus'), {
+        at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: '', b0: 280,
+        t0: 1791868800, held: [], v: [0, 10, null, 0, 0, 10, 0, 0],
+      });
+      renderApp(); return true;
+    })()`);
+    await defrostWait();
+    assert.deepEqual(await defrostRows(), [], `${context}: a stale report supplies no current diagnosis values`);
+    assert.equal(await page.evaluate("document.getElementById('inspSrc').innerText"), "Defrost Operation",
+      `${context}: retained X10A history keeps its own source subtitle`);
+    assert.equal(await hasElement(`${defrostPlot} .vhist-state-track.x10a .vhist-retained`),
+      true, `${context}: retained X10A history stays with its assessment while Modbus is live`);
+    const modbusDefrostPlot = "#inspHist [data-hist='modbus_defrost_state'][data-source='modbus']";
+    assert.equal(await hasElement(modbusDefrostPlot), false,
+      `${context}: the retained X10A finding never borrows the live Modbus history`);
+    await page.evaluate("recoverOpenHistory(); true");
+    assert.equal(await hasElement(defrostPlot), true,
+      `${context}: refreshing an open inspector preserves the X10A source`);
+    assert.equal(await hasElement(modbusDefrostPlot), false,
+      `${context}: recovery cannot replace retained X10A with the Modbus chart`);
+
+    await page.evaluate(`S.status.diagnostics.effective_source = 'modbus';
+      S.status.health.source = 'modbus'; renderApp(); true`);
+    assert.equal(await hasElement(modbusDefrostPlot), true,
+      `${context}: Modbus fallback shows the independent defrost/restart history`);
+    assert.deepEqual(await defrostRows(), [], `${context}: the combined Modbus flag supplies no X10A values`);
+    assert.deepEqual(await page.evaluate(`(() => {
+      const text = document.getElementById('inspBody').innerText;
+      return [text.includes(t('check.defrost.modbus.about')), text.includes(t('check.defrost.modbus.normal')),
+        document.getElementById('inspNow').innerText];
+    })()`), [true, true, "—"], `${context}: fallback explains the combined flag and keeps the live X10A value unknown`);
+    await page.evaluate(`S.status = ${JSON.stringify(waitingStatus)}; renderApp(); true`);
     await assertFlowInspector(page, `${context}/flow-inspector`, missingDay);
   } finally {
     await page.evaluate(`(() => {
@@ -2310,7 +2865,9 @@ async function assertPlantDiagnosis(page, context) {
       S.histIdentity = window.__browserDiagnosisOriginal.histIdentity;
       S.histUptime = window.__browserDiagnosisOriginal.histUptime;
       S.flowMinSelection = window.__browserDiagnosisOriginal.flowMinSelection;
+      S.inspFromDefrostNotice = window.__browserDiagnosisOriginal.inspFromDefrostNotice;
       delete window.__browserDiagnosisOriginal;
+      delete window.__browserDefrostPlot;
       renderApp();
       return true;
     })()`);
@@ -2499,9 +3056,10 @@ async function assertWorkingFigure(page, context) {
 }
 
 async function assertNativeAltherma4(page, context, locale = "en") {
-  const expectedFlow = new Intl.NumberFormat(locale, {
+  const readingFormat = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 1, maximumFractionDigits: 1,
-  }).format(12.3);
+  });
+  const expectedFlow = readingFormat.format(12.3);
   try {
     await page.evaluate(`(() => {
       window.__browserNativeAltherma4Original = { ...S };
@@ -2682,12 +3240,17 @@ async function assertNativeAltherma4(page, context, locale = "en") {
           throw error;
         }
         const helpId = connected ? "inspRows" : "inspBody";
+        const expectLocalizedPressure = connected && target === "wp";
+        const expectedHeadline = expectLocalizedPressure
+          ? `${readingFormat.format(2.5)}\u00a0bar`
+          : connected ? "2.5" : nativeValue;
         assert.deepEqual(await page.evaluate(`(() => {
           const help = document.getElementById(${JSON.stringify(helpId)});
+          const headline = document.getElementById("inspNow").innerText;
           return { help: help.getBoundingClientRect().height > 0 && help.innerText.includes(t(${JSON.stringify(key)})),
-            headline: document.getElementById("inspNow").innerText.split(" ")[0],
+            headline: ${expectLocalizedPressure} ? headline : headline.split(" ")[0],
             deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length };
-        })()`), {help: true, headline: connected ? "2.5" : nativeValue, deltas: 0},
+        })()`), {help: true, headline: expectedHeadline, deltas: 0},
         `${context}/${target}/${connected}: real inspector click retains the native limit`);
         assertLayout(await page.evaluate(layoutAudit), `${context}/${target}/native-inspector`);
         await captureNativeEvidence(page,
@@ -3537,19 +4100,21 @@ try {
       await assertDhwTimeline(page, server, `${viewport.name}/dhw`, { locales: viewport.name === "phone" });
     }
     assert.deepEqual(page.diagnostics, [], "DHW timeline states must emit no browser errors");
-  } else if (process.argv.includes("--diagnosis-only")) {
+  } else if (process.argv.includes("--diagnosis-only") || process.argv.includes("--diagnosis-layout-only")) {
     // A focused rendering pass for diagnosis-copy iterations. The default full matrix below and
     // the supervisor's independent mutation controls remain unchanged.
     for (const viewport of viewports) {
       await page.viewport(viewport.width, viewport.height);
-      await activateLocale(page, "en");
-      await assertCyclingChart(page, server, `${viewport.name}/diagnosis/cycling`);
-      await assertDhwTimeline(page, server, `${viewport.name}/diagnosis/dhw`, { locales: viewport.name === "phone" });
-      await assertFaultChart(page, `${viewport.name}/diagnosis/fault/en`, viewport.name);
-      await activateLocale(page, "de");
-      await assertFaultChart(page, `${viewport.name}/diagnosis/fault/de`, viewport.name);
-      await activateLocale(page, "en");
-      await assertLivePollFullDashboard(page, server, `${viewport.name}/diagnosis/live-poll`);
+      if (!process.argv.includes("--diagnosis-layout-only")) {
+        await activateLocale(page, "en");
+        await assertCyclingChart(page, server, `${viewport.name}/diagnosis/cycling`);
+        await assertDhwTimeline(page, server, `${viewport.name}/diagnosis/dhw`, { locales: viewport.name === "phone" });
+        await assertFaultChart(page, `${viewport.name}/diagnosis/fault/en`, viewport.name);
+        await activateLocale(page, "de");
+        await assertFaultChart(page, `${viewport.name}/diagnosis/fault/de`, viewport.name);
+        await activateLocale(page, "en");
+        await assertLivePollFullDashboard(page, server, `${viewport.name}/diagnosis/live-poll`);
+      }
       for (const locale of browserLocales) {
         await activateLocale(page, locale);
         await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");

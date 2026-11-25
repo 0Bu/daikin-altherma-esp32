@@ -539,6 +539,12 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
     "Modbus flow report must omit X10A water agreement");
   assert.ok(!ui.checkupFlowBriefHtml(modbusFlowReport).includes(agreeLabel),
     "Modbus flow inspector must omit X10A water agreement rows");
+  const modbusHeater = { id: "heater", verdict: "ok", evidence: "observation", buh_s: 120, bsh_s: 0,
+    context: { confirmed: true, dated: true, buh: { supported: true, on_s: 120 }, bsh: { supported: false } } };
+  const modbusHeaterDetail = ui.checkupDetailHtml(modbusHeater, false, modbusOnly.health);
+  assert.ok(!modbusHeaterDetail.includes("heater-context") &&
+      !modbusHeaterDetail.includes(ui.t("check.heater_context.title")),
+    "Modbus heater detail must omit X10A heater context");
   checks++;
 }
 

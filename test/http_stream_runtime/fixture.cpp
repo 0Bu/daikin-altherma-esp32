@@ -83,7 +83,16 @@ inline int                                    scan_count = 0, scan_failure = 0;
 inline unsigned                               scan_calls             = 0;
 inline size_t                                 scan_first_allocations = 0;
 inline daik::CheckupStopContextReport         stop_report{};
+inline std::decay_t<decltype(daik::logic::CheckupReport{}.checks[0])> heater_legacy{};
+inline bool                                                           heater_legacy_active = false;
+inline daik::logic::heater_context::Totals                            heater_totals[2];
+inline daik::HeaterContextStatus                                      heater_meta;
+inline daik::logic::HeaterContextPayloadFields                        heater_last_snapshot;
+inline unsigned heater_snapshot_calls = 0, heater_expire_calls = 0;
+inline bool     heater_expire_retires = false, heater_snapshot_before_expire = false;
+inline bool     heater_snapshot_mutates = false, heater_snapshot_throws = false;
 inline daik::CheckupHydronicReport            hydronic_report{};
+inline daik::logic::ModbusHeatingFlowReport   modbus_heating_report{};
 inline int                                    flow_min_tenths = -1;
 inline daik::logic::DefrostStartReport        defrost_start{};
 inline daik::logic::CheckupOutdoorReport      defrost_outdoor{};
@@ -144,7 +153,15 @@ void reset() {
     scan_calls                   = 0;
     scan_first_allocations       = 0;
     stop_report                  = {};
+    heater_legacy                = {};
+    heater_legacy_active         = false;
+    for (auto& totals : heater_totals) totals = {};
+    heater_meta           = {};
+    heater_snapshot_calls = heater_expire_calls = 0;
+    heater_expire_retires = heater_snapshot_before_expire = false;
+    heater_snapshot_mutates = heater_snapshot_throws = false;
     hydronic_report              = {};
+    modbus_heating_report        = {};
     flow_min_tenths              = -1;
     defrost_start                = {};
     defrost_outdoor              = {};
@@ -276,6 +293,66 @@ void configure_stop_context() {
     c.censored       = 2;
     c.target_changed = 1;
     c.saturated      = true;
+}
+void configure_heater_context() {
+    using namespace daik::logic;
+    heater_meta.epoch = 73;
+    heater_meta.capabilities =
+        heater_context::ALL ^ heater_context::mask(heater_context::Category::ColdOutdoor);
+    heater_meta.supported_heaters = 3;
+    heater_meta.confirmed = heater_meta.dated = true;
+    heater_meta.restore_pending               = false;
+    heater_meta.persistence_pending           = true;
+    heater_meta.flags                         = heater_cohort::Partial | heater_cohort::Loss;
+    heater_meta.dropped                       = 3;
+    for (unsigned h = 0; h < 2; ++h) {
+        auto& c                       = heater_totals[h];
+        c                             = {};
+        heater_meta.observed_hours[h] = uint8_t(h + 1);
+        c.readable_us                 = (h ? 20 : 10) * 1000000u;
+        c.on_us                       = (h ? 7 : 3) * 1000000u;
+        c.off_us                      = c.readable_us - c.on_us;
+        c.samples = c.readable_samples = h ? 5 : 4;
+        c.on_samples                   = h ? 3 : 2;
+        c.unknown_context_us           = c.on_us;
+        c.union_us                     = (h ? 5 : 3) * 1000000u;
+        c.unclassified_us              = c.on_us - c.union_us;
+        const auto emergency           = size_t(heater_context::Category::Emergency);
+        const auto silent              = size_t(heater_context::Category::Silent);
+        c.positive_us[emergency]       = (h ? 5 : 1) * 1000000u;
+        c.evaluable_on_us[emergency] = c.evaluable_on_us[silent] = c.on_us;
+        c.evaluable_on_samples[emergency] = c.evaluable_on_samples[silent] = c.on_samples;
+        c.positive_samples[emergency]                                      = 1;
+        if (!h) {
+            c.positive_us[silent]      = 2000000;
+            c.positive_samples[silent] = 1;
+        }
+        // A conservative wire guard must hide old counters after this capability is withdrawn.
+        const auto cold     = size_t(heater_context::Category::ColdOutdoor);
+        c.positive_us[cold] = c.evaluable_on_us[cold] = c.on_us;
+        c.positive_samples[cold] = c.evaluable_on_samples[cold] = c.on_samples;
+    }
+}
+void stop_wire_parity(const httpd_req_t& req) {
+    std::string expected;
+    daik::append_stop_context_json(expected, daik::stop_context_payload_fields(stop_report));
+    check(req.response.find("\"stop_context\":" + expected) != std::string::npos,
+          "STOP_HTTP_SHARED_OUTPUT_MATCHES_ORIGINAL_BUILDER_BYTES");
+}
+httpd_req_t heater_wire(const char* name) {
+    auto       req       = request();
+    const auto snapshots = heater_snapshot_calls, expires = heater_expire_calls;
+    check(invoke(req, "/status", daik::h_status) == ESP_OK, "heater status failed");
+    successful(req);
+    check(heater_snapshot_calls == snapshots + 1 && heater_expire_calls == expires + 1 &&
+              !heater_snapshot_before_expire,
+          "HEATER_STATUS_ONE_ATOMIC_SNAPSHOT_AFTER_EXPIRY");
+    std::string reference;
+    daik::logic::append_heater_context_json(reference, heater_last_snapshot);
+    check(req.response.find(reference) != std::string::npos,
+          "HEATER_SHARED_OUTPUT_MATCHES_ORIGINAL_NESTED_BUILDER");
+    emit(req, name);
+    return req;
 }
 void configure_refrigerant() {
     // This shaped service snapshot is a wire adapter, not a simulated poll/accumulator.
@@ -573,10 +650,15 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
             defrost.verdict    = logic::CheckupVerdict::Info;
             defrost.reason     = logic::CheckupReason::None;
             defrost.observed_s = 86400;
+            report.source_fresh = true;
+            report.source_age_s = 1;
         }
         if (fixture::flow_min_tenths >= 0)
             report.checks[static_cast<size_t>(logic::CheckupCheck::Flow)].a =
                 fixture::flow_min_tenths;
+        if (fixture::heater_legacy_active)
+            report.checks[static_cast<size_t>(logic::CheckupCheck::Heater)] =
+                fixture::heater_legacy;
     } else if (defrost_context) {
         *defrost_context = {};
     }
@@ -595,6 +677,9 @@ logic::WorkingFigureReport checkup_working_figure_status(const Config&, Diagnost
 CheckupHydronicReport checkup_hydronic_report() {
     ++fixture::hydronic_report_calls;
     return fixture::hydronic_report;
+}
+logic::ModbusHeatingFlowReport checkup_modbus_heating_report() {
+    return fixture::modbus_heating_report;
 }
 CheckupFaultStatus checkup_fault_latest_status(DiagnosticsSource, bool source_fresh) {
     if (fixture::fault_trace_present) {
@@ -617,6 +702,22 @@ bool checkup_fault_timeline_snapshot(logic::CheckupFaultTrace& out, DiagnosticsS
 CheckupStopContextReport checkup_stop_context_report() {
     ++fixture::stop_report_calls;
     return fixture::stop_report;
+}
+void checkup_heater_context_expire() {
+    ++fixture::heater_expire_calls;
+    if (fixture::heater_expire_retires) fixture::heater_meta.confirmed = false;
+}
+void heater_context_payload(logic::HeaterContextPayloadFields& out) {
+    ++fixture::heater_snapshot_calls;
+    fixture::heater_snapshot_before_expire |=
+        fixture::heater_snapshot_calls > fixture::heater_expire_calls;
+    if (fixture::heater_snapshot_throws) throw std::bad_alloc();
+    logic::heater_context_payload_project(out, fixture::heater_totals, fixture::heater_meta);
+    fixture::heater_last_snapshot = out;
+    if (fixture::heater_snapshot_mutates) {
+        fixture::heater_meta.epoch      = 99;
+        fixture::heater_totals[1].on_us = 99000000;
+    }
 }
 bool checkup_has_cycling_run_contexts(DiagnosticsSource source, uint32_t, uint32_t) {
     return source == DiagnosticsSource::X10a && fixture::current.diagnostics_enabled &&
@@ -1004,6 +1105,7 @@ int main(int argc, char** argv) {
             successful(req);
             check(stop_report_calls == calls + 1,
                   "status must take exactly one typed stop snapshot");
+            stop_wire_parity(req);
             check(req.response.find("\"witnessed_stops_recent_heating\":null") !=
                           std::string::npos &&
                       req.response.find("\"positive\":null") != std::string::npos,
@@ -1023,6 +1125,7 @@ int main(int argc, char** argv) {
         check(invoke(req, "/status", daik::h_status) == ESP_OK, "zero-population status failed");
         successful(req);
         check(stop_report_calls == 1, "zero population must use one typed stop snapshot");
+        stop_wire_parity(req);
         check(req.response.find("\"witnessed_stops_recent_heating\":0") != std::string::npos &&
                   req.response.find("\"positive\":0,\"evaluable\":0,\"complete\":0") !=
                       std::string::npos,
@@ -1047,6 +1150,7 @@ int main(int argc, char** argv) {
             successful(req);
             check(stop_report_calls == calls + 1,
                   "populated status copied stop snapshot repeatedly");
+            stop_wire_parity(req);
             check(sdk::allocations <= baseline_allocations,
                   "compact stop append added allocations over the null-context status");
             check(req.response.find("\"stop_context\":{") != std::string::npos &&
@@ -1064,6 +1168,150 @@ int main(int argc, char** argv) {
                   "unsupported defrost leaked stored counts or fabricated zero");
             emit(req, redact ? "stop-populated-redacted" : "stop-populated");
         }
+    });
+    run("stop_shared_output", [] {
+        configure_stop_context();
+        stop_report.observation.counters.witnessed_stops_recent_heating = UINT16_MAX;
+        stop_report.observation.readable_us = uint64_t(UINT32_MAX) * 1000000;
+        for (bool flat : {false, true}) {
+            const auto  fields   = daik::stop_context_payload_fields(stop_report);
+            std::string original = flat ? "{\"prefix\":7" : "prefix:", shared = original;
+            daik::append_stop_context_json(original, fields, flat);
+            auto sink = daik::detail::json_output(shared);
+            daik::append_stop_context_json(sink, fields, flat);
+            check(shared == original &&
+                      (flat ? shared.find(",\"stop_context_confirmed\":") != std::string::npos
+                            : shared.find("prefix:{\"confirmed\":") != std::string::npos),
+                  "STOP_SHARED_PREFIX_AND_FLAT_FLAGS_MATCH_ORIGINAL_BYTES");
+        }
+        auto req = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK,
+              "shared stop maximum status succeeds");
+        successful(req);
+        stop_wire_parity(req);
+    });
+    run("heater_context_absent", [] {
+        (void)heater_wire("heater-unconfirmed");
+        heater_meta.confirmed         = true;
+        heater_meta.supported_heaters = 3;
+        heater_meta.capabilities      = daik::logic::heater_context::ALL;
+        const auto unread             = heater_wire("heater-unreadable");
+        check(
+            unread.response.find("\"buh\":{\"supported\":true,\"readable_s\":null,\"on_s\":null") !=
+                std::string::npos,
+            "HEATER_UNREADABLE_POPULATION_IS_NULL");
+        configure_heater_context();
+        heater_meta.supported_heaters = 0;
+        const auto absent             = heater_wire("heater-unsupported");
+        check(absent.response.find(
+                  "\"buh\":{\"supported\":false,\"readable_s\":null,\"on_s\":null") !=
+                  std::string::npos,
+              "HEATER_UNSUPPORTED_POPULATION_IS_NULL");
+    });
+    run("heater_context_populated", [] {
+        configure_heater_context();
+        heater_legacy_active = true;
+        heater_legacy        = {};
+        heater_legacy.a      = 17;
+        heater_legacy.b      = 29;
+        heater_legacy.c      = 111;
+        heater_legacy.d      = 222;
+        const auto req       = heater_wire("heater-populated");
+        check(req.response.find(
+                  "\"buh_s\":17,\"bsh_s\":29,\"buh_observed_s\":111,\"bsh_observed_s\":222") !=
+                  std::string::npos,
+              "HEATER_CONTEXT_NEVER_REPLACES_LEGACY_CLOCKS");
+        check(req.response.find("\"silent\":{\"supported\":true,\"positive_s\":0,\"evaluable_on_"
+                                "s\":7,\"positive_samples\":0}") != std::string::npos,
+              "HEATER_EVALUABLE_ZERO_STAYS_NUMERIC");
+        check(req.response.find("\"cold_outdoor\":{\"supported\":false,\"positive_s\":null,"
+                                "\"evaluable_on_s\":null,\"positive_samples\":null}") !=
+                  std::string::npos,
+              "HEATER_UNSUPPORTED_CATEGORY_HAS_NO_NUMBERS");
+    });
+    run("heater_context_seams", [] {
+        configure_heater_context();
+        for (unsigned h = 0; h < 2; ++h) {
+            auto& c       = heater_totals[h];
+            c             = {};
+            c.readable_us = c.on_us = (h ? 3 : 2) * 1000000u;
+            c.union_us = c.unknown_context_us = c.on_us;
+            c.positive_us[0] = c.evaluable_on_us[0] = c.on_us;
+        }
+        const auto time = heater_wire("heater-time-only");
+        check(time.response.find("\"buh\":{\"supported\":true,\"readable_s\":2,\"on_s\":2") !=
+                      std::string::npos &&
+                  time.response.find("\"emergency\":{\"supported\":true,\"positive_s\":2,"
+                                     "\"evaluable_on_s\":2,\"positive_samples\":0}") !=
+                      std::string::npos,
+              "HEATER_TIME_ONLY_SEAM_RETAINS_QUALIFIED_TIME");
+        for (auto& c : heater_totals) {
+            c               = {};
+            c.unreadable_us = 2000000;
+        }
+        const auto unknown = heater_wire("heater-unknown-only");
+        check(unknown.response.find("\"buh\":{\"supported\":true,\"readable_s\":0,\"on_s\":null") !=
+                      std::string::npos &&
+                  unknown.response.find("\"unreadable_s\":2") != std::string::npos,
+              "HEATER_UNKNOWN_ONLY_SEAM_RETAINS_UNREADABLE_TIME");
+        auto& c       = heater_totals[0];
+        c             = {};
+        c.readable_us = c.on_us = c.union_us = c.unknown_context_us = 500000;
+        c.samples = c.readable_samples = c.on_samples = 2;
+        c.positive_us[0] = c.evaluable_on_us[0] = 500000;
+        c.positive_samples[0]                   = 1;
+        c.evaluable_on_samples[0]               = 2;
+        const auto subsecond                    = heater_wire("heater-subsecond");
+        check(subsecond.response.find("\"emergency\":{\"supported\":true,\"positive_s\":0,"
+                                      "\"evaluable_on_s\":0,\"positive_samples\":1}") !=
+                  std::string::npos,
+              "HEATER_POSITIVE_SUBSECOND_SAMPLE_IS_NOT_ABSENCE");
+    });
+    run("heater_context_atomic", [] {
+        configure_heater_context();
+        heater_snapshot_mutates = true;
+        const auto req          = heater_wire("heater-atomic");
+        check(heater_meta.epoch == 99 && heater_totals[1].on_us == 99000000 &&
+                  req.response.find("\"epoch\":73") != std::string::npos &&
+                  req.response.find("\"bsh\":{\"supported\":true,\"readable_s\":20,\"on_s\":7") !=
+                      std::string::npos,
+              "HEATER_HTTP_SERIALIZES_ONE_FROZEN_PAIR");
+    });
+    run("heater_context_maximum", [] {
+        configure_heater_context();
+        heater_meta.epoch        = UINT32_MAX;
+        heater_meta.capabilities = heater_meta.flags = heater_meta.dropped = UINT16_MAX;
+        for (auto& c : heater_totals) {
+            c.readable_us = c.on_us = c.off_us = c.transition_us = c.unreadable_us = UINT64_MAX;
+            c.union_us = c.overlap_us = c.unknown_context_us = c.unclassified_us =
+                c.complete_context_us                        = UINT64_MAX;
+            c.samples = c.readable_samples = c.on_samples = UINT32_MAX;
+            for (size_t k = 0; k < daik::logic::heater_context::CATEGORIES; ++k) {
+                c.positive_us[k] = c.evaluable_on_us[k] = UINT64_MAX;
+                c.positive_samples[k] = c.evaluable_on_samples[k] = UINT32_MAX;
+            }
+        }
+        (void)heater_wire("heater-maximum");
+    });
+    run("heater_context_failures", [] {
+        configure_heater_context();
+        heater_expire_retires = true;
+        const auto expired    = heater_wire("heater-expired");
+        check(expired.response.find("\"context\":{\"confirmed\":false") != std::string::npos,
+              "HEATER_EXPIRY_PRECEDES_WIRE_PUBLICATION");
+        heater_expire_retires = false;
+        configure_heater_context();
+        heater_snapshot_throws = true;
+        auto req               = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_FAIL && req.emission_attempts > 0 &&
+                  req.final_chunks == 0 && req.replacement_responses == 0 &&
+                  req.late_status_changes == 0,
+              "HEATER_PROVIDER_OOM_ABORTS_COMMITTED_STREAM");
+        heater_snapshot_throws = false;
+        next_request();
+        (void)heater_wire("heater-recovered");
+        allocation_sweep("/status", daik::h_status);
+        chunk_sweep("/status", daik::h_status);
     });
     run("defrost_start_wire", [] {
         for (const auto& [sample, result] :
@@ -1548,16 +1796,29 @@ int main(int argc, char** argv) {
         hydronic_report.observation.totals.r1_r4_windows      = 1;
         hydronic_report.observation.totals.r1_r4_samples      = 2;
         hydronic_report.observation.totals.r1_r4              = {-500, -300, -100};
-        const unsigned before_stop_calls                      = stop_report_calls;
-        const unsigned before_hydronic_calls                  = hydronic_report_calls;
-        auto           req                                    = request();
+        modbus_heating_report.supported                       = true;
+        modbus_heating_report.minimum_tenths                  = 52;
+        modbus_heating_report.windows.first_bucket            = 500000;
+        modbus_heating_report.windows.masks[23]               = 4;
+        configure_heater_context();
+        const unsigned before_stop_calls          = stop_report_calls;
+        const unsigned before_hydronic_calls      = hydronic_report_calls;
+        const unsigned before_heater_calls        = heater_snapshot_calls;
+        const unsigned before_heater_expire_calls = heater_expire_calls;
+        auto           req                        = request();
         check(invoke(req, "/status", daik::h_status) == ESP_OK, "modbus diagnostics status failed");
         successful(req);
         emit(req, "status-modbus-diagnostics");
         check(last_checkup_report_source == daik::DiagnosticsSource::Modbus &&
                   stop_report_calls == before_stop_calls &&
-                  hydronic_report_calls == before_hydronic_calls,
-              "modbus diagnostics view must read modbus slot without stop_context or hydronic");
+                  hydronic_report_calls == before_hydronic_calls + 1 &&
+                  heater_snapshot_calls == before_heater_calls &&
+                  heater_expire_calls == before_heater_expire_calls,
+              "modbus diagnostics view must consult X10A only for the independent heating minimum "
+              "without stop_context, hydronic body, or X10A heater");
+        const auto heater_wire_sv = checkup_wire(req, "heater");
+        check(heater_wire_sv.find("\"context\":{\"confirmed\":false") != std::string_view::npos,
+              "modbus diagnostics must emit unconfirmed heater context without X10A leakage");
         const size_t hydronic_pos = req.response.find("\"hydronic\":{\"confirmed\":false");
         const size_t hydronic_end =
             hydronic_pos == std::string::npos
@@ -1590,6 +1851,58 @@ int main(int argc, char** argv) {
                 req.response.find("\"pel_source\":\"modbus\"") != std::string::npos &&
                 req.response.find("\"limited_buh\":true") != std::string::npos,
             "status payload missing modbus working_figure or gas_comparison");
+    });
+    run("heating_minimum_status", [] {
+        current.mb_host                            = "192.0.2.50";
+        current.diagnostics_enabled                = true;
+        current.diagnostics_source                 = daik::DiagnosticsSource::X10a;
+        checkup_x10a_has_data                      = true;
+        flow_min_tenths                            = 65;
+        hydronic_report.reason                     = daik::logic::HydronicReason::Settling;
+        auto& obs                                  = hydronic_report.observation;
+        obs.confirmed                              = true;
+        obs.dated                                  = true;
+        modbus_heating_report.supported            = true;
+        modbus_heating_report.minimum_tenths       = 52;
+        modbus_heating_report.windows.first_bucket = 500000;
+        modbus_heating_report.windows.masks[23]    = 4;
+
+        auto read = [&](const char* name, bool redacted = false) {
+            next_request();
+            auto req = request();
+            check(invoke(req, redacted ? "/status?redact=1" : "/status", daik::h_status) == ESP_OK,
+                  "heating minimum status failed");
+            successful(req);
+            emit(req, name);
+            return req.response;
+        };
+        const auto fallback = read("heating-modbus-fallback");
+        check(fallback.find("\"heating_minimum\":{\"source\":\"modbus\",\"reason\":\"observed\","
+                            "\"min_l_min\":5.2,\"minimum_windows\":{") != std::string::npos,
+              "an unqualified X10A population hid the Modbus minimum");
+        const auto redacted = read("heating-modbus-redacted", true);
+        check(redacted.find("\"heating_minimum\":{\"source\":\"modbus\",\"reason\":\"observed\","
+                            "\"min_l_min\":5.2,\"minimum_windows\":null}") != std::string::npos,
+              "redacted status must keep the measured minimum and withhold its windows");
+
+        obs.totals.samples                = 2;
+        obs.totals.first_evidence_unix_us = 1800080000000000;
+        obs.totals.last_evidence_unix_us  = 1800082000000000;
+        obs.totals.flow                   = {15125, 7125, 8000};
+        obs.minimum_windows.first_bucket  = 500000;
+        obs.minimum_windows.masks[22]     = 16;
+        const auto preferred              = read("heating-x10a-priority");
+        check(preferred.find("\"heating_minimum\":{\"source\":\"x10a\",\"reason\":\"observed\","
+                             "\"min_l_min\":7.125,\"minimum_windows\":{") != std::string::npos,
+              "qualified X10A must take precedence over a lower Modbus result");
+
+        current.diagnostics_source = daik::DiagnosticsSource::Modbus;
+        read("heating-x10a-with-modbus-diagnostics");
+        current.diagnostics_source  = daik::DiagnosticsSource::X10a;
+        current.diagnostics_enabled = false;
+        hydronic_report             = {};
+        flow_min_tenths             = -1;
+        read("heating-disabled");
     });
     run("hydronic_status", [] {
         hydronic_report = {};

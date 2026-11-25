@@ -15,7 +15,7 @@
 //
 // An explicit X10A re-detection, profile or pin identity change still empties the window. A
 // HomeHub-only edit is a separate source and deliberately does not.
-#include "hp_poll.hpp"          // CachedValue
+#include "hp_poll.hpp" // CachedValue
 #include "freertos/FreeRTOS.h"
 #include "logic/checkup.hpp"
 #include "logic/checkup_persist.hpp"
@@ -26,8 +26,12 @@
 #include "logic/dhw_loss_persist.hpp"
 #include "logic/fault_persist.hpp"
 #include "logic/fault_trace.hpp"
+#include "logic/heater_context_input.hpp"
+#include "logic/hydronic_input.hpp"
+#include "logic/stop_context_input.hpp"
 #include "logic/working_figure.hpp"
 #include "hydronic_observation_store.hpp"
+#include "logic/modbus_heating_flow.hpp"
 #include "stop_observation_store.hpp"
 
 #include <cstddef>
@@ -113,18 +117,22 @@ uint32_t checkup_consent_epoch();
 // metadata. Neither an empty sample nor that flag establishes a successful bus observation.
 // `sweep_started_us` is captured before the actual poll begins. Only the independent hydronic
 // population uses it to refuse inputs older than its 15 s allowance; unavailable timing (-1)
-// cannot qualify that population. Existing minimum-flow and other diagnosis contracts are
-// unchanged.
+// cannot qualify that population. Only the poll owner's completed fresh sweep sets
+// `completed_sweep`; UART/TLS/OOM/auto gaps pause the independent heater context without changing
+// core observations.
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
                     const logic::CheckupCoverage& coverage, uint32_t source_generation,
                     uint32_t consent_epoch, bool profile_confirmed = true,
-                    int64_t sweep_started_us = -1);
+                    bool completed_sweep = false, int64_t sweep_started_us = -1);
 
 // Feed one confirmed HomeHub/Modbus full poll cycle into the independent Modbus checkup slot.
 void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
                            uint32_t source_generation, uint32_t consent_epoch,
                            bool               source_confirmed = true,
-                           ModbusProfileBasis basis            = ModbusProfileBasis::Affirmative);
+                           ModbusProfileBasis basis            = ModbusProfileBasis::Affirmative,
+                           int64_t sweep_started_us = -1, uint32_t link_generation = 0);
+void checkup_modbus_heating_break(uint32_t source_generation, uint32_t consent_epoch);
+logic::ModbusHeatingFlowReport checkup_modbus_heating_report();
 
 // Judge the previous boot's handoff integrity and retire completed RAM hours. app_main calls ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.
@@ -139,7 +147,20 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation);
 // cannot unlock flash restore. The first confirmation may resume a matching one-shot ongoing DHW
 // filter; later confirmation changes retire the old window through the reset barrier. Confirmation
 // also requires the exact resolved consumer schema; an unknown name cannot borrow generic's scope.
-void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp);
+struct CheckupProfileLayout {
+    uint32_t                            model_fp = 0;
+    logic::StopContextInputPlan         stop;
+    logic::heater_context_input::Layout heater;
+    logic::HydronicInputPlan            hydronic;
+    logic::CheckupLocator               rwt_locator{};
+    logic::EnergyCoverage               energy_cov{};
+    bool                                defrost_air = false;
+};
+
+// Resolve profiles before taking the HP/checkup locks or committing HTTP configuration.
+// The installed layout owns no profile string or transient row pointer.
+void checkup_profile_layout(const char* profile_id, CheckupProfileLayout& out);
+void checkup_reset_on_detect(const CheckupProfileLayout& layout, uint32_t source_fp);
 
 // Confirm this boot's HomeHub Modbus profile and host/port fingerprint. Unlocks independent Modbus
 // flash restore or clears the Modbus slot when identity changes.
@@ -190,6 +211,10 @@ struct CheckupStopContextReport {
 
 // Independent, bounded observation population; never changes the completed-run verdict.
 CheckupStopContextReport checkup_stop_context_report();
+
+// Before history takes its flash lock, age the independent heater owner and fence snapshots
+// sampled before that current-time observation. No HP/cache lock is acquired here.
+void checkup_heater_context_expire();
 
 struct CheckupHydronicReport {
     struct SecondarySupply {
