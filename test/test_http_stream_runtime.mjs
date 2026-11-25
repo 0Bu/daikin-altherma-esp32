@@ -13,7 +13,8 @@ const temporary=fs.mkdtempSync(path.join(os.tmpdir(),"daikin-http-stream-runtime
 const commands=[];
 const paths={ common:"main/http_common.cpp",status:"main/http_status.cpp",dwell:"main/state_dwell.cpp",
   chunks:"main/logic/chunk_sink.hpp",json:"main/logic/json.hpp",identity:"main/logic/values_identity.hpp",
-  dwellLogic:"main/logic/state_dwell.hpp",heartbeat:"main/logic/heartbeat.hpp" };
+  dwellLogic:"main/logic/state_dwell.hpp",heartbeat:"main/logic/heartbeat.hpp",
+  hydronicPayload:"main/logic/hydronic_payload.hpp" };
 const sources=Object.fromEntries(Object.entries(paths).map(([key,file])=>[key,fs.readFileSync(path.join(root,file),"utf8")]));
 const frozen=JSON.parse(fs.readFileSync(path.join(fixture,"legacy_handlers.json"),"utf8"));
 assert.equal(frozen.base_commit,"e99da78f38901cfc1421cec7f74e44dbbb632486");
@@ -201,6 +202,18 @@ const mutations=[
   {name:"stale-secondary-supply",file:"status",scenario:"hydronic_status",
     before:"!report.current || !secondary.samples || !secondary.source.conv",
     after:"!secondary.samples || !secondary.source.conv"},
+  {name:"leaked-x10a-water-agreement-on-modbus",file:"status",scenario:"status_modbus_diagnostics",
+    before:/if\s*\(diag_effective == DiagnosticsSource::Modbus \|\| !report\.observation\.confirmed\)\s*\{\s*j\s*\+=\s*"null";\s*return;\s*\}\s*append_hydronic_agreement_json\(j, report\);/,
+    after:"append_hydronic_agreement_json(j, checkup_hydronic_report());"},
+  {name:"unconfirmed-water-agreement-leaked",file:"status",scenario:"hydronic_status",
+    before:"if (diag_effective == DiagnosticsSource::Modbus || !report.observation.confirmed) {",
+    after:"if (diag_effective == DiagnosticsSource::Modbus) {"},
+  {name:"undated-water-agreement-ranges",file:"hydronicPayload",scenario:"hydronic_status",
+    before:/const bool\s+known =\s*observation\.confirmed && observation\.dated && totals\.first_evidence_unix_us >= 0;/,
+    after:"const bool known = observation.confirmed;"},
+  {name:"stale-agreement-current-limits",file:"hydronicPayload",scenario:"hydronic_status",
+    before:'w.u64("current_limitations_mask", report.agree_limitations, report.current);',
+    after:'w.u64("current_limitations_mask", report.agree_limitations, true);'},
 ];
 try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
@@ -497,11 +510,27 @@ try {
       assert.equal(doc.health.checks.length,8,name);
       assert.equal(flow?.min_l_min,6.5,name);
       assert.deepEqual(flow.secondary_supply,secondaryWires.get(name),name);
+      const isUnavailable=name==="secondary-unavailable";
+      const current=name==="secondary-current";
+      assert.deepEqual(flow.water_agreement,isUnavailable?{
+        method:2,settling_s:600,stable_window_s:300,max_drift_k:0.5,min_flow_l_min:5,max_gap_s:15,
+        reason_code:3,reason:"no_source",settling_remaining_s:null,
+        current_limitations_mask:null,population_limitations_mask:0,
+        r1_r4:{supported:false,qualified_s:0,windows:0,samples:0,delta_k:{min:null,mean:null,max:null}},
+        r2_r1:{supported:false,qualified_s:0,windows:0,samples:0,delta_k:{min:null,mean:null,max:null}},
+      }:{
+        method:2,settling_s:600,stable_window_s:300,max_drift_k:0.5,min_flow_l_min:5,max_gap_s:15,
+        reason_code:0,reason:"none",settling_remaining_s:null,
+        current_limitations_mask:current?2:null,population_limitations_mask:3,
+        r1_r4:{supported:true,qualified_s:35.000001,windows:1,samples:2,delta_k:{min:-0.3,mean:-0.25,max:-0.1}},
+        r2_r1:{supported:true,qualified_s:15,windows:1,samples:3,delta_k:{min:0.2,mean:0.3,max:0.4}},
+      },`${name}: water_agreement wire oracle`);
       secondaryWires.delete(name);
     }
     if(name==="status-modbus-diagnostics") {
       const flow=doc.health.checks.find(check=>check.id==="flow");
       assert.equal(flow?.secondary_supply,null,name);
+      assert.equal(flow?.water_agreement,null,name);
     }
     if(name==="status-x10a-defrost-outdoor") {
       const defrost=doc.health.checks.find(check=>check.id==="defrost");

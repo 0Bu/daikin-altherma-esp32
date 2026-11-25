@@ -1,4 +1,4 @@
-// translation-source: c7de29a481f17e11a35ea248d888ac416d34b79cb23bafa5bcba8f20a50dc331
+// translation-source: eceea7ddd6ed641798b2f04b3048352f8ee2c044ab186c3c4c20fc20c05eef5b
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -358,6 +358,10 @@ I18N.fr = localeValues([
   /* service.metric.eev */ "Commande de vanne de détente",
   /* service.metric.hp */ "Haute pression",
   /* service.metric.lp */ "Basse pression",
+  /* check.hydronic.agree_labels */ "Pompe seule R1T−R4T|Pompe seule R2T−R1T|État de concordance|Limites de concordance",
+  /* check.hydronic.agree_reasons */ "Débit sous 5,0 l/min|Compresseur en marche|Appoint actif ou ambigu|Vanne 3 voies changée|Températures non stationnaires",
+  /* check.hydronic.agree_limits */ "R2T indisponible|Voie ECS incluse",
+  /* check.hydronic.agree_meta */ "fenêtres|mesures|Concordance passive uniquement ; pas d'étalonnage ; chaleur externe non exclue.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · moyenne ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "mesure retenue" : "mesures retenues"}`,
   /* service.metric.input_none */ "Aucune entrée sélectionnée",

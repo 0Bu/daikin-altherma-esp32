@@ -1,4 +1,4 @@
-// translation-source: c7de29a481f17e11a35ea248d888ac416d34b79cb23bafa5bcba8f20a50dc331
+// translation-source: eceea7ddd6ed641798b2f04b3048352f8ee2c044ab186c3c4c20fc20c05eef5b
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -358,6 +358,10 @@ I18N.nb = localeValues([
   /* service.metric.eev */ "Ekspansjonsventilkommando",
   /* service.metric.hp */ "Høytrykk",
   /* service.metric.lp */ "Lavtrykk",
+  /* check.hydronic.agree_labels */ "Kun pumpe R1T−R4T|Kun pumpe R2T−R1T|Samsvarstatus|Samsvarsbegrensning",
+  /* check.hydronic.agree_reasons */ "Strømning under 5,0 l/min|Kompressor i gang|Varmer aktiv eller uklar|3-veisventil endret|Temperaturer ikke stasjonære",
+  /* check.hydronic.agree_limits */ "R2T utilgjengelig|Varmtvannsrute inkludert",
+  /* check.hydronic.agree_meta */ "vinduer|målinger|Kun passivt samsvar; ikke kalibrering; ekstern varme ikke utelukket.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · snitt ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "inkludert måling" : "inkluderte målinger"}`,
   /* service.metric.input_none */ "Ingen valgt inngang",

@@ -234,20 +234,33 @@ void open_at(int64_t first, int64_t last, uint8_t duration_edges) {
 bool delta_valid(const HydronicDelta& d) {
     if (d.to_us < 0 || d.from_us < -1 || (d.from_us >= 0 && d.from_us >= d.to_us) ||
         (d.limitations & ~HYDRONIC_KNOWN_LIMITATIONS) ||
+        (d.agree_limitations & ~AGREEMENT_KNOWN_LIMITATIONS) ||
         static_cast<unsigned>(d.reason) > static_cast<unsigned>(HydronicReason::Overflow) ||
-        d.command_accepted > d.accepted)
+        static_cast<unsigned>(d.agree_reason) > static_cast<unsigned>(AgreementReason::Overflow) ||
+        d.command_accepted > d.accepted || d.r1_r4_window_started > d.r1_r4_accepted ||
+        d.r2_r1_window_started > d.r2_r1_accepted)
         return false;
-    if (d.observed_us || d.candidate_us || d.qualified_us) {
+    if (d.observed_us || d.candidate_us || d.qualified_us || d.r1_r4_qualified_us ||
+        d.r2_r1_qualified_us) {
         if (d.from_us < 0 || d.from_us >= d.to_us || d.to_us - d.from_us > HYDRONIC_MAX_GAP_US)
             return false;
         const uint64_t dt = static_cast<uint64_t>(d.to_us - d.from_us);
         // Tracker intervals are wholly admitted or absent for each independent duration.
         // An arbitrary partial duration does not locate a real subinterval at an hour seam.
         if ((d.observed_us && d.observed_us != dt) || (d.candidate_us && d.candidate_us != dt) ||
-            (d.qualified_us && d.qualified_us != dt) || d.candidate_us > d.observed_us ||
-            d.qualified_us > d.candidate_us)
+            (d.qualified_us && d.qualified_us != dt) ||
+            (d.r1_r4_qualified_us && d.r1_r4_qualified_us != dt) ||
+            (d.r2_r1_qualified_us && d.r2_r1_qualified_us != dt) ||
+            d.candidate_us > d.observed_us || d.qualified_us > d.candidate_us ||
+            d.r1_r4_qualified_us > d.observed_us || d.r2_r1_qualified_us > d.observed_us)
             return false;
     }
+    if (d.r1_r4_accepted &&
+        (d.r1_r4_milli < -HYDRONIC_SPREAD_MAX_MILLI || d.r1_r4_milli > HYDRONIC_SPREAD_MAX_MILLI))
+        return false;
+    if (d.r2_r1_accepted &&
+        (d.r2_r1_milli < -HYDRONIC_SPREAD_MAX_MILLI || d.r2_r1_milli > HYDRONIC_SPREAD_MAX_MILLI))
+        return false;
     return !d.accepted ||
            (d.spread_milli >= -HYDRONIC_SPREAD_MAX_MILLI &&
             d.spread_milli <= HYDRONIC_SPREAD_MAX_MILLI && d.flow_milli > 0 &&
@@ -443,15 +456,19 @@ void hydronic_observation_record(const logic::HydronicDelta& d) {
     SemGuard lk(store_mutex());
     if (!lk || hydronic_observation_suppressed() || !s_enabled || !s_confirmed || s_sealed) return;
     const int64_t now_us = esp_timer_get_time(), wall = wall_now();
+    const bool    any_work = d.accepted || d.observed_us || d.r1_r4_accepted || d.r2_r1_accepted ||
+                          d.r1_r4_qualified_us || d.r2_r1_qualified_us;
     if (!date_clock(now_us, wall)) {
-        if (d.accepted || d.observed_us) lose();
+        if (any_work) lose();
         return;
     }
     expire_live(wall);
     if (!delta_valid(d) || d.to_us > now_us ||
         (s_last_sample_us >= 0 &&
-         (d.to_us <= s_last_sample_us || (d.observed_us && d.from_us < s_last_sample_us)))) {
-        if (d.accepted || d.observed_us) lose();
+         (d.to_us <= s_last_sample_us ||
+          ((d.observed_us || d.r1_r4_qualified_us || d.r2_r1_qualified_us) &&
+           d.from_us < s_last_sample_us)))) {
+        if (any_work) lose();
         return;
     }
     // bind() owns identity/generation fences. A tracker identity-change flag may accompany
@@ -474,7 +491,11 @@ void hydronic_observation_record(const logic::HydronicDelta& d) {
                 s_open.observed_us += duration;
                 if (d.candidate_us) s_open.candidate_us += duration;
                 if (d.qualified_us) s_open.qualified_us += duration;
+                if (d.r1_r4_qualified_us) s_open.r1_r4_qualified_us += duration;
+                if (d.r2_r1_qualified_us) s_open.r2_r1_qualified_us += duration;
                 s_open.limitations |= d.limitations;
+                if (d.r1_r4_qualified_us || d.r2_r1_qualified_us)
+                    s_open.agree_limitations |= d.agree_limitations;
             }
             begin = end;
         }
@@ -501,6 +522,29 @@ void hydronic_observation_record(const logic::HydronicDelta& d) {
             s_open.limitations |= d.limitations;
         }
     }
+    const auto record_agreement_pair = [&](bool accepted, bool window_started, int32_t value_milli,
+                                           uint32_t& samples, uint16_t& windows,
+                                           HydronicRange& range) {
+        if (!accepted) return;
+        if (s_open_bucket == observation_bucket(at) &&
+            (samples == UINT32_MAX || (window_started && windows == UINT16_MAX))) {
+            lose();
+            s_open.agree_limitations |= AgreementCounterSaturated;
+        } else {
+            open_at(at, at, 0);
+            range.fold(value_milli, samples);
+            ++samples;
+            if (window_started) ++windows;
+            s_open.agree_limitations |= d.agree_limitations;
+        }
+    };
+    record_agreement_pair(d.r1_r4_accepted, d.r1_r4_window_started, d.r1_r4_milli,
+                          s_open.r1_r4_samples, s_open.r1_r4_windows, s_open.r1_r4);
+    record_agreement_pair(d.r2_r1_accepted, d.r2_r1_window_started, d.r2_r1_milli,
+                          s_open.r2_r1_samples, s_open.r2_r1_windows, s_open.r2_r1);
+    if (s_open_bucket == observation_bucket(at) &&
+        (d.agree_limitations & AgreementCounterSaturated))
+        s_open.agree_limitations |= AgreementCounterSaturated;
     s_last_sample_us = d.to_us;
 }
 void hydronic_observation_seal() {
@@ -547,7 +591,11 @@ HydronicObservationReport hydronic_observation_report() {
     r.partial |= s_restore_pending || s_clock_bad || s_dropped != 0;
     if (s_dropped > r.dropped) r.dropped = s_dropped;
     r.totals.saturated |= s_drop_saturated;
-    if (s_drop_saturated) r.totals.limitations |= HydronicCounterSaturated;
+    r.totals.agree_saturated |= s_drop_saturated;
+    if (s_drop_saturated) {
+        r.totals.limitations |= HydronicCounterSaturated;
+        r.totals.agree_limitations |= AgreementCounterSaturated;
+    }
     if (observation_in_window(s_open_bucket, wall)) {
         const int archived = archive_hour(s_open_bucket);
         if (outside_archive_span(s_open, archived)) {
@@ -701,7 +749,8 @@ void hydronic_observation_flash_service(HydronicObservationReader reader) {
     s_archive_first_bucket = first_bucket;
     s_archive_wake_us      = wake;
     if (rebuilt.dropped > s_dropped) s_dropped = rebuilt.dropped;
-    s_drop_saturated |= rebuilt.dropped == UINT16_MAX && rebuilt.totals.saturated;
+    s_drop_saturated |= rebuilt.dropped == UINT16_MAX &&
+                        (rebuilt.totals.saturated || rebuilt.totals.agree_saturated);
     s_restore_pending = false;
     s_rebuild         = false;
 }
@@ -751,7 +800,10 @@ bool hydronic_observation_flash_next(HydronicObservationReader reader, int64_t& 
             if (s_dropped) {
                 payload.flags |= HYDRONIC_HOUR_PARTIAL | HYDRONIC_HOUR_QUEUE_LOSS;
                 payload.dropped = s_dropped;
-                if (s_drop_saturated) payload.limitations |= HydronicCounterSaturated;
+                if (s_drop_saturated) {
+                    payload.limitations |= HydronicCounterSaturated;
+                    payload.agree_limitations |= AgreementCounterSaturated;
+                }
             }
         }
         bool           conflict = false;

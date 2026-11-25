@@ -61,6 +61,54 @@ inline const char* hydronic_reason_id(logic::HydronicReason reason) {
     }
 }
 
+inline const char* agreement_reason_id(logic::AgreementReason reason) {
+    using logic::AgreementReason;
+    switch (reason) {
+    case AgreementReason::None:
+        return "none";
+    case AgreementReason::Unsupported:
+        return "unsupported";
+    case AgreementReason::NoConsent:
+        return "no_consent";
+    case AgreementReason::NoSource:
+        return "no_source";
+    case AgreementReason::MissingWitness:
+        return "missing_witness";
+    case AgreementReason::InvalidReading:
+        return "invalid_reading";
+    case AgreementReason::PumpOff:
+        return "pump_off";
+    case AgreementReason::LowFlow:
+        return "low_flow";
+    case AgreementReason::CompressorActive:
+        return "compressor_active";
+    case AgreementReason::HeaterActive:
+        return "heater_active";
+    case AgreementReason::Defrost:
+        return "defrost";
+    case AgreementReason::ValveChanged:
+        return "valve_changed";
+    case AgreementReason::Settling:
+        return "settling";
+    case AgreementReason::NotStationary:
+        return "not_stationary";
+    case AgreementReason::PollGap:
+        return "poll_gap";
+    case AgreementReason::Clock:
+        return "clock";
+    case AgreementReason::SourceChanged:
+        return "source_changed";
+    case AgreementReason::ConsentChanged:
+        return "consent_changed";
+    case AgreementReason::Overflow:
+        return "overflow";
+    case AgreementReason::Forgotten:
+        return "forgotten";
+    default:
+        return "unknown";
+    }
+}
+
 template <typename JsonOut>
 __attribute__((noinline)) inline void hydronic_json_unsigned(JsonOut& out, uint64_t value,
                                                              bool known = true) {
@@ -253,6 +301,57 @@ __attribute__((noinline)) inline void append_hydronic_json_impl(JsonOutput&   ou
     if (!flat) out += "}";
 }
 
+template <typename Report>
+__attribute__((noinline)) inline void append_hydronic_agreement_json_impl(JsonOutput&   out,
+                                                                          const Report& report) {
+    const auto& observation = report.observation;
+    const auto& totals      = observation.totals;
+    const bool  known =
+        observation.confirmed && observation.dated && totals.first_evidence_unix_us >= 0;
+    HydronicJsonWriter w{out, false};
+
+    out += "{";
+    w.u64("method", logic::HYDRONIC_METHOD);
+    w.u64("settling_s", logic::AGREEMENT_SETTLE_US / 1000000);
+    w.u64("stable_window_s", logic::AGREEMENT_STABLE_WINDOW_US / 1000000);
+    w.key("max_drift_k");
+    hydronic_json_decimal(out, logic::AGREEMENT_DRIFT_MAX_MILLI, 1, true);
+    w.key("min_flow_l_min");
+    hydronic_json_decimal(out, logic::AGREEMENT_FLOW_MIN_MILLI, 1, true);
+    w.u64("max_gap_s", logic::HYDRONIC_MAX_GAP_US / 1000000);
+    w.u64("reason_code", static_cast<uint8_t>(report.agree_reason));
+    w.key("reason");
+    out += "\"";
+    out += agreement_reason_id(report.agree_reason);
+    out += "\"";
+    const bool settling_known =
+        report.current && report.agree_reason == logic::AgreementReason::Settling &&
+        report.agree_settling_remaining_s > 0 &&
+        report.agree_settling_remaining_s <= logic::AGREEMENT_SETTLE_US / 1000000;
+    w.u64("settling_remaining_s", report.agree_settling_remaining_s, settling_known);
+    w.u64("current_limitations_mask", report.agree_limitations, report.current);
+    w.u64("population_limitations_mask", totals.agree_limitations, known);
+
+    const auto emit_pair = [&](const char* name, bool supported, uint64_t qualified_us,
+                               uint64_t windows, uint64_t samples,
+                               const logic::HydronicRange& range) {
+        w.key(name);
+        out += "{";
+        HydronicJsonWriter pw{out, false};
+        pw.flag("supported", supported);
+        pw.sec("qualified_s", qualified_us, known);
+        pw.u64("windows", windows, known);
+        pw.u64("samples", samples, known);
+        pw.range("delta_k", nullptr, nullptr, range, samples, known);
+        out += "}";
+    };
+    emit_pair("r1_r4", report.r1_r4_supported, totals.r1_r4_qualified_us, totals.r1_r4_windows,
+              totals.r1_r4_samples, totals.r1_r4);
+    emit_pair("r2_r1", report.r2_r1_supported, totals.r2_r1_qualified_us, totals.r2_r1_windows,
+              totals.r2_r1_samples, totals.r2_r1);
+    out += "}";
+}
+
 } // namespace detail
 
 template <typename JsonOut, typename Report>
@@ -260,6 +359,13 @@ __attribute__((noinline)) inline void append_hydronic_json(JsonOut& out, const R
                                                            bool flat = false) {
     auto sink = detail::json_output(out);
     detail::append_hydronic_json_impl(sink, report, flat);
+}
+
+template <typename JsonOut, typename Report>
+__attribute__((noinline)) inline void append_hydronic_agreement_json(JsonOut&      out,
+                                                                     const Report& report) {
+    auto sink = detail::json_output(out);
+    detail::append_hydronic_agreement_json_impl(sink, report);
 }
 
 } // namespace daik

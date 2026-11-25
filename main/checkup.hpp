@@ -195,10 +195,15 @@ struct CheckupHydronicReport {
     HydronicObservationReport observation;
     SecondarySupply           secondary;
     logic::HydronicReason     reason            = logic::HydronicReason::NoSource;
+    logic::AgreementReason    agree_reason      = logic::AgreementReason::NoSource;
     uint32_t                  source_generation = 0, schema_fp = 0;
-    uint32_t                  settling_remaining_s = 0;
-    uint8_t                   limitations          = 0;
-    bool                      current              = false;
+    uint32_t                  settling_remaining_s       = 0;
+    uint32_t                  agree_settling_remaining_s = 0;
+    uint8_t                   limitations                = 0;
+    uint8_t                   agree_limitations          = 0;
+    bool                      current                    = false;
+    bool                      r1_r4_supported            = false;
+    bool                      r2_r1_supported            = false;
 };
 
 // Current qualification and dated populations have independent clocks. Neither changes the
