@@ -25,11 +25,19 @@ async function assertWebKitDashboardDiagnosis(page, server, context) {
     modbus: JSON.parse(JSON.stringify(S._modbus || [])),
     card: S.dashboardCard,
     open: [...S.descOpen],
+    insp: S.insp,
+    inspFromDefrostNotice: S.inspFromDefrostNotice,
+    hist: new Map(S.hist), pins: new Map(S.histPin), hidden: new Map(S.histHidden),
+    histIdentity: S.histIdentity, histUptime: S.histUptime, histEpoch: S.histEpoch,
   }; true`);
   try {
     const base = server.defaultStatus();
+    const defrostLabel = "Defrost Operation";
+    const bootId = "webkit-defrost-diagnosis", epoch = 1;
     const diagStatus = {
       ...base,
+      boot_id: bootId, uptime_s: 86400,
+      history: { epoch, rows: [{ id: "defrost_state", label: defrostLabel }] },
       diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
       health: {
         status: "info", source: "x10a", source_fresh: true, full_span: true,
@@ -47,11 +55,16 @@ async function assertWebKitDashboardDiagnosis(page, server, context) {
       },
       refrigerant_service: { state: "limited", continuous_s: 3600, samples: 120, blocker: "compressor_not_running" },
     };
-    server.setTelemetry({ status: diagStatus, values: server.defaultValues(), histories: {} });
+    const values = server.defaultValues();
+    values.values = [...values.values.filter(row => row.label !== defrostLabel),
+      { label: defrostLabel, concept: "defrost_state", value: "0", binary: true, group: "Operation" }];
+    const histories = { "x10a:defrost_state": {
+      id: "defrost_state", source: "x10a", boot_id: bootId, epoch, dt: 300, b0: 284, v: [0, 10, 10, 0],
+    } };
+    server.setTelemetry({ status: diagStatus, values, histories });
     await page.evaluate(`(() => {
       pollSchedule = window.__browserPollSchedule;
       S.descOpen.clear();
-      S.descOpen.add("model:health_defrost");
       S.descOpen.add("service:refrigerant");
       S.dashboardCard = "diagnosis";
       pollNow();
@@ -64,13 +77,58 @@ async function assertWebKitDashboardDiagnosis(page, server, context) {
       browserHidden: document.getElementById("cardBrowser").hidden,
       navCount: document.querySelectorAll("#cardNav [data-card]").length,
       valueRows: document.querySelectorAll("#valueGroups .vrow, #valueGroups .vdesc").length,
-      diagText: document.querySelector('[data-dashboard-card="diagnosis"]')?.textContent || "",
+      note: !!document.querySelector('button[data-defrost-inspect]'),
+      duplicate: !!document.querySelector('[data-desc="model:health_defrost"]'),
+      alert: document.getElementById("gDefrostState").classList.contains("sc-defrost-alert"),
+      service: document.querySelector('[data-desc="service:refrigerant"]')?.closest(".vitem")?.textContent || "",
     }))()`);
     assert.equal(observed.browserHidden, false, `${context}: #cardBrowser must be visible`);
     assert.ok(observed.navCount >= 2, `${context}: #cardNav must be populated`);
     assert.ok(observed.valueRows > 0, `${context}: #valueGroups must render diagnosis and value rows`);
-    assert.ok(observed.diagText.includes("-4.5") && observed.diagText.includes("X10A"),
-      `${context}: X10A defrost outdoor context must render on WebKit`);
+    assert.ok(observed.note && observed.alert && !observed.duplicate,
+      `${context}: WebKit presents the fresh defrost note without the old disclosure`);
+    assert.ok(observed.service.includes(await page.evaluate("t('service.help.limited')")),
+      `${context}: the refrigerant service disclosure still renders its reported state`);
+
+    const tap = async (selector, fraction = 0.5) => {
+      const point = await page.evaluate(`(async () => {
+        const node = document.querySelector(${JSON.stringify(selector)});
+        node.scrollIntoView({ block: "center", behavior: "instant" });
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const box = node.getBoundingClientRect();
+        const x = box.left + box.width * ${fraction}, y = box.top + box.height / 2;
+        return { x, y, reachable: node.contains(document.elementFromPoint(x, y)) };
+      })()`);
+      assert.equal(point.reachable, true, `${context}: native tap can reach ${selector}`);
+      await page.nativeClick(point.x, point.y);
+      await page.frame();
+    };
+    await tap("button[data-defrost-inspect]");
+    await page.waitFor(`S.insp === 'defrost' && S.hist.has('defrost_state') && !S.histBusy.has('defrost_state') &&
+      !!document.querySelector("#inspHist [data-hist='defrost_state'] .defrost-on") && !S.clickHold`);
+    const { state, expectedState, rows, expectedRows } = await page.evaluate(`(() => ({
+      state: document.getElementById("inspNow").innerText,
+      expectedState: t("state.off"),
+      rows: Array.from(document.querySelectorAll("#inspRows .inspect-row"), row => row.lastElementChild.innerText),
+      expectedRows: [(3).toLocaleString(LANG), (15.1).toLocaleString(LANG) + " %"],
+    }))()`);
+    assert.equal(state, expectedState, `${context}: the shortcut opens the current OFF state`);
+    assert.deepEqual(rows, expectedRows, `${context}: the inspector shows the two X10A measurements`);
+    const plot = "#inspHist [data-hist='defrost_state']";
+    await tap(plot, 0.4);
+    await page.waitFor("S.histPin.has('defrost_state') && !S.scrub");
+    assert.ok(await page.evaluate(`(() => {
+      const graph = document.querySelector(${JSON.stringify(plot)}).parentElement;
+      const tip = graph.querySelector(".vhist-tip.vhist-pinned");
+      const time = graph.querySelector(".vhist-time.vhist-pinned");
+      const axis = graph.querySelector(".vhist-axis");
+      const readout = tip?.textContent.split(" · ");
+      return readout?.length === 2 && !!readout[0].trim() && readout[1] === t("hist.defrost_active") &&
+        getComputedStyle(time).display === "none" && tip.getBoundingClientRect().height > 0 &&
+        tip.getBoundingClientRect().top >= axis.getBoundingClientRect().bottom - 1;
+    })()`), `${context}: native touch pins the active defrost readout below the scale`);
+    await tap("#inspClose");
+    await page.waitFor("!S.insp && !S.clickHold");
     assert.deepEqual(page.diagnostics, [], `${context}: WebKit full dashboard diagnosis must emit no errors`);
   } finally {
     await page.evaluate("pollStop(); pollSchedule = () => {}; true");
@@ -84,6 +142,15 @@ async function assertWebKitDashboardDiagnosis(page, server, context) {
         S._modbus = saved.modbus;
         S.dashboardCard = saved.card;
         S.descOpen = new Set(saved.open);
+        S.insp = saved.insp;
+        S.inspFromDefrostNotice = saved.inspFromDefrostNotice;
+        S.hist = saved.hist;
+        S.histPin = saved.pins;
+        S.histHidden = saved.hidden;
+        S.histIdentity = saved.histIdentity;
+        S.histUptime = saved.histUptime;
+        S.histEpoch = saved.histEpoch;
+        S.inspSig = S.inspHistSig = null;
         delete window.__webkitDiagSaved;
         renderApp();
       }

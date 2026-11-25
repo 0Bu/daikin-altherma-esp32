@@ -1,4 +1,4 @@
-// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
+// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -169,7 +169,7 @@ I18N.sv = localeValues([
   /* check.fault */ "Anläggningsfel",
   /* check.dhw_loss */ "Tankavsvalning",
   /* check.cycling */ "Kompressorstarter",
-  /* check.defrost */ "Avfrostningar",
+  /* check.defrost */ "Avfrostning",
   /* check.pressure */ "Vattentryck",
   /* check.flow */ "Lägsta vattenflöde",
   /* check.flow.lowest */ "Lägsta flöde vid uppvärmning",
@@ -232,7 +232,6 @@ I18N.sv = localeValues([
   /* check.detail.fault.past */ "Inget meddelande är aktivt nu; ett registrerades under perioden. Att det försvann bevisar varken orsak eller lösning.",
   /* check.detail.fault.past_unknown */ "Ett meddelande registrerades; aktuellt feltillstånd kan inte läsas.",
   /* check.detail.collecting */ (a, b) => `Läsbara signaler: ${a} av ${b} krävs.`,
-  /* check.detail.outdoor_defrost */ " X10A-utomhusdata är endast aktuella mätningar medan avfrostning och kompressorstatus var läsbara och kompressorn gick. De är sammanhang och ändrar inte gränsen eller bedömningen.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Godkända timfönster: ${a}; aktuell kandidat: ${c} av ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Godkända timfönster: ${a}; tankladdning eller tankvärmare upptäckt. Återstående stabilisering: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Godkända timfönster: ${a}; väntar på nästa lämpliga timme.`,
@@ -249,8 +248,6 @@ I18N.sv = localeValues([
   /* check.detail.experimental */ "Experimentella räknare; stabilitet utesluter inte begränsning.",
   /* check.detail.unavailable */ "Ingen bedömbar signal i denna profil.",
   /* check.starts */ (n) => `${n} ${n === 1 ? "start" : "starter"}`,
-  /* check.cycles */ (n) => `${n} ${n === 1 ? "cykel" : "cykler"}`,
-  /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "klassificerad" : "klassificerade"}`,
   /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "körning" : "körningar"}`,
   /* check.cycling.mean */ (d) => `Snitt ${d}`,
   /* check.cycling.completed */ "Avslutade körningar",
@@ -316,8 +313,6 @@ I18N.sv = localeValues([
   /* check.cycling.e_ongoing */ "Aktiv vid senaste mätning.",
   /* check.cycling.cause_unavailable */ "Inga detaljer",
   /* check.cycling.cause_older_unavailable */ "Sparade start- och stoppuppgifter saknas för de här äldre körningarna.",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `Tank ${d}`,
   /* check.buh_runtime */ (d) => `Tillsats ${d}`,
@@ -377,13 +372,13 @@ I18N.sv = localeValues([
   /* check.detail.period_label */ "Dataperiod:",
   /* check.detail.period */ (a) => `${a}, högst 24 h; möjliga luckor`,
   /* check.detail.age_label */ "Senaste mätningens ålder:",
-  /* check.detail.horizon_wait */ (a) => `Ett helt 24-timmarsfönster saknas ännu: ${a} återstår.`,
   /* check.detail.fault.ok */ "Inget aktuellt eller sparat meddelande i läsbara felsignaler.",
-  /* check.detail.defrost.info */ "≥3 parade avfrostningar överstiger 15% av läsbar kompressortid: projekttips.",
-  /* check.detail.defrost.ok */ "Inget avfrostningsandelstips; väder och luckor ej bedömda.",
-  /* check.defrost.last_start */ (date, route, outdoor) => `Senast observerade avfrostningsstart · ${date} · Krets ${route} · Uteluft ${outdoor}`,
-  /* check.defrost.route_space */ "Rumsuppvärmning",
-  /* check.defrost.route_dhw */ "Varmvattentank",
+  /* check.defrost.normal */ "Kort avfrostning är vanligt i kallt, fuktigt väder. Avfrostningsandelen visar hur stor del av kompressorns drifttid med känd avfrostningsstatus som gick till avfrostning.",
+  /* check.defrost.modbus.about */ "Modbus använder samma signal för avfrostning och förberedelse för omstart av kompressorn.",
+  /* check.defrost.modbus.normal */ "Signalen är av vid stabil drift. Båda faserna kan aktivera den.",
+  /* check.defrost.starts_label */ "Registrerade avfrostningsstarter",
+  /* check.defrost.share */ "Avfrostningsandel",
+  /* check.defrost.notice */ "Hög avfrostningsandel",
   /* check.detail.pressure.info */ "Lågt",
   /* check.detail.pressure.warn */ "Kritiskt",
   /* check.detail.pressure.ok */ "Normalt",
@@ -393,9 +388,7 @@ I18N.sv = localeValues([
   /* check.pressure.rules */ "Hur bedöms trycket?",
   /* check.pressure.unavailable */ "X10A-tryckdiagnosen är inte tillgänglig.",
   /* check.pressure.pending */ "Mätvärdet ligger i det kritiska området. Varaktigheten är fortfarande okänd.",
-  /* check.detail.defrost_events_insufficient */ "Färre än tre parade avfrostningar; ingen andelsbedömning.",
   /* check.detail.source_stale */ "Inget färskt X10A-prov; aktuellt tillstånd okänt. Historik behålls.",
-  /* check.detail.no_paired_runtime */ "Ingen parad läsbar drifttid; bara antal.",
   /* check.detail.current_label */ "≤1,0 bar lågt",
   /* check.detail.minimum_time_label */ "≤0,5 bar kritiskt",
   /* check.detail.coverage_missing */ (a) => `Saknad läsbar tid: ${a} s.`,
@@ -507,7 +500,7 @@ I18N.sv = localeValues([
   /* hist.boost_active */ "Boost aktiv",
   /* hist.boost_inactive */ "Boost av",
   /* hist.boost_aria */ svAria("Smart Grid-historik med fyra lägen"),
-  /* hist.defrost_total */ (d) => `Avfrostning registrerad · ${d} i 5-minutersintervall`,
+  /* hist.defrost_total */ (d) => `5-minutersblock med avfrostning · ${d}`,
   /* hist.defrost_none */ "Ingen avfrostning registrerad i perioden.",
   /* hist.defrost_active */ "Avfrostning aktiv",
   /* hist.defrost_inactive */ "Avfrostning av",
@@ -635,7 +628,7 @@ I18N.sv = localeValues([
   /* schem.card_aria */ "Live systemschema: utomhusenhet, köldmediekrets, plattvärmeväxlare, vattenkrets med tillsatsvärmare och 3-vägsventil, varmvattentank och rumskrets",
   /* schem.group_aria */ "Live systemschema — välj ett värde eller en komponent för en förklaring",
   /* schem.outdoor_unit */ "Utomhusenhet",
-  /* schem.defrost_pill */ "❄ Avfrostning",
+  /* schem.defrost_pill */ "Avfrostning",
   /* schem.outdoor */ "Ute",
   /* insp.close */ "Stäng",
   /* schem.defrost_transfer */ "Vid bekräftad avfrostning kan värme överföras från vattnet till köldmediet. Rören visar den riktningen bara när flödet och temperaturerna just nu stöder den.",
@@ -1220,9 +1213,9 @@ DESCRIPTION_I18N.sv = descriptionValues([
   ["Aktuellt rumsläge värme/kyla utan Auto; kräver aktivitetssignal och bevisar inte kompressordrift."], // 45
   ["HomeHub-val Auto/värme/kyla; konfiguration, inte aktuell drift eller bevis på aktivitet."], // 46
   ["Utomhusstatus stopp/värme/kyla; kan stå kvar med kompressorn av och bevisar inte värme."], // 47
-  ["Kombinerad flagga för avfrostning och kompressoromstart i register 35; OFF = normal drift, ON = avfrostning eller omstartsförberedelse."], // 48
+  ["HomeHub-register 35 kombinerar avfrostning och förberedelse för kompressorns omstart.", "Vid stabil drift är signalen av. En aktiv signal betyder avfrostning eller omstartsförberedelse."], // 48
   ["Varmstartsflagga i register 36; OFF = stabil drift, ON = kort förvärmning av värmeväxlaren innan värmedrift fortsätter."], // 49
-  ["Avfrostning av utomhusenheten; normalt i kallt/fuktigt väder, men biten diagnostiserar inte frekvens."], // 50
+  ["Avfrostning tar bort frost från utomhusenhetens värmeväxlare.", "Avfrostning är normalt vid kallt och fuktigt väder. Signalen ensam kan inte avgöra om cyklerna är för täta."], // 50
   ["Allvarlighetsklass för aktivt meddelande: Normal, Fel, Varning eller Försiktighet."], // 51
   ["Betydelsen av felkoden som rapporteras nu."], // 52
   ["Nöddrift efter värmepumpsfel."], // 53

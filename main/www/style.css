@@ -326,6 +326,12 @@ svg .sc-snow .sc-val, svg .sc-quiet .sc-val {
   fill: var(--brand); fill-opacity: .11; stroke: var(--brand);
 }
 .defrost-on .sc-snow .sc-val, .quiet-on .sc-quiet .sc-val { fill: var(--brand); }
+svg :is(.sc-defrost-warning, .sc-defrost-warning-spacer) {
+  display: none; font-size: 12px; font-weight: 400; pointer-events: none;
+}
+svg .sc-defrost-alert :is(.sc-defrost-warning, .sc-defrost-warning-spacer) { display: inline; }
+svg .sc-defrost-warning { fill: var(--warn); }
+svg .sc-defrost-warning-spacer { visibility: hidden; }
 /* Daikin's normal space heating/cooling operation state on the space riser. It is not a thermostat
    demand; --ok means the documented operation state is ON, while the text carries the exact fact. */
 #gSpaceH.on .sc-pill { stroke: var(--ok); }
@@ -388,7 +394,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   font-size: 13.5px; color: var(--muted); line-height: 1.55;
   transform: translateY(-7px); transition: transform .22s ease;
 }
-.vitem.open .vdesc-body, .inspect.open .inspect-card { transform: none; }
+/* Keep open explainers composited during live value repaints. */
+.vitem.open .vdesc-body, .inspect.open .inspect-card { transform: translateZ(0); }
 
 /* ── Inspector tongue (attached below the schematic card) ────────────────────────────────────
    Reuses the value-row explainer copy (DESCRIPTIONS) so "what is this / what's normal" has ONE
@@ -1334,6 +1341,12 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   background: var(--vhist-surface); box-shadow: 0 0 3px 1px var(--vhist-surface); }
 .vhist-time.vhist-live { z-index: 4; background: var(--vhist-surface);
   box-shadow: 0 0 3px 1px var(--vhist-surface); }
+/* Keep the selected defrost state below its timeline. */
+.inspect-defrost .vhist-state-graph .vhist-time { display: none; }
+.inspect-defrost .vhist-state-graph .vhist-tips {
+  grid-row: 3; position: relative; inset: auto;
+}
+.inspect-defrost .vhist-state-graph .vhist-tips:has(.vhist-tip:not([hidden])) { margin-top: 5px; }
 /* The global reduced-motion rule (line ~127) kills `animation` only — these shared tongue and
    chevron movements are transitions, so they need their own explicit opt-out (DESIGN.md §9). */
 @media (prefers-reduced-motion: reduce) {

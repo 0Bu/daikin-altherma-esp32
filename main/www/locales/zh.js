@@ -1,4 +1,4 @@
-// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
+// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -169,7 +169,7 @@ I18N.zh = localeValues([
   /* check.fault */ "机组故障",
   /* check.dhw_loss */ "热水箱降温",
   /* check.cycling */ "压缩机启动",
-  /* check.defrost */ "除霜次数",
+  /* check.defrost */ "除霜",
   /* check.pressure */ "水压",
   /* check.flow */ "最低流量",
   /* check.flow.lowest */ "供暖时的最低流量",
@@ -232,7 +232,6 @@ I18N.zh = localeValues([
   /* check.detail.fault.past */ "当前无消息；本时段曾记录消息。消息消失不能证明原因或问题已解决。",
   /* check.detail.fault.past_unknown */ "曾记录消息；当前故障状态无法读取。",
   /* check.detail.collecting */ (a, b) => `可读信号：${a}，要求${b}。`,
-  /* check.detail.outdoor_defrost */ " X10A 室外数据只包含除霜状态和压缩机状态可读且压缩机运行时的近期样本，仅提供背景，不改变除霜阈值或结论。",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `已接受的小时窗口：${a}；当前候选：${c}/${d}。`,
   /* check.detail.dhw_settling */ (a, b, c) => `已接受的小时窗口：${a}；检测到水箱加热或电加热器。剩余稳定时间：${c}。`,
   /* check.detail.dhw_waiting */ (a, b) => `已接受的小时窗口：${a}；等待下一个符合条件的小时。`,
@@ -249,8 +248,6 @@ I18N.zh = localeValues([
   /* check.detail.experimental */ "实验计数器；稳定不排除限流。",
   /* check.detail.unavailable */ "本配置无可评估信号。",
   /* check.starts */ (n) => `${n} 次启动`,
-  /* check.cycles */ (n) => `${n} 个循环`,
-  /* check.paired_cycles */ (n) => `${n} 个已配对`,
   /* check.cycling.runs */ (n) => `${n} 次运行`,
   /* check.cycling.mean */ (d) => `平均 ${d}`,
   /* check.cycling.completed */ "已完成的运行",
@@ -316,8 +313,6 @@ I18N.zh = localeValues([
   /* check.cycling.e_ongoing */ "最近读数时仍在运行。",
   /* check.cycling.cause_unavailable */ "无详情",
   /* check.cycling.cause_older_unavailable */ "这些较早的运行没有可用的已保存启停详情。",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m} 分钟`,
   /* check.tank_runtime */ (d) => `水箱 ${d}`,
   /* check.buh_runtime */ (d) => `辅助 ${d}`,
@@ -377,13 +372,13 @@ I18N.zh = localeValues([
   /* check.detail.period_label */ "数据时段：",
   /* check.detail.period */ (a) => `${a}，最多24小时；可能缺测`,
   /* check.detail.age_label */ "最后测量值的年龄：",
-  /* check.detail.horizon_wait */ (a) => `尚未形成完整24小时窗口：还需 ${a}。`,
   /* check.detail.fault.ok */ "可读故障信号中无当前或保存的消息。",
-  /* check.detail.defrost.info */ "至少3次配对除霜超过可读压缩机运行时间的15%：项目提示。",
-  /* check.detail.defrost.ok */ "无项目除霜比例提示；天气和缺口未评估。",
-  /* check.defrost.last_start */ (date, route, outdoor) => `最近一次观察到的除霜启动 · ${date} · 回路 ${route} · 室外气温 ${outdoor}`,
-  /* check.defrost.route_space */ "供暖",
-  /* check.defrost.route_dhw */ "热水罐",
+  /* check.defrost.normal */ "寒冷潮湿时，短时除霜很常见。除霜占比表示在能够读取除霜状态的压缩机运行时间中，有多少时间用于除霜。",
+  /* check.defrost.modbus.about */ "Modbus 用同一个信号表示除霜和压缩机重启准备。",
+  /* check.defrost.modbus.normal */ "稳定运行时信号关闭。这两个阶段均可使信号开启。",
+  /* check.defrost.starts_label */ "记录到的除霜启动次数",
+  /* check.defrost.share */ "除霜占比",
+  /* check.defrost.notice */ "除霜占比较高",
   /* check.detail.pressure.info */ "偏低",
   /* check.detail.pressure.warn */ "危急",
   /* check.detail.pressure.ok */ "正常",
@@ -393,9 +388,7 @@ I18N.zh = localeValues([
   /* check.pressure.rules */ "如何评估水压？",
   /* check.pressure.unavailable */ "X10A 水压诊断不可用。",
   /* check.pressure.pending */ "读数处于危险范围，持续时间尚不明确。",
-  /* check.detail.defrost_events_insufficient */ "少于3次配对除霜；不作比例判定。",
   /* check.detail.source_stale */ "无新鲜X10A样本；当前状态未知。保留历史。",
-  /* check.detail.no_paired_runtime */ "无配对可读运行时间；仅次数。",
   /* check.detail.current_label */ "≤1.0 bar 偏低",
   /* check.detail.minimum_time_label */ "≤0.5 bar 危急",
   /* check.detail.coverage_missing */ (a) => `缺少可读时间：${a} s。`,
@@ -507,7 +500,7 @@ I18N.zh = localeValues([
   /* hist.boost_active */ "增载中",
   /* hist.boost_inactive */ "未增载",
   /* hist.boost_aria */ zhAria("Smart Grid 四种状态的历史"),
-  /* hist.defrost_total */ (d) => `除霜 · ${d}`,
+  /* hist.defrost_total */ (d) => `检测到除霜的 5 分钟区段 · ${d}`,
   /* hist.defrost_none */ "记录期内未观察到除霜循环。",
   /* hist.defrost_active */ "正在除霜",
   /* hist.defrost_inactive */ "未除霜",
@@ -635,7 +628,7 @@ I18N.zh = localeValues([
   /* schem.card_aria */ "系统实时示意图：室外机、制冷剂回路、板式换热器、带备用加热器和三通阀的水回路、生活热水箱和空间调温回路",
   /* schem.group_aria */ "系统实时示意图——选择数值或部件可查看说明",
   /* schem.outdoor_unit */ "室外机",
-  /* schem.defrost_pill */ "❄ 除霜",
+  /* schem.defrost_pill */ "除霜",
   /* schem.outdoor */ "室外",
   /* insp.close */ "关闭",
   /* schem.defrost_transfer */ "确认正在除霜时，热量可能从水传向制冷剂。只有当前流量和温度支持这一判断时，管路才会显示该方向。",
@@ -1203,9 +1196,9 @@ DESCRIPTION_I18N.zh = descriptionValues([
   ["当前空间冷暖模式；不证明压缩机启动。"], // 45
   ["HomeHub 配置的自动/暖/冷选择；非室外机当前状态。"], // 46
   ["室外机停/暖/冷状态；停机仍可保留选择，不证明供热。"], // 47
-  ["输入寄存器 35 中的化霜与压缩机重启合并标志；OFF = 正常，ON = 化霜或重启准备。"], // 48
+  ["HomeHub 输入寄存器 35 合并了除霜和压缩机重启两种状态。", "稳定运行时信号关闭。信号开启表示正在除霜或准备重启。"], // 48
   ["输入寄存器 36 中的热启动标志；OFF = 稳定运行，ON = 恢复供水前的短暂换热器预热。"], // 49
-  ["室外机除霜；寒湿时正常，单个位不能诊断过多。"], // 50
+  ["除霜用于清除室外换热器上的霜。", "寒冷潮湿时除霜属正常现象。仅凭此信号无法判断除霜是否过于频繁。"], // 50
   ["当前故障严重级别：正常、错误、警告或提醒。"], // 51
   ["当前所报告故障代码的含义"], // 52
   ["故障后应急运行，可使用 BUH/锅炉。"], // 53

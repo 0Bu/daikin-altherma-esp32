@@ -152,7 +152,7 @@ const context = {
     if (key === "hist.boost_active") return "Boost aktiv";
     if (key === "hist.boost_inactive") return "Boost aus";
     if (key === "hist.boost_aria") return `${arg} — Boost-Verlauf. ${arg2}`;
-    if (key === "hist.defrost_total") return `Abtauen aktiv erfasst · ${arg} im 5-Minuten-Raster`;
+    if (key === "hist.defrost_total") return `5-Minuten-Blöcke mit Abtauung · ${arg}`;
     if (key === "hist.defrost_none") return "Kein Abtauvorgang erfasst.";
     if (key === "hist.defrost_active") return "Abtauen aktiv";
     if (key === "hist.defrost_inactive") return "Abtauen aus";
@@ -1310,16 +1310,17 @@ assert.doesNotMatch(disinfectionHtml, />X10A<|Speichervorheizung aktiv/);
 // Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet toggles its
 // second HomeHub track on demand so gaps and disagreements remain directly inspectable.
 S.hist.set("defrost_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
-  held: [], v: [0, 10, 0, 10] });
+  held: [], v: [0, 10, null, 10] });
 const defrostView = h.historyView("defrost_state");
 const defrostHtml = h.histHtml("defrost_state", "", "Abtauen");
 assert.match(defrostHtml, /vhist-state-track/);
 assert.doesNotMatch(defrostHtml, /vhist-line/);
-assert.match(defrostHtml, /Abtauen aktiv erfasst · 10 min im 5-Minuten-Raster/);
+assert.match(defrostHtml, /5-Minuten-Blöcke mit Abtauung · 2/);
 assert.match(defrostHtml, /vhist-state-on state-off/);
 assert.match(defrostHtml, /vhist-state-on defrost-on/);
 assert.doesNotMatch(defrostHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(defrostView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · An$/);
+assert.match(h.scrubText(defrostView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Abtauen aktiv$/);
+assert.match(h.scrubText(defrostView, 2), /^\d{2}:\d{2} · nicht gemessen$/);
 
 S.hist.set("quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [10, 10, 0, 0] });

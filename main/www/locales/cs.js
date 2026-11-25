@@ -1,4 +1,4 @@
-// translation-source: 2184623468cb624eb00615b57fd546691e441326cd7410c1088c6d7a0bba225c
+// translation-source: e5c1cf33443843bfc4806235764e4ba38434beba665e68332f6a1ec32b4dd95a
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -169,7 +169,7 @@ I18N.cs = localeValues([
   /* check.fault */ "Porucha jednotky",
   /* check.dhw_loss */ "Chladnutí zásobníku",
   /* check.cycling */ "Starty kompresoru",
-  /* check.defrost */ "Cykly odmrazování",
+  /* check.defrost */ "Odmrazování",
   /* check.pressure */ "Tlak vody",
   /* check.flow */ "Min. průtok",
   /* check.flow.lowest */ "Nejnižší průtok při vytápění",
@@ -232,7 +232,6 @@ I18N.cs = localeValues([
   /* check.detail.fault.past */ "Nyní není hlášení aktivní; v tomto období bylo zaznamenáno. Zmizení neprokazuje příčinu ani odstranění problému.",
   /* check.detail.fault.past_unknown */ "Bylo zaznamenáno hlášení; aktuální stav poruchy nelze přečíst.",
   /* check.detail.collecting */ (a, b) => `Čitelné signály: ${a} z požadovaných ${b}.`,
-  /* check.detail.outdoor_defrost */ " Venkovní hodnoty X10A obsahují jen čerstvé vzorky, kdy byly čitelné stav odmrazování i stav kompresoru a kompresor běžel. Slouží jako kontext a nemění práh ani výsledek hodnocení odmrazování.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Přijatá hodinová okna: ${a}; aktuální kandidát: ${c} z ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Přijatá hodinová okna: ${a}; zjištěn ohřev nebo topná tyč zásobníku. Zbývá ustálení: ${c}.`,
   /* check.detail.dhw_waiting */ (a, b) => `Přijatá hodinová okna: ${a}; čekání na další vhodnou hodinu.`,
@@ -249,8 +248,6 @@ I18N.cs = localeValues([
   /* check.detail.experimental */ "Experimentální čítače; stabilita nevylučuje omezení.",
   /* check.detail.unavailable */ "Žádný hodnotitelný signál v tomto profilu.",
   /* check.starts */ (n) => `${n} ${n === 1 ? "start" : n >= 2 && n <= 4 ? "starty" : "startů"}`,
-  /* check.cycles */ (n) => `${n} ${n === 1 ? "cyklus" : n >= 2 && n <= 4 ? "cykly" : "cyklů"}`,
-  /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "spárovaný" : n >= 2 && n <= 4 ? "spárované" : "spárovaných"}`,
   /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "cyklus" : n >= 2 && n <= 4 ? "cykly" : "cyklů"}`,
   /* check.cycling.mean */ (d) => `Průměr ${d}`,
   /* check.cycling.completed */ "Dokončené cykly",
@@ -316,8 +313,6 @@ I18N.cs = localeValues([
   /* check.cycling.e_ongoing */ "Běžel při posledním odečtu.",
   /* check.cycling.cause_unavailable */ "Bez podrobností",
   /* check.cycling.cause_older_unavailable */ "Pro tyto starší cykly nejsou k dispozici uložené podrobnosti o spuštění a zastavení.",
-  /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
-  /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · průměr ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `zásobník ${d}`,
   /* check.buh_runtime */ (d) => `záložní ${d}`,
@@ -377,13 +372,13 @@ I18N.cs = localeValues([
   /* check.detail.period_label */ "Období dat:",
   /* check.detail.period */ (a) => `${a}, nejvýše 24 h; možné mezery`,
   /* check.detail.age_label */ "Stáří posledního měření:",
-  /* check.detail.horizon_wait */ (a) => `Úplné 24hodinové okno ještě chybí: zbývá ${a}.`,
   /* check.detail.fault.ok */ "Žádné aktuální ani uložené hlášení v čitelných signálech poruch.",
-  /* check.detail.defrost.info */ "≥3 spárovaná odmrazení přesahují 15 % čitelné doby kompresoru: upozornění projektu.",
-  /* check.detail.defrost.ok */ "Žádné upozornění podílu; počasí a mezery nehodnoceny.",
-  /* check.defrost.last_start */ (date, route, outdoor) => `Poslední zaznamenaný začátek odmrazování · ${date} · Okruh ${route} · Venkovní vzduch ${outdoor}`,
-  /* check.defrost.route_space */ "Vytápění",
-  /* check.defrost.route_dhw */ "Zásobník teplé vody",
+  /* check.defrost.normal */ "Krátké odmrazování je za chladného a vlhkého počasí běžné. Podíl odmrazování ukazuje, kolik z doby chodu kompresoru s čitelným stavem odmrazování připadlo na odmrazování.",
+  /* check.defrost.modbus.about */ "Modbus používá stejný signál pro odmrazování a přípravu opětovného spuštění kompresoru.",
+  /* check.defrost.modbus.normal */ "Při ustáleném provozu je signál vypnutý. Zapnout ho může každá z obou fází.",
+  /* check.defrost.starts_label */ "Zaznamenaná zahájení odmrazování",
+  /* check.defrost.share */ "Podíl odmrazování",
+  /* check.defrost.notice */ "Vysoký podíl odmrazování",
   /* check.detail.pressure.info */ "Nízký",
   /* check.detail.pressure.warn */ "Kritický",
   /* check.detail.pressure.ok */ "Normální",
@@ -393,9 +388,7 @@ I18N.cs = localeValues([
   /* check.pressure.rules */ "Jak se vyhodnocuje tlak?",
   /* check.pressure.unavailable */ "Diagnostika tlaku X10A není dostupná.",
   /* check.pressure.pending */ "Hodnota je v kritickém rozsahu. Doba trvání zatím není známá.",
-  /* check.detail.defrost_events_insufficient */ "Méně než tři spárovaná odmrazení; bez verdiktu podílu.",
   /* check.detail.source_stale */ "Žádný čerstvý vzorek X10A; aktuální stav neznámý. Historie zachována.",
-  /* check.detail.no_paired_runtime */ "Žádná spárovaná čitelná doba; pouze počet.",
   /* check.detail.current_label */ "≤1,0 bar nízký",
   /* check.detail.minimum_time_label */ "≤0,5 bar kritický",
   /* check.detail.coverage_missing */ (a) => `Chybějící čitelná doba: ${a} s.`,
@@ -507,7 +500,7 @@ I18N.cs = localeValues([
   /* hist.boost_active */ "Posílení aktivní",
   /* hist.boost_inactive */ "Posílení vypnuté",
   /* hist.boost_aria */ csAria("stavu Smart Grid se všemi čtyřmi režimy"),
-  /* hist.defrost_total */ (d) => `Odmrazování aktivní · ${d} v 5minutovém rastru`,
+  /* hist.defrost_total */ (d) => `Pětiminutové bloky s odmrazováním · ${d}`,
   /* hist.defrost_none */ "V zaznamenaném období nebyl pozorován žádný cyklus odmrazování.",
   /* hist.defrost_active */ "Odmrazování aktivní",
   /* hist.defrost_inactive */ "Odmrazování vypnuté",
@@ -635,7 +628,7 @@ I18N.cs = localeValues([
   /* schem.card_aria */ "Živé schéma soustavy: venkovní jednotka, chladivový okruh, deskový výměník, vodní okruh se záložním ohřívačem a 3cestným ventilem, zásobník TUV a okruh domu",
   /* schem.group_aria */ "Živé schéma soustavy — vyberte hodnotu nebo součást pro vysvětlení",
   /* schem.outdoor_unit */ "VENKOVNÍ JEDNOTKA",
-  /* schem.defrost_pill */ "❄ odmraz.",
+  /* schem.defrost_pill */ "odmraz.",
   /* schem.outdoor */ "Venku",
   /* insp.close */ "Zavřít",
   /* schem.defrost_transfer */ "Při potvrzeném odmrazování může teplo přecházet z vody do chladiva. Potrubí tento směr zobrazuje jen tehdy, když ho potvrzuje aktuální průtok a teploty.",
@@ -1174,9 +1167,9 @@ DESCRIPTION_I18N.cs = descriptionValues([
   ["Živý režim domu je vytápění/chlazení bez automatiky a sám nedokazuje běh kompresoru."], // 45
   ["Nastavená volba HomeHub Auto/vytápění/chlazení z registru 3."], // 46
   ["Stav venkovní jednotky: zastaveno, vytápění nebo chlazení; sám nedokazuje přenos tepla."], // 47
-  ["Sdílený příznak odtávání a přípravy restartu kompresoru v registru 35; OFF = běžný chod, ON = odtávání nebo příprava restartu."], // 48
+  ["Registr 35 HomeHub sdružuje stav odmrazování a přípravy restartu kompresoru.", "Při ustáleném chodu je signál vypnutý. Zapnutý stav znamená odmrazování nebo přípravu restartu."], // 48
   ["Příznak teplého startu v registru 36; OFF = ustálený chod, ON = krátký předehřev výměníku."], // 49
-  ["Odmrazování je v chladu a vlhku normální; samotný bit bez vlhkosti neurčuje četnost."], // 50
+  ["Odmrazování odstraňuje námrazu z venkovního výměníku.", "Odmrazování je v chladu a vlhku normální. Samotný stav bez údaje o vlhkosti neumožňuje posoudit četnost cyklů."], // 50
   ["Třída aktivní poruchy: normální stav, chyba, varování nebo upozornění."], // 51
   ["Význam právě hlášeného kódu poruchy."], // 52
   ["Nouzový provoz po poruše tepelného čerpadla."], // 53

@@ -2660,7 +2660,7 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   const statusKey = checkupStatusKey(c);
   const metric = checkupMetricValue(c);
   const parts = metric.split(" · ");
-  const compactMetric = ["dhw_loss", "defrost"].includes(c.id);
+  const compactMetric = c.id === "dhw_loss";
   const value = (compactMetric ? parts.shift() : metric) || checkupStatusText(c);
   const description = MODEL_DESCRIPTIONS[`health_${c.id}`];
   const copy = modelDescriptionCopy(`health_${c.id}`);
@@ -2710,29 +2710,12 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   }
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
-    defrost_events_insufficient: "defrost_events_insufficient",
     source_stale: isModbus ? "source_stale_modbus" : "source_stale",
-    no_paired_runtime: "no_paired_runtime",
   }[c.reason];
   if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
-  if (compactMetric && c.id !== "dhw_loss" && parts.length) detail += ` ${parts.join(" · ")}.`;
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
     detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c, isModbus),
                 checkupDuration(c.best_aborted_s));
-  if (c.id === "defrost") {
-    if (checkupOutdoorContext(c)) detail += t("check.detail.outdoor_defrost");
-    const start = c.last_observed_start;
-    if (start && typeof start === "object") {
-      const missing = t("sys.nodata");
-      const date = Number.isInteger(start.unix_s) && start.unix_s > 0 && start.unix_s <= 0xffffffff
-        ? new Date(start.unix_s * 1000).toLocaleString(LANG,
-            { dateStyle: "short", timeStyle: "short" }) : missing;
-      const route = start.route === "space_heating" ? t("check.defrost.route_space")
-        : start.route === "dhw_route" ? t("check.defrost.route_dhw") : missing;
-      const outdoor = Number.isFinite(start.outdoor_c) ? `${checkupFmt1(start.outdoor_c)} °C` : missing;
-      detail += ` ${t("check.defrost.last_start", date, route, outdoor)}`;
-    }
-  }
   // Three paragraphs: observation with its real time scope, current interpretation, then normal
   // context. A report window is never a verdict's "since" timestamp.
   const time = [];
@@ -2751,12 +2734,6 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   if (statusKey === "collecting" && Number(c.required_s) > Number(c.observed_s))
     detail += ` ${t("check.detail.coverage_missing",
                     Math.ceil(c.required_s - c.observed_s).toLocaleString(LANG))}`;
-  // Only the bounded daily assessments need a complete day; flow waits for eligible pump time.
-  if (c.id === "defrost" && statusKey === "collecting" &&
-      fullSpan === false && Number.isFinite(report.span_s) &&
-      ["day_incomplete", "input_coverage"].includes(c.reason))
-    detail += ` ${t("check.detail.horizon_wait",
-                   checkupDuration(Math.max(0, 86400 - report.span_s)))}`;
   if (c.id === "dhw_loss" && checkupDhwHasRate(c) && !c.blocked &&
       Number.isFinite(c.pump_windows) && Number.isFinite(c.draw_windows) &&
       Number.isFinite(c.quiet_high_windows))
@@ -2776,18 +2753,42 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
 }
 
 function checkupDefrostShare(c) {
-  const part = Number(c.defrost_s), total = Number(c.run_s);
-  if (Number.isFinite(part) && part >= 0 && Number.isFinite(total) && total > 0) {
+  const part = c.defrost_s, total = c.run_s;
+  if (Number.isFinite(part) && part >= 0 && Number.isFinite(total) && total > 0 && part <= total) {
     if (part === 0) return "0 %";
     const exact = part * 100 / total;
     if (exact < 1) return "<1 %";
-    // Five decimals keep every rational step distinguishable around an integer-percent boundary for
-    // a denominator up to this 86,400-second window. Floor rather than round so the renderer never
-    // crosses any firmware-owned limit, without copying that limit into the browser.
-    const hundredThousandth = Math.floor(exact * 100000) / 100000;
-    return `${hundredThousandth.toFixed(5).replace(/\.?0+$/, "")} %`;
+    // Retain more precision where truncation would make a value just above an
+    // integer percentage look exactly on the firmware's boundary.
+    const digits = exact > Math.floor(exact) && Math.floor(exact * 100) % 100 === 0 ? 5 : 2;
+    const scale = 10 ** digits;
+    return `${(Math.floor(exact * scale) / scale).toLocaleString(LANG, { maximumFractionDigits: digits })} %`;
   }
-  return c.share_pct == null ? "" : `${c.share_pct} %`; // older firmware
+  return Number.isFinite(c.share_pct) ? `${c.share_pct.toLocaleString(LANG)} %` : "";
+}
+
+function checkupDefrostCheck(status) {
+  const report = status?.health;
+  const source = report?.source || status?.diagnostics?.effective_source || "x10a";
+  if (status?.diagnostics?.enabled !== true || source !== "x10a" || report?.persist === "unknown") return null;
+  return Array.isArray(report?.checks) ? report.checks.find(check => check.id === "defrost") : null;
+}
+
+function checkupFreshDefrostCheck(status, statusStale = false) {
+  const c = checkupDefrostCheck(status);
+  return c && !statusStale && status.health.source_fresh !== false && c.reason !== "source_stale" ? c : null;
+}
+
+function checkupDefrostInspectorRows(status, statusStale = false) {
+  const c = checkupFreshDefrostCheck(status, statusStale);
+  if (!c || c.verdict === "unavailable") return "";
+
+  const count = Number.isInteger(c.count) && c.count >= 0 ? c.count.toLocaleString(LANG) : "";
+  const share = checkupDefrostShare(c);
+  if (!count && !share) return "";
+  return [["check.defrost.starts_label", count], ["check.defrost.share", share]]
+    .map(([key, value]) => `<div class="inspect-row"><span>${esc(t(key))}</span><span>${esc(value || "—")}</span></div>`)
+    .join("");
 }
 
 function checkupHeaterRuntime(seconds, minutes) {
@@ -2810,28 +2811,6 @@ function checkupHeaterValue(c) {
   return parts.length ? t("check.min", parts.join(" · ")) : "";
 }
 
-const CHECKUP_OUTDOOR_SOURCE_LABELS = new Map([
-  ["homehub", "Modbus"],
-  ["x10a", "X10A"],
-  ["env3", "ENV III"],
-]);
-
-function checkupOutdoorContext(c) {
-  if (typeof c.outdoor_source !== "string" ||
-      !Number.isFinite(c.outdoor_min_c) || !Number.isFinite(c.outdoor_mean_c) ||
-      !(Number(c.outdoor_samples) > 0)) return "";
-  const fmt = (n) => n.toLocaleString(LANG,
-    { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const source = CHECKUP_OUTDOOR_SOURCE_LABELS.get(c.outdoor_source) ?? "—";
-  return c.outdoor_min_c === c.outdoor_mean_c
-    ? t("check.outdoor_one", source, fmt(c.outdoor_mean_c))
-    : t("check.outdoor_range", source, fmt(c.outdoor_min_c), fmt(c.outdoor_mean_c));
-}
-
-function checkupWithOutdoor(c, value) {
-  return [value, checkupOutdoorContext(c)].filter(Boolean).join(" · ");
-}
-
 function checkupCyclingCountPrefix(n) {
   return n > 0 ? "≥" : "";
 }
@@ -2841,11 +2820,7 @@ function checkupCyclingCountPrefix(n) {
 // stale one", applied to a count).
 function checkupMetricValue(c) {
   const v = c.verdict;
-  // Count-only defrost evidence without an RPS witness or positive runtime denominator is a supported
-  // observation. `unavailable` means the defrost row itself was absent, so even a legacy payload's
-  // numeric zero proves nothing.
   if (v === "unavailable") return "";
-  const collecting = v === "collecting";
   switch (c.id) {
     case "fault":
       if (v === "warn") return t("check.fault_err");
@@ -2867,14 +2842,6 @@ function checkupMetricValue(c) {
     case "cycling":
       return Number.isInteger(c.starts) && c.starts >= 0
         ? checkupCyclingCountPrefix(c.starts) + t("check.starts", c.starts) : "";
-    case "defrost": {
-      if (c.count == null) return "";
-      const n = t("check.cycles", c.count);
-      if (collecting) return checkupWithOutdoor(c, n);
-      const share = checkupDefrostShare(c);
-      const paired = c.paired_count == null ? "" : t("check.paired_cycles", c.paired_count);
-      return checkupWithOutdoor(c, [n, paired, share].filter(Boolean).join(" · "));
-    }
     case "flow":
       return !Number.isFinite(c.min_l_min) ? "" : `${checkupFmt1(c.min_l_min)} l/min`;
     case "heater": {
@@ -2915,10 +2882,6 @@ function checkupValue(c) {
   if (c.id === "cycling")
     return Number.isFinite(c.starts) && c.starts >= 0
       ? checkupCyclingCountPrefix(c.starts) + c.starts.toLocaleString(LANG) : st;
-  if (c.id === "defrost") {
-    const share = c.verdict !== "collecting" && checkupDefrostShare(c);
-    return share || (Number.isFinite(c.count) && c.count >= 0 ? t("check.cycles", c.count) : st);
-  }
   if (c.id === "heater") return checkupHeaterValue(c) || st;
   return checkupMetricValue(c) || st;
 }
@@ -2935,14 +2898,26 @@ function checkupCardHtml(includeHealth = true) {
                   : t("card.checkup");
   let healthRows = "";
   const unreadable = includeHealth && h?.persist === "unknown";
+  const defrost = includeHealth && checkupFreshDefrostCheck(S.status,
+    S.otaCached || S.transportUnavailable === "status");
   const visibleChecks = includeHealth && Array.isArray(h?.checks)
     ? h.checks.filter(c => Object.hasOwn(CHECKUP_ROW, c.id) && c.id !== "flow" && c.id !== "pressure" &&
+                          (c.id !== "defrost" || c === defrost) &&
                           !(isModbus && MODBUS_HIDDEN_CHECKS.has(c.id)))
     : [];
   if (unreadable) healthRows = `<span class="empty">${esc(t("sys.nodata"))}</span>`;
   if (!unreadable && visibleChecks.length) {
     for (const c of visibleChecks) {
       const key = CHECKUP_ROW[c.id];
+      if (c.id === "defrost") {
+        if (c.verdict === "info") {
+          healthRows += `<button type="button" class="vrow vrow-btn" data-defrost-inspect aria-controls="inspect">` +
+            `<span class="vrow-label">${esc(t(key))}</span>` +
+            `<span class="vrow-end"><span class="vrow-val warn">${esc(checkupStatusText(c))}</span>` +
+            `<span class="vrow-chev" aria-hidden="true">›</span></span></button>`;
+        }
+        continue;
+      }
       const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
       const rowVal = c.id === "fault" ? checkupFaultRow(c) : { text: checkupValue(c), aria: "" };
       const detail = checkupDetailHtml(c, h.full_span === true, h);

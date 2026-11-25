@@ -94,8 +94,8 @@ export function renderWireSnapshots(wires) {
       name: "status-x10a-defrost-outdoor",
       status: wireMap.get("status-x10a-defrost-outdoor"),
       values: baseValues,
-      insp: "outdoor",
-      expand: ["model:health_defrost"],
+      insp: "defrost",
+      expand: [],
     },
     {
       name: "status-modbus-diagnostics",
@@ -208,10 +208,21 @@ export function renderWireSnapshots(wires) {
     }
 
     if (sc.name === "status-x10a-defrost-outdoor") {
-      assert.ok(checkupHtml.includes("X10A") && checkupHtml.includes("-4.5") && checkupHtml.includes("-2.0"),
-        `${sc.name}: checkupCardHtml must render real C++ X10A defrost outdoor context`);
-      assert.ok(checkupHtml.includes("Space heating") && checkupHtml.includes("-2.5 °C"),
-        `${sc.name}: checkupCardHtml must render real C++ last_observed_start`);
+      const html = doc.getElementById("inspRows").innerHTML;
+      const rows = Array.from(html.matchAll(/<div class="inspect-row"><span>([^<]+)<\/span><span>([^<]+)<\/span><\/div>/g),
+        ([, name, reading]) => [name, reading]);
+      assert.deepEqual(rows, [
+        [ui.t("check.defrost.starts_label"), "3"],
+        [ui.t("check.defrost.share"), "15.1 %"],
+      ], `${sc.name}: the defrost inspector must render only the observed starts and exact runtime share`);
+      assert.match(checkupHtml, /data-defrost-inspect/, `${sc.name}: real X10A NOTE must link to the inspector`);
+      assert.doesNotMatch(checkupHtml, /model:health_defrost/, `${sc.name}: no duplicate diagnosis disclosure`);
+      ui.S.status.health.source_fresh = false;
+      ui.renderInspect();
+      assert.equal(doc.getElementById("inspRows").innerHTML, "",
+        `${sc.name}: a retained X10A report must not render current defrost values`);
+      assert.doesNotMatch(ui.checkupCardHtml(true), /data-defrost-inspect/,
+        `${sc.name}: a retained X10A report must not link from an active note`);
     }
     if (sc.name === "checkup-persist-unknown") {
       assert.ok(checkupHtml.includes(ui.t("sys.nodata")),

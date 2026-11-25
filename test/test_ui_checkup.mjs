@@ -155,6 +155,10 @@ vm.runInContext(
      detail: checkupDetailHtml,
      flowReport: checkupFlowReport,
      flowBrief: checkupFlowBriefHtml,
+     defrostInspector: (c, health = {}, statusStale = false) => checkupDefrostInspectorRows({
+       diagnostics: { enabled: true },
+       health: { source: "x10a", span_s: 86400, full_span: true, source_fresh: true, ...health, checks: [c] },
+     }, statusStale),
      chart: checkupCyclingChartHtml,
      timeline: checkupCyclingTimelineHtml,
      periodDetails: (trace, checkObj, from, to, source = "x10a") => {
@@ -172,6 +176,7 @@ vm.runInContext(
      card: checkupCardHtml,
      ready: checkupSourceReadyFor,
      copy: I18N,
+     duration: (lang, seconds) => { LANG = lang; return checkupDuration(seconds); },
      text: (lang, key, ...args) => { LANG = lang; return t(key, ...args); },
      setLang: (lang) => { LANG = lang; },
    };`,
@@ -197,33 +202,22 @@ for (const c of [
   { id: "heater", buh_s: null, bsh_s: null },
 ]) assert.equal(ui.metric({ verdict: "collecting", ...c }), "");
 
-// An almost-complete input clock and a partial calendar horizon have different explanations.
+// Collecting cycling fixture reused across the diagnosis cases.
 const collecting = {
   id: "cycling", verdict: "collecting", evidence: "heuristic", reason: "input_coverage",
   starts: 2, observed_s: 77759, required_s: 77760,
 };
-const collectingDefrost = { ...collecting, id: "defrost" };
-let detail = ui.detail(collectingDefrost, true, { span_s: 86400, source_age_s: 5, source_fresh: true });
-assert.match(detail, /Readable signals: 21 h 35 min of 21 h 36 min required/);
-assert.match(detail, /Missing readable time: 1 s/);
-assert.match(detail, /Data window: 24 h/);
-assert.doesNotMatch(detail, /full 24-hour window is still missing/);
-detail = ui.detail({ ...collectingDefrost, observed_s: 77760, reason: "day_incomplete" }, false,
-                   { span_s: 84600, source_age_s: 5, source_fresh: true });
-assert.match(detail, /full 24-hour window is still missing: 30 min remaining/);
-assert.doesNotMatch(detail, /insufficient coverage|Missing readable time/);
+let detail;
 
 // A first-hour flow observation needs eligible pump operation, not the rest of a calendar day.
-// Exercise actual localized details: daily assessments must keep their waiting explanation,
-// while instant/eligible-window observations must preserve scope without inheriting that delay.
+// Exercise localized details to keep instant and eligible-window observations scoped.
 const partialReport = { span_s: 900, source_age_s: 1, source_fresh: true };
 const collectingFlow = {
   id: "flow", verdict: "collecting", evidence: "observation", reason: "input_coverage",
   observed_s: 0, required_s: 0, min_l_min: null,
 };
 for (const lang of locales) {
-  const horizon = ui.text(lang, "check.detail.horizon_wait", "23 h 45 min");
-  const completeHorizon = ui.text(lang, "check.detail.horizon_wait", "0 min");
+  const horizon = ui.duration(lang, 85500);
   const period = `${ui.text(lang, "check.detail.period_label")} 15 min`;
   const ageLabel = ui.text(lang, "check.detail.age_label");
   const flowDetail = ui.detail(collectingFlow, false, partialReport);
@@ -232,13 +226,6 @@ for (const lang of locales) {
   assert.ok(!flowDetail.includes(ageLabel), `${lang} fresh flow need not repeat source age`);
   assert.ok(flowDetail.includes(ui.text(lang, "check.detail.collecting_unknown")),
     `${lang} flow must retain its actual collection state`);
-  for (const reason of ["day_incomplete", "input_coverage"]) {
-    const daily = { ...collectingDefrost, reason, observed_s: 900 };
-    assert.ok(ui.detail(daily, false, partialReport).includes(horizon),
-      `${lang}/defrost/${reason} must explain its missing day`);
-    assert.ok(!ui.detail(daily, true, { ...partialReport, span_s: 86400 }).includes(completeHorizon),
-      `${lang}/defrost must not add a day once the horizon is complete`);
-  }
   for (const id of ["fault", "dhw_loss", "heater", "retries"]) {
     assert.ok(!ui.detail({ ...collectingFlow, id, windows: 0 }, false, partialReport).includes(horizon),
       `${lang}/${id} observations must not inherit a daily prerequisite`);
@@ -1109,23 +1096,33 @@ assert.match(detail, /current fault state is unreadable/);
 assert.match(detail, /No fresh X10A sample/);
 assert.doesNotMatch(detail, /right now.*error|No message is active now/);
 
-// Runtime denominator is truthful even close to thresholds; event-only evidence stays neutral.
+// The inspector shows two plain readings. Missing input stays unknown and cannot produce zero.
 const defrost = { id: "defrost", verdict: "info", evidence: "heuristic", count: 3,
   paired_count: 3, defrost_s: 200, run_s: 1000 };
-assert.equal(ui.metric(defrost), "3 cycles · 3 paired · 20 %");
-assert.equal(ui.metric({ ...defrost, defrost_s: 1 }), "3 cycles · 3 paired · <1 %");
-assert.match(ui.detail({ ...defrost, verdict: "ok", evidence: "observation",
-                        count: 2, paired_count: 2,
-                        reason: "defrost_events_insufficient" }), /Fewer than three paired defrosts/);
-assert.match(ui.detail({ id: "defrost", verdict: "ok", evidence: "observation",
-                         reason: "no_paired_runtime", count: 3 }), /event count only/);
-assert.match(ui.detail({ ...defrost, last_observed_start: {
-  unix_s: null, route: "dhw_route", outdoor_c: 0,
-} }), /Last observed defrost start.*Hot-water tank.*0 °C/);
-assert.match(ui.detail({ ...defrost, last_observed_start: {
-  unix_s: null, route: null, outdoor_c: null,
-} }), /Last observed defrost start.*Outdoor air No data/);
-assert.doesNotMatch(ui.detail({ ...defrost, last_observed_start: null }), /Last observed defrost start/);
+const defrostRow = (label, value) =>
+  `<div class="inspect-row"><span>${label}</span><span>${value}</span></div>`;
+assert.equal(ui.defrostInspector(defrost),
+  defrostRow("Observed defrost starts", "3") + defrostRow("Defrost share", "20 %"));
+assert.match(ui.defrostInspector({ ...defrost, defrost_s: 1 }), /&lt;1 %/);
+assert.match(ui.defrostInspector({ ...defrost, defrost_s: 3, run_s: 20 }), /15 %/);
+assert.match(ui.defrostInspector({ ...defrost, defrost_s: 12959, run_s: 86393 }), /15\.00005 %/);
+assert.equal(ui.defrostInspector({ ...defrost, count: 0, defrost_s: 0 }),
+  defrostRow("Observed defrost starts", "0") + defrostRow("Defrost share", "0 %"));
+assert.equal(ui.defrostInspector({ ...defrost, defrost_s: null }),
+  defrostRow("Observed defrost starts", "3") + defrostRow("Defrost share", "—"));
+assert.equal(ui.defrostInspector({ ...defrost, count: null }),
+  defrostRow("Observed defrost starts", "—") + defrostRow("Defrost share", "20 %"));
+assert.equal(ui.defrostInspector({ id: "defrost", verdict: "collecting" }), "");
+assert.equal(ui.defrostInspector({ ...defrost, verdict: "unavailable" }), "");
+assert.equal(ui.defrostInspector({ ...defrost, reason: "source_stale" }), "");
+assert.equal(ui.defrostInspector(defrost, { source_fresh: false }), "");
+assert.equal(ui.defrostInspector(defrost, {}, true), "");
+assert.equal(ui.defrostInspector(defrost, { source: "modbus" }), "");
+assert.equal(ui.defrostInspector(defrost, { persist: "unknown" }), "");
+ui.setLang("de");
+assert.equal(ui.defrostInspector({ ...defrost, count: 6, defrost_s: 20, run_s: 980 }),
+  defrostRow("Erfasste Abtaustarts", "6") + defrostRow("Abtauanteil", "2,04 %"));
+ui.setLang("en");
 assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "No increase");
 assert.equal(ui.value({ id: "retries", verdict: "info", evidence: "experimental", seen: 1 }), "Increase");
 assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental" }), "TENTATIVE");
@@ -1136,7 +1133,6 @@ assert.equal(ui.value({ id: "fault", verdict: "info", active: 0, latest: { code:
   "U4 · 3 h ago");
 assert.equal(ui.value({ id: "fault", verdict: "info", active: null, latest: { code: "U4", duration_s: 90 } }),
   "U4 · Unknown");
-assert.equal(ui.value({ id: "defrost", verdict: "ok", evidence: "observation", count: 3, defrost_s: 200, run_s: 1000 }), "20 %");
 assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: 0, bsh_s: 59 }),
@@ -1303,7 +1299,10 @@ for (const lang of locales) {
     assert.ok(!ui.detail({ ...result, aborts: 0 }).includes(discarded),
       `${lang}/${verdict} must not invent discarded reading-gap evidence`);
   }
-  for (const c of [dhw, cycling, defrost, waiting, partialModeCycling,
+  const localizedDefrost = ui.defrostInspector(defrost, partialReport);
+  assert.doesNotMatch(localizedDefrost,
+    /check\.defrost\.|undefined|NaN|Infinity/, `missing or misleading ${lang} defrost copy`);
+  for (const c of [dhw, cycling, waiting, partialModeCycling,
       { id: "fault", verdict: "info", active: 0 },
       { id: "fault", verdict: "info", active: null, reason: "source_stale" }]) {
     assert.doesNotMatch(ui.detail(c, false, { span_s: 3600, source_age_s: 900, source_fresh: false }),
@@ -1373,8 +1372,8 @@ for (const copy of [model.health_cycling.what, model.health_cycling.normal,
   assert.ok(copy.length <= 265, "cycling help must fit in a short paragraph");
   assert.doesNotMatch(copy, /≥|90 ?%|Daikin|\bOFF\b|\bON\b/);
 }
-assert.match(model.health_defrost.what, /compressor runtime with readable compressor and defrost states/);
-assert.match(descriptionContext.modelDe.health_defrost[0], /Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus/);
+assert.match(model.health_defrost.what, /removes frost from the outdoor unit/);
+assert.match(descriptionContext.modelDe.health_defrost[0], /entfernt die Anlage Reif von der Außeneinheit/);
 assert.match(JSON.stringify(model.health_pressure), /Chart guide:.*>1\.0 bar.*≤1\.0 bar.*≤0\.5 bar.*60 continuous seconds/);
 assert.match(JSON.stringify(model.health_flow), /Not nominal flow or proof of part load/);
 assert.match(JSON.stringify(model.health_retries), /while stopped or at a compressor-state boundary/);
@@ -1397,7 +1396,7 @@ vm.runInContext(`${i18nSource}${dashboardSource}${explanationSource}
   };`, renderedContext);
 for (const lang of locales) {
   renderedContext.rendered.lang(lang);
-  for (const id of Object.keys(model).filter(id => id.startsWith("health_"))) {
+  for (const id of Object.keys(model).filter(id => id.startsWith("health_") && id !== "health_defrost")) {
     for (const verdict of ["ok", "info", "warn", "collecting", "unavailable"]) {
       const c = { ...pressure, id: id.slice(7), verdict };
       const body = renderedContext.rendered.detail(c, false, partialReport);
@@ -1518,15 +1517,6 @@ const mbDetail = ui.detail(
 assert.ok(mbDetail.includes(ui.text("en", "check.detail.dhw_reason.blind_modbus")));
 assert.ok(mbDetail.includes(ui.text("en", "check.detail.source_stale_modbus")));
 assert.doesNotMatch(mbDetail, /X10A|HomeHub/);
-for (const [source, label] of [["homehub", "Modbus"], ["x10a", "X10A"], ["env3", "ENV III"], ["unknown", "—"]]) {
-  const outdoorMetric = ui.metric({
-    id: "defrost", verdict: "ok", count: 3, paired_count: 3, share_pct: 5,
-    outdoor_source: source, outdoor_min_c: 2, outdoor_mean_c: 3, outdoor_samples: 10,
-  });
-  assert.ok(outdoorMetric.includes(ui.text("en", "check.outdoor_range", label, "2.0", "3.0")),
-    `defrost outdoor context uses the display label for ${source}`);
-  assert.doesNotMatch(outdoorMetric, /HomeHub/);
-}
 assert.equal(ui.ready({
   diagnostics: { enabled: true, effective_source: "x10a" },
   hp: { connected: false }, modbus: { connected: false },
@@ -1742,41 +1732,6 @@ assert.equal(ui.ready({
   assert.equal(ui.value({ id: "cycling", verdict: "collecting", starts: null }), "CHECKING");
   assert.equal(ui.value({ id: "cycling", verdict: "ok", starts: 0 }), "0");
   assert.equal(ui.value({ id: "cycling", verdict: "warn", starts: 14 }), "≥14");
-
-  // defrost: outdoor_source variants (homehub, x10a, env3, unknown), equal vs distinct temperatures, routes.
-  for (const [src, label] of [["homehub", "Modbus"], ["x10a", "X10A"], ["env3", "ENV III"], ["other", "—"]]) {
-    const out = ui.metric({
-      id: "defrost", verdict: "info", count: 3, paired_count: 3, share_pct: 12,
-      outdoor_source: src, outdoor_min_c: -5.0, outdoor_mean_c: -2.5, outdoor_samples: 8,
-    });
-    assert.ok(out.includes(label) && out.includes("-5.0") && out.includes("-2.5"),
-      `defrost outdoor metric for ${src} must format ${label} range`);
-  }
-  const singleTemp = ui.metric({
-    id: "defrost", verdict: "collecting", count: 1,
-    outdoor_source: "env3", outdoor_min_c: 1.5, outdoor_mean_c: 1.5, outdoor_samples: 4,
-  });
-  assert.ok(singleTemp.includes("ENV III") && singleTemp.includes("1.5"),
-    "defrost equal min/mean outdoor temperature must use single-value wording");
-  assert.equal(ui.metric({
-    id: "defrost", verdict: "ok", count: 2, paired_count: 2, share_pct: 5,
-    outdoor_source: "x10a", outdoor_min_c: -1, outdoor_mean_c: 0, outdoor_samples: 0,
-  }).includes("X10A"), false, "zero outdoor samples must suppress outdoor suffix");
-  assert.equal(ui.value({ id: "defrost", verdict: "collecting", count: 2 }), "2 cycles");
-  assert.equal(ui.value({ id: "defrost", verdict: "collecting", count: null }), "CHECKING");
-  assert.equal(ui.value({ id: "defrost", verdict: "unavailable", count: 2 }), "N/A");
-  for (const [route, expectedRoute] of [
-    ["space_heating", ui.text("en", "check.defrost.route_space")],
-    ["dhw_route", ui.text("en", "check.defrost.route_dhw")],
-    [null, ui.text("en", "sys.nodata")],
-  ]) {
-    const det = ui.detail({
-      id: "defrost", verdict: "info", evidence: "measured", count: 3, paired_count: 3, share_pct: 15,
-      defrost_s: 120, run_s: 800,
-      last_observed_start: { unix_s: route ? 1791900000 : 0, route, outdoor_c: route ? -1.5 : null },
-    }, true, { span_s: 86400 });
-    assert.ok(det.includes(expectedRoute), `defrost route ${route} must render ${expectedRoute}`);
-  }
 
   // fault: every verdict + active combination with and without latest fault code.
   assert.equal(ui.value({ id: "fault", verdict: "unavailable" }), "N/A");
