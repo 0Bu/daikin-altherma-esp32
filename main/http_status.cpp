@@ -1646,6 +1646,17 @@ static void append_status_json(JsonOut& j, bool redact) {
                 break;
             case logic::CheckupCheck::Retries:
                 num("seen", ck.a);
+                j += ",\"counters\":[";
+                {
+                    bool first = true;
+                    for (size_t idx = 0; idx < logic::CHECKUP_RETRY_COUNT; ++idx) {
+                        if (!(hr.retry_increased_mask & (1u << idx))) continue;
+                        if (!first) j += ",";
+                        first = false;
+                        json_append_quoted(j, logic::checkup_retry_counter_name(idx));
+                    }
+                }
+                j += "]";
                 break;
             }
             j += "}";

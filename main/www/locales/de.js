@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -332,6 +332,18 @@ I18N.de = localeValues([
   /* check.fault_severity_caution */ "Hinweis",
   /* check.retry_seen */ "Anstieg",
   /* check.retry_none */ "Kein Anstieg",
+  /* check.retry_hero_none */ (d) => `In ${d} vergleichbarer Beobachtung ist keiner der fünf Schutzzähler gestiegen.`,
+  /* check.retry_hero_none_short */ "In vergleichbaren Messungen ist keiner der fünf Schutzzähler gestiegen.",
+  /* check.retry_hero_seen */ (d) => `Anstieg eines Schutzzählers in ${d} vergleichbarer Beobachtung erkannt.`,
+  /* check.retry_hero_seen_short */ "Anstieg eines Schutzzählers in vergleichbaren Messungen erkannt.",
+  /* check.retry_hero_collecting */ "Wartet auf aufeinanderfolgende lesbare Messungen aller fünf Zähler und des Verdichterzustands.",
+  /* check.retry_counters_legacy */ "Mindestens ein Zähler ist gestiegen; dieser Datenstand nennt nicht, welcher.",
+  /* check.retry_monitored */ "Überwachte Schutzbereiche",
+  /* check.retry_counter.discharge_temp */ "Heißgastemperatur",
+  /* check.retry_counter.inv_current */ "Inverterstrom",
+  /* check.retry_counter.high_pressure */ "Hochdruck",
+  /* check.retry_counter.low_pressure */ "Niederdruck",
+  /* check.retry_counter.fin_temp */ "Inverter-Kühlkörper",
   /* service.metric.comp */ "Verdichter",
   /* service.metric.disch */ "Heißgastemperatur",
   /* service.metric.eev */ "Expansionsventil-Befehl",
@@ -987,7 +999,7 @@ MODEL_DESCRIPTION_I18N.de = modelDescriptionValues([
   /* health_pressure */ ["24-Stunden-Wasserdruckverlauf im geschlossenen Hydraulikkreis (X10A, 5-Minuten-Minima).","Orientierung im Verlauf: >1,0 bar Normal, ≤1,0 bar Niedrig, ≤0,5 bar Kritisch (Diagnosebefund ab 60 s durchgehend). Zulässiger Füll- und Betriebsdruck richtet sich nach dem genauen Gerätehandbuch und der Anlagenhöhe; der Messwert allein belegt weder Leckage noch Defekt."],
   /* health_flow */ ["Minimum nach 60 s durchgehendem Betrieb der internen Pumpe; separat: nach Stichproben gewichtete Wasserspreizung, Durchfluss und Pumpenansteuerung nach 600 s Heiz-Anlauf laut Projektregel.", "Kein allgemeiner Normalwert. Kein Nenndurchfluss oder Teillastnachweis. Werte am gemeinsamen wasserseitigen Wärmetauscher. Die Ansteuerung ist keine gemessene Drehzahl oder Förderhöhe. 600-s-Projektfilter (Lücken ≤15 s), kein Beharrungsnachweis. Kein Sollvergleich oder hydraulischer Ursachennachweis aus diesen Werten."],
   /* health_heater */ ["Beobachtete An-Zeit des Zusatzheizers (BUH) und Speicherheizstabs (BSH).","Es gibt keine feste normale Laufzeit; sie hängt vom Heiz- und Warmwasserbedarf ab. Laufzeit ist kein Energieverbrauch und belegt kein unnötiges Heizen."],
-  /* health_retries */ ["Vergleichbare Anstiege in fünf experimentellen Zählern, auch im Stillstand oder an Verdichter-Zustandsgrenzen.","Für diese experimentellen Zähler ist kein Normalbereich belegt. Lücken, Rücksetzungen und fehlende Anstiege zählen nicht. Stabile Zähler schließen Begrenzung nicht aus und belegen keine Ursache."],
+  /* health_retries */ ["Experimentelle interne Daikin-Schutzzähler (Werte 0–7), verglichen über aufeinanderfolgende Messungen – auch im Stillstand oder bei Verdichter-Wechseln. Daikin dokumentiert Schwellen und Rücksetzungen nicht; Lücken und Rücksetzungen werden übersprungen. Unveränderte Zähler schließen eine Begrenzung nicht aus, und ein Anstieg belegt weder Störung noch Ursache."],
   /* free_heap */ ["Arbeitsspeicher, den die Firmware gerade nicht verwendet. Kurze Schwankungen sind normal, weil WLAN, MQTT und Web-Anfragen vorübergehend Speicher belegen; der 24-Stunden-Verlauf ist aussagekräftiger als ein Einzelwert.","eine stabile Linie mit Einbrüchen, die sich erholen; dauerhafter Rückgang kann auf nicht freigegebenen Speicher hinweisen. Ein kompatibler Neustart bei erhaltener Spannung kann den RAM-Verlauf bewahren. Wenn der RAM nicht übernommen werden kann, kommen nur passende, datierte 5-Minuten-Intervalle aus dem Flash-Journal nach dem Zeitabgleich zurück. Das 5-Minuten-Raster kann kurze Unterbrechungen verbergen; längere können Lücken hinterlassen. Offene und jüngste ungespeicherte Intervalle können fehlen; ohne Journal gibt es keine Flash-Wiederherstellung."],
   /* max_alloc */ ["Der größte zusammenhängende freie RAM-Block. Manche Vorgänge, darunter TLS-Aufbau und OTA-Arbeiten, benötigen einen ausreichend großen Block, auch wenn insgesamt noch mehr RAM frei ist.","der Wert liegt nie über dem gesamten freien RAM. Bleibt der freie RAM stabil, während dieser Wert dauerhaft sinkt, wird der Speicher fragmentiert; dann kann eine große Reservierung scheitern, obwohl noch RAM frei ist."],
   /* capacity */ ["Die Nennleistung der Außeneinheit, aus ihrer eigenen Kennungsseite gelesen. Eine Größenklasse der Hardware — wofür das Gerät gebaut ist, nicht was es gerade liefert."],

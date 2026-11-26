@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: a07c55a01df742dc5d748ed4f19445ec5f38fa567c067082b819a7ae84ec6760 -->
+<!-- diagnostic-evidence-contract: 1d9a85b70fa880c47f8bebdab502a5b1f1c0ce5ad72ec93cb5fa770f5c1285b0 -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -207,7 +207,7 @@ neutral comparison band (`neutral_band_pct = 20`).
 second-level intervals (`dt <= CHECKUP_MAX_GAP_S = 15 s`) across monotonic sweeps; longer gaps,
 non-monotonic timestamps, missing source sweeps, or source/consent transitions break continuity
 without bridging. X10A (`s_x10a`) and Modbus (`s_modbus`) maintain separate accumulators, 23-slot
-`EnergyRing` buffers (`EnergyBucket`, `32 bytes`, zero padding), open live-hour counters, and v5
+`EnergyRing` buffers (`EnergyBucket`, `32 bytes`, zero padding), open live-hour counters, and v6
 `CheckupJournalPayload` flash journals (`160 bytes`, `pel_source_fp` at offset `124` CRC-derived
 from domain tag `"x10a-pel-v1"` on X10A and `"modbus-pel-v1"` on Modbus). On flash restore,
 `checkup_journal_rebuild()` retains checkup/DHW buckets independently while retiring only energy
@@ -818,23 +818,28 @@ temperature, compressor inverter current, high pressure, low pressure, and inver
 including high pressure, compressor overheating, and inverter overcurrent, in its error-code table
 ([D1], section 12.4).
 
-**Firmware rule:** The same exact counter must increase between comparable readable endpoints.
+**Firmware rule:** Each counter must strictly increase between comparable readable endpoints.
 All profile-declared counters and the compressor state must be readable at both endpoints. A
-non-zero startup value is a baseline; a decrease invalidates the comparison. A usable comparison
-without an increase displays **TENTATIVE**; a comparable increase displays **NOTE**. Both retain
-experimental evidence and appear without a day-long wait. The retained event flag does not identify
-which counter increased or when. Neither HomeHub EKRHH nor native Altherma 4 Modbus exposes page-0x10
-protection-limit counters, so `checkup_modbus_coverage` leaves `retries` unsupported (`unavailable`,
-hidden in Modbus UI mode). See checkup_retry_index(),
-CHECKUP_RETRY_COUNT and the Retries branch in [checkup.hpp](../main/logic/checkup.hpp).
+non-zero startup value is a baseline; a decrease invalidates the comparison for that interval. A
+usable comparison without an increase displays **TENTATIVE**; a comparable increase displays
+**NOTE**. Both retain experimental evidence and appear without a day-long wait. Each hour in
+`CheckupBucket` (journal layout version `6`) records a 5-bit per-counter increase mask (`retry_mask`)
+alongside `CHECKUP_F_RETRY`, and `/status.health` publishes the increased counters under `counters`
+using stable slugs (`discharge_temp`, `inv_current`, `high_pressure`, `low_pressure`, `fin_temp`)
+via `checkup_retry_counter_name()`. Neither HomeHub EKRHH nor native Altherma 4 Modbus exposes
+page-0x10 protection-limit counters, so `checkup_modbus_coverage` leaves `retries` unsupported
+(`unavailable`, hidden in Modbus UI mode). See `checkup_retry_index()`,
+`checkup_retry_counter_name()`, `CHECKUP_RETRY_COUNT`, and the Retries branch in
+[checkup.hpp](../main/logic/checkup.hpp).
 
 **Experimental boundary:** Public Daikin documentation does not establish complete semantics for
 the five X10A counters: reset/wrap behaviour, guaranteed event counting and causal assignment are
 unknown. No manufacturer threshold or health verdict is derived from their values.
 
 **Not established:** An increase is not a specific fault, and no observed increase does not prove
-that protection limiting never occurred. Individual events, operating causes and limiting intensity
-cannot be reconstructed from the retained flag.
+that protection limiting never occurred. The retained 5-bit mask identifies which of the five
+counters strictly increased within the 24-hour window, but exact timestamps, increment counts,
+operating causes, and limiting intensity cannot be reconstructed from it.
 
 ## Sources
 

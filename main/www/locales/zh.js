@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -332,6 +332,18 @@ I18N.zh = localeValues([
   /* check.fault_severity_caution */ "注意",
   /* check.retry_seen */ "有增加",
   /* check.retry_none */ "无增加",
+  /* check.retry_hero_none */ (d) => `在 ${d} 可比观测期间，五个保护计数器均未增加。`,
+  /* check.retry_hero_none_short */ "在可比读数中，五个保护计数器均未增加。",
+  /* check.retry_hero_seen */ (d) => `在 ${d} 可比观测期间检测到保护计数器增加。`,
+  /* check.retry_hero_seen_short */ "在可比读数中检测到保护计数器增加。",
+  /* check.retry_hero_collecting */ "正在等待五个计数器和压缩机状态的连续可读读数。",
+  /* check.retry_counters_legacy */ "至少有一个计数器增加，但此快照未标明具体是哪一个。",
+  /* check.retry_monitored */ "监测的保护范围",
+  /* check.retry_counter.discharge_temp */ "排气温度",
+  /* check.retry_counter.inv_current */ "变频器电流",
+  /* check.retry_counter.high_pressure */ "高压",
+  /* check.retry_counter.low_pressure */ "低压",
+  /* check.retry_counter.fin_temp */ "变频器散热片",
   /* service.metric.comp */ "压缩机",
   /* service.metric.disch */ "排气温度",
   /* service.metric.eev */ "膨胀阀指令",
@@ -1261,7 +1273,7 @@ MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["封闭水路24小时水压曲线（X10A，5分钟最小值）。", "曲线说明：>1.0 bar正常，≤1.0 bar偏低，≤0.5 bar危急（连续60秒触发诊断）。允许充注与运行压力取决于具体机型手册及系统高度；单凭读数不能证明漏水或故障。"], // health_pressure
   ["内置水泵连续运行 60 秒后的最低流量；另附供暖启动 600 秒后按样本加权的水温差、流量与水泵指令统计。", "非额定流量，也不证明部分负荷。仅覆盖公共水侧换热器。水泵指令不代表转速或扬程。600 秒项目筛选（允许 ≤15 秒间隔）不证明稳定运行，也不作目标对比或水力成因判断。"], // health_flow
   ["BUH/BSH的ON时间", "非能量，不证明加热多余。"], // health_heater
-  ["5个实验计数器", "可比增长；忽略缺口/重置。稳定不排除限功率，也不证明原因。"], // health_retries
+  ["大金实验性内部保护计数器（0–7），在连续读数间比较，包括停机或压缩机状态切换时。大金未公开阈值与复位规则，缺口与复位会被忽略。数值稳定不排除保护限功率，增加也不证明存在故障或确定原因。"], // health_retries
   ["RAM 24小时曲线稳定或回升正常；持续下降可能泄漏。兼容通电重启可保留RAM曲线。5分钟粒度可能隐藏短暂停机。否则，须时间同步，闪存仅恢复日志内带时间的兼容区间。未完/最近未存区间可能丢失。"], // free_heap
   ["TLS/OTA 需要足够大的连续内存块；总 RAM 稳定而最大连续块下降，可能表示内存碎片。"], // max_alloc
   ["识别页给出的室外机额定容量，不是当前热输出。"], // capacity

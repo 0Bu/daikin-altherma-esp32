@@ -2997,8 +2997,7 @@ const MODEL_DESCRIPTIONS = {
     what: "Observed ON time of the circuit heater (BUH) and tank heater (BSH).",
     normal: "There is no fixed normal runtime; it depends on heating and hot-water demand. Runtime is not energy consumption and cannot establish unnecessary heating." },
   health_retries: {
-    what: "Comparable rises in five experimental counters, including while stopped or at a compressor-state boundary.",
-    normal: "No verified normal range for these experimental counters. Gaps, resets and non-rises do not count. Stable counters cannot rule out limiting or identify a cause." },
+    what: "Experimental internal Daikin protection counters (values 0–7) compared across consecutive readings, including when stopped or at compressor-state boundaries. Daikin does not document their thresholds or resets, so gaps and resets are ignored. Stable counters cannot rule out limiting, and an increase does not identify a fault or cause." },
   // The two board-memory rows on the ESP32 card. The copy has one job beyond naming the number: to
   // say what the SHAPE of the curve means, because that is the whole reason these rows exist rather
   // than living on /status alone.

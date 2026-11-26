@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -337,6 +337,18 @@ I18N.pl = localeValues([
   /* check.fault_severity_caution */ "Uwaga",
   /* check.retry_seen */ "Wzrost",
   /* check.retry_none */ "Bez wzrostu",
+  /* check.retry_hero_none */ (d) => `Żaden z pięciu liczników ochrony nie wzrósł w ciągu ${d} porównywalnej obserwacji.`,
+  /* check.retry_hero_none_short */ "Żaden z pięciu liczników ochrony nie wzrósł w porównywalnych odczytach.",
+  /* check.retry_hero_seen */ (d) => `Wykryto wzrost licznika ochrony w ciągu ${d} porównywalnej obserwacji.`,
+  /* check.retry_hero_seen_short */ "Wykryto wzrost licznika ochrony w porównywalnych odczytach.",
+  /* check.retry_hero_collecting */ "Oczekiwanie na kolejne czytelne odczyty pięciu liczników i stanu sprężarki.",
+  /* check.retry_counters_legacy */ "Co najmniej jeden licznik wzrósł, lecz ten zapis nie wskazuje który.",
+  /* check.retry_monitored */ "Monitorowane obszary ochrony",
+  /* check.retry_counter.discharge_temp */ "Temp. tłoczenia",
+  /* check.retry_counter.inv_current */ "Prąd falownika",
+  /* check.retry_counter.high_pressure */ "Wysokie ciśnienie",
+  /* check.retry_counter.low_pressure */ "Niskie ciśnienie",
+  /* check.retry_counter.fin_temp */ "Radiator falownika",
   /* service.metric.comp */ "Sprężarka",
   /* service.metric.disch */ "Temperatura tłoczenia",
   /* service.metric.eev */ "Polecenie zaworu rozprężnego",
@@ -1271,7 +1283,7 @@ MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["24-godzinny wykres ciśnienia wody w zamkniętym obiegu hydraulicznym (X10A, minima 5-minutowe).", "Orientacja na wykresie: >1,0 bar w normie, ≤1,0 bar niskie, ≤0,5 bar krytyczne (diagnoza od 60 s ciągle). Dopuszczalne ciśnienie napełniania i pracy określa instrukcja dokładnego modelu oraz wysokość instalacji; sam odczyt nie dowodzi wycieku ani usterki."], // health_pressure
   ["Najniższy przepływ po 60 s ciągłej pracy pompy wewnętrznej; osobno: ważone próbkami statystyki różnicy temperatur wody, przepływu i wysterowania pompy po 600 s rozruchu grzania.", "Nie przepływ nominalny ani dowód pracy częściowej. Dotyczy wspólnego wymiennika wodnego. Wysterowanie pompy to nie obroty ani wysokość podnoszenia. Filtr projektu 600 s (luki ≤15 s) nie dowodzi stanu ustalonego, porównania z celem ani przyczyny hydraulicznej."], // health_flow
   ["Czas ON BUH/BSH", "nie energia ani dowód zbędnego grzania."], // health_heater
-  ["5 eksperymentalnych liczników", "porównywalne wzrosty; luki/reset pomijane. Stabilność nie wyklucza ograniczeń ani nie dowodzi przyczyny."], // health_retries
+  ["Eksperymentalne wewnętrzne liczniki Daikin (0–7) porównywane w kolejnych odczytach, także w postoju i na granicach stanu sprężarki. Daikin nie dokumentuje progów ani resetów; luki i resety są pomijane. Stabilność nie wyklucza ograniczeń, a wzrost nie dowodzi usterki ani przyczyny."], // health_retries
   ["RAM 24 h: stabilna lub spadki z odbiciem; stały spadek, możliwy wyciek; zgodny restart z zasilaniem: możliwy wykres RAM. Inaczej tylko zgodne datowane 5 min dziennika flash po synchronizacji czasu. Co 5 min krótka przerwa może pozostać niewidoczna; otwarty/ostatnie niezapisane mogą zniknąć."], // 8
   ["Największy ciągły blok wolnej pamięci RAM. TLS i OTA potrzebują jednego dość dużego bloku, nawet gdy łącznie wolnej pamięci jest więcej. Zawsze nie większy niż cała wolna RAM. Jeśli wolna RAM jest stabilna, a ten blok maleje, rośnie fragmentacja sterty i duża alokacja może zawieść przed wyczerpaniem pamięci."], // 9
   ["Nominalna moc jednostki zewnętrznej z jej strony identyfikacyjnej. To klasa sprzętu, nie aktualna produkcja."], // 10

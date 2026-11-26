@@ -2501,10 +2501,68 @@ function checkupDetailKey(c, statusKey) {
   return `check.detail.${statusKey}`;
 }
 
+const CHECKUP_RETRY_COUNTERS = [
+  ["discharge_temp", "check.retry_counter.discharge_temp"],
+  ["inv_current", "check.retry_counter.inv_current"],
+  ["high_pressure", "check.retry_counter.high_pressure"],
+  ["low_pressure", "check.retry_counter.low_pressure"],
+  ["fin_temp", "check.retry_counter.fin_temp"],
+];
+
+function checkupRetriesDetailHtml(c, report = {}) {
+  const statusKey = checkupStatusKey(c);
+  const isModbus = report?.source === "modbus";
+  const hasObs = Number.isFinite(c.observed_s) && c.observed_s > 0;
+  const obsDur = hasObs ? checkupDuration(c.observed_s) : "";
+  const validSlugs = new Set(CHECKUP_RETRY_COUNTERS.map(([slug]) => slug));
+  const rawCounters = statusKey === "info" && Array.isArray(c.counters) ? c.counters : [];
+  const increased = new Set(rawCounters.filter((slug) => validSlugs.has(slug)));
+  let heroText;
+  if (statusKey === "unavailable") heroText = t("check.detail.unavailable");
+  else if (statusKey === "collecting") heroText = t("check.retry_hero_collecting");
+  else if (statusKey === "info") {
+    heroText = hasObs ? t("check.retry_hero_seen", obsDur) : t("check.retry_hero_seen_short");
+  } else {
+    heroText = hasObs ? t("check.retry_hero_none", obsDur) : t("check.retry_hero_none_short");
+  }
+  const legacyNote = statusKey === "info" && increased.size === 0
+    ? `<div class="checkup-retries-meta">${esc(t("check.retry_counters_legacy"))}</div>`
+    : "";
+  const stale = report?.source_fresh === false || c.reason === "source_stale";
+  let staleHtml = "";
+  if (stale) {
+    let staleMsg = t(isModbus ? "check.detail.source_stale_modbus" : "check.detail.source_stale");
+    if (Number.isFinite(report?.source_age_s)) {
+      staleMsg += ` ${t("check.detail.age_label")} ${dwellDuration(report.source_age_s)}.`;
+    }
+    staleHtml = `<div class="checkup-retries-meta">${esc(staleMsg)}</div>`;
+  }
+  const chipsHtml = statusKey === "unavailable" ? "" :
+    `<div class="checkup-retries-list">` +
+    `<div class="checkup-retries-label">${esc(t("check.retry_monitored"))}</div>` +
+    `<div class="checkup-retries-chips">` +
+    CHECKUP_RETRY_COUNTERS.map(([slug, key]) => {
+      const hit = increased.has(slug);
+      const label = t(key);
+      const aria = hit ? ` aria-label="${esc(`${label}: ${t("check.retry_seen")}`)}"` : "";
+      return `<span class="retry-chip${hit ? " is-seen" : ""}" data-retry-counter="${slug}"${aria}>` +
+        (hit ? `<i class="retry-dot" aria-hidden="true"></i>` : "") +
+        `${esc(label)}${hit ? " ↑" : ""}</span>`;
+    }).join("") +
+    `</div></div>`;
+  const copy = modelDescriptionCopy("health_retries");
+  const what = copy ? copy[0] : MODEL_DESCRIPTIONS.health_retries.what;
+  return `<div class="checkup-retries-panel" data-checkup-retries>` +
+    `<div class="checkup-retries-hero"><div class="vdesc-p">${esc(heroText)}</div>${legacyNote}${staleHtml}</div>` +
+    `${chipsHtml}` +
+    `<p class="vdesc-p checkup-retries-boundary">${esc(what)}</p></div>`;
+}
+
 const checkupFmt1 = (n) => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
 function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   if (c.id === "fault") return checkupFaultDetailHtml(c, report);
   if (c.id === "cycling") return checkupCyclingDetailHtml(c, report);
+  if (c.id === "retries") return checkupRetriesDetailHtml(c, report);
   return checkupGenericDetailHtml(c, fullSpan, report);
 }
 function checkupGenericDetailHtml(c, fullSpan, report) {

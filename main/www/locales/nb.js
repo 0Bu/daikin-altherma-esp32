@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -332,6 +332,18 @@ I18N.nb = localeValues([
   /* check.fault_severity_caution */ "Varsomhet",
   /* check.retry_seen */ "Økning",
   /* check.retry_none */ "Ingen økning",
+  /* check.retry_hero_none */ (d) => `Ingen av de fem vernetellerne økte i løpet av ${d} sammenlignbar observasjon.`,
+  /* check.retry_hero_none_short */ "Ingen av de fem vernetellerne økte i sammenlignbare målinger.",
+  /* check.retry_hero_seen */ (d) => `Økning i verneteller registrert i løpet av ${d} sammenlignbar observasjon.`,
+  /* check.retry_hero_seen_short */ "Økning i verneteller registrert i sammenlignbare målinger.",
+  /* check.retry_hero_collecting */ "Venter på sammenhengende lesbare målinger av alle fem tellere og kompressorstatus.",
+  /* check.retry_counters_legacy */ "Minst én teller økte, men denne visningen oppgir ikke hvilken.",
+  /* check.retry_monitored */ "Overvåkede verneområder",
+  /* check.retry_counter.discharge_temp */ "Utløpstemperatur",
+  /* check.retry_counter.inv_current */ "Inverterstrøm",
+  /* check.retry_counter.high_pressure */ "Høytrykk",
+  /* check.retry_counter.low_pressure */ "Lavtrykk",
+  /* check.retry_counter.fin_temp */ "Inverterkjøleribbe",
   /* service.metric.comp */ "Kompressor",
   /* service.metric.disch */ "Utløpstemperatur",
   /* service.metric.eev */ "Ekspansjonsventilkommando",
@@ -1278,7 +1290,7 @@ MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["24-timers vanntrykkurve i lukket hydraulikkrets (X10A, 5-minutters minimumsverdier).", "Kurveveiledning: >1,0 bar normalt, ≤1,0 bar lavt, ≤0,5 bar kritisk (diagnose ved ≥60 s kontinuerlig). Tillatt fylle- og driftstrykk avhenger av nøyaktig modellmanual og anleggshøyde; verdien alene beviser verken lekkasje eller feil."], // health_pressure
   ["Laveste strømning etter 60 s kontinuerlig drift av intern pumpe; separat: prøvevektet statistikk for temperaturdifferanse vann, strømning og pumpekommando etter 600 s oppvarmingsinnkjøring.", "Ikke nominell strømning eller bevis på dellast. Gjelder felles vannside-varmeveksler. Pumpekommando måler ikke turtall eller løftehøyde. 600 s prosjektfilter (hull ≤15 s) beviser ikke stabil drift; ingen målsammenligning eller hydraulisk årsak."], // health_flow
   ["BUH/BSH ON-tid", "ikke energi eller bevis på unødig varme."], // health_heater
-  ["5 eksperimentelle tellere", "sammenlignbare økninger; hull/reset utelates. Stabilitet utelukker ikke begrensning eller beviser årsak."], // health_retries
+  ["Eksperimentelle interne Daikin-vernetellere (0–7) sammenlignet mellom etterfølgende målinger, også ved stans og kompressoroverganger. Daikin dokumenterer ikke grenser eller nullstilling; hull og nullstillinger utelates. Stabile tellere utelukker ikke begrensning, og en økning beviser verken feil eller årsak."], // health_retries
   ["RAM 24 h: stabil, fall snur; varig fall: mulig lekkasje; kompatibel omstart med strøm: RAM-kurve mulig; ellers kun daterte kompatible 5 min fra flashjournal etter tidssynk. 5 min oppløsning kan skjule korte stopp; åpne/siste ulagrede kan mangle."], // free_heap
   ["Største sammenhengende blokk som TLS/OTA trenger; fall med stabil total-RAM tyder på fragmentering."], // max_alloc
   ["Utedelens nominelle effekt, ikke aktuell produksjon."], // capacity

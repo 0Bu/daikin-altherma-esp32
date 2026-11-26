@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -332,6 +332,18 @@ I18N.it = localeValues([
   /* check.fault_severity_caution */ "Attenzione",
   /* check.retry_seen */ "Aumento",
   /* check.retry_none */ "Nessun aumento",
+  /* check.retry_hero_none */ (d) => `Nessuno dei cinque contatori di protezione è aumentato in ${d} di osservazione comparabile.`,
+  /* check.retry_hero_none_short */ "Nessuno dei cinque contatori di protezione è aumentato in letture comparabili.",
+  /* check.retry_hero_seen */ (d) => `Rilevato aumento di un contatore di protezione in ${d} di osservazione comparabile.`,
+  /* check.retry_hero_seen_short */ "Rilevato aumento di un contatore di protezione in letture comparabili.",
+  /* check.retry_hero_collecting */ "In attesa di letture consecutive leggibili di tutti i cinque contatori e dello stato del compressore.",
+  /* check.retry_counters_legacy */ "Almeno un contatore è aumentato, ma questo stato non indica quale.",
+  /* check.retry_monitored */ "Aree di protezione monitorate",
+  /* check.retry_counter.discharge_temp */ "Temp. di mandata",
+  /* check.retry_counter.inv_current */ "Corrente inverter",
+  /* check.retry_counter.high_pressure */ "Alta pressione",
+  /* check.retry_counter.low_pressure */ "Bassa pressione",
+  /* check.retry_counter.fin_temp */ "Dissipatore inverter",
   /* service.metric.comp */ "Compressore",
   /* service.metric.disch */ "Temperatura di mandata del gas",
   /* service.metric.eev */ "Comando valvola di espansione",
@@ -1263,7 +1275,7 @@ MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Andamento 24 h della pressione dell’acqua nel circuito idraulico chiuso (X10A, minimi su 5 min).", "Guida al grafico: >1,0 bar normale, ≤1,0 bar bassa, ≤0,5 bar critica (diagnosi da 60 s continui). La pressione di riempimento ed esercizio ammessa dipende dal manuale esatto del modello e dall’altezza dell’impianto; il valore da solo non prova perdite o guasti."], // health_pressure
   ["Portata minima dopo 60 s di marcia continua della pompa interna; a parte: statistiche ponderate per campione di salto termico acqua, portata e comando pompa dopo 600 s di avviamento in riscaldamento.", "Non è portata nominale né prova di carico parziale. Riguarda lo scambiatore lato acqua comune. Il comando pompa non misura giri o prevalenza. Filtro di progetto 600 s (lacune ≤15 s): non prova regime stazionario, confronto con obiettivo o causa idraulica."], // health_flow
   ["Tempo ON BUH/BSH", "non energia né prova di calore inutile."], // health_heater
-  ["5 contatori sperimentali", "aumenti comparabili; lacune/reset esclusi. Stabilità non esclude limitazione né prova causa."], // health_retries
+  ["Contatori interni sperimentali Daikin (0–7) confrontati tra letture consecutive, anche a compressore fermo o nei passaggi di stato. Daikin non documenta soglie né azzeramenti; lacune e reset vengono esclusi. Contatori stabili non escludono limitazioni e un aumento non prova guasti né cause."], // health_retries
   ["RAM 24 h: stabile o cali recuperati; calo continuo, possibile perdita; riavvio compatibile alimentato: curva RAM possibile; altrimenti solo 5 min datati compatibili del registro flash a ora sincronizzata. Passi di 5 min possono celare pause brevi; aperto/recenti non salvati possono mancare."], // free_heap
   ["Massimo blocco contiguo richiesto da TLS/OTA; se cala con RAM totale stabile indica frammentazione."], // max_alloc
   ["Capacità nominale dell’unità esterna dalla pagina identificativa, non potenza prodotta ora."], // capacity

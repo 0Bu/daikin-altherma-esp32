@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -332,6 +332,18 @@ I18N.es = localeValues([
   /* check.fault_severity_caution */ "Precaución",
   /* check.retry_seen */ "Aumento",
   /* check.retry_none */ "Sin aumento",
+  /* check.retry_hero_none */ (d) => `Ninguno de los cinco contadores de protección subió en ${d} de observación comparable.`,
+  /* check.retry_hero_none_short */ "Ninguno de los cinco contadores de protección subió en lecturas comparables.",
+  /* check.retry_hero_seen */ (d) => `Aumento en un contador de protección registrado en ${d} de observación comparable.`,
+  /* check.retry_hero_seen_short */ "Aumento en un contador de protección registrado en lecturas comparables.",
+  /* check.retry_hero_collecting */ "Esperando lecturas consecutivas legibles de los cinco contadores y del estado del compresor.",
+  /* check.retry_counters_legacy */ "Subió al menos un contador, pero este registro no indica cuál.",
+  /* check.retry_monitored */ "Áreas de protección vigiladas",
+  /* check.retry_counter.discharge_temp */ "Temp. de descarga",
+  /* check.retry_counter.inv_current */ "Corriente inversor",
+  /* check.retry_counter.high_pressure */ "Alta presión",
+  /* check.retry_counter.low_pressure */ "Baja presión",
+  /* check.retry_counter.fin_temp */ "Disipador inversor",
   /* service.metric.comp */ "Compresor",
   /* service.metric.disch */ "Temperatura de descarga",
   /* service.metric.eev */ "Orden de válvula de expansión",
@@ -1279,7 +1291,7 @@ MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Presión de agua (24 h) en el circuito hidráulico cerrado (X10A, mínimos de 5 min).", "Guía de la curva: >1,0 bar normal, ≤1,0 bar baja, ≤0,5 bar crítica (diagnóstico desde 60 s continuos). La presión de llenado y trabajo admisible depende del manual exacto del equipo y la altura del sistema; la lectura por sí sola no prueba fugas ni avería."], // health_pressure
   ["Caudal mínimo tras 60 s de marcha continua de la bomba interna; aparte: estadísticas ponderadas por muestra de salto térmico del agua, caudal y orden de bomba tras 600 s de arranque en calefacción.", "No es caudal nominal ni prueba de carga parcial. Cubre el intercambiador de agua común. La orden de bomba no mide velocidad ni altura disponible. Filtro del proyecto de 600 s (huecos ≤15 s), sin probar régimen estable, objetivo ni causa hidráulica."], // health_flow
   ["Tiempo ON de BUH/BSH", "no energía ni prueba de calor innecesario."], // health_heater
-  ["5 contadores experimentales", "aumentos comparables; ignora huecos/reset. Estabilidad no excluye limitación ni prueba causa."], // health_retries
+  ["Contadores internos experimentales de Daikin (0–7) comparados entre lecturas consecutivas, incluso parado o en cambios del compresor. Daikin no documenta umbrales ni reinicios; huecos y reinicios se omiten. Estabilidad no excluye limitación ni un aumento prueba avería o causa."], // health_retries
   ["RAM 24 h: estable o bajadas recuperadas; caída continua, posible fuga. Reinicio compatible alimentado: curva RAM posible; si no, solo 5 min fechados compatibles del registro flash tras ajustar hora; pasos de 5 min pueden ocultar pausas breves; abierto/últimos sin guardar pueden faltar."], // free_heap
   ["Mayor bloque contiguo necesario para TLS/OTA; si cae con RAM total estable, indica fragmentación."], // max_alloc
   ["Capacidad nominal de la unidad exterior, no su producción actual."], // capacity

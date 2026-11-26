@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -332,6 +332,18 @@ I18N.cs = localeValues([
   /* check.fault_severity_caution */ "Upozornění",
   /* check.retry_seen */ "Nárůst",
   /* check.retry_none */ "Bez nárůstu",
+  /* check.retry_hero_none */ (d) => `Žádný z pěti ochranných čítačů nestoupl za ${d} srovnatelného sledování.`,
+  /* check.retry_hero_none_short */ "Žádný z pěti ochranných čítačů nestoupl ve srovnatelných měřeních.",
+  /* check.retry_hero_seen */ (d) => `Zaznamenán nárůst ochranného čítače za ${d} srovnatelného sledování.`,
+  /* check.retry_hero_seen_short */ "Zaznamenán nárůst ochranného čítače ve srovnatelných měřeních.",
+  /* check.retry_hero_collecting */ "Čeká se na navazující čitelné údaje všech pěti čítačů a stavu kompresoru.",
+  /* check.retry_counters_legacy */ "Alespoň jeden čítač stoupl, tento snímek ale neurčuje který.",
+  /* check.retry_monitored */ "Sledované ochranné oblasti",
+  /* check.retry_counter.discharge_temp */ "Teplota výtlaku",
+  /* check.retry_counter.inv_current */ "Proud invertoru",
+  /* check.retry_counter.high_pressure */ "Vysoký tlak",
+  /* check.retry_counter.low_pressure */ "Nízký tlak",
+  /* check.retry_counter.fin_temp */ "Chladič invertoru",
   /* service.metric.comp */ "Kompresor",
   /* service.metric.disch */ "Teplota výtlaku",
   /* service.metric.eev */ "Povel expanzního ventilu",
@@ -1232,7 +1244,7 @@ MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["24h průběh tlaku vody v uzavřeném hydraulickém okruhu (X10A, 5min minima).", "Průběh: >1,0 bar normální, ≤1,0 bar nízký, ≤0,5 bar kritický (diagnóza od 60 s souvisle). Přípustný plnicí a provozní tlak určuje přesný návod modelu a výška soustavy; samotný údaj neprokazuje únik ani závadu."], // health_pressure
   ["Nejnižší průtok po 60 s souvislého chodu vnitřního čerpadla; samostatně: podle vzorků vážené statistiky rozdílu teplot vody, průtoku a povelu čerpadla po 600 s náběhu vytápění.", "Není jmenovitý průtok ani důkaz částečného zatížení. Platí pro společný vodní výměník tepla. Povel čerpadla není otáčkami ani dopravní výškou. Projektový filtr 600 s (mezery ≤15 s) neprokazuje ustálený stav; bez srovnání s cílem či hydraulické příčiny."], // health_flow
   ["Doba ON BUH/BSH", "ne energie ani důkaz zbytečného topení."], // health_heater
-  ["5 experimentálních čítačů", "srovnatelné nárůsty; mezery/reset vyloučeny. Stabilita nevylučuje omezení ani neprokazuje příčinu."], // health_retries
+  ["Experimentální interní čítače Daikin (0–7) porovnávané v po sobě jdoucích měřeních, i v klidu nebo na přechodech stavu kompresoru. Daikin nedokumentuje prahy ani nulování; mezery a resety se vynechávají. Stabilita nevylučuje omezení a nárůst neprokazuje poruchu ani příčinu."], // health_retries
   ["RAM 24 h stabilní, poklesy mizí; trvalý pokles: možný únik; napájený kompatibilní restart: průběh RAM možný. Jinak jen datované kompatibilní 5 min z flash žurnálu po seřízení hodin. Rastr 5 min může skrýt krátké pauzy; otevřené/nové neuložené mohou chybět."], // 8
   ["Největší souvislý blok volné RAM. TLS a OTA potřebují jeden velký blok i při vyšším celkovém volnu. Je nejvýše roven volné RAM. Klesá-li při stabilní volné RAM, roste fragmentace haldy a velká alokace může selhat před vyčerpáním paměti."], // 9
   ["Jmenovitý výkon venkovní jednotky z její identifikace; třída hardwaru, ne aktuální výroba."], // 10

@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 8ad662750578bf1efe55b4f0e56b693254581440e99a477829239f5a838eb2ca -->
+<!-- user-docs-contract: f68fd26b732ba7f4859d0c36e321d9293ba0b2d2c92010567eaa9c12ce9ad045 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -300,16 +300,11 @@ and reset, clock, and incomplete-record safeguards are described in the evidence
 <!-- user-docs: health_retries -->
 ### Protection-limit counter changes
 
-**In plain language:** The board compares five internal counters at consecutive readable endpoints,
-with a known compressor state. Only a comparable increase counts as an observed event.
+**In plain language:** The board compares five internal Daikin protection counters (discharge temperature, compressor inverter current, high pressure, low pressure, and inverter heatsink; each with values 0–7) across consecutive readable endpoints with a known compressor state, including while stopped or at compressor-state boundaries. Only a comparable increase counts as an observed event. Expanding the row shows the comparable observation duration, the five monitored protection areas (highlighting any counter that increased in the 24-hour window, or noting when an older snapshot does not identify which counter changed), and the experimental boundary without a generic normal target.
 
-**Meaning:** A usable comparison without an increase shows **TENTATIVE**; a comparable increase
-shows **NOTE**. Both retain experimental evidence and appear without a full-day wait. A non-zero
-startup value is a baseline, and a decrease has no established reset or wrap interpretation.
+**Meaning:** A usable comparison without an increase shows **TENTATIVE** (*No increase*); a comparable increase shows **NOTE** (*Increase*). Both retain experimental evidence and appear without a full-day wait. A non-zero startup value is a baseline, and gaps or decreases (undocumented resets or wraps) are ignored.
 
-**Important limit:** An increase does not identify a fault; no observed increase does not prove that
-protection limiting never occurred. The retained event flag cannot reconstruct individual counter
-changes or their cause.
+**Important limit:** Daikin does not publicly document the thresholds or reset rules of these counters. No observed increase does not prove that protection limiting never occurred, and an increase does not establish a fault, exact timestamp, increment count, or cause.
 
 **Evidence and limits:** [Protection-limit changes](DIAGNOSTIC_EVIDENCE.md#diagnosis-retries)
 
