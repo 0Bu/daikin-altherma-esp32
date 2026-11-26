@@ -1420,7 +1420,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         ufield(",\"available\":", hr.available);
         ufield(",\"assessable\":", hr.assessable);
         ufield(",\"evaluated\":", hr.evaluated);
-        qfield(",\"status\":", logic::checkup_verdict_name(hr.overall));
         j += ",\"checks\":[";
         // An integer field, or null when the check did not establish it.
         // Keep one implementation of the many nullable integer fields in the compact image.
@@ -1654,7 +1653,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     }
 
     // A separate read-only service observation, deliberately OUTSIDE health{}: it never contributes
-    // to the eight diagnosis rows, assessable/evaluated counts or the overall verdict.  Before this
+    // to the eight diagnosis rows or their available/assessable/evaluated counts.  Before this
     // boot has detected a profile AND the poll task has evaluated that profile's coverage there is
     // no service source to describe, so omit the complete object instead of misreporting the
     // tracker's default unsupported_profile state. Every number below is from one uninterrupted

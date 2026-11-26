@@ -16389,14 +16389,13 @@ static void test_checkup_evidence_overhaul() {
     CHECK(report[CheckupCheck::DhwLoss].observation_only);
     CHECK(std::string(checkup_result_evidence_name(
               CheckupCheck::DhwLoss, report[CheckupCheck::DhwLoss])) == "observation");
-    CHECK(report.assessable == 0 && report.evaluated == 0 &&
-          report.overall == CheckupVerdict::Unavailable);
+    CHECK(report.assessable == 0 && report.evaluated == 0);
     DhwLossWindow notable       = loss;
     notable.high_windows        = 1;
     notable.quiet_high_windows  = 1;
     notable.max_loss_tenths_k_h = 10;
-    CHECK(checkup_evaluate(window, cov, FaultClass::Unknown, notable).overall ==
-          CheckupVerdict::Info);
+    CHECK(checkup_evaluate(window, cov, FaultClass::Unknown, notable)[CheckupCheck::DhwLoss]
+              .verdict == CheckupVerdict::Info);
 
     cov       = CheckupCoverage{};
     cov.fault = cov.pressure = true;
@@ -16405,12 +16404,14 @@ static void test_checkup_evidence_overhaul() {
     report                   = checkup_evaluate(window, cov, FaultClass::Normal);
     checkup_apply_freshness(report, true, 1, CHECKUP_WINDOW_S + 10);
     CHECK(report.source_fresh && report.source_age_s == 1 && report.span_s == CHECKUP_WINDOW_S);
-    CHECK(report.evaluated == 2 && report.overall == CheckupVerdict::Ok);
+    CHECK(report.evaluated == 2 && report[CheckupCheck::Fault].verdict == CheckupVerdict::Ok &&
+          report[CheckupCheck::Pressure].verdict == CheckupVerdict::Ok);
     checkup_apply_freshness(report, false, UINT32_MAX, CHECKUP_WINDOW_S);
     CHECK(!report.source_fresh && report[CheckupCheck::Fault].a == -1);
     CHECK(report[CheckupCheck::Fault].reason == CheckupReason::SourceStale);
     CHECK(report[CheckupCheck::Pressure].verdict == CheckupVerdict::Collecting);
-    CHECK(report.evaluated == 0 && report.overall == CheckupVerdict::Collecting);
+    CHECK(report.evaluated == 0 &&
+          report[CheckupCheck::Fault].verdict == CheckupVerdict::Collecting);
     window.min_bar  = 0;
     window.flags    = CHECKUP_F_LOW_BAR;
     window.bar_crit = true;
@@ -18749,9 +18750,9 @@ static void test_checkup(bool with_trace) {
             CHECK(r.dhw_aborts == 6);
             CHECK(r.dhw_best_aborted_s == 2400);
             CHECK(r.dhw_abort_reasons == (DHW_ABORT_CHARGE | DHW_ABORT_PUMP));
-            // Unavailable says nothing either way: it must not be counted as an assessable check
-            // and must not drag the card's overall verdict.
-            CHECK(r.overall != CheckupVerdict::Collecting);
+            // Unavailable says nothing either way: it must not be counted as an assessable or
+            // evaluated check.
+            CHECK(r.assessable == 0 && r.evaluated == 0);
         }
         // DIAG-02/b: the X10A lifecycle alone does not license it. A DHW-only reset (a circulation
         // remap) or a restore that dropped DHW hours restarts the DHW scope and not that lifecycle,
@@ -18953,7 +18954,7 @@ static void test_checkup(bool with_trace) {
             const auto report = checkup_evaluate(scope, cov, FaultClass::Unknown, w);
             CHECK(report[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Ok);
             CHECK(report[CheckupCheck::DhwLoss].observation_only);
-            CHECK(report.overall == CheckupVerdict::Unavailable);
+            CHECK(report.assessable == 0 && report.evaluated == 0);
             CHECK(report.dhw_draw_windows == w.draw_windows);
             CHECK(report.dhw_pump_windows == w.pump_windows);
         }
@@ -19125,8 +19126,8 @@ static void test_checkup(bool with_trace) {
         const CheckupReport a = checkup_evaluate(without, full, FaultClass::Normal);
         const CheckupReport b = checkup_evaluate(with, full, FaultClass::Normal);
         CHECK(b.cycling_outdoor.samples == 100 && b.defrost_outdoor.samples == 50);
-        CHECK(a.overall == b.overall && a.available == b.available &&
-              a.assessable == b.assessable && a.evaluated == b.evaluated);
+        CHECK(a.available == b.available && a.assessable == b.assessable &&
+              a.evaluated == b.evaluated);
         for (size_t i = 0; i < CHECKUP_CHECK_COUNT; i++)
             CHECK(a.checks[i].verdict == b.checks[i].verdict);
     }
@@ -19207,7 +19208,7 @@ static void test_checkup(bool with_trace) {
         CHECK(r[CheckupCheck::Cycling].observation_only);
         CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::ClassUnavailable);
         CHECK(r[CheckupCheck::Cycling].a == 24 && r[CheckupCheck::Cycling].b == -1);
-        CHECK(!r.cycling_split && r.overall != CheckupVerdict::Info);
+        CHECK(!r.cycling_split);
 
         CheckupCoverage split = full;
         split.valve = split.mode = true;
@@ -19606,21 +19607,12 @@ static void test_checkup(bool with_trace) {
     }
     {
         // AGGREGATION. Supported observations remain visible and count as available, but only
-        // bounded adjudications may count as evaluated or support a green no-finding summary.
-        // Collecting does hold back an adjudication that could run and lacks evidence.
-        CHECK(checkup_worse(CheckupVerdict::Ok, CheckupVerdict::Unavailable) == CheckupVerdict::Ok);
-        CHECK(checkup_worse(CheckupVerdict::Ok, CheckupVerdict::Collecting) ==
-              CheckupVerdict::Collecting);
-        CHECK(checkup_worse(CheckupVerdict::Collecting, CheckupVerdict::Info) ==
-              CheckupVerdict::Info);
-        CHECK(checkup_worse(CheckupVerdict::Info, CheckupVerdict::Warn) == CheckupVerdict::Warn);
-        CHECK(checkup_worse(CheckupVerdict::Warn, CheckupVerdict::Warn) == CheckupVerdict::Warn);
+        // bounded adjudications may count as assessable or evaluated.
 
-        // A profile that can supply NOTHING: every row Unavailable, and the card says so rather
-        // than claiming a clean bill of health.
+        // A profile that can supply NOTHING: every row Unavailable and zero counts.
         const CheckupCoverage none;
         const CheckupReport   r = checkup_evaluate(day(), none, FaultClass::Unknown);
-        CHECK(r.overall == CheckupVerdict::Unavailable);
+        CHECK(r.available == 0 && r.assessable == 0 && r.evaluated == 0);
         for (const auto& c : r.checks) CHECK(c.verdict == CheckupVerdict::Unavailable);
         // …and only a fully-spanned, per-signal-covered window with no supported finding clears.
         CheckupWindow good = day();
@@ -19640,7 +19632,10 @@ static void test_checkup(bool with_trace) {
         clean_dhw.windows             = 6;
         clean_dhw.max_loss_tenths_k_h = 3;
         const CheckupReport ok        = checkup_evaluate(good, all, FaultClass::Normal, clean_dhw);
-        CHECK(ok.overall == CheckupVerdict::Ok);
+        CHECK(ok[CheckupCheck::Fault].verdict == CheckupVerdict::Ok &&
+              ok[CheckupCheck::Cycling].verdict == CheckupVerdict::Ok &&
+              ok[CheckupCheck::Defrost].verdict == CheckupVerdict::Ok &&
+              ok[CheckupCheck::Pressure].verdict == CheckupVerdict::Ok);
         CHECK(ok.full_span && ok.available == CHECKUP_CHECK_COUNT && ok.assessable == 4 &&
               ok.evaluated == 4); // current fault, heating runs, defrost ratio and pressure
 
@@ -19660,7 +19655,6 @@ static void test_checkup(bool with_trace) {
         CHECK(observed.available == 3);
         CHECK(observed.assessable == 0);
         CHECK(observed.evaluated == 0);
-        CHECK(observed.overall == CheckupVerdict::Unavailable);
 
         // An actually observed experimental increase may raise Info; a stable counter does not
         // support an absence conclusion and therefore stays outside the evaluated denominator.
@@ -19669,7 +19663,6 @@ static void test_checkup(bool with_trace) {
         const CheckupReport with_retry =
             checkup_evaluate(retry_event, all, FaultClass::Normal, clean_dhw);
         CHECK(with_retry[CheckupCheck::Retries].verdict == CheckupVerdict::Info);
-        CHECK(with_retry.overall == CheckupVerdict::Info);
         CHECK(with_retry.assessable == 4 && with_retry.evaluated == 4);
         // These strings are the existing /status.health wire contract. Non-empty is insufficient:
         // a well-formed rename would make an older UI silently skip a row or misread a verdict.

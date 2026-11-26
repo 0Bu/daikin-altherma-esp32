@@ -467,7 +467,7 @@ separate clocks, and sub-minute activity remains visible. Source limitations and
 all rule details are maintained in [DIAGNOSTICS.md](DIAGNOSTICS.md) and its evidence reference.
 
 A separate neutral **Refrigerant (heating)** row uses passive fresh-sweep observation.
-Its collection needs no 24-hour opt-in and contributes no badge/count/verdict. The whole diagnosis
+Its collection needs no 24-hour opt-in and contributes no `/status.health` count or verdict. The whole diagnosis
 card is hidden when Plant diagnostics is off, and this X10A row is hidden when `Modbus` is the
 active display source. When `X10A` is displayed with opt-in, the row uses the current HTTP status
 after signal coverage is evaluated this boot. A failed status fetch or an OTA snapshot hides it.
@@ -480,7 +480,7 @@ A separate neutral **Performance factor** (`Arbeitszahl` in German) observation 
 24-hour heating/DHW energy and optional break-even gas comparison when `working_figure` is
 emitted (Plant diagnostics on, active display source either `X10A` with valid boot profile
 fingerprint or a configured `Modbus` target; omitted on older firmware). Like
-**Refrigerant (heating)**, it contributes no badge count or `/status.health` verdict. Collapsed rows
+**Refrigerant (heating)**, it contributes no `/status.health` count or verdict. Collapsed rows
 leave the value blank while `Collecting` (retaining `Performance factor: Collecting` in `aria-label`
 for screen readers), show dimmed `Standby` or `Not supported` (including native Altherma 4 or
 unconfirmed `Probing`/`Fallback` Modbus sweeps) without a figure, or show the computed working
@@ -670,7 +670,7 @@ quantity. Units/type come from converter metadata; nameplate capacity is not an 
 No group duplicates the dedicated connection/firmware cards.
 
 Match precedence is a separate rule: specific Protection drop/retry labels win before broad current/
-discharge keywords. Active drop flags add the written Limiting now state and warning colour;
+discharge keywords. Active drop flags highlight their 1 reading in warning colour;
 cumulative retry counters do not. Normal freeze-protection ON is not a limiting flag. Empty groups
 are hidden; missing readings in supported groups remain `—`. Exact matching/order is maintained in
 [dashboard.js](../main/www/js/dashboard.js).

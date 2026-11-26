@@ -2512,12 +2512,10 @@ async function assertPlantDiagnosis(page, context) {
       assert.ok(openedEnergy.includes(assumption), `${context}: energy assumptions retain ${assumption}`);
     assert.ok((await dhwText()).includes(discardedContext),
       `${context}: opened basis retains discarded reading-gap evidence for the NOTE`);
-    const diagnosisBadge = () => page.evaluate(`(() => {
-      const badge = document.querySelector("[data-desc='model:health_fault']").closest('.card').querySelector('.section-badge');
-      return [badge?.innerText, badge?.classList.contains("err")];
-    })()`);
-    assert.deepEqual(await diagnosisBadge(), [await page.evaluate("t('check.summary.notes', 3)"), false],
-      `${context}: pressure is represented only by the schematic signal, not the diagnosis badge`);
+    const diagnosisBadge = () => page.evaluate(`document.querySelector("[data-desc='model:health_fault']")
+      .closest('.card').querySelector('.section-badge')`);
+    assert.equal(await diagnosisBadge(), null,
+      `${context}: diagnosis card renders no header summary badge`);
     await captureNativeEvidence(page, `${context}/expanded`);
     for (const id of ["dhw_loss", "cycling"])
       await captureNativeEvidence(page, `${context}/${id}`,
@@ -2530,8 +2528,8 @@ async function assertPlantDiagnosis(page, context) {
       renderApp(); return true;
     })()`);
     await page.waitFor(`document.querySelector(${JSON.stringify(defrostHint)})`);
-    assert.deepEqual(await diagnosisBadge(), [await page.evaluate("t('check.summary.notes', 4)"), false],
-      `${context}: removal of the duplicate details preserves the raised defrost finding`);
+    assert.equal(await diagnosisBadge(), null,
+      `${context}: raised defrost finding stays on its row without adding a card header badge`);
     await expectDefrostPill(true, "fresh-X10A-note");
     await page.evaluate("S.status.health.source_fresh = false; renderApp(); true");
     await expectDefrostPill(false, "stale-X10A-note-with-live-link");
@@ -2913,18 +2911,17 @@ async function assertWorkingFigure(page, context) {
     const cheaperState = await page.evaluate(`(() => {
       const row = document.querySelector("[data-desc='observation:working_figure']");
       const body = row?.closest(".vitem")?.querySelector(".vdesc-body");
-      const badge = document.querySelector("[data-dashboard-card='diagnosis'] .section-badge")?.innerText;
+      const badge = document.querySelector("[data-dashboard-card='diagnosis'] .section-badge");
       return {
         kpis: body ? body.querySelectorAll(".wf-kpis-4 .wf-kpi").length : 0,
         hasScale: !!body?.querySelector(".wf-scale"),
         badge,
-        expectedBadge: t("check.summary.warnings", 1),
       };
     })()`);
     assert.equal(cheaperState.kpis, 4, `${context}: tariffs-configured working figure renders 4 KPI tiles`);
     assert.equal(cheaperState.hasScale, true, `${context}: Break-Even scale bar renders when tariffs configured`);
-    assert.equal(cheaperState.badge, cheaperState.expectedBadge,
-      `${context}: working figure never alters the checkup summary badge`);
+    assert.equal(cheaperState.badge, null,
+      `${context}: diagnosis card renders no header summary badge`);
     assertLayout(await page.evaluate(layoutAudit), `${context}/cheaper`);
     await assertAccessibility(page, `${context}/cheaper`, { nativeTree: true });
 

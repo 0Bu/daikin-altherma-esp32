@@ -1,4 +1,4 @@
-// translation-source: c2571eea4c9e1b1557c03b1681258c3302a5a3ec6e3069de40751f5d837f74b1
+// translation-source: 9d5db6b481e895505e13600d42051d375612a2008f0d31e718bbfbe0f88e9a08
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -402,11 +402,6 @@ I18N.fr = localeValues([
   /* check.detail.minimum_time_label */ "≤0,5 bar critique",
   /* check.detail.coverage_missing */ (a) => `Temps lisible manquant : ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a} : couverture ${b}`,
-  /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "avertissement" : "avertissements"}`,
-  /* check.summary.notes */ (n) => `${n} ${n === 1 ? "note" : "notes"}`,
-  /* check.summary.ok */ "Aucun indice dans les données évaluées",
-  /* check.summary.collecting */ "Collecte de données",
-  /* check.summary.observations */ "Observations",
   /* values.waiting */ "En attente de la première interrogation…",
   /* values.sg_x10a_mode */ "Mode Smart Grid (contacts X10A)",
   /* group.Operation */ "Fonctionnement",
@@ -417,7 +412,6 @@ I18N.fr = localeValues([
   /* group.Device */ "Appareil",
   /* group.Other values */ "Autres valeurs",
   /* group.Protection */ "Protection",
-  /* protect.limiting */ "limitation en cours",
   /* group.Values */ "Valeurs",
   /* state.on */ "MARCHE",
   /* state.off */ "ARRÊT",

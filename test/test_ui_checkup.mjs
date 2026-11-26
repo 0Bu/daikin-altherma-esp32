@@ -29,14 +29,14 @@ assert.match(dashboardSource, /const GROUP_ORDER = \["Operation"/s,
 assert.doesNotMatch(dashboardSource, /checkup \+ service \+|refrigerantServiceCardHtml/,
                     "refrigerant service must not return as a separate dashboard card");
 assert.match(dashboardSource,
-             /return hp\.connected \? vcard\(t\("card\.model"\), model, "", "", "model"\) : "";/,
+             /return hp\.connected \? vcard\(t\("card\.model"\), model, "model"\) : "";/,
              "the Model card must follow plant diagnostics and precede Operation without reviving the removed outdoor card");
 // Pin the existing /status.health surface plus its additive evidence fields at the actual serializer.
 // The UI payloads below are synthetic by design; without this half, a C++ key drift could leave every
 // renderer test green while the board sends a different contract.
 const normalizedStatusSource = statusSource.replaceAll("\\\"", "\"");
 for (const key of [
-  "health", "covered_s", "status", "checks",
+  "health", "covered_s", "checks",
   "span_s", "source_age_s", "source_fresh", "reason",
   "persist",
   "full_span", "available", "assessable", "evaluated", "evidence", "observed_s", "required_s",
@@ -62,6 +62,8 @@ for (const key of [
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
 }
+assert.doesNotMatch(normalizedStatusSource, /"status":/,
+                    "removed /status.health.status must not be serialized");
 assert.match(statusSource,
              /case logic::CheckupCheck::Flow:\s*tenths\("min_l_min", ck\.a\);\s*append_hydronic_status\(j, diag_effective, c\.diagnostics_enabled, redact\);/,
              "flow check serializer must retain min_l_min and delegate hydronic details");
@@ -1141,24 +1143,24 @@ assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: 0, bsh_s: 59 }),
 assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: null, bsh_s: 0 }),
   ui.text("en", "check.min", `${ui.text("en", "check.tank_short")} 0`));
 
-// The badge counts the highest-severity serialized findings; unrelated metadata cannot turn it
-// into a health score. Pure observations never get a fake assessment denominator.
+// The card renders no header summary badge; per-row verdicts carry the state, and unrelated
+// metadata cannot turn it into a health score. Pure observations never get a fake assessment denominator.
 context.S.status = { health: {
-  status: "info", assessable: 4, evaluated: 2, available: 8,
+  assessable: 4, evaluated: 2, available: 8,
   span_s: 3600, source_age_s: 5, source_fresh: true, full_span: false,
   checks: [dhw, pressure, cycling],
 } };
 let card = ui.card();
-assert.match(card, />2 notes<\/span>/);
+assert.doesNotMatch(card, /section-badge/);
 assert.doesNotMatch(card, /model:health_pressure/);
 assert.doesNotMatch(card, /2\/4 checks|checks assessed/);
 assert.match(card, /class="vrow-val checkup-val warn"/);
 assert.doesNotMatch(card, /All clear|healthy|8 values|health score/);
-context.S.status.health = { status: "unavailable", assessable: 0, evaluated: 0,
+context.S.status.health = { assessable: 0, evaluated: 0,
   checks: [{ id: "flow", verdict: "ok", evidence: "observation", min_l_min: 8.4 }] };
 card = ui.card();
 assert.equal(card, "", "a flow-only report belongs in the inspector and cannot create a second card");
-context.S.status.health = { status: "unavailable", persist: "unknown",
+context.S.status.health = { persist: "unknown",
   checks: [{ id: "cycling", verdict: "unavailable" }] };
 for (const lang of locales) {
   const message = ui.text(lang, "sys.nodata");
@@ -1167,13 +1169,12 @@ for (const lang of locales) {
   assert.doesNotMatch(card, /health_cycling|N\/A|NaN/);
 }
 ui.setLang("en");
-context.S.status.health = { status: "warn", checks: [dhw, { ...pressure, verdict: "warn" }] };
-assert.match(ui.card(), />1 note<\/span>/);
-assert.doesNotMatch(ui.card(), />1 warning<\/span>|section-badge err/);
-context.S.status.health = { status: "ok", checks: [{ id: "fault", verdict: "ok", active: 0 }] };
-assert.match(ui.card(), />No hint in assessed data<\/span>/);
-context.S.status.health = { status: "collecting", checks: [collecting] };
-assert.match(ui.card(), />Collecting data<\/span>/);
+context.S.status.health = { checks: [dhw, { ...pressure, verdict: "warn" }] };
+assert.doesNotMatch(ui.card(), /section-badge/);
+context.S.status.health = { checks: [{ id: "fault", verdict: "ok", active: 0 }] };
+assert.doesNotMatch(ui.card(), /section-badge/);
+context.S.status.health = { checks: [collecting] };
+assert.doesNotMatch(ui.card(), /section-badge/);
 context.S.status.health.checks = [{ id: "future_check", verdict: "warn", opaque: "<must-not-render>" }];
 assert.equal(ui.card(), "");
 

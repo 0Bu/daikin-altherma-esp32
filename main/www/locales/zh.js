@@ -1,4 +1,4 @@
-// translation-source: c2571eea4c9e1b1557c03b1681258c3302a5a3ec6e3069de40751f5d837f74b1
+// translation-source: 9d5db6b481e895505e13600d42051d375612a2008f0d31e718bbfbe0f88e9a08
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -402,11 +402,6 @@ I18N.zh = localeValues([
   /* check.detail.minimum_time_label */ "≤0.5 bar 危急",
   /* check.detail.coverage_missing */ (a) => `缺少可读时间：${a} s。`,
   /* check.detail.channel_coverage */ (a, b) => `${a}：覆盖 ${b}`,
-  /* check.summary.warnings */ (n) => `${n} 项警告`,
-  /* check.summary.notes */ (n) => `${n} 项提示`,
-  /* check.summary.ok */ "已评估数据中无提示",
-  /* check.summary.collecting */ "收集数据",
-  /* check.summary.observations */ "观察值",
   /* values.waiting */ "正在等待首次轮询…",
   /* values.sg_x10a_mode */ "Smart Grid 模式（X10A 触点）",
   /* group.Operation */ "运行",
@@ -417,7 +412,6 @@ I18N.zh = localeValues([
   /* group.Device */ "设备",
   /* group.Other values */ "其他数值",
   /* group.Protection */ "保护",
-  /* protect.limiting */ "正在限功率",
   /* group.Values */ "数值",
   /* state.on */ "开",
   /* state.off */ "关",

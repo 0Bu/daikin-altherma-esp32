@@ -1,4 +1,4 @@
-// translation-source: c2571eea4c9e1b1557c03b1681258c3302a5a3ec6e3069de40751f5d837f74b1
+// translation-source: 9d5db6b481e895505e13600d42051d375612a2008f0d31e718bbfbe0f88e9a08
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -402,11 +402,6 @@ I18N.ja = localeValues([
   /* check.detail.minimum_time_label */ "≤0.5 bar 危険",
   /* check.detail.coverage_missing */ (a) => `不足する読取可能時間：${a} s。`,
   /* check.detail.channel_coverage */ (a, b) => `${a}：網羅 ${b}`,
-  /* check.summary.warnings */ (n) => `警告 ${n} 件`,
-  /* check.summary.notes */ (n) => `参考所見 ${n} 件`,
-  /* check.summary.ok */ "評価データに参考所見なし",
-  /* check.summary.collecting */ "データ収集中",
-  /* check.summary.observations */ "観測",
   /* values.waiting */ "初回取得を待機中…",
   /* values.sg_x10a_mode */ "Smart-Gridモード（X10A接点）",
   /* group.Operation */ "運転",
@@ -417,7 +412,6 @@ I18N.ja = localeValues([
   /* group.Device */ "機器",
   /* group.Other values */ "その他の値",
   /* group.Protection */ "保護",
-  /* protect.limiting */ "現在制限中",
   /* group.Values */ "値",
   /* state.on */ "入",
   /* state.off */ "切",
