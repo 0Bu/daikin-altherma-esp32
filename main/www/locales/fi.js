@@ -1,4 +1,4 @@
-// translation-source: 5ddbfabdc2b4730876b10007be47010a018f4477e8886237ca146e65aabc544d
+// translation-source: c2571eea4c9e1b1557c03b1681258c3302a5a3ec6e3069de40751f5d837f74b1
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
