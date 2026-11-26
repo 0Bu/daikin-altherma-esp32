@@ -171,6 +171,7 @@ try {
       checkupMetricValue, checkupValue,
       checkupCardHtml, refrigerantServiceRowHtml, checkupDetailHtml,
       checkupDhwReport, checkupDhwBriefHtml, checkupDhwCoolingExplanation,
+      checkupHeaterReport, checkupHeaterBriefHtml,
       cyclingPeriodDetailsHtml: (scope, from, to) => cyclingPeriodDetailsHtml(_cyclingModels.get(scope), from, to),
       checkupCyclingTimelineHtml,
     };`,
@@ -262,10 +263,6 @@ try {
     { id: "pressure", verdict: "ok", current_bar: null, min_bar: NaN },
     { id: "flow", verdict: "ok", min_l_min: 14.5 },
     { id: "flow", verdict: "collecting", min_l_min: null },
-    { id: "heater", verdict: "ok", buh_s: 30, bsh_s: 120 },
-    { id: "heater", verdict: "ok", buh_s: 0, bsh_s: null },
-    { id: "heater", verdict: "ok", buh_s: null, bsh_s: 90 },
-    { id: "heater", verdict: "ok", buh_s: null, bsh_s: null },
     { id: "retries", verdict: "info", seen: true },
     { id: "retries", verdict: "ok", seen: false },
     { id: "retries", verdict: "collecting", seen: null },
@@ -473,21 +470,87 @@ try {
     { id: "pressure", verdict: "info", min_bar: 0.8, current_bar: 1.2, observed_s: 3600, required_s: 3600 },
     { id: "flow", verdict: "ok", min_l_min: 14.0, observed_s: 3600, required_s: 3600,
       hydronic: { confirmed: true, current: true, dated: true, samples: 5, spread_k: { min: 1.5, mean: 2.0, max: 3.0 } } },
-    { id: "heater", verdict: "ok", buh_s: 60, bsh_s: 120, buh_observed_s: 3600, bsh_observed_s: 3600, observed_s: 3600,
-      context: { confirmed: true, dated: true, coverage_partial: true, restore_pending: false, persistence_pending: true,
-        archive_incomplete: false, clock_uncertain: false, storage_loss: false, dropped: 0,
-        buh: { supported: true, on_s: 60, union_s: 30, overlap_s: 10, unknown_context_s: 30, unclassified_s: 30,
-          readable_s: 3600, saturated: false, quiet_mild_notice: true,
-          categories: { emergency: { supported: true, positive_s: 0, evaluable_on_s: 60, positive_samples: 1 },
-            error: { supported: false }, silent: { supported: true, positive_s: null, evaluable_on_s: null, positive_samples: null },
-            dhw_route: { supported: true, positive_s: 30, evaluable_on_s: 60, positive_samples: 2 } } },
-        bsh: { supported: false } } },
-    { id: "heater", verdict: "collecting", buh_s: null, bsh_s: null, observed_s: 0,
-      context: { confirmed: false, dated: false, coverage_partial: false, restore_pending: true, persistence_pending: false,
-        archive_incomplete: true, clock_uncertain: true, storage_loss: true, dropped: 3,
-        buh: { supported: true, saturated: true }, bsh: { supported: true, saturated: true } } },
     { id: "retries", verdict: "info", seen: true, observed_s: 3600, required_s: 3600 },
   ]) ui.checkupDetailHtml(ck, true, { source: "x10a", span_s: 86400, source_fresh: true });
+  // Exercise checkupHeaterReport & checkupHeaterBriefHtml across all branches.
+  assert.equal(ui.checkupHeaterReport(null), null);
+  assert.equal(ui.checkupHeaterReport("invalid"), null);
+  assert.equal(ui.checkupHeaterBriefHtml(null), "");
+  ui.S.otaCached = true;
+  assert.equal(ui.checkupHeaterReport("buh"), null);
+  ui.S.otaCached = false;
+  ui.S.transportUnavailable = "status";
+  assert.equal(ui.checkupHeaterReport("buh"), null);
+  ui.S.transportUnavailable = null;
+  ui.S.status.diagnostics = { enabled: false };
+  assert.equal(ui.checkupHeaterReport("buh"), null);
+  ui.S.status.diagnostics = { enabled: true, source: "x10a", effective_source: "x10a" };
+  ui.S.status.health = { source: "x10a", persist: "unknown", checks: [{ id: "heater" }] };
+  assert.equal(ui.checkupHeaterReport("buh"), null);
+  ui.S.status.health = { source: "env3", persist: "fresh", checks: [{ id: "heater" }] };
+  assert.equal(ui.checkupHeaterReport("buh"), null);
+  const covHeaterCases = [
+    ["buh", "x10a", true, {
+      id: "heater", verdict: "ok", buh_s: 360, bsh_s: null, buh_observed_s: 3600,
+      context: {
+        confirmed: true, archive_incomplete: false, storage_loss: false, dropped: 0,
+        buh: {
+          supported: true, on_s: 360, saturated: false, quiet_mild_notice: true,
+          categories: {
+            emergency: { supported: true, positive_s: 0, positive_samples: 1 },
+            error: { supported: true, positive_s: 15, positive_samples: 1 },
+            quiet_mild_heating: { supported: true, positive_s: 90, positive_samples: 3 },
+            defrost_recovery: { supported: true, positive_s: 45, positive_samples: 2 },
+            dhw_route: { supported: true, positive_s: 45, positive_samples: 2 },
+            silent: { supported: true, positive_s: 120, positive_samples: 4 },
+            cold_outdoor: { supported: false, positive_s: 10, positive_samples: 1 },
+            mild_outdoor: { supported: true, positive_s: 0, positive_samples: 0 },
+            compressor_off: { supported: true, positive_s: null, positive_samples: 1 },
+          },
+        },
+      },
+    }],
+    ["bsh", "x10a", true, {
+      id: "heater", verdict: "ok", buh_s: null, bsh_s: 0, bsh_observed_s: 7200,
+      context: { confirmed: true, archive_incomplete: true, bsh: { supported: true, saturated: false } },
+    }],
+    ["bsh", "x10a", false, {
+      id: "heater", verdict: "ok", buh_s: null, bsh_s: 0, bsh_observed_s: null, reason: "source_stale",
+    }],
+    ["buh", "x10a", true, {
+      id: "heater", verdict: "collecting", buh_s: null, bsh_s: null,
+      context: { confirmed: true, dropped: 2, buh: { supported: true, on_s: 60, categories: {} } },
+    }],
+    ["buh", "x10a", false, {
+      id: "heater", verdict: "collecting", buh_s: null, bsh_s: null, reason: "source_stale",
+      context: { confirmed: true, storage_loss: true, buh: { supported: true, on_samples: 1, categories: {} } },
+    }],
+    ["bsh", "x10a", true, {
+      id: "heater", verdict: "ok", buh_s: null, bsh_s: null, bsh_min: 5, bsh_observed_s: 3600,
+    }],
+    ["bsh", "x10a", true, {
+      id: "heater", verdict: "ok", buh_s: null, bsh_s: null, bsh_min: 5, bsh_observed_s: null,
+    }],
+    ["buh", "x10a", true, {
+      id: "heater", verdict: "collecting", buh_s: null, bsh_s: null,
+      context: { confirmed: true, archive_incomplete: true, buh: { supported: true, saturated: true,
+        categories: { silent: { supported: true, positive_s: null, positive_samples: 2 } } } },
+    }],
+    ["buh", "x10a", false, {
+      id: "heater", verdict: "collecting", buh_s: null, bsh_s: null,
+      context: { confirmed: true, archive_incomplete: true, buh: { supported: true } },
+    }],
+    ["buh", "x10a", true, {
+      id: "heater", verdict: "unavailable", buh_s: null, bsh_s: null,
+    }],
+    ["buh", "modbus", true, { id: "heater", verdict: "ok", buh_s: 60, bsh_s: 120 }],
+    ["bsh", "modbus", true, { id: "heater", verdict: "ok", buh_s: 60, bsh_s: 120 }],
+  ];
+  for (const [which, source, fresh, ck] of covHeaterCases) {
+    ui.S.status.diagnostics = { enabled: true, source, effective_source: source, available_sources: [source] };
+    ui.S.status.health = { source, source_fresh: fresh, persist: "fresh", checks: [ck] };
+    ui.checkupHeaterBriefHtml(ui.checkupHeaterReport(which));
+  }
   ui.S.status.diagnostics = { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] };
   ui.S.status.health = {
     source: "x10a", source_fresh: true, persist: "fresh",

@@ -159,8 +159,9 @@ function renderCards(hold = true) {
   if (S.scrub || (hold && S.clickHold)) return;
   // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows
   // follow the active diagnostics source (X10A or Modbus). Flow observations live in the Flow
-  // inspector and DHW tank cooling lives in the Tank inspector. Passive refrigerant observations
-  // can remain visible independently of the summary.
+  // inspector, DHW tank cooling lives in the Tank inspector, and electric heater observations live
+  // in the BUH and BSH inspectors. Passive refrigerant observations can remain visible independently
+  // of the summary.
   const checkupSourceReady = checkupSourceReadyFor();
   let checkup = "";
   if (S.status?.diagnostics?.enabled === true) {
@@ -2233,70 +2234,137 @@ function checkupFlowBriefHtml({ source, minimum, locationsMissing, unsupported, 
   return head + checkupWaterAgreementHtml(agreement);
 }
 
-function checkupHeaterContextHtml(c) {
-  const s = c.context;
-  if (!s || typeof s !== "object" || Array.isArray(s)) return "";
-  const splitSegs = (key, count) => {
-    const raw = t(key);
-    const parts = typeof raw === "string" ? raw.split("|") : [];
-    return parts.length === count ? parts : null;
-  };
-  const states = splitSegs("check.heater_context.states", 9);
-  const labels = splitSegs("check.heater_context.categories", 9);
-  const columns = splitSegs("check.heater_context.columns", 3);
-  const totals = splitSegs("check.heater_context.totals", 6);
-  if (!states || !labels || !columns || !totals) return "";
-  const state = [];
-  if (s.confirmed !== true) state.push(states[0]);
-  if (s.dated !== true) state.push(states[1]);
-  if (s.coverage_partial === true) state.push(states[2]);
-  const droppedLabel = Number.isFinite(s.dropped) && s.dropped > 0
-    ? ` (≥${s.dropped.toLocaleString(LANG)})` : "";
-  if (s.archive_incomplete === true) state.push(states[5] + droppedLabel);
-  else if (s.storage_loss === true || s.dropped > 0) state.push(states[5] + droppedLabel);
-  else if (s.restore_pending === true) state.push(states[3]);
-  if (s.persistence_pending === true) state.push(states[4]);
-  if (s.clock_uncertain === true) state.push(states[6]);
-  if (s.buh?.saturated === true || s.bsh?.saturated === true) state.push(states[7]);
-  const channels = [s.buh, s.bsh].map(h => (h && typeof h === "object" && !Array.isArray(h) ? h : null));
-  const title = descParaHtml(`<span class="vdesc-n">${esc(t("check.heater_context.title"))}</span>`);
-  const hasHeater = channels.some(h => h?.supported === true);
-  if (!hasHeater && s.confirmed === true) state.push(states[8]);
-  const status = state.length ? descParaHtml(esc(state.join(" · "))) : "";
-  if (s.confirmed !== true || !hasHeater) return title + status + descParaHtml(esc(t("check.heater_context.limits")));
-  const number = (n, saturated, unit = " s") => Number.isFinite(n) && n >= 0
-    ? `${saturated ? "≥" : ""}${Math.floor(n).toLocaleString(LANG)}${unit}` : t("sys.nodata");
-  const row = (label, value) => `<tr><th scope="row">${esc(label)}</th><td>${esc(value)}</td></tr>`;
-  const categoryIds = ["emergency", "error", "defrost_recovery", "dhw_route", "silent",
-    "cold_outdoor", "mild_outdoor", "compressor_off", "quiet_mild_heating"];
-  const countsCaption = t("check.heater_context.counts");
-  const table = channels.map((h, heater) => {
-    const name = columns[heater + 1];
-    if (h?.supported !== true) return descParaHtml(esc(`${name}: ${h?.supported === false ? states[8] : t("sys.nodata")}`));
-    const categoryRows = categoryIds.map((id, k) => {
-      const v = h.categories?.[id];
-      let value = t("sys.nodata");
-      if (v?.supported === false) value = states[8];
-      else if (v?.supported === true && (v.positive_s ?? v.evaluable_on_s ?? v.positive_samples) != null) {
-        const saturated = h.saturated === true;
-        const positive = !saturated && v.positive_s === 0 &&
-          Number.isFinite(v.positive_samples) && v.positive_samples > 0
-          ? "<1 s" : number(v.positive_s, saturated);
-        value = `${positive} / ${number(v.evaluable_on_s, saturated)} · ${number(v.positive_samples, saturated, "")}`;
+const HEATER_HIGH_SIGNAL_CONTEXTS = ["emergency", "error", "quiet_mild_heating"];
+const HEATER_CONTEXT_TIE_BREAK = [
+  "defrost_recovery", "dhw_route", "compressor_off", "silent", "cold_outdoor", "mild_outdoor",
+];
+const HEATER_CONTEXT_CATEGORIES = [
+  "emergency", "error", "defrost_recovery", "dhw_route", "silent",
+  "cold_outdoor", "mild_outdoor", "compressor_off", "quiet_mild_heating",
+];
+
+function checkupHeaterReport(which) {
+  if (which !== "buh" && which !== "bsh") return null;
+  if (S.status?.diagnostics?.enabled !== true || S.otaCached || S.transportUnavailable === "status")
+    return null;
+  const health = S.status.health;
+  if (health?.persist === "unknown" || !Array.isArray(health?.checks)) return null;
+  const c = health.checks.find(x => x?.id === "heater");
+  const source = health.source || S.status.diagnostics.effective_source || "x10a";
+  if (!c || (source !== "x10a" && source !== "modbus")) return null;
+
+  const seconds = c[`${which}_s`];
+  const legacyMinutes = c[`${which}_min`];
+  const runtimeText = checkupHeaterRuntime(seconds, legacyMinutes) || null;
+  const isZero = runtimeText !== null &&
+    ((Number.isFinite(seconds) && seconds === 0) || (seconds == null && legacyMinutes === 0));
+  const observedS = Number.isFinite(c[`${which}_observed_s`]) && c[`${which}_observed_s`] >= 0
+    ? c[`${which}_observed_s`] : null;
+  const stale = health.source_fresh === false || c.reason === "source_stale";
+  const ctxObj = source === "x10a" && c.context && typeof c.context === "object" && !Array.isArray(c.context)
+    ? c.context : null;
+  const ctxConfirmed = ctxObj?.confirmed === true;
+  const ch = ctxConfirmed && ctxObj[which] && typeof ctxObj[which] === "object" && !Array.isArray(ctxObj[which])
+    ? ctxObj[which] : null;
+  const unsupported = c.verdict === "unavailable" || (source === "modbus" && which === "buh") ||
+    (runtimeText === null && ch?.supported === false);
+  const archiveIncomplete = ctxConfirmed && (ctxObj.archive_incomplete === true ||
+    ctxObj.storage_loss === true || (Number.isFinite(ctxObj.dropped) && ctxObj.dropped > 0));
+  const saturated = ch?.supported === true && ch.saturated === true;
+  const quietMildNotice = ch?.supported === true && ch.quiet_mild_notice === true;
+
+  const activeContexts = [];
+  if (ch?.supported === true && ch.categories && typeof ch.categories === "object") {
+    for (let index = 0; index < HEATER_CONTEXT_CATEGORIES.length; index++) {
+      const id = HEATER_CONTEXT_CATEGORIES[index];
+      const v = ch.categories[id];
+      if (!v || typeof v !== "object" || v.supported !== true) continue;
+      const hasPosS = Number.isFinite(v.positive_s) && v.positive_s > 0;
+      const hasPosSamples = Number.isFinite(v.positive_samples) && v.positive_samples > 0;
+      if (!hasPosS && !hasPosSamples) continue;
+      const positiveS = Number.isFinite(v.positive_s) && v.positive_s >= 0 ? v.positive_s : null;
+      const subSecond = !saturated && v.positive_s === 0 && hasPosSamples;
+      activeContexts.push({ id, index, positiveS, subSecond });
+    }
+    activeContexts.sort((a, b) => {
+      const ha = HEATER_HIGH_SIGNAL_CONTEXTS.indexOf(a.id);
+      const hb = HEATER_HIGH_SIGNAL_CONTEXTS.indexOf(b.id);
+      if (ha !== -1 || hb !== -1) {
+        if (ha === -1) return 1;
+        if (hb === -1) return -1;
+        return ha - hb;
       }
-      return row(labels[k], value);
+      const pa = a.positiveS ?? -1;
+      const pb = b.positiveS ?? -1;
+      if (pa !== pb) return pb - pa;
+      return HEATER_CONTEXT_TIE_BREAK.indexOf(a.id) - HEATER_CONTEXT_TIE_BREAK.indexOf(b.id);
     });
-    const totalRows = ["on_s", "union_s", "overlap_s", "unknown_context_s", "unclassified_s",
-      "readable_s"].map((key, k) => row(totals[k], number(h[key], h.saturated === true)));
-    return `<table class="heater-context"><caption>${esc(countsCaption)}</caption>` +
-      `<thead><tr><th scope="col">${esc(columns[0])}</th><th scope="col">${esc(name)}</th></tr></thead>` +
-      `<tbody>${categoryRows.join("")}${totalRows.join("")}</tbody></table>`;
-  }).join("");
-  const notice = channels.some(h => h?.supported === true && h.quiet_mild_notice === true)
-    ? descParaHtml(esc(t("check.heater_context.notice"))) : "";
-  return title + status + table + notice +
-    descParaHtml(esc(t("check.heater_context.rule"))) +
-    descParaHtml(esc(t("check.heater_context.limits")));
+  }
+  const topContexts = activeContexts.slice(0, 3);
+  const hasOnNoCategory = ch?.supported === true && topContexts.length === 0 &&
+    ((Number.isFinite(ch.on_s) && ch.on_s > 0) || (Number.isFinite(ch.on_samples) && ch.on_samples > 0));
+
+  return {
+    which,
+    source,
+    runtimeText,
+    isZero,
+    observedS,
+    stale,
+    unsupported,
+    archiveIncomplete,
+    saturated,
+    quietMildNotice,
+    activeContexts: topContexts,
+    hasOnNoCategory,
+  };
+}
+
+function checkupHeaterBriefHtml(heater) {
+  if (!heater) return "";
+  const sourceLabel = heater.source === "modbus" ? "Modbus" : "X10A";
+  if (heater.unsupported) return `<p>${esc(t("check.heater_insp.unavailable"))}</p>`;
+  if (heater.runtimeText === null && heater.activeContexts.length === 0 && !heater.hasOnNoCategory) {
+    const notes = [];
+    if (heater.archiveIncomplete) notes.push(t("check.heater_insp.archive_incomplete"));
+    if (heater.stale) notes.push(t("check.heater_insp.stale"));
+    return `<p>${esc(t("check.heater_insp.waiting"))}</p>` +
+      (notes.length ? `<p>${esc(notes.join(" "))}</p>` : "");
+  }
+  const head = heater.runtimeText !== null
+    ? inspectDiagnosisResultHtml(`${t("check.heater_insp.runtime")} · ${sourceLabel}`, heater.runtimeText)
+    : "";
+  const catLabels = t("check.heater_context.categories").split("|");
+  const activeListText = heater.activeContexts.map(item => {
+    const label = catLabels[item.index] || item.id;
+    const durText = item.subSecond ? "<1 s"
+      : Number.isFinite(item.positiveS) ? `${heater.saturated ? "≥" : ""}${checkupDuration(item.positiveS)}`
+      : t("sys.nodata");
+    return `${label} (${durText})`;
+  }).join(", ");
+  let primary;
+  if (heater.isZero && heater.activeContexts.length === 0 && !heater.hasOnNoCategory) {
+    primary = heater.observedS != null
+      ? t("check.heater_insp.zero_cov", checkupDuration(heater.observedS))
+      : t("check.heater_insp.zero");
+  } else if (heater.activeContexts.length > 0) {
+    primary = t("check.heater_insp.active_ctx", activeListText) +
+      (heater.quietMildNotice ? ` ${t("check.heater_context.notice")}` : "");
+  } else if (heater.hasOnNoCategory) {
+    primary = heater.observedS != null
+      ? t("check.heater_insp.active_unclassified_cov", checkupDuration(heater.observedS))
+      : t("check.heater_insp.active_unclassified");
+  } else {
+    primary = heater.observedS != null
+      ? t("check.heater_insp.active_cov", checkupDuration(heater.observedS))
+      : t("check.heater_insp.active");
+  }
+  const p1Parts = [primary];
+  if (heater.archiveIncomplete) p1Parts.push(t("check.heater_insp.archive_incomplete"));
+  if (heater.stale) p1Parts.push(t("check.heater_insp.stale"));
+  return head +
+    `<p>${esc(p1Parts.join(" "))}</p>` +
+    `<p>${esc(t("check.heater_insp.limit"))}</p>`;
 }
 
 function checkupStatusKey(c) {
@@ -2433,12 +2501,6 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
     time.push(`${t("check.detail.period_label")} ${checkupDuration(report.span_s)}`);
   if ((report.source_fresh === false || c.reason === "source_stale") && Number.isFinite(report.source_age_s))
     detail += ` ${t("check.detail.age_label")} ${dwellDuration(report.source_age_s)}.`;
-  if (c.id === "heater") {
-    const channelCoverage = [["BUH", c.buh_observed_s], ["BSH", c.bsh_observed_s]]
-      .filter(([, duration]) => Number.isFinite(duration))
-      .map(([label, duration]) => t("check.detail.channel_coverage", label, checkupDuration(duration)));
-    if (channelCoverage.length) detail += ` ${channelCoverage.join(" · ")}.`;
-  }
   if (report.source_fresh === false && c.reason !== "source_stale")
     detail += ` ${t(isModbus ? "check.detail.source_stale_modbus" : "check.detail.source_stale")}`;
   if (statusKey === "collecting" && Number(c.required_s) > Number(c.observed_s))
@@ -2447,7 +2509,6 @@ function checkupGenericDetailHtml(c, fullSpan, report) {
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
          descParaHtml(esc(detail)) +
-         (c.id === "heater" && report?.source === "x10a" ? checkupHeaterContextHtml(c) : "") +
          descNoteHtml(t("normal.label"), normal);
 }
 
@@ -2491,23 +2552,13 @@ function checkupDefrostInspectorRows(status, statusStale = false) {
 }
 
 function checkupHeaterRuntime(seconds, minutes) {
-  if (seconds != null) return checkupDuration(seconds);
-  return minutes == null ? "" : t("check.min", minutes); // older firmware
-}
-
-function checkupHeaterValue(c) {
-  const parts = [];
-  for (const [label, seconds, legacyMinutes] of [
-    ["check.buh_short", c.buh_s, c.buh_min], ["check.tank_short", c.bsh_s, c.bsh_min],
-  ]) {
-    if (seconds != null && !Number.isFinite(seconds)) continue;
-    const minutes = seconds == null ? legacyMinutes : seconds / 60;
-    if (!Number.isFinite(minutes) || minutes < 0) continue;
-    const value = minutes > 0 && minutes < 1 ? "<1"
-      : Math.floor(minutes).toLocaleString(LANG, { useGrouping: false });
-    parts.push(`${t(label)} ${value}`);
+  if (seconds != null) {
+    return Number.isFinite(seconds) && seconds >= 0 ? checkupDuration(seconds) : "";
   }
-  return parts.length ? t("check.min", parts.join(" · ")) : "";
+  if (minutes != null) {
+    return Number.isFinite(minutes) && minutes >= 0 ? t("check.min", minutes) : ""; // older firmware
+  }
+  return "";
 }
 
 function checkupCyclingCountPrefix(n) {
@@ -2535,14 +2586,6 @@ function checkupMetricValue(c) {
         ? checkupCyclingCountPrefix(c.starts) + t("check.starts", c.starts) : "";
     case "flow":
       return !Number.isFinite(c.min_l_min) ? "" : `${checkupFmt1(c.min_l_min)} l/min`;
-    case "heater": {
-      const parts = [];
-      const buh = checkupHeaterRuntime(c.buh_s, c.buh_min);
-      const bsh = checkupHeaterRuntime(c.bsh_s, c.bsh_min);
-      if (buh) parts.push(t("check.buh_runtime", buh));
-      if (bsh) parts.push(t("check.tank_runtime", bsh));
-      return parts.join(" · ");
-    }
     case "retries":  return c.seen == null ? "" : c.seen ? t("check.retry_seen") : t("check.retry_none");
   }
   return "";
@@ -2571,7 +2614,6 @@ function checkupValue(c) {
   if (c.id === "cycling")
     return Number.isFinite(c.starts) && c.starts >= 0
       ? checkupCyclingCountPrefix(c.starts) + c.starts.toLocaleString(LANG) : st;
-  if (c.id === "heater") return checkupHeaterValue(c) || st;
   return checkupMetricValue(c) || st;
 }
 
@@ -2591,7 +2633,8 @@ function checkupCardHtml(includeHealth = true) {
     S.otaCached || S.transportUnavailable === "status");
   const visibleChecks = includeHealth && Array.isArray(h?.checks)
     ? h.checks.filter(c => Object.hasOwn(CHECKUP_ROW, c.id) && c.id !== "flow" && c.id !== "pressure" &&
-                          c.id !== "dhw_loss" && (c.id !== "defrost" || c === defrost) &&
+                          c.id !== "dhw_loss" && c.id !== "heater" &&
+                          (c.id !== "defrost" || c === defrost) &&
                           !(isModbus && MODBUS_HIDDEN_CHECKS.has(c.id)))
     : [];
   if (unreadable) healthRows = `<span class="empty">${esc(t("sys.nodata"))}</span>`;
