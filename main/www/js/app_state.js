@@ -36,6 +36,7 @@ const S = {
   // (logic/history.hpp's history_pin_index).
   histPin: new Map(),
   flowMinSelection: null,
+  dhwCoolSelection: null,
   cyclingScope: null,
   cyclingPin: null,
   cyclingHover: null,
@@ -125,7 +126,6 @@ function cancelHistoryGesture() {
   S.faultHoverIdx = null;
   if (S.trendPointer) scrubEnd(S.trendPointer.plot);
   if (S.cancelCyclingDrag) S.cancelCyclingDrag();
-  if (S.cancelDhwDrag) S.cancelDhwDrag();
 }
 
 function invalidateHistSources() {
@@ -140,6 +140,7 @@ function invalidateHistSources() {
   (S.histAwait ||= new Map()).clear();
   S.histPin.clear();
   S.flowMinSelection = null;
+  S.dhwCoolSelection = null;
   S.faultCodes?.clear();
   S.faultSnapKeys = null;
   S.faultHoverIdx = null;
@@ -495,7 +496,6 @@ function invalidateLiveReadings(reason, busy = false) {
   S._values = []; S._modbus = []; S.live = null;
   S.transportUnavailable = reason;
   S.transportBusy = busy;
-  if (reason === "status" && typeof markCheckupDhwStale === "function") markCheckupDhwStale();
   if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   if (typeof _bootReady === "undefined" || !_bootReady) renderApp();
 }
@@ -552,7 +552,6 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   S.statusReceivedAt = receivedAt;
   // A successful status read resolves the status outage while values are still unavailable.
   if (S.transportUnavailable === "status") { S.transportUnavailable = "values"; S.transportBusy = false; }
-  if (typeof retireCheckupDhwTimeline === "function") retireCheckupDhwTimeline();
   if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   cyclingStatusAt = requestedAt;
   // A new frame can report a stop before the following /values request lets the chart repaint.

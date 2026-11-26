@@ -788,19 +788,8 @@ function expandDynamicI18nFamilies(ast, sourceTexts) {
   }
   // check.status.<statusKey>
   if (/t\(`check\.status\.\$\{/.test(fullJs)) {
-    for (const k of ["ok", "info", "warn", "collecting", "observation", "experimental", "unavailable", "no_window"]) {
+    for (const k of ["ok", "info", "warn", "collecting", "observation", "experimental", "unavailable"]) {
       if (fullJs.includes(`"${k}"`)) add(`check.status.${k}`);
-    }
-  }
-  // check.dhw.marker_<yes|no>
-  if (/t\(`check\.dhw\.marker_\$\{/.test(fullJs)) {
-    add("check.dhw.marker_yes");
-    add("check.dhw.marker_no");
-  }
-  // check.detail.dhw_reason.<r> (charge/pump/draw/reading/blind/blind_modbus from firmware)
-  if (/t\(`check\.detail\.dhw_reason\.\$\{/.test(fullJs)) {
-    for (const r of ["charge", "pump", "draw", "reading", "blind", "blind_modbus"]) {
-      add(`check.detail.dhw_reason.${r}`);
     }
   }
   // check.detail.<reasonKey> and check.detail.<id>.<statusKey>

@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1004, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 968, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -135,20 +135,27 @@ for (const code of codes) {
     assert.equal(parts.length, segments, `${code}/${key} segment count`);
     for (const part of parts) assert.ok(part.trim(), `${code}/${key} has empty segment`);
   }
-}
-// Completed DHW windows are counts. The current candidate and settling remainder are durations;
-// there is no six-hour assessment target and no second unit may be added to a duration.
-for (const code of ["ja", "fi", "zh"]) {
-  const dict = catalog[code];
-  for (const key of ["check.detail.dhw_candidate", "check.detail.dhw_settling", "check.detail.dhw_waiting"]) {
-    const args = key.endsWith("candidate") ? ["2", "", "20 min", "1 h"]
-      : key.endsWith("settling") ? ["2", "", "45 min"] : ["2", ""];
-    const text = dict[key](...args);
-    for (const arg of args) assert.ok(text.includes(arg), `${code}/${key} lost duration ${arg}`);
-    assert.doesNotMatch(text, /6 h/, `${code}/${key} invents an assessment target`);
-    assert.doesNotMatch(text, /(?:h|min)\s*(?:件|个|分鐘|分钟)|puhdasta tunnin ikkunaa valmiina|puhdas tunnin ikkuna valmis/,
-      `${code}/${key} treats a formatted duration as a count or adds a second unit`);
+  for (const key of [
+    "check.dhw.show", "check.dhw.maximum", "check.dhw.waiting",
+    "check.dhw.no_window", "check.dhw.locations_missing", "check.dhw.stale",
+  ]) {
+    const val = dict[key];
+    assert.equal(typeof val, "string", `${code}/${key} must be a string`);
+    assert.ok(val.trim(), `${code}/${key} is empty`);
+    if (code !== "en") assert.notEqual(val, catalog.en[key], `${code}/${key} falls back to English`);
   }
+  const dhwCauses = ["check.dhw.cause_both", "check.dhw.cause_pump", "check.dhw.cause_draw", "check.dhw.cause_quiet"]
+    .map(key => {
+      const val = dict[key];
+      assert.equal(typeof val, "string", `${code}/${key} must be a string`);
+      assert.ok(val.trim(), `${code}/${key} is empty`);
+      if (code !== "en") assert.notEqual(val, catalog.en[key], `${code}/${key} falls back to English`);
+      const sentences = val.split(/[.!?。！？]+/).filter(s => s.trim());
+      assert.ok(sentences.length >= 1 && sentences.length <= 3,
+        `${code}/${key} must be at most 3 sentences (saw ${sentences.length})`);
+      return val;
+    });
+  assert.equal(new Set(dhwCauses).size, 4, `${code} DHW cause explanations must be distinct`);
 }
 assert.doesNotMatch(catalog.ja["check.detail.collecting"]("2 h", "24 h"), /(?:h|min)件/,
   "Japanese collecting progress must describe elapsed time, not item counts");
@@ -183,53 +190,14 @@ for (const [count, start, gap] of [
 }
 
 // Count-bearing diagnosis copy must not silently keep a plural adjective/verb for a real singular
-// observation. Pin the surfaces that render abort, paired and completed-run populations.
-assert.match(catalog.de["check.detail.dhw_blocked_link"](1, 20), /Abgebrochene Fenster: 1,/);
-assert.match(catalog.de["check.detail.dhw_blocked_link"](2, 20), /Abgebrochene Fenster: 2,/);
-// Structural markers only, not meaning: every locale's blind list item carries no parentheses (it
-// is inserted into an already parenthesised list). The
-// cause-neutral MEANING ("blind" is unobserved time from the X10A link or the board's own pauses;
-// the unread input is the readings the check needs) is pinned for EN and DE in test_ui_checkup.mjs
-// and for ZH, JA and CS below; the other locales rely on human review of each translation and on
-// the translation-source marker, which goes stale when the English source changes.
-for (const code of codes) {
-  const label = catalog[code]["check.detail.dhw_reason.blind"];
-  assert.doesNotMatch(label, /[()（）]/, `${code} blind reason label must not nest parentheses`);
-  const verdict = catalog[code]["check.detail.dhw_blocked_link"](2, 20);
-  assert.ok(verdict.trim(), `${code} blind verdict must explain the missing evidence`);
-  assert.doesNotMatch(verdict, /RX\/TX/, `${code} must not prescribe wiring work from an unobserved interval`);
-  const noAttempt = catalog[code]["check.detail.dhw_blocked"](0, "", "0 min");
-  assert.ok(noAttempt.includes("24"), `${code} retains the no-window day scope`);
-  assert.doesNotMatch(noAttempt, /0 min|\(\)|（）|\b0\b/,
-    `${code} no confirmed opening must not invent discarded candidates`);
-}
-// This reason includes a plausible endpoint that was not confirmed within the closing grace.
-// It must not claim that every failed confirmation was an implausible R5T reading.
-for (const [code, unconfirmed] of Object.entries({
-  en: /unconfirmed/, de: /unbestätigt/, es: /sin confirmar/, fr: /non confirmé/,
-  it: /non confermato/, pl: /niepotwierdzone/, cs: /nepotvrzené/, uk: /непідтверджене/,
-  zh: /未确认/, ja: /未確認/, nb: /ubekreftet/, sv: /obekräftad/, fi: /vahvistamaton/,
-})) assert.match(catalog[code]["check.detail.dhw_reason.reading"], unconfirmed,
-  `${code} reading reason must include unconfirmed endpoints`);
-// ZH once said the tank "has no problem", a reassurance a NOT AVAILABLE result cannot give; it must
-// stay as neutral as the English "says nothing about the tank". JA uses one term for "paused" in
-// both the list item and the verdict. Missing replies and local query pauses remain distinct.
-assert.match(catalog.zh["check.detail.dhw_blocked_link"](2, 20), /不说明水箱状态/);
-assert.doesNotMatch(catalog.zh["check.detail.dhw_blocked_link"](2, 20), /有问题|没有问题|正常/);
-assert.match(catalog.ja["check.detail.dhw_reason.blind"], /一時停止/);
-assert.match(catalog.ja["check.detail.dhw_blocked_link"](2, 20), /応答欠落|ポーリング停止/);
-assert.match(catalog.cs["check.detail.dhw_blocked_link"](2, 20), /Chybějící odpovědi či pauzy dotazování/);
-assert.match(catalog.es["check.detail.dhw_blocked"](1, "x", 20), /Ventanas descartadas: 1 \(x\)/);
-assert.match(catalog.es["check.detail.dhw_blocked"](2, "x", 20), /Ventanas descartadas: 2 \(x\)/);
+// observation. Pin the surfaces that render completed-run populations.
 assert.equal(catalog.es["check.cycling.runs"](1), "1 ciclo");
-assert.match(catalog.fr["check.detail.dhw_blocked_link"](1, 20), /Fenêtres interrompues : 1,/);
 assert.equal(catalog.fr["check.cycling.runs"](1), "1 cycle");
 assert.equal(catalog.it["check.cycling.runs"](1), "1 ciclo");
 assert.deepEqual([1, 2, 12].map(catalog.cs["check.cycling.runs"]), ["1 cyklus", "2 cykly", "12 cyklů"]);
 assert.deepEqual([1, 2, 12].map(catalog.pl["check.cycling.runs"]), ["1 cykl", "2 cykle", "12 cykli"]);
 assert.deepEqual([1, 2, 12].map(catalog.uk["check.cycling.runs"]), ["1 цикл", "2 цикли", "12 циклів"]);
-assert.match(catalog.sv["check.detail.dhw_aborted"](1, "x", 20), /1 kandidat blev förkastad/);
-assert.match(catalog.sv["check.detail.dhw_aborted"](2, "x", 20), /2 kandidater blev förkastade/);
+
 assert.equal(catalog.sv["check.cycling.runs"](1), "1 körning");
 assert.equal(catalog.sv["check.cycling.runs"](2), "2 körningar");
 assert.equal(catalog.de["check.cycling.runs"](12), "12 Läufe");

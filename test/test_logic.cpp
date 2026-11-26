@@ -16394,8 +16394,11 @@ static void test_checkup_evidence_overhaul() {
     notable.high_windows        = 1;
     notable.quiet_high_windows  = 1;
     notable.max_loss_tenths_k_h = 10;
-    CHECK(checkup_evaluate(window, cov, FaultClass::Unknown, notable)[CheckupCheck::DhwLoss]
-              .verdict == CheckupVerdict::Info);
+    const auto notable_report   = checkup_evaluate(window, cov, FaultClass::Unknown, notable);
+    CHECK(notable_report[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Ok);
+    CHECK(notable_report[CheckupCheck::DhwLoss].observation_only);
+    CHECK(notable_report[CheckupCheck::DhwLoss].reason == CheckupReason::ObservationOnly);
+    CHECK(notable_report.assessable == 0 && notable_report.evaluated == 0);
 
     cov       = CheckupCoverage{};
     cov.fault = cov.pressure = true;
@@ -18791,15 +18794,19 @@ static void test_checkup(bool with_trace) {
         w.full_span = false;
         CHECK(checkup_evaluate(w, cov, FaultClass::Normal, dhw)[CheckupCheck::DhwLoss].verdict ==
               CheckupVerdict::Collecting);
-        // A FINDING always outranks it: a high window is evidence, and evidence is never withheld
-        // because the plant is also busy.
+        // A completed high window stays an observation and is never withheld because the plant is
+        // also busy, nor does it raise a summary verdict.
         w.full_span             = true;
+        dhw.windows             = 1;
         dhw.high_windows        = 1;
         dhw.quiet_high_windows  = 1;
         dhw.max_loss_tenths_k_h = 12;
         {
             const CheckupReport r = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
-            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Info);
+            CHECK(r[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Ok);
+            CHECK(r[CheckupCheck::DhwLoss].observation_only);
+            CHECK(r[CheckupCheck::DhwLoss].reason == CheckupReason::ObservationOnly);
+            CHECK(r.assessable == 0 && r.evaluated == 0);
             CHECK(!r.dhw_blocked);
             // The account of what was discarded is still reported — it explains a thin sample.
             CHECK(r.dhw_aborts == 50);
@@ -18966,8 +18973,11 @@ static void test_checkup(bool with_trace) {
               trace(60, true, true).pump_windows == 1); // overlapping counts, not two hours
         const auto quiet = trace(10, false, false);
         CHECK(quiet.quiet_high_windows == 1 && quiet.draw_windows == 0);
-        CHECK(checkup_evaluate(scope, cov, FaultClass::Unknown, quiet)[CheckupCheck::DhwLoss]
-                  .verdict == CheckupVerdict::Info);
+        const auto quiet_report = checkup_evaluate(scope, cov, FaultClass::Unknown, quiet);
+        CHECK(quiet_report[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Ok);
+        CHECK(quiet_report[CheckupCheck::DhwLoss].observation_only);
+        CHECK(quiet_report[CheckupCheck::DhwLoss].reason == CheckupReason::ObservationOnly);
+        CHECK(quiet_report.assessable == 0 && quiet_report.evaluated == 0);
         const auto warming = trace(-10, false, false);
         CHECK(warming.windows == 1 && warming.max_loss_tenths_k_h == 0);
         CHECK(warming.high_windows == 0 && warming.quiet_high_windows == 0);
@@ -19638,6 +19648,16 @@ static void test_checkup(bool with_trace) {
               ok[CheckupCheck::Pressure].verdict == CheckupVerdict::Ok);
         CHECK(ok.full_span && ok.available == CHECKUP_CHECK_COUNT && ok.assessable == 4 &&
               ok.evaluated == 4); // current fault, heating runs, defrost ratio and pressure
+        DhwLossWindow high_dhw          = clean_dhw;
+        high_dhw.high_windows           = 1;
+        high_dhw.quiet_high_windows     = 1;
+        high_dhw.max_loss_tenths_k_h    = 12;
+        const CheckupReport ok_with_dhw = checkup_evaluate(good, all, FaultClass::Normal, high_dhw);
+        CHECK(ok_with_dhw[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Ok);
+        CHECK(ok_with_dhw[CheckupCheck::DhwLoss].observation_only);
+        CHECK(ok_with_dhw[CheckupCheck::DhwLoss].reason == CheckupReason::ObservationOnly);
+        CHECK(ok_with_dhw[CheckupCheck::Fault].verdict == CheckupVerdict::Ok);
+        CHECK(ok_with_dhw.assessable == 4 && ok_with_dhw.evaluated == 4);
 
         CheckupWindow idle_no_ratio = good;
         idle_no_ratio.dfr_run_s     = 0;
@@ -19655,6 +19675,19 @@ static void test_checkup(bool with_trace) {
         CHECK(observed.available == 3);
         CHECK(observed.assessable == 0);
         CHECK(observed.evaluated == 0);
+
+        CHECK(checkup_div_round_nearest(5, 0) == 0);
+        CHECK(checkup_outdoor_mean_tenths(CheckupOutdoorStats{}) == CHECKUP_ABSENT);
+        {
+            CheckupOutdoorStats a{40, 20, 2}, b{5, 5, 1};
+            checkup_outdoor_merge(a, b);
+            CHECK(a.min_tenths == 5 && a.sum_tenths == 45 && a.samples == 3);
+            CheckupRing edge_ring;
+            edge_ring.observe(-1);
+            CHECK(edge_ring.first_sample_us < 0 && edge_ring.retained_bucket(2, 1) == nullptr);
+            CheckupState edge_st;
+            CHECK(!checkup_pause_state(edge_st, edge_ring.pending, &edge_ring));
+        }
 
         // An actually observed experimental increase may raise Info; a stable counter does not
         // support an absence conclusion and therefore stays outside the evaluated denominator.
@@ -19681,7 +19714,7 @@ static void test_checkup(bool with_trace) {
         CHECK(std::string(checkup_verdict_name(CheckupVerdict::Warn)) == "warn");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Fault)) == "device");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Pressure)) == "heuristic");
-        CHECK(std::string(checkup_evidence_name(CheckupCheck::DhwLoss)) == "heuristic");
+        CHECK(std::string(checkup_evidence_name(CheckupCheck::DhwLoss)) == "observation");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Cycling)) == "heuristic");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Defrost)) == "heuristic");
         CHECK(std::string(checkup_evidence_name(CheckupCheck::Flow)) == "observation");

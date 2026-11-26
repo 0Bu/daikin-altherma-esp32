@@ -1804,7 +1804,7 @@ async function assertPlantDiagnosis(page, context) {
       hist: new Map(S.hist), histPin: new Map(S.histPin),
       histHidden: new Map(S.histHidden), histEpoch: S.histEpoch,
       histIdentity: S.histIdentity, histUptime: S.histUptime, flowMinSelection: S.flowMinSelection,
-      inspFromDefrostNotice: S.inspFromDefrostNotice,
+      inspFromDefrostNotice: S.inspFromDefrostNotice, dhwCoolSelection: S.dhwCoolSelection,
     };
     S.status = structuredClone(S.status);
     S.status.hp = { ...S.status.hp, connected: true };
@@ -1987,11 +1987,11 @@ async function assertPlantDiagnosis(page, context) {
         standard: true, cells: [["SPAN", 0, label], ["SPAN", 0, [count, share][i]]],
       })), `${context}: the inspector ends with only the two standard defrost value rows`);
     };
-    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 5,
-      `${context}: render the five remaining diagnosis disclosures`);
+    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 4,
+      `${context}: render the four remaining diagnosis disclosures`);
     assert.equal(await page.evaluate(`!!document.querySelector(
-      "[data-desc='model:health_pressure'], [data-desc='model:health_flow']")`), false,
-      `${context}: pressure and flow diagnoses belong in their inspectors`);
+      "[data-desc='model:health_pressure'], [data-desc='model:health_flow'], [data-desc='model:health_dhw_loss']")`), false,
+      `${context}: pressure, flow, and DHW tank cooling diagnoses belong in their inspectors`);
     assert.equal(await hasElement(defrostAccordion), false, `${context}: the separate defrost disclosure is gone`);
     assert.equal(await hasElement(defrostHint), false, `${context}: an observation needs no defrost shortcut`);
     await expectDefrostPill(false, "observation");
@@ -2034,46 +2034,10 @@ async function assertPlantDiagnosis(page, context) {
         lastNormal: body.lastElementChild?.querySelector('.vdesc-n')?.innerText,
         text: Array.from(body.children, block => block.innerText) };
     })`);
-    assert.equal(blocks.length, 6, `${context}: include the independent refrigerant observation`);
+    assert.equal(blocks.length, 5, `${context}: include the independent refrigerant observation`);
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
       if (block.id === "model:health_cycling") continue;
-      if (block.id === "model:health_dhw_loss") {
-        const dhw = await page.evaluate(`(() => {
-          const body = document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').querySelector('.vdesc-body');
-          const detail = body.querySelector('.checkup-dhw-detail');
-          const basis = detail?.querySelector('[data-dhw-disclosure="basis"]');
-          const assessment = detail?.querySelector('.checkup-dhw-assessment');
-          const timeline = detail?.querySelector('[data-checkup-dhw]');
-          return { wrapper: body.firstElementChild === detail, heroFirst: detail?.firstElementChild?.classList.contains('checkup-dhw-hero'),
-            value: detail?.querySelector('.checkup-dhw-value')?.firstChild?.textContent.trim(),
-            unit: detail?.querySelector('.checkup-dhw-unit')?.textContent,
-            assessmentTitle: assessment?.querySelector('strong')?.textContent,
-            assessment: assessment?.lastChild?.textContent.trim(),
-            hint: Array.from(detail?.querySelectorAll('.vdesc-p') || [])
-              .some(node => node.textContent === t('check.dhw.hint')),
-            disclosures: Array.from(detail?.querySelectorAll('details[data-dhw-disclosure]') || [], node =>
-              ({key:node.dataset.dhwDisclosure,tag:node.tagName,open:node.open,named:!!node.querySelector('summary')?.textContent.trim()})),
-            normal: basis?.querySelector('.vdesc-n')?.textContent,
-            empty: timeline && !timeline.hasChildNodes(),
-            fabricated: detail?.querySelectorAll('.checkup-dhw-chart, [data-dhw-window], [data-dhw-lane]').length };
-        })()`);
-        assert.equal(block.count, 1, `${context}/${block.id}: one dedicated detail wrapper, not the generic three blocks`);
-        assert.equal(dhw.wrapper && dhw.heroFirst, true, `${context}/${block.id}: the measurement hero leads the detail`);
-        assert.equal(dhw.value, "1", `${context}/${block.id}: hero retains the aggregate sensor rate without timed records`);
-        assert.equal(dhw.unit, await page.evaluate("t('check.dhw.hour_unit')"),
-          `${context}/${block.id}: separate localized cooling-rate unit`);
-        assert.equal(dhw.assessmentTitle, await page.evaluate("t('check.dhw.context_title')"));
-        assert.equal(dhw.assessment, await page.evaluate("t('check.dhw.context_missing')"),
-          `${context}/${block.id}: aggregate-only firmware has unknown timed context`);
-        assert.equal(dhw.hint, true, `${context}/${block.id}: keep the bounded project hint visible`);
-        assert.deepEqual(dhw.disclosures, ["timeline", "basis", "energy"].map(key => ({key,tag:"DETAILS",open:false,named:true})),
-          `${context}/${block.id}: named native disclosures start collapsed`);
-        assert.equal(dhw.normal, normalLabel, `${context}/${block.id}: Normal context is retained inside the basis`);
-        assert.equal(dhw.empty, true, `${context}/${block.id}: a closed timeline is not mounted`);
-        assert.equal(dhw.fabricated, 0, `${context}/${block.id}: totals cannot fabricate chart bars or marker lanes`);
-        continue;
-      }
       if (block.id === "model:health_heater") {
         assert.ok(block.count >= 5, `${context}/${block.id}: includes independent heater context blocks`);
         assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
@@ -2414,7 +2378,12 @@ async function assertPlantDiagnosis(page, context) {
     assert.equal(await page.evaluate('!document.getElementById("inspPressureFinding").parentElement.hidden'), true,
       `${context}: clearing the selected sample keeps the finding visible`);
     await clickElement(page, "#inspClose");
-    await page.waitFor("S.insp === null");
+    await page.waitFor(`(() => {
+      const panel = document.getElementById('inspect');
+      return S.insp === null && !panel.classList.contains('open') &&
+        panel.getAnimations({ subtree: true }).every(anim =>
+          !(anim instanceof CSSTransition) || anim.playState !== 'running');
+    })()`);
     const cyclingDetail = () => page.evaluate(`(() => {
       const row = document.querySelector("[data-desc='model:health_cycling']").closest(".vitem");
       const body = row.querySelector(".vdesc-body");
@@ -2483,43 +2452,15 @@ async function assertPlantDiagnosis(page, context) {
     assert.equal(unavailable.historyText, await page.evaluate("t('check.cycling.history_empty')"),
       `${context}: no history is distinct from zero starts`);
     assert.equal(unavailable.oldStopBox, false);
-    const discardedContext = await page.evaluate(`(() => {
-      const fixture = S.status.health.checks.find(check => check.id === 'dhw_loss');
-      return t('check.detail.dhw_aborted', fixture.aborts,
-        fixture.abort_reasons.map(reason => t('check.detail.dhw_reason.' + reason)).join(', '),
-        '40 min').trim();
-    })()`);
-    const dhwText = () => page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']")
-      .closest('.vitem').innerText`);
-    const dhwEnergyText = () => page.evaluate(`document.querySelector(
-      '.checkup-dhw-detail [data-dhw-disclosure="energy"] .checkup-dhw-disclosure-body')?.innerText.trim() || ''`);
-    const expectedDhwEnergy = numbers => page.evaluate(`t('check.detail.dhw_energy',
-      ...${JSON.stringify(numbers)}.map((value,index) => value.toLocaleString(LANG,
-        {minimumFractionDigits:index ? 2 : 1,maximumFractionDigits:index ? 2 : 1})))`);
-    // The new layout deliberately hides long evidence and the energy example until their own
-    // native summaries are activated. Test their actions before inspecting visible content.
-    for (const name of ["basis", "energy"]) {
-      const disclosure = `.checkup-dhw-detail details[data-dhw-disclosure="${name}"]`;
-      await clickElement(page, disclosure + " > summary");
-      await page.waitFor(`document.querySelector(${JSON.stringify(disclosure)}).open === true`);
-    }
-    await page.waitFor("!S.clickHold && !S.scrub");
-    assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-supporting-details`);
-    const openedEnergy = await dhwEnergyText();
-    assert.equal(openedEnergy, await expectedDhwEnergy([1, 0.23, 0.08, 0.09]),
-      `${context}: opened energy example retains the one-hour 200 l and assumed-COP calculation`);
-    for (const assumption of ["200", "COP", "kWh"])
-      assert.ok(openedEnergy.includes(assumption), `${context}: energy assumptions retain ${assumption}`);
-    assert.ok((await dhwText()).includes(discardedContext),
-      `${context}: opened basis retains discarded reading-gap evidence for the NOTE`);
     const diagnosisBadge = () => page.evaluate(`document.querySelector("[data-desc='model:health_fault']")
       .closest('.card').querySelector('.section-badge')`);
     assert.equal(await diagnosisBadge(), null,
       `${context}: diagnosis card renders no header summary badge`);
+    assert.equal(await page.evaluate(`Boolean(document.querySelector("[data-desc='model:health_dhw_loss'], .checkup-dhw-detail"))`), false,
+      `${context}: Diagnosis card must not mount DHW row or legacy .checkup-dhw-detail`);
     await captureNativeEvidence(page, `${context}/expanded`);
-    for (const id of ["dhw_loss", "cycling"])
-      await captureNativeEvidence(page, `${context}/${id}`,
-        `[data-desc='model:health_${id}']`, ".vitem");
+    await captureNativeEvidence(page, `${context}/cycling`,
+      "[data-desc='model:health_cycling']", ".vitem");
     // A finding stays in the diagnosis count and opens the one inspector through native input.
     await page.evaluate(`(() => {
       const check = S.status.health.checks[3];
@@ -2647,49 +2588,6 @@ async function assertPlantDiagnosis(page, context) {
     await page.waitFor("!S.insp && !S.clickHold");
     assert.equal(await page.evaluate(`document.activeElement?.matches('#cardNav [data-card="diagnosis"]')`),
       true, `${context}: closing after the notice disappears restores focus to diagnosis navigation`);
-    // Exercise the formerly blind band, then the exact no-window screenshot state, through the
-    // real accordion. Ordinary use may explain the drop: it stays MEASURED, with a heat example.
-    await page.evaluate(`(() => {
-      Object.assign(S.status.health.checks[1], { verdict: 'ok', evidence: 'observation',
-        max_k_h: 6, quiet_high_windows: 0, draw_windows: 4, pump_windows: 4 });
-      renderApp();
-      return true;
-    })()`);
-    await page.frame();
-    assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-net-cooling`);
-    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss'] .vrow-val").innerText`),
-      "6 K/h",
-      `${context}: marked rapid cooling shows its measured rate`);
-    assert.ok((await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').innerText`))
-      .includes('kWh'), `${context}: measured cooling has the energy illustration`);
-    assert.equal(await page.evaluate(`document.querySelector('.checkup-dhw-detail [data-dhw-disclosure="energy"]').open`), true,
-      `${context}: changing the measured scalar preserves the opened native energy disclosure`);
-    assert.equal(await dhwEnergyText(), await expectedDhwEnergy([6, 1.40, 0.47, 0.56]),
-      `${context}: the energy illustration updates the one-hour calculation, not a daily extrapolation`);
-    assert.ok((await dhwText()).includes(discardedContext),
-      `${context}: MEASURED retains discarded reading-gap evidence`);
-    await captureNativeEvidence(page, `${context}/dhw-net-cooling`,
-      "[data-desc='model:health_dhw_loss']", ".vitem");
-    await page.evaluate(`(() => {
-      Object.assign(S.status.health.checks[1], { verdict: 'unavailable', blocked: true,
-        max_k_h: null, windows: 0, high_windows: 0, quiet_high_windows: 0,
-        draw_windows: 0, pump_windows: 0, aborts: 7, best_aborted_s: 2820,
-        abort_reasons: ['charge', 'blind'] });
-      renderApp();
-      return true;
-    })()`);
-    await page.frame();
-    assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-no-window`);
-    await assertDiagnosisSummaryRows(page, `${context}/compact-blocked`);
-    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss'] .vrow-val").innerText`),
-      await page.evaluate("t('check.status.no_window')"),
-      `${context}: a blocked day must not promise ongoing checking`);
-    assert.ok(!(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').innerText`))
-      .includes('kWh'), `${context}: no measured rate means no energy number`);
-    assert.equal(await page.evaluate(`document.querySelectorAll('.checkup-dhw-detail [data-dhw-disclosure="energy"]').length`), 0,
-      `${context}: a blocked day removes the numeric energy disclosure rather than merely collapsing it`);
-    await captureNativeEvidence(page, `${context}/dhw-no-window`,
-      "[data-desc='model:health_dhw_loss']", ".vitem");
     await captureNativeEvidence(page, `${context}/refrigerant`,
       "[data-desc='service:refrigerant']", ".vitem");
     // An optional input may contribute no readings while the other pressure side admits the
@@ -2864,6 +2762,7 @@ async function assertPlantDiagnosis(page, context) {
       S.histUptime = window.__browserDiagnosisOriginal.histUptime;
       S.flowMinSelection = window.__browserDiagnosisOriginal.flowMinSelection;
       S.inspFromDefrostNotice = window.__browserDiagnosisOriginal.inspFromDefrostNotice;
+      S.dhwCoolSelection = window.__browserDiagnosisOriginal.dhwCoolSelection;
       delete window.__browserDiagnosisOriginal;
       delete window.__browserDefrostPlot;
       renderApp();

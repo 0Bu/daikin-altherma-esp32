@@ -102,7 +102,7 @@ export function renderWireSnapshots(wires) {
       status: wireMap.get("status-modbus-diagnostics"),
       values: modbusValues,
       insp: "flow",
-      expand: ["model:health_cycling", "model:health_dhw_loss"],
+      expand: ["model:health_cycling"],
     },
     {
       name: "checkup-persist-unknown",
@@ -122,8 +122,8 @@ export function renderWireSnapshots(wires) {
       name: "dhw-x10a",
       status: wireMap.get("dhw-x10a"),
       values: baseValues,
-      insp: null,
-      expand: ["model:health_dhw_loss"],
+      insp: "tank",
+      expand: [],
     },
     {
       name: "refrigerant-populated",
@@ -231,6 +231,14 @@ export function renderWireSnapshots(wires) {
     if (sc.name === "status-modbus-diagnostics") {
       assert.ok(checkupHtml.includes("Modbus"),
         `${sc.name}: Modbus checkupCardHtml must name Modbus source`);
+    }
+    if (sc.name === "dhw-x10a") {
+      assert.equal(checkupHtml.includes("model:health_dhw_loss"), false,
+        `${sc.name}: checkupCardHtml must omit health_dhw_loss`);
+      assert.equal(doc.getElementById("inspFlowDiagnosis").hidden, false,
+        `${sc.name}: tank inspector must reveal #inspFlowDiagnosis for dhw-x10a`);
+      assert.ok(doc.getElementById("inspFlowDiagnosis").innerHTML.includes(ui.t("check.dhw.maximum")),
+        `${sc.name}: tank inspector must render strongest tank cooling`);
     }
   }
 

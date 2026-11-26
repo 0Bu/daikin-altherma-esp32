@@ -335,7 +335,7 @@ try {
     ]};
   const dhwUnsynced={epoch:71,window_end_s:172800,since_s:80000,observed_end_s:172799,
     live:true,windows:dhwWindows};
-  const dhwAggregate={id:"dhw_loss",evidence:"heuristic",verdict:"info",reason:"",
+  const dhwAggregate={id:"dhw_loss",evidence:"observation",verdict:"info",reason:"",
     observed_s:28000,required_s:0,max_k_h:4.5,windows:8,high_windows:3,high_with_pump:2,
     high_pump_off:1,draw_windows:4,pump_windows:5,quiet_high_windows:1,circulation_on_s:600,
     circulation_known_s:7200,candidate_s:137,settle_remaining_s:19,aborts:2,best_aborted_s:119,

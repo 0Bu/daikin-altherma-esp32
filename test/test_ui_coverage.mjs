@@ -170,6 +170,7 @@ try {
       checkupDefrostCheck, checkupFreshDefrostCheck, checkupDefrostInspectorRows,
       checkupMetricValue, checkupValue,
       checkupCardHtml, refrigerantServiceRowHtml, checkupDetailHtml,
+      checkupDhwReport, checkupDhwBriefHtml, checkupDhwCoolingExplanation,
       cyclingPeriodDetailsHtml: (scope, from, to) => cyclingPeriodDetailsHtml(_cyclingModels.get(scope), from, to),
       checkupCyclingTimelineHtml,
     };`,
@@ -487,6 +488,20 @@ try {
         buh: { supported: true, saturated: true }, bsh: { supported: true, saturated: true } } },
     { id: "retries", verdict: "info", seen: true, observed_s: 3600, required_s: 3600 },
   ]) ui.checkupDetailHtml(ck, true, { source: "x10a", span_s: 86400, source_fresh: true });
+  ui.S.status.diagnostics = { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] };
+  ui.S.status.health = {
+    source: "x10a", source_fresh: true, persist: "fresh",
+    checks: [{ id: "dhw_loss", verdict: "ok", max_k_h: 2.1, windows: 3, observed_s: 10800,
+      timeline: { epoch: 1, window_end_s: 86400, since_s: 0, observed_end_s: 86400, unix_s: 1794582660, live: true,
+        windows: [{ start_s: 79200, end_s: 82800, rate_k_h: 2.1, observed_s: 3600, pump_marker: true, draw_marker: false }] } }],
+  };
+  const covDhw = ui.checkupDhwReport();
+  ui.checkupDhwBriefHtml(covDhw, true);
+  ui.checkupDhwBriefHtml({ source: "x10a", maxRate: null, blocked: true, unsupported: false, stale: false }, false);
+  ui.checkupDhwBriefHtml({ source: "x10a", maxRate: null, blocked: false, unsupported: true, stale: false }, false);
+  ui.checkupDhwBriefHtml({ source: "x10a", maxRate: null, blocked: false, unsupported: false, stale: false }, false);
+  for (const [pump_marker, draw_marker] of [[true, true], [true, false], [false, true], [false, false]])
+    ui.checkupDhwCoolingExplanation({ pump_marker, draw_marker });
 
   // 2. Execute main/www/mcp_dashboard.js across secure + insecure legacyCopy(true/false) paths.
   const mcpJs = fs.readFileSync(path.join(ROOT, "main/www/mcp_dashboard.js"), "utf8");
