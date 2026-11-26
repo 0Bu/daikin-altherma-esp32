@@ -76,7 +76,7 @@ def validate_safety(sources, error):
                 'scratch: exact static owner declaration changed: ' + declaration, error)
     for _, start, end, name in source_tools.definitions(store):
         text = source_tools.masked(store[start:end - 1])
-        require(not re.search(r'\b(?:Cell|hd::Hour|hd::Totals|wh::Data|wh::Fence)\s+\w+\s*(?:\[|[;={])', text),
+        require(not re.search(r'\b(?:CellMeta|HotCell|hd::Hour|hd::Totals|wh::Data|wh::Fence)\s+\w+\s*(?:\[|[;={])', text),
                 'scratch: automatic aggregate in ' + name, error)
     _reader_scopes(store, error)
     require(not re.search(r'\b(?:checkup_\w+|hp_\w+|with_config|config_snapshot|'
@@ -86,7 +86,7 @@ def validate_safety(sources, error):
         require(_code(sources, 'main/heater_context_store.cpp', name, error).startswith('SemGuardlock(s_mutex);'),
                 'receipt: one-shot callback cannot lose its mutex acquisition: ' + name, error)
     next_record = _code(sources, 'main/heater_context_store.cpp', 'heater_context_flash_next', error)
-    require(not re.search(r'\b(?:reader|materialize|heater_context_flash_service|'
+    require(not re.search(r'\b(?:reader|materialize|rebuild_clean|heater_context_flash_service|'
                           r'heater_context_flash_scan_\w+)\(', next_record),
             'progress: hidden Reader/scan in next', error)
     service = _code(sources, 'main/heater_context_store.cpp', 'heater_context_flash_service', error)
@@ -99,7 +99,7 @@ def validate_safety(sources, error):
     require('piece_same(p)' in appended and 'claim_current()' in appended and
             'std::memcmp(v.payload,s_wire,p.bytes)' in appended and
             'v.header->sequence!=p.sequence' in appended and 'v.header->bucket!=p.bucket' in appended and
-            'c.mutation==s_claim_mutation' in appended,
+            's_hot[c.hot].mutation==s_claim_mutation' in appended,
             'receipt: immutable epoch/bucket/mutation/readback contract changed', error)
     progress = _code(sources, 'main/history.cpp', 'flash_progress_heater_context', error)
     require(progress == 'heater_context_flash_service(flash_read_heater_context,HEATER_CONTEXT_FLASH_MAX_READS);',
@@ -210,7 +210,7 @@ def validate_paths(budgets, error):
             re.fullmatch(r'[0-9a-f]{64}', rules.FINAL_MAP_SHA256 or '') and
             bool(rules.SYMBOLS) and bool(rules.PATHS) and bool(rules.DISPATCH) and
             bool(rules.CALLBACK_REFERENCES) and bool(rules.STORAGE) and
-            len(rules.STORAGE) == 48 and sum(item.get('bytes', 0) for item in rules.STORAGE.values()) == 12038 and
+            len(rules.STORAGE) == 51 and sum(item.get('bytes', 0) for item in rules.STORAGE.values()) <= 4800 and
             all(item.get('owner') == 'heater_context_store.cpp' for item in rules.STORAGE.values()) and
             rules.SCHEMA_CHAIN == ('heater_profile_layout',) and isinstance(rules.PACKED_BRIDGES, dict),
             'binding: final integrated source/ELF/frame/path inventory is pending', error)
@@ -795,7 +795,7 @@ def self_test(budgets, sources, error):
         reject(changed)
     mutations = [
         ('main/heater_context_store.cpp', 'if (!budget) return;', 'if (false) return;'),
-        ('main/heater_context_store.cpp', 'c.mutation == s_claim_mutation', 'true'),
+        ('main/heater_context_store.cpp', 's_hot[c.hot].mutation == s_claim_mutation', 'true'),
         ('main/heater_context_store.cpp', 'std::memcmp(v.payload, s_wire, p.bytes)', 'false'),
         ('main/logic/json_output.hpp', 'append(context, part);',
          'static void (*saved)(void*, std::string_view); saved = append;'),
