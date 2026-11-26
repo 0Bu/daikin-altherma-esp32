@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 968, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 969, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -126,14 +126,44 @@ for (const code of codes) {
     ["check.hydronic.agree_reasons", 5],
     ["check.hydronic.agree_limits", 2],
     ["check.hydronic.agree_meta", 3],
-    ["check.heater_context.columns", 3],
     ["check.heater_context.categories", 9],
-    ["check.heater_context.totals", 6],
-    ["check.heater_context.states", 9],
   ]) {
     const parts = dict[key].split("|");
     assert.equal(parts.length, segments, `${code}/${key} segment count`);
     for (const part of parts) assert.ok(part.trim(), `${code}/${key} has empty segment`);
+  }
+  for (const key of [
+    "check.heater_insp.runtime",
+    "check.heater_insp.zero",
+    "check.heater_insp.active",
+    "check.heater_insp.active_unclassified",
+    "check.heater_insp.archive_incomplete",
+    "check.heater_insp.stale",
+    "check.heater_insp.limit",
+    "check.heater_insp.waiting",
+    "check.heater_insp.unavailable",
+  ]) {
+    const val = dict[key];
+    assert.equal(typeof val, "string", `${code}/${key} must be a string`);
+    assert.ok(val.trim(), `${code}/${key} is empty`);
+    if (code !== "en") assert.notEqual(val, catalog.en[key], `${code}/${key} falls back to English`);
+  }
+  for (const [key, sample] of [
+    ["check.heater_insp.zero_cov", "2 h"],
+    ["check.heater_insp.active_cov", "2 h"],
+    ["check.heater_insp.active_ctx", "emergency flag (5 s)"],
+    ["check.heater_insp.active_unclassified_cov", "2 h"],
+  ]) {
+    const fn = dict[key];
+    assert.equal(typeof fn, "function", `${code}/${key} must be a function`);
+    assert.equal(fn.length, 1, `${code}/${key} must take 1 argument`);
+    const rendered = fn(sample);
+    assert.equal(typeof rendered, "string", `${code}/${key} must return a string`);
+    assert.ok(rendered.trim(), `${code}/${key} rendered empty`);
+    assert.ok(rendered.includes(sample), `${code}/${key} must preserve its argument`);
+    if (code !== "en") {
+      assert.notEqual(rendered, catalog.en[key](sample), `${code}/${key} falls back to English`);
+    }
   }
   for (const key of [
     "check.dhw.show", "check.dhw.maximum", "check.dhw.waiting",

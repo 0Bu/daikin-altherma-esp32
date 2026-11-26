@@ -412,10 +412,11 @@ not establish identical readings. Translated Model rows have stable explanation 
 
 The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in and while the active
 source (`X10A` or `Modbus`) is live or has retained/confirmed window state. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
-Rows cover fault, starts, heater runtime and retry changes. Like the observation-only flow result in
-the **Flow rate** inspector, the observation-only **DHW tank cooling** (`dhw_loss`) result appears in
-the **DHW tank / thermal store** schematic inspector rather than as a row on the Plant diagnostics
-card; `dhw_loss` is pure observation and excluded from diagnosis assessments. The
+Card rows cover `fault`, `cycling` (starts) and `retries` (plus an X10A `defrost` notice link when
+active, and the separate `refrigerant` and `working_figure` observations where applicable). Like
+`flow`, `pressure` and the observation-only `dhw_loss` result, `heater` is excluded from the Plant
+diagnostics card rows and presented in the schematic instead; `dhw_loss` is pure observation and
+excluded from diagnosis assessments. The
 [water pressure finding](DIAGNOSTICS.md#water-pressure) follows any second-source pressure reading in
 its inspector. With the X10A assessment available and its trend visible, selecting a chart position
 opens the explanation below the time axis. A red triangle after the pressure label marks a confirmed
@@ -461,6 +462,19 @@ notices when no chart window matches older readings at that rate or current tank
 are stale or missing. See the [API contract](API.md#dhw-cooling-timeline) for retention and
 scope and [tank-cooling guidance](DIAGNOSTICS.md#domestic-hot-water-tank-cooling) for
 interpretation.
+
+In the **Backup heater (BUH)** and **Electric tank heater** (`BSH`) schematic inspectors (when Plant
+diagnostics is enabled and the active source `X10A` or `Modbus` reports `heater` state), a compact
+brief appears below the live chart showing each heater's separate 24-hour reported ON time (never
+merged between BUH and BSH), an observation/coverage/co-occurrence summary—listing up to the top
+three active context categories prioritized by high-signal flags (`emergency`, `error`,
+`quiet_mild_heating`) then positive duration, an optional `≥ 15 min` Silent Mode + mild heating
+notice when triggered, and incomplete context archive or stale/missing current-reading notices when
+applicable—and a single-sentence evidence limit. In `Modbus` diagnostics mode, **Electric tank
+heater** (`BSH`) shows its 24-hour `Modbus` runtime brief while keeping its live headline and
+timeline `X10A`-only, and **Backup heater (BUH)** shows unavailable. Full per-category durations and
+audit counters (`union_s`, `overlap_s`, `positive_samples`, etc.) remain in `/status`, MQTT, and
+device reports rather than rendering a table in the UI.
 
 Observation-only/experimental results cannot become OK or manufacture a health certificate.
 `available`, `assessable` and `evaluated` count different facts; only completed bounded judgments

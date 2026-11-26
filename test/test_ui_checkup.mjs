@@ -155,7 +155,8 @@ vm.runInContext(
      metric: checkupMetricValue,
      status: checkupStatusText,
      detail: checkupDetailHtml,
-     heaterContext: checkupHeaterContextHtml,
+     heaterReport: checkupHeaterReport,
+     heaterBrief: checkupHeaterBriefHtml,
      flowReport: checkupFlowReport,
      flowBrief: checkupFlowBriefHtml,
      defrostInspector: (c, health = {}, statusStale = false) => checkupDefrostInspectorRows({
@@ -196,16 +197,8 @@ assert.equal(ui.text("en", "card.checkup"), "Plant diagnostics · 24 h");
 assert.equal(ui.text("de", "card.checkup"), "Anlagendiagnose · 24 h");
 ui.setLang("en");
 
-// Missing channels stay absent; observed zero and a positive sub-minute runtime stay distinct.
-for (const [payload, expected] of [
-  [{ buh_min: 7, bsh_min: null }, "backup 7 min"],
-  [{ buh_min: null, bsh_min: 9 }, "tank 9 min"],
-  [{ buh_s: 0, bsh_s: 0 }, "backup 0 min · tank 0 min"],
-  [{ buh_s: 1, bsh_s: 59 }, "backup <1 min · tank <1 min"],
-]) assert.equal(ui.metric({ id: "heater", verdict: "ok", ...payload }), expected);
 for (const c of [
   { id: "cycling", starts: null }, { id: "defrost", count: null },
-  { id: "heater", buh_s: null, bsh_s: null },
 ]) assert.equal(ui.metric({ verdict: "collecting", ...c }), "");
 
 // Collecting cycling fixture reused across the diagnosis cases.
@@ -232,7 +225,7 @@ for (const lang of locales) {
   assert.ok(!flowDetail.includes(ageLabel), `${lang} fresh flow need not repeat source age`);
   assert.ok(flowDetail.includes(ui.text(lang, "check.detail.collecting_unknown")),
     `${lang} flow must retain its actual collection state`);
-  for (const id of ["fault", "dhw_loss", "heater", "retries"]) {
+  for (const id of ["fault", "dhw_loss", "retries"]) {
     assert.ok(!ui.detail({ ...collectingFlow, id, windows: 0 }, false, partialReport).includes(horizon),
       `${lang}/${id} observations must not inherit a daily prerequisite`);
   }
@@ -332,10 +325,6 @@ for (const lang of locales) {
   }
 }
 ui.setLang("en");
-
-detail = ui.detail({ id: "heater", verdict: "ok", evidence: "observation", buh_s: 0,
-  bsh_s: 60, buh_observed_s: 7200, bsh_observed_s: 3600 });
-assert.match(detail, /BUH: 2 h covered · BSH: 1 h covered/);
 
 // Starts and completed runs have separate populations. Each mean belongs only to its own purpose.
 const cycling = {
@@ -1113,11 +1102,6 @@ assert.equal(ui.value({ id: "fault", verdict: "info", active: 0, latest: { code:
 assert.equal(ui.value({ id: "fault", verdict: "info", active: null, latest: { code: "U4", duration_s: 90 } }),
   "U4 · Unknown");
 assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED");
-assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED");
-assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: 0, bsh_s: 59 }),
-  ui.text("en", "check.min", `${ui.text("en", "check.buh_short")} 0 · ${ui.text("en", "check.tank_short")} <1`));
-assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: null, bsh_s: 0 }),
-  ui.text("en", "check.min", `${ui.text("en", "check.tank_short")} 0`));
 
 // The card renders no header summary badge; per-row verdicts carry the state, and unrelated
 // metadata cannot turn it into a health score. Pure observations never get a fake assessment denominator.
@@ -1413,9 +1397,9 @@ context.S.status = {
 };
 let cardHtml = ui.card(true);
 assert.match(cardHtml, /Plant diagnostics · 24 h · Modbus</);
-for (const shown of ["health_fault", "health_heater", "health_cycling"])
+for (const shown of ["health_fault", "health_cycling"])
   assert.ok(cardHtml.includes(shown), `Modbus card must render ${shown}`);
-for (const hidden of ["health_defrost", "health_flow", "health_dhw_loss", "health_pressure", "health_retries", "refrigerant_service"])
+for (const hidden of ["health_defrost", "health_flow", "health_dhw_loss", "health_pressure", "health_heater", "Electric heaters", "health_retries", "refrigerant_service"])
   assert.ok(!cardHtml.includes(hidden), `Modbus card must hide ${hidden}`);
 
 // Diagnosis card badge must ignore dhw_loss and flow verdicts and treat h.status === "info" as ok
@@ -1439,6 +1423,8 @@ context.S.status = {
 cardHtml = ui.card(true);
 assert.ok(!cardHtml.includes("health_dhw_loss") && !cardHtml.includes("DHW tank cooling"),
   "X10A Diagnosis card must omit dhw_loss");
+assert.ok(!cardHtml.includes("health_heater") && !cardHtml.includes("Electric heaters"),
+  "X10A Diagnosis card must omit heater");
 assert.doesNotMatch(cardHtml, /section-badge/,
   "Diagnosis card renders no header summary badge");
 
@@ -1723,9 +1709,7 @@ assert.equal(ui.ready({
     staleHighBrief.includes(ui.text("en", "check.dhw.stale")) &&
     !staleHighBrief.includes(ui.text("en", "check.dhw.locations_missing")));
 
-  // heater, retries, and flow edge inputs.
-  assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: 30, bsh_s: 120 }), "Aux <1 · Tank 2 min");
-  assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: -5, bsh_min: NaN }), "OK");
+  // retries and flow edge inputs.
   assert.equal(ui.value({ id: "retries", verdict: "info", seen: true }), "Increase");
   assert.equal(ui.value({ id: "retries", verdict: "ok", seen: false }), "No increase");
   assert.equal(ui.value({ id: "retries", verdict: "collecting", seen: null }), "CHECKING");
@@ -1733,99 +1717,244 @@ assert.equal(ui.ready({
   assert.equal(ui.value({ id: "flow", verdict: "collecting", min_l_min: null }), "CHECKING");
 }
 
-// Independent heater populations must remain visible on X10A even when legacy runtime is absent,
-// and remain hidden in Modbus mode. Bind category IDs to the shared C++ serializer.
+// BUH & BSH heater diagnostics moved into the BUH and BSH inspectors: /status.health still
+// carries the heater observation + X10A context, while checkupCardHtml() omits health_heater and
+// the browser derives per-channel inspector briefs. Bind category IDs to the shared C++ serializer.
 {
   const heaterPayloadSource = fs.readFileSync(
     new URL("../main/logic/heater_context_payload.hpp", import.meta.url), "utf8");
   const heaterCategories = ["emergency", "error", "defrost_recovery", "dhw_route", "silent",
     "cold_outdoor", "mild_outdoor", "compressor_off", "quiet_mild_heating"];
   for (const id of heaterCategories) assert.ok(heaterPayloadSource.includes(`"${id}"`), id);
-  const heaterChannel = () => ({ supported: true, on_s: 30, union_s: 10, overlap_s: 5,
-    unknown_context_s: 20, unclassified_s: 20, readable_s: 120, saturated: false,
-    quiet_mild_notice: false, categories: Object.fromEntries(heaterCategories.map(id =>
-      [id, { supported: true, positive_s: 0, evaluable_on_s: 30, positive_samples: 0 }])) });
-  const heaterContext = { confirmed: true, dated: true, coverage_partial: true,
-    restore_pending: false, persistence_pending: true, archive_incomplete: false,
+  assert.equal(ui.text("en", "check.heater_context.categories").split("|").length, heaterCategories.length);
+
+  const heaterChannel = (patch = {}) => ({
+    supported: true, on_s: 0, union_s: 0, overlap_s: 0,
+    unknown_context_s: 0, unclassified_s: 0, readable_s: 3600, saturated: false,
+    quiet_mild_notice: false,
+    categories: Object.fromEntries(heaterCategories.map(id =>
+      [id, { supported: true, positive_s: 0, evaluable_on_s: 0, positive_samples: 0 }])),
+    ...patch,
+  });
+  const makeHeaterContext = (patch = {}) => ({
+    confirmed: true, dated: true, coverage_partial: true,
+    restore_pending: false, persistence_pending: false, archive_incomplete: false,
     clock_uncertain: false, storage_loss: false, dropped: 0,
-    buh: heaterChannel(), bsh: heaterChannel() };
-  heaterContext.bsh.categories.emergency = { supported: true, positive_s: 5,
-    evaluable_on_s: 10, positive_samples: 2 };
-  const heaterRow = { id: "heater", verdict: "collecting", evidence: "observation",
-    buh_s: null, bsh_s: null, context: heaterContext };
-  ui.setLang("en");
-  assert.equal(ui.heaterContext({}), "", "older firmware must not gain invented context");
-  const heaterHtml = ui.heaterContext(heaterRow);
-  assert.match(heaterHtml, /0 s \/ 30 s · 0/);
-  assert.match(heaterHtml, /5 s \/ 10 s · 2/);
-  assert.equal((heaterHtml.match(/scope="col"/g) || []).length, 4);
-  assert.equal((heaterHtml.match(/scope="row"/g) || []).length, 30);
-  assert.match(ui.detail(heaterRow, false, { source: "x10a" }), /class="heater-context"/,
-    "legacy missing runtime cannot hide independent current flag context on X10A");
-  assert.doesNotMatch(ui.detail(heaterRow, false, { source: "modbus" }), /class="heater-context"/,
-    "Modbus diagnostics must hide X10A heater context");
-  assert.match(heaterHtml, /Categories overlap per heater/);
-  assert.doesNotMatch(heaterHtml, /OK|WARNING|kWh|3–4/);
-  const renderHeater = value => ui.heaterContext({ ...heaterRow, context: value });
-  assert.doesNotMatch(renderHeater({ ...heaterContext, confirmed: false }), /<table|5 s \/ 10 s/,
-    "unconfirmed sources cannot leak cached numeric populations");
-  assert.doesNotMatch(renderHeater({ ...heaterContext, buh: { supported: false },
-    bsh: { supported: false } }), /<table/);
-  const unknownHeater = structuredClone(heaterContext);
-  for (const channel of [unknownHeater.buh, unknownHeater.bsh])
-    for (const category of Object.values(channel.categories))
-      Object.assign(category, { positive_s: null, evaluable_on_s: null, positive_samples: null });
-  assert.doesNotMatch(renderHeater(unknownHeater), /0 s \/ 0 s/,
-    "unread categories remain unknown instead of false negatives");
-  assert.equal((renderHeater(unknownHeater).match(/<td>No data<\/td>/g) || []).length, 18,
-    "each wholly unknown context has one readable cell, without repeating all three missing leaves");
-  const partialHeater = structuredClone(unknownHeater);
-  partialHeater.buh.categories.error.evaluable_on_s = 10;
-  assert.match(renderHeater(partialHeater), /No data \/ 10 s · No data/,
-    "a partial value must not be hidden by the compact wholly unknown presentation");
-  const shortHeater = structuredClone(heaterContext);
-  shortHeater.buh.categories.silent.positive_samples = 1;
-  assert.match(renderHeater(shortHeater), /&lt;1 s \/ 30 s · 1/,
-    "positive sample without a whole elapsed second must remain visible");
-  shortHeater.buh.categories.silent.positive_samples = Infinity;
-  assert.doesNotMatch(renderHeater(shortHeater), /&lt;1 s|Infinity|NaN|undefined/,
-    "an invalid sample count cannot manufacture positive subsecond evidence");
-  const saturatedHeater = structuredClone(heaterContext);
-  saturatedHeater.bsh.saturated = true;
-  assert.match(renderHeater(saturatedHeater), /≥5 s \/ ≥10 s · ≥2/);
-  const unavailableHeater = { ...heaterContext, archive_incomplete: true, restore_pending: true,
-    clock_uncertain: true, dated: false, storage_loss: true, dropped: 4 };
-  assert.match(renderHeater(unavailableHeater),
-    /Archive unavailable: damaged or unread records \(≥4\)/);
-  assert.doesNotMatch(renderHeater(unavailableHeater), /Archive not yet validated/,
-    "a failed archive cannot be presented as an ordinary wait");
-  const escapeHeater = text => String(text).replace(/[&<>"]/g,
-    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  for (const lang of locales) {
-    ui.setLang(lang);
-    const body = renderHeater({ ...unavailableHeater,
-      bsh: { ...unavailableHeater.bsh, quiet_mild_notice: true } });
-    const labels = ui.text(lang, "check.heater_context.categories").split("|");
-    assert.equal(labels.length, 9, `${lang} has all separate operating contexts`);
-    assert.equal(ui.text(lang, "check.heater_context.totals").split("|").length, 6);
-    assert.equal(ui.text(lang, "check.heater_context.states").split("|").length, 9);
-    for (const label of labels) assert.ok(body.includes(escapeHeater(label)), `${lang}: ${label}`);
-    for (const key of ["title", "counts", "notice", "rule", "limits"]) {
-      const text = ui.text(lang, `check.heater_context.${key}`);
-      assert.ok(body.includes(escapeHeater(text)), `${lang}: ${key}`);
-      if (lang !== "en") assert.notEqual(text, ui.copy.en[`check.heater_context.${key}`]);
-    }
-    assert.doesNotMatch(body, /check\.heater_context\.|undefined|NaN|Infinity/);
-  }
-  ui.setLang("en");
-  assert.equal(renderHeater([]), "", "array context payload must be ignored");
-  const savedCats = ui.copy.en["check.heater_context.categories"];
+    buh: heaterChannel(), bsh: heaterChannel(),
+    ...patch,
+  });
+  const setHeaterStatus = (checkPatch = {}, healthPatch = {}, diagPatch = {}, extra = {}) => {
+    const check = {
+      id: "heater", verdict: "ok", evidence: "observation",
+      buh_s: 0, bsh_s: 0, buh_observed_s: 3600, bsh_observed_s: 3600,
+      ...checkPatch,
+    };
+    context.S.status = {
+      diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"], ...diagPatch },
+      health: { source: "x10a", status: "ok", persist: "fresh", source_fresh: true, ...healthPatch, checks: [check] },
+      ...extra,
+    };
+  };
+  const savedState = {
+    status: context.S.status,
+    otaCached: context.S.otaCached,
+    transportUnavailable: context.S.transportUnavailable,
+  };
   try {
-    ui.copy.en["check.heater_context.categories"] = "broken|only";
-    const truncated = renderHeater(heaterContext);
-    assert.equal(truncated, "", "truncated locale pipe segments must degrade safely without undefined");
+    ui.setLang("en");
+    assert.equal(ui.heaterBrief(null), "");
+    assert.equal(ui.heaterReport("other"), null);
+    assert.equal(ui.heaterReport(null), null);
+
+    // Gating: disabled diagnostics, OTA cache, transport unavailable, persist unknown, missing check, invalid source -> null.
+    setHeaterStatus();
+    context.S.status.diagnostics.enabled = false;
+    assert.equal(ui.heaterReport("buh"), null, "disabled diagnostics must hide heater report");
+    setHeaterStatus();
+    context.S.otaCached = true;
+    assert.equal(ui.heaterReport("buh"), null, "otaCached must hide heater report");
+    context.S.otaCached = false;
+    context.S.transportUnavailable = "status";
+    assert.equal(ui.heaterReport("buh"), null, "transportUnavailable=status must hide heater report");
+    context.S.transportUnavailable = null;
+    setHeaterStatus({}, { persist: "unknown" });
+    assert.equal(ui.heaterReport("buh"), null, "persist=unknown must hide heater report");
+    context.S.status.health.checks = [{ id: "fault", verdict: "ok" }];
+    assert.equal(ui.heaterReport("buh"), null, "missing heater check must return null");
+    setHeaterStatus({}, { source: "env3" }, { effective_source: "env3" });
+    assert.equal(ui.heaterReport("buh"), null, "unsupported source must return null");
+
+    // Card omission in both X10A and Modbus modes.
+    for (const src of ["x10a", "modbus"]) {
+      setHeaterStatus({ buh_s: 120, bsh_s: 60 }, { source: src }, { source: src, effective_source: src });
+      const cHtml = ui.card(true);
+      assert.equal(cHtml, "", `${src}: heater-only report must not create a Diagnostics card`);
+      assert.ok(!cHtml.includes("health_heater") && !cHtml.includes("Electric heaters"));
+    }
+
+    // Waiting state (null runtime, no context) + archive_incomplete & source_stale notes.
+    setHeaterStatus({
+      verdict: "collecting", buh_s: null, bsh_s: null, buh_observed_s: null,
+      context: makeHeaterContext({ archive_incomplete: true }),
+    }, { source_fresh: false });
+    const waitingRep = ui.heaterReport("buh");
+    assert.equal(waitingRep.runtimeText, null);
+    assert.equal(waitingRep.archiveIncomplete, true);
+    assert.equal(waitingRep.stale, true);
+    const waitingBrief = ui.heaterBrief(waitingRep);
+    assert.ok(waitingBrief.includes(ui.text("en", "check.heater_insp.waiting")));
+    assert.ok(waitingBrief.includes(ui.text("en", "check.heater_insp.archive_incomplete")));
+    assert.ok(waitingBrief.includes(ui.text("en", "check.heater_insp.stale")));
+    assert.doesNotMatch(waitingBrief, /inspect-diagnosis-result/);
+
+    // Zero runtime with observed_s coverage, dropped > 0, and reason=source_stale.
+    setHeaterStatus({
+      buh_s: 0, buh_observed_s: 7200, reason: "source_stale",
+      context: makeHeaterContext({ dropped: 3 }),
+    });
+    const zeroRep = ui.heaterReport("buh");
+    assert.equal(zeroRep.isZero, true);
+    assert.equal(zeroRep.observedS, 7200);
+    assert.equal(zeroRep.archiveIncomplete, true);
+    assert.equal(zeroRep.stale, true);
+    const zeroBrief = ui.heaterBrief(zeroRep);
+    assert.match(zeroBrief, /Reported ON time \(24 h\) · X10A<\/span><strong class="num">0 min<\/strong>/);
+    assert.ok(zeroBrief.includes(ui.text("en", "check.heater_insp.zero_cov", "2 h")));
+    assert.ok(zeroBrief.includes(ui.text("en", "check.heater_insp.archive_incomplete")));
+    assert.ok(zeroBrief.includes(ui.text("en", "check.heater_insp.stale")));
+    assert.ok(zeroBrief.includes(ui.text("en", "check.heater_insp.limit")));
+
+    // Active runtime with overlapping categories: high-signal priority, positive_s desc, top-3 cap, <1 s, saturated, quiet_mild_notice.
+    const ctxOverlapping = makeHeaterContext();
+    ctxOverlapping.buh = heaterChannel({
+      on_s: 600, quiet_mild_notice: true,
+      categories: {
+        emergency: { supported: true, positive_s: 0, evaluable_on_s: 600, positive_samples: 1 }, // <1 s, high-signal first
+        error: { supported: true, positive_s: 15, evaluable_on_s: 600, positive_samples: 2 }, // high-signal second
+        quiet_mild_heating: { supported: true, positive_s: 90, evaluable_on_s: 600, positive_samples: 3 }, // high-signal third
+        silent: { supported: true, positive_s: 500, evaluable_on_s: 600, positive_samples: 10 }, // larger duration, capped out by 3 high-signal
+        defrost_recovery: { supported: true, positive_s: 300, evaluable_on_s: 600, positive_samples: 5 },
+      },
+    });
+    setHeaterStatus({ buh_s: 600, context: ctxOverlapping });
+    const overlapRep = ui.heaterReport("buh");
+    assert.deepEqual(Array.from(overlapRep.activeContexts.map(c => c.id)),
+      ["emergency", "error", "quiet_mild_heating"]);
+    assert.equal(overlapRep.activeContexts[0].subSecond, true);
+    const overlapBrief = ui.heaterBrief(overlapRep);
+    assert.match(overlapBrief, /Reported ON time \(24 h\) · X10A<\/span><strong class="num">10 min<\/strong>/);
+    assert.ok(overlapBrief.includes("Co-occurred with: emergency flag (&lt;1 s), error status (&lt;1 min), Silent Mode + mild heating (1 min)."));
+    assert.ok(overlapBrief.includes(escapeText(ui.text("en", "check.heater_context.notice"))));
+    assert.ok(!overlapBrief.includes("Silent Mode flag"));
+    assert.doesNotMatch(overlapBrief, /OK|WARNING|kWh/);
+
+    // Non-high-signal sorting by positive_s desc + tie-break + top-3 cap + saturated lower bounds.
+    const ctxSaturated = makeHeaterContext();
+    ctxSaturated.bsh = heaterChannel({
+      on_s: 900, saturated: true,
+      categories: {
+        mild_outdoor: { supported: true, positive_s: 120, positive_samples: 4 },
+        dhw_route: { supported: true, positive_s: 120, positive_samples: 4 }, // beats mild_outdoor on tie-break
+        compressor_off: { supported: true, positive_s: 300, positive_samples: 6 },
+        silent: { supported: true, positive_s: 200, positive_samples: 5 },
+        cold_outdoor: { supported: true, positive_s: 0, positive_samples: 1 }, // positive_s:0 with saturated=true is NOT subSecond
+      },
+    });
+    setHeaterStatus({ bsh_s: 900, context: ctxSaturated });
+    const satRep = ui.heaterReport("bsh");
+    assert.deepEqual(Array.from(satRep.activeContexts.map(c => c.id)),
+      ["compressor_off", "silent", "dhw_route"]);
+    const satBrief = ui.heaterBrief(satRep);
+    assert.ok(satBrief.includes("Co-occurred with: compressor reported stopped (≥5 min), Silent Mode flag (≥3 min), hot-water route (≥2 min)."));
+
+    // Unclassified / unknown context (hasOnNoCategory: on_s > 0 or on_samples > 0 without active categories).
+    setHeaterStatus({
+      buh_s: 120, buh_observed_s: 3600,
+      context: makeHeaterContext({ buh: heaterChannel({ on_s: 120 }) }),
+    });
+    const unclassRep = ui.heaterReport("buh");
+    assert.equal(unclassRep.hasOnNoCategory, true);
+    assert.ok(ui.heaterBrief(unclassRep).includes(ui.text("en", "check.heater_insp.active_unclassified_cov", "1 h")));
+    setHeaterStatus({
+      buh_s: null, buh_observed_s: null,
+      context: makeHeaterContext({ buh: heaterChannel({ on_samples: 2 }) }),
+    });
+    const unclassNoCovRep = ui.heaterReport("buh");
+    assert.equal(unclassNoCovRep.hasOnNoCategory, true);
+    assert.ok(ui.heaterBrief(unclassNoCovRep).includes(ui.text("en", "check.heater_insp.active_unclassified")));
+
+    // Legacy-null runtime with active independent context (buh_s: null, bsh_s: null) + confirmed=false isolation.
+    const ctxLegacyNull = makeHeaterContext();
+    ctxLegacyNull.bsh.categories.emergency = { supported: true, positive_s: 5, evaluable_on_s: 10, positive_samples: 2 };
+    setHeaterStatus({ verdict: "collecting", buh_s: null, bsh_s: null, context: ctxLegacyNull });
+    const legNullRep = ui.heaterReport("bsh");
+    assert.equal(legNullRep.runtimeText, null);
+    assert.equal(legNullRep.activeContexts.length, 1);
+    const legNullBrief = ui.heaterBrief(legNullRep);
+    assert.doesNotMatch(legNullBrief, /inspect-diagnosis-result/);
+    assert.ok(legNullBrief.includes("Co-occurred with: emergency flag (&lt;1 min)."));
+    setHeaterStatus({
+      verdict: "collecting", buh_s: null, bsh_s: null,
+      context: { ...ctxLegacyNull, confirmed: false, archive_incomplete: true },
+    });
+    const unconfRep = ui.heaterReport("bsh");
+    assert.deepEqual(Array.from(unconfRep.activeContexts), []);
+    assert.equal(unconfRep.archiveIncomplete, false);
+    assert.ok(ui.heaterBrief(unconfRep).includes(ui.text("en", "check.heater_insp.waiting")));
+
+    // Modbus mode: BSH shows Modbus runtime without X10A context; BUH shows unavailable.
+    setHeaterStatus({
+      buh_s: 120, bsh_s: 180, buh_observed_s: 3600, bsh_observed_s: 3600,
+      context: makeHeaterContext({
+        archive_incomplete: true,
+        buh: heaterChannel({ on_s: 120, quiet_mild_notice: true, categories: { emergency: { supported: true, positive_s: 60, positive_samples: 2 } } }),
+        bsh: heaterChannel({ on_s: 180, quiet_mild_notice: true, categories: { emergency: { supported: true, positive_s: 60, positive_samples: 2 } } }),
+      }),
+    }, { source: "modbus" }, { source: "modbus", effective_source: "modbus", available_sources: ["modbus"] });
+    const mbBuh = ui.heaterReport("buh");
+    assert.equal(mbBuh.unsupported, true);
+    assert.equal(ui.heaterBrief(mbBuh), `<p>${ui.text("en", "check.heater_insp.unavailable")}</p>`);
+    const mbBsh = ui.heaterReport("bsh");
+    assert.equal(mbBsh.unsupported, false);
+    assert.equal(mbBsh.runtimeText, "3 min");
+    assert.deepEqual(Array.from(mbBsh.activeContexts), []);
+    assert.equal(mbBsh.archiveIncomplete, false);
+    assert.equal(mbBsh.quietMildNotice, false);
+    const mbBshBrief = ui.heaterBrief(mbBsh);
+    assert.match(mbBshBrief, /Reported ON time \(24 h\) · Modbus<\/span><strong class="num">3 min<\/strong>/);
+    assert.ok(mbBshBrief.includes(ui.text("en", "check.heater_insp.active_cov", "1 h")));
+    assert.ok(!mbBshBrief.includes("emergency flag"));
+    assert.ok(!mbBshBrief.includes(ui.text("en", "check.heater_context.notice")));
+
+    // Legacy buh_min / bsh_min support and negative / NaN runtime rejection.
+    setHeaterStatus({ buh_s: null, buh_min: 7, bsh_s: null, bsh_min: 0 });
+    assert.equal(ui.heaterReport("buh").runtimeText, "7 min");
+    assert.equal(ui.heaterReport("bsh").runtimeText, "0 min");
+    assert.equal(ui.heaterReport("bsh").isZero, true);
+    for (const [buh_s, buh_min] of [[-5, null], [NaN, null], [Infinity, null], [null, -1], [null, NaN]]) {
+      setHeaterStatus({ buh_s, buh_min });
+      const badRep = ui.heaterReport("buh");
+      assert.equal(badRep.runtimeText, null);
+      assert.equal(badRep.isZero, false);
+    }
+
+    // All 13 locales render without undefined, NaN, unexpanded keys, or forbidden causal/verdict strings.
+    setHeaterStatus({
+      buh_s: 600, buh_observed_s: 3600,
+      context: makeHeaterContext({ archive_incomplete: true, buh: ctxOverlapping.buh }),
+    }, { source_fresh: false });
+    for (const lang of locales) {
+      ui.setLang(lang);
+      const brief = ui.heaterBrief(ui.heaterReport("buh"));
+      assert.match(brief, /inspect-diagnosis-result/);
+      assert.doesNotMatch(brief, /check\.heater_insp\.|check\.heater_context\.|undefined|NaN|Infinity|\bOK\b|\bWARNING\b|kWh/);
+    }
+    ui.setLang("en");
   } finally {
-    ui.copy.en["check.heater_context.categories"] = savedCats;
+    context.S.status = savedState.status;
+    context.S.otaCached = savedState.otaCached;
+    context.S.transportUnavailable = savedState.transportUnavailable;
+    ui.setLang("en");
   }
 }
 

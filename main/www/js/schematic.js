@@ -1859,8 +1859,11 @@ function renderInspect(mode = "") {
   if (S.scrub) return;
   const isFlow = e === INSPECT.flow;
   const isTank = e === INSPECT.tank;
+  const isBuh = e === INSPECT.buh;
+  const isBsh = e === INSPECT.bsh;
   const flow = isFlow ? checkupFlowReport() : null;
   const dhw = isTank ? checkupDhwReport() : null;
+  const heater = isBuh ? checkupHeaterReport("buh") : isBsh ? checkupHeaterReport("bsh") : null;
   // The chart is decided ahead of the early return below, because its own state moves independently
   // of the card's: the series arrives from an async fetch that changes no live value.
   // inspCurRow refuses a retained X10A row. renderInspectHist may still resolve this target's paired
@@ -1884,6 +1887,10 @@ function renderInspect(mode = "") {
   ]) : "") + (dhw ? JSON.stringify([
     dhw.source, dhw.maxRate, dhw.blocked, dhw.unsupported, dhw.stale,
     dhw.timeline?.epoch ?? null, dhw.timeline?.windows?.length ?? 0, hasDhwBands,
+  ]) : "") + (heater ? JSON.stringify([
+    heater.which, heater.source, heater.runtimeText, heater.isZero, heater.observedS,
+    heater.stale, heater.unsupported, heater.archiveIncomplete, heater.saturated,
+    heater.quietMildNotice, heater.activeContexts, heater.hasOnNoCategory,
   ]) : "");
   if (sig === S.inspSig) return;
   S.inspSig = sig;
@@ -1892,9 +1899,10 @@ function renderInspect(mode = "") {
       (S.dhwCoolSelection && (S.dhwCoolSelection.source !== dhw.source ||
                               S.dhwCoolSelection.epoch !== dhw.timeline.epoch)))
     S.dhwCoolSelection = null;
-  $("inspFlowDiagnosis").hidden = !(flow || dhw);
+  $("inspFlowDiagnosis").hidden = !(flow || dhw || heater);
   setHtml("inspFlowDiagnosis", flow ? checkupFlowBriefHtml(flow)
-    : dhw ? checkupDhwBriefHtml(dhw, hasDhwBands) : "", false);
+    : dhw ? checkupDhwBriefHtml(dhw, hasDhwBands)
+    : heater ? checkupHeaterBriefHtml(heater) : "", false);
   // Use the same live-class accordion as the value/Settings tongues. The body stays mounted inside
   // its 0fr clip so the browser has a real closed geometry to transition FROM; toggling `hidden`
   // here painted the full infobox immediately and could never reproduce their pull-out motion.

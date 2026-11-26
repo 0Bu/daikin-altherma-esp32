@@ -861,11 +861,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vdesc-p { margin-top: 11px; }
 .vdesc-p:first-child { margin-top: 0; }
 .vdesc-n { color: var(--fg); font-weight: 600; }
-.heater-context { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 11px; font-variant-numeric: tabular-nums; }
-.heater-context caption { text-align: left; margin-bottom: 6px; }
-.heater-context th, .heater-context td { text-align: left; vertical-align: top; overflow-wrap: anywhere; padding: 5px 4px; border-bottom: 1px solid var(--line); font-weight: 400; }
-.heater-context th:first-child { width: 44%; padding-left: 0; }
-.heater-context thead th { color: var(--fg); font-weight: 600; }
 .checkup-cycling-chart .vhist-range { margin-top: 4px; font-size: 11px; white-space: normal; }
 .checkup-chart-cols { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; height: 110px; touch-action: pan-y; }
 .checkup-chart-col { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; padding: 0; border: 0; border-radius: 2px; background: none; }
