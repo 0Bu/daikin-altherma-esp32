@@ -281,9 +281,9 @@ explanation, optional history, then owned supplementary values (if any). Assembl
 with no single measurement have no headline, numeric chart, or duplicated pill rows; they explain
 the part and its live state in prose. A target omits its own duplicated headline row and never
 duplicates readings owned by another schematic card; it keeps a current HomeHub twin of the same
-quantity with its comparison and any un-pilled sub-readings owned solely by that component (tank
-setpoint/disinfection, pump signal, BUH stage 2/capacity, operating-mode thermostat/fault code, room
-setpoint, and electrical CT/inverter currents).
+quantity with its comparison and any un-pilled sub-readings owned solely by that component (compressor
+running, tank setpoint/disinfection, pump signal, BUH stage 2/capacity, operating-mode
+thermostat/fault code, room setpoint, and electrical CT/inverter currents).
 
 **Flow rate** follows that order. Its trend comes after the explanation and Normal note. The
 HomeHub comparison follows the trend when paired, and the heating observation comes last. Violet
