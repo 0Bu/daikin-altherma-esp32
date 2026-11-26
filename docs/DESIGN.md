@@ -406,16 +406,18 @@ not establish identical readings. Translated Model rows have stable explanation 
 
 The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in and while the active
 source (`X10A` or `Modbus`) is live or has retained/confirmed window state. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
-Rows cover fault, tank loss, starts, heater runtime and retry changes. The observation-only
-flow result appears in the **Flow rate** inspector. The [water pressure finding](DIAGNOSTICS.md#water-pressure)
-follows any second-source pressure reading in its inspector. With the X10A assessment available and
-its trend visible, selecting a chart position opens the explanation below the time axis.
-A red triangle after the pressure label marks a confirmed critical
-finding. The amber signal for an unconfirmed critical reading follows the settings button's upper-right
-placement.
+Rows cover fault, starts, heater runtime and retry changes. Like the observation-only flow result in
+the **Flow rate** inspector, the observation-only **DHW tank cooling** (`dhw_loss`) result appears in
+the **DHW tank / thermal store** schematic inspector rather than as a row on the Plant diagnostics
+card; `dhw_loss` is pure observation and excluded from diagnosis assessments. The
+[water pressure finding](DIAGNOSTICS.md#water-pressure) follows any second-source pressure reading in
+its inspector. With the X10A assessment available and its trend visible, selecting a chart position
+opens the explanation below the time axis. A red triangle after the pressure label marks a confirmed
+critical finding. The amber signal for an unconfirmed critical reading follows the settings button's
+upper-right placement.
 
-Collapsed rows show the primary
-measured value when available, or a status such as checking, no window, measured, tentative or N/A.
+Collapsed rows show the primary measured value when available, or a status such as checking,
+measured, tentative or N/A.
 The collapsed `fault` row retains an accessible label and stays quiet when no active or retained
 fault exists. It otherwise shows `<code> · <duration>` or `<code> · Unknown` when stale, with status
 text if no code is available.
@@ -439,19 +441,20 @@ trend when X10A history is unavailable. A current X10A **NOTE** counts in the Pl
 summary. Its entry opens the same inspector. An amber warning triangle appears directly after
 the centred **Defrost** label. The pill's active colour follows the current defrost state.
 
-The tank-cooling expander shows **Largest hourly drop at the tank sensor** in °C per hour when the
-aggregate has a rate. It shows the time and recorded circumstances of the most recent exact hour
-with that rate when available. Open **24-hour history** to see the chart. Position each bar by its
-endpoints, keep zero-rate bars visible and hatch the gaps between completed timed records.
-Fixed-size markers occupy separate pump and draw-like lanes. Selecting a bar shows the interval,
-rate, readable time and circumstances. **Data details** and **Calculation example** start
-collapsed when present.
-Preserve selection and disclosure state during same-scope polling. Select the newest retained
-window if the selected one expires. Clear the chart when an accepted diagnosis response changes
-scope or has no valid timeline.
-Show the unavailable state for missing detail and the historical notice for stale tank-cooling
-inputs. See the [API contract](API.md#dhw-cooling-timeline) for retention and scope and
-[tank-cooling guidance](DIAGNOSTICS.md#domestic-hot-water-tank-cooling) for interpretation.
+In the **DHW tank / thermal store** inspector (when Plant diagnostics is enabled and the active
+diagnostics source `X10A` or `Modbus` matches the visible `dhw_tank` series), shaded areas under
+the `dhw_tank` curve mark completed 1-hour windows with `rate_k_h >= 0.8` K/h, visually
+distinguishing the strongest window(s) and the active selection. Selecting a shaded area on the
+chart (or cycling through windows via the legend button) displays the window's time range, rate
+in °C/h, and up to 3 plain-language, evidence-bounded sentences explaining possible causes from
+that window's recorded `pump_marker` and `draw_marker` flags, without elaborate breakdowns or
+energy calculation examples. Preserve selection during same-scope polling and clear it when no
+qualifying windows remain. Below the chart, a compact summary shows the strongest recorded hourly
+rate (`°C/h`) when available—or the waiting, no-completed-window, or N/A status—plus concise
+notices when no chart window matches older readings at that rate or current tank-cooling inputs
+are stale or missing. See the [API contract](API.md#dhw-cooling-timeline) for retention and
+scope and [tank-cooling guidance](DIAGNOSTICS.md#domestic-hot-water-tank-cooling) for
+interpretation.
 
 Observation-only/experimental results cannot become OK or manufacture a health certificate.
 `available`, `assessable` and `evaluated` count different facts; only completed bounded judgments

@@ -2,201 +2,122 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-// Exercise the firmware's assembled/minified page, not the standalone design preview. Fixtures
-// enter through the same /status and /values requests as live telemetry; no chart HTML is injected.
-const ROW = 'button[data-desc="model:health_dhw_loss"]';
-const DETAIL = ".checkup-dhw-detail";
-const CHART = `${DETAIL} .checkup-dhw-chart`;
-const WINDOWS = `${CHART} button[data-dhw-window]`;
-const TIMELINE = `${DETAIL} details[data-dhw-disclosure="timeline"]`;
-const BASIS = `${DETAIL} details[data-dhw-disclosure="basis"]`;
-const ENERGY = `${DETAIL} details[data-dhw-disclosure="energy"]`;
-const NOW = 172800;
+// Exercise the firmware's assembled/minified page in the Tank inspector (#schem [data-insp="tank"]).
+// Fixtures enter through real /status, /values, and /history requests; no chart HTML is injected.
+const TANK_HIT = '#schem [data-insp="tank"]';
+const DIAG_BRIEF = "#inspFlowDiagnosis";
+const HIST_HOST = "#inspHist";
+const PLOT = `${HIST_HOST} [data-hist=dhw_tank]`;
+const BANDS = `${HIST_HOST} .vhist-dhw-band`;
+const LEGEND_SHOW = `${HIST_HOST} button[data-dhw-cool-show]`;
+const READOUT = `${HIST_HOST} .vhist-dhw-readout`;
+const NOW = 172800; // 576 * 300s
+const SAMPLES = 288;
+const RING_B0 = NOW / 300 - SAMPLES; // 288 -> 0 expired slots
+const CHART_START_S = NOW - (SAMPLES - 1) * 300; // 86700
 const UNIX = Date.parse("2026-11-18T12:00:00Z") / 1000;
-const windowButton = end => `${WINDOWS}[data-dhw-window="${end}"]`;
 const evaluate = (page, fn, arg) => page.evaluate(`(${fn})(${JSON.stringify(arg)})`);
 
-async function tap(page, selector) {
-  await page.waitFor("!S.clickHold");
-  const point = await evaluate(page, async selector => {
+async function settle(page) {
+  await page.waitFor(`!S.clickHold && !_pollBusy && !S.histBusy.size &&
+    document.getElementById("inspect").getAnimations({subtree: true})
+      .every(a => !(a instanceof CSSTransition) || a.playState !== "running")`);
+  await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
+}
+
+async function tap(page, selector, { yFraction = 0.5, isPlotBand = false } = {}) {
+  await settle(page);
+  await page.bringToFront();
+  const point = await evaluate(page, async ({ selector, yFraction, isPlotBand }) => {
     const node = document.querySelector(selector);
-    node?.scrollIntoView({ block: "center", behavior: "instant" });
+    if (!node) throw new Error("missing DHW target: " + selector);
+    node.scrollIntoView({ block: "center", behavior: "instant" });
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const box = node?.getBoundingClientRect();
-    if (!box?.width || !box.height) throw new Error("missing visible DHW target: " + selector);
-    const x = box.left + box.width / 2, y = box.top + box.height / 2;
+    const box = node.getBoundingClientRect();
+    if (!box.width || !box.height) throw new Error("hidden DHW target: " + selector);
+    const x = box.left + box.width / 2;
+    const y = box.top + box.height * yFraction;
     const hit = document.elementFromPoint(x, y);
-    return { x, y, reachable: hit === node || node.contains(hit), disabled: !!node.disabled,
-      hit: hit?.outerHTML.slice(0, 180) };
-  }, selector);
+    const container = isPlotBand ? node.closest(".vhist-plot") : node;
+    return {
+      x, y,
+      disabled: !!node.disabled,
+      reachable: !!container && (hit === container || container.contains(hit)),
+      hit: hit?.outerHTML.slice(0, 180),
+    };
+  }, { selector, yFraction, isPlotBand });
   assert.equal(point.disabled, false, "DHW action must be enabled: " + selector);
-  assert.equal(point.reachable, true, "DHW action must survive native hit testing: " +
+  assert.equal(point.reachable, true, "DHW target must survive native hit testing: " +
     selector + " " + JSON.stringify(point));
   await page.nativeClick(point.x, point.y);
   await page.frame();
 }
 
 async function key(page, name, code, keyCode) {
-  // Both adapters use native input: CDP on Chromium and Playwright's keyboard on Linux WebKit.
   await page.key(page.inputMode === "touch" && name === " " ? "Space" : name, { code, keyCode });
   await page.frame();
 }
 
-async function settle(page) {
-  await page.waitFor(`!S.clickHold && !_pollBusy && (() => {
-    const item = document.querySelector(${JSON.stringify(ROW)})?.closest('.vitem');
-    return !item || item.getAnimations({subtree:true}).every(a =>
-      !(a instanceof CSSTransition) || a.playState !== 'running');
-  })()`);
-  await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
-}
-
-async function heroValue(page) {
-  return evaluate(page, selector => [...document.querySelector(selector).childNodes]
-    .filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join("").trim(),
-  DETAIL + " .checkup-dhw-value");
-}
-
-async function selected(page) {
-  return evaluate(page, selector => [...document.querySelectorAll(selector)]
-    .filter(node => node.getAttribute("aria-pressed") === "true")
-    .map(node => Number(node.dataset.dhwWindow)), WINDOWS);
-}
-
-async function assertSelection(page, end, context, focused = false) {
-  assert.deepEqual(await selected(page), [end], context + ": exactly the chosen real window is selected");
-  const expected = makeTimeline().windows.find(window => window.end_s === end);
-  assert.ok(expected, context + ": expected window must belong to the independent fixture");
-  const state = await evaluate(page, selector => {
-    const button = document.querySelector(selector);
-    const details = button.closest(".checkup-dhw-chart").querySelector(".checkup-dhw-window-details");
-    return { focus: document.activeElement === button,
-      rate: details?.querySelector('[data-dhw-readout="rate"]')?.textContent.trim(),
-      time: details?.querySelector('[data-dhw-readout="time"]')?.textContent.trim(),
-      coverage: details?.querySelector('[data-dhw-readout="coverage"]')?.textContent.trim(),
-      context: details?.querySelector('[data-dhw-readout="context"]')?.textContent.trim(),
-      label: button.getAttribute("aria-label"),
-      labels: { pump:t('check.dhw.pump'), draw:t('check.dhw.draw'),
-        yes:t('check.dhw.marker_yes'), no:t('check.dhw.marker_no'),
-        pumpContext:t('check.dhw.context_pump'), drawContext:t('check.dhw.context_draw'),
-        quietContext:t('check.dhw.context_quiet'), uncertainty:t('check.dhw.context_selected') } };
-  }, windowButton(end));
-  if (focused) assert.equal(state.focus, true, context + ": roving keyboard focus follows selection");
-  assert.ok(state.time && state.coverage && state.context, context + ": selection exposes time, coverage and circumstances");
-  assert.ok(state.rate?.includes("K/h"), context + ": selected rate keeps its unit");
-  assert.equal(Number.parseFloat(state.rate), expected.rate_k_h, context + ": readout uses the selected record, not the aggregate maximum");
-  const markers = `${state.labels.pump}: ${expected.pump_marker ? state.labels.yes : state.labels.no} · ` +
-    `${state.labels.draw}: ${expected.draw_marker ? state.labels.yes : state.labels.no}`;
-  assert.ok(state.label?.endsWith(markers), context + ": the bar's accessible name preserves both presence flags");
-  const phrases = [];
-  if (expected.pump_marker) phrases.push(state.labels.pumpContext);
-  if (expected.draw_marker) phrases.push(state.labels.drawContext);
-  if (!phrases.length) phrases.push(state.labels.quietContext);
-  if (expected.rate_k_h > 0) phrases.push(state.labels.uncertainty);
-  assert.equal(state.context, phrases.join(" "), context + ": only this window's paired markers explain its circumstances");
-}
-
 function makeTimeline() {
-  const record = (ago, duration, rate, pump_marker, draw_marker) => ({
+  const windowAt = (ago, duration, rate, pump_marker, draw_marker) => ({
     start_s: NOW - ago, end_s: NOW - ago + duration, rate_k_h: rate,
     observed_s: duration, pump_marker, draw_marker,
   });
-  return { epoch: 1, window_end_s: NOW, since_s: NOW - 80000, observed_end_s: NOW,
-    unix_s: UNIX, live: true, windows: [
-      record(78017, 3600, 1.8, true, false),
-      record(60011, 3600, 0, false, false),
-      record(30007, 3615, 1.2, false, true),
-      record(11003, 3600, 2.7, true, true),
-      record(4001, 3600, 0.6, false, false),
-    ] };
+  return {
+    epoch: 1, window_end_s: NOW, since_s: NOW - 80000, observed_end_s: NOW,
+    unix_s: UNIX, live: true,
+    windows: [
+      windowAt(78000, 3600, 1.8, false, false), // quiet
+      windowAt(64000, 3600, 0.4, false, false), // < 0.8 -> must remain unshaded
+      windowAt(46000, 3600, 1.2, false, true),  // draw
+      windowAt(24000, 3600, 2.7, true, true),   // peak: pump + draw
+      windowAt(10000, 3600, 1.4, true, false),  // pump
+    ],
+  };
 }
 
-async function assertGeometry(page, timeline, context) {
-  const visual = await evaluate(page, ({ chart, plot, windows }) => {
-    const root = document.querySelector(chart), graph = root.querySelector(plot);
-    const rect = node => { const r = node.getBoundingClientRect();
-      return { left: r.left, right: r.right, width: r.width, height: r.height, bottom: r.bottom }; };
-    return { plot: rect(graph), clock: root.dataset.dhwClock,
-      rows: [...root.querySelectorAll(windows)].map(button => ({
-        start: Number(button.dataset.startS), end: Number(button.dataset.endS),
-        rate: Number(button.dataset.rate), label: button.getAttribute("aria-label"),
-        tab: button.tabIndex, zero: button.classList.contains("is-zero"),
-        button: rect(button), bar: rect(button.querySelector(".checkup-dhw-bar")),
-      })), lanes: ["pump", "draw"].map(kind => {
-        const lane = root.querySelector('[data-dhw-lane="' + kind + '"]');
-        return { kind, box: rect(lane), markers: [...lane.querySelectorAll("[data-dhw-marker]")]
-          .map(node => ({ end: Number(node.dataset.dhwMarker), ...rect(node) })) };
-      }), sliders: root.querySelectorAll('input[type="range"]').length };
-  }, { chart: CHART, plot: ".checkup-dhw-plot", windows: "button[data-dhw-window]" });
-  assert.equal(visual.rows.length, timeline.windows.length, context + ": only genuine completed windows become bars; empty time is not zero");
-  assert.equal(visual.clock, "wall", context + ": use only the timeline's trusted wall anchor");
-  assert.equal(visual.sliders, 0, context + ": real windows, not a separate artificial slider, are the controls");
-  assert.ok(visual.plot.height >= 80, context + ": the production variant01 plot is not a miniature strip");
-  assert.equal(visual.rows.filter(row => row.tab === 0).length, 1, context + ": one keyboard entry into the real window sequence");
-  const left = timeline.window_end_s - 86400;
-  for (const [index, window] of timeline.windows.entries()) {
-    const row = visual.rows[index];
-    assert.deepEqual([row.start, row.end, row.rate], [window.start_s, window.end_s, window.rate_k_h],
-      context + ": buttons retain actual per-window evidence");
-    assert.ok(row.label?.includes("K/h"), context + ": every selectable window has an accessible rate");
-    const expectedLeft = visual.plot.left + (window.start_s - left) / 86400 * visual.plot.width;
-    const expectedWidth = (window.end_s - window.start_s) / 86400 * visual.plot.width;
-    assert.ok(Math.abs(row.button.left - expectedLeft) <= 1.1 && Math.abs(row.button.width - expectedWidth) <= 1.1,
-      context + ": bars follow actual start/end seconds on 24 h, not aligned hourly bins: " + JSON.stringify(row));
-    assert.equal(row.zero, window.rate_k_h === 0, context + ": a true zero has its own visible representation");
-    assert.ok(row.bar.width > 0 && row.bar.height >= 1.5, context + ": even a measured zero paints visibly");
-    if (window.rate_k_h === 0) assert.ok(row.bar.height <= 3, context + ": zero is a baseline mark, not positive cooling");
-  }
-  const positive = visual.rows.filter(row => row.rate > 0);
-  const scale = positive.at(-1).bar.height / positive.at(-1).rate;
-  assert.ok(positive.every(row => Math.abs(row.bar.height - scale * row.rate) <= 1.5),
-    context + ": bar heights encode the observed rates, not aggregate counts");
-  for (const lane of visual.lanes) {
-    const expected = timeline.windows.filter(row => row[lane.kind + "_marker"]).map(row => row.end_s);
-    assert.deepEqual(lane.markers.map(marker => marker.end), expected, context + ": independent " + lane.kind + " presence, never inferred from totals");
-    for (const marker of lane.markers) {
-      const row = visual.rows.find(row => row.end === marker.end);
-      assert.ok(marker.width > 0 && marker.height > 0 && marker.height <= 10,
-        context + ": presence markers paint as bounded symbols");
-      assert.ok(Math.abs(marker.left + marker.width / 2 - row.button.left - row.button.width / 2) <= 1.1,
-        context + ": marker lane aligns to the actual window, without implying a duration or cause");
-    }
-  }
+function makeHistories(bootId, epoch, t0, offset = 0) {
+  const v = Array.from({ length: SAMPLES }, (_, i) => (i >= 110 && i <= 116 ? null : 500 - Math.round(i / 4) + offset));
+  return {
+    "x10a:dhw_tank": { ok: true, id: "dhw_tank", source: "x10a", epoch, boot_id: bootId, dt: 300, unit: "°C", b0: RING_B0, t0, v },
+    "modbus:dhw_tank": { ok: true, id: "dhw_tank", source: "modbus", epoch, boot_id: bootId, dt: 300, unit: "°C", b0: RING_B0, t0, v: v.map(n => (n == null ? null : n + 12)) },
+  };
 }
 
 async function assertLayout(page, context) {
-  const result = await evaluate(page, detail => {
-    const root = document.querySelector(detail), outside = [], clipped = [], unnamed = [];
+  const result = await evaluate(page, () => {
+    const card = document.getElementById("inspCard"), outside = [], clipped = [], unnamed = [];
     const shown = node => {
       if (node.closest("[hidden]")) return false;
       const r = node.getBoundingClientRect(), s = getComputedStyle(node);
       return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility === "visible";
     };
-    for (const node of [root, ...root.querySelectorAll("*")]) {
+    for (const node of [card, ...card.querySelectorAll("*")]) {
       if (!shown(node)) continue;
       const r = node.getBoundingClientRect(), s = getComputedStyle(node);
       const label = node.tagName + "." + (typeof node.className === "string" ? node.className : "");
       if (r.left < -1 || r.right > innerWidth + 1) outside.push(label);
       if ((["hidden", "clip"].includes(s.overflowX) && node.scrollWidth > node.clientWidth + 1) ||
           (["hidden", "clip"].includes(s.overflowY) && node.scrollHeight > node.clientHeight + 1)) clipped.push(label);
-      if (node.matches("button, summary, [role=group]")) {
+      if (node.matches("button")) {
         const name = node.getAttribute("aria-label") || node.textContent.trim();
         if (!name) unnamed.push(label);
       }
     }
-    const value = root.querySelector(".checkup-dhw-value"), unit = root.querySelector(".checkup-dhw-unit");
-    return { outside, clipped, unnamed, lang: document.documentElement.lang, width: innerWidth,
+    return {
+      outside, clipped, unnamed,
+      lang: document.documentElement.lang,
       overflow: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth,
-      valueSize: parseFloat(getComputedStyle(value).fontSize), unitSize: parseFloat(getComputedStyle(unit).fontSize),
-      text: root.textContent, fits: root.scrollWidth <= root.clientWidth + 1 };
-  }, DETAIL);
-  assert.ok(result.overflow <= 1 && result.fits, context + ": DHW detail must fit without horizontal scrolling");
-  assert.deepEqual(result.outside, [], context + ": no offscreen translated controls or copy");
-  assert.deepEqual(result.clipped, [], context + ": no clipped full readings or disclosures");
-  assert.deepEqual(result.unnamed, [], context + ": chart and disclosure controls have accessible names");
-  assert.ok(result.valueSize >= 24 && result.unitSize < result.valueSize, context + ": a real hero retains separate value/unit hierarchy");
-  assert.doesNotMatch(result.text, /check\.(?:dhw|detail\.)|NaN|Infinity|undefined/,
-    context + ": no missing translation keys or fabricated numeric evidence");
+      fits: card.scrollWidth <= card.clientWidth + 1,
+      text: card.textContent,
+    };
+  });
+  assert.ok(result.overflow <= 1 && result.fits, `${context}: tank inspector must fit without horizontal overflow`);
+  assert.deepEqual(result.outside, [], `${context}: no offscreen controls or copy`);
+  assert.deepEqual(result.clipped, [], `${context}: no clipped controls or copy`);
+  assert.deepEqual(result.unnamed, [], `${context}: controls must have accessible names`);
+  assert.doesNotMatch(result.text, /check\.(?:dhw|status)\.|NaN|Infinity|undefined/,
+    `${context}: no missing translation keys or fabricated numeric evidence`);
   return result;
 }
 
@@ -204,28 +125,23 @@ async function capture(page, context) {
   const directory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
   if (!directory) return;
   assert.ok(path.isAbsolute(directory), "DHW evidence directory must be absolute");
-  const original = await evaluate(page, selector => ({ width: innerWidth, height: innerHeight,
-    cardHeight: document.querySelector(selector).closest(".vitem").getBoundingClientRect().height }), DETAIL);
-  // Capture one real paint at the tested width, not a stitched viewport with a repeated fixed header.
-  // Taller evidence framing is temporary; every interaction/layout assertion keeps its real viewport.
+  const original = await evaluate(page, () => ({
+    width: innerWidth, height: innerHeight,
+    cardHeight: document.getElementById("inspCard").getBoundingClientRect().height,
+  }));
   const expanded = typeof page.viewport === "function" && original.cardHeight + 240 > original.height;
   try {
     if (expanded) await page.viewport(original.width, Math.ceil(original.cardHeight + 240));
-    const { clip, scroll } = await evaluate(page, async selector => {
-      const node = document.querySelector(selector).closest(".vitem");
+    const { clip, scroll } = await evaluate(page, async () => {
+      const node = document.getElementById("inspCard");
       node.scrollIntoView({ block: "center", behavior: "instant" });
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const r = node.getBoundingClientRect();
-      if (r.top < 0 || r.bottom > innerHeight + 1) throw new Error("DHW evidence card must fit one paint");
-      return { clip: { x: r.left, y: r.top, width: r.width, height: r.height },
-        scroll: { x: scrollX, y: scrollY } };
-    }, DETAIL);
-    // Playwright clips the visible viewport. CDP's beyond-viewport clip uses page coordinates.
+      return { clip: { x: r.left, y: r.top, width: r.width, height: r.height }, scroll: { x: scrollX, y: scrollY } };
+    });
     const image = page.screenshotClip ? await page.screenshotClip(clip) : Buffer.from((await page.send(
       "Page.captureScreenshot", { format: "png", captureBeyondViewport: true,
         clip: { ...clip, x: clip.x + scroll.x, y: clip.y + scroll.y, scale: 1 } })).data, "base64");
-    assert.ok(Math.abs(image.readUInt32BE(16) - clip.width) <= 1 &&
-      Math.abs(image.readUInt32BE(20) - clip.height) <= 1, "DHW evidence must include the full card");
     fs.mkdirSync(directory, { recursive: true });
     fs.writeFileSync(path.join(directory, context.replaceAll("/", "-") + ".png"), image);
   } finally {
@@ -233,575 +149,362 @@ async function capture(page, context) {
   }
 }
 
-async function beginContinuity(page, visible) {
-  await evaluate(page, ({ visible, detail, chart, windows, row }) => {
-    const hooks = window.__dhwBrowserHooks;
-    hooks.polls = []; hooks.builds = 0;
-    const root = document.querySelector(visible ? detail : row);
-    const elements = visible ? [root, ...root.querySelectorAll("*")] : [root];
-    const tracked = new Set(elements), ancestors = [];
-    for (let node = root; node; node = node.parentNode) { tracked.add(node); ancestors.push(node); }
-    const removed = [];
-    const record = records => {
-      for (const item of records) for (const node of item.removedNodes)
-        if (tracked.has(node)) removed.push(node.nodeName);
-    };
-    const observer = new MutationObserver(record);
-    observer.observe(document, { childList: true, subtree: true });
-    hooks.witness = { root, elements, ancestors, removed, record, observer,
-      focused: document.activeElement,
-      selected: [...document.querySelectorAll(windows + '[aria-pressed="true"]')].map(node => node.dataset.dhwWindow),
-      timeline: document.querySelector('[data-dhw-disclosure="timeline"]')?.open,
-      basis: document.querySelector('[data-dhw-disclosure="basis"]')?.open,
-      energy: document.querySelector('[data-dhw-disclosure="energy"]')?.open };
-    hooks.observe = true;
-    pollSchedule = window.__browserPollSchedule;
-    // One real visibility-resume update, then the unmodified recursive two-second poll timer.
-    pollNow();
-    return true;
-  }, { visible, detail: DETAIL, chart: CHART, windows: WINDOWS, row: ROW });
-}
-
-async function finishContinuity(page, server, requests, visible, context, chartMounted = visible) {
-  try {
-    await page.waitFor("window.__dhwBrowserHooks.polls.length >= 3 && !_pollBusy", { timeoutMs: 12000 });
-  } catch (error) {
-    const state = await page.evaluate(`({polls:window.__dhwBrowserHooks.polls, busy:_pollBusy,
-      hidden:document.hidden, transport:S.transportUnavailable, failures:_pollFails})`);
-    throw new Error(context + ": recurring DHW poll observation failed: " + error.message +
-      "; state=" + JSON.stringify(state) + "; diagnostics=" + page.diagnostics.join(" | "));
-  }
-  await page.evaluate("pollStop(); pollSchedule = () => {}; true");
-  const result = await evaluate(page, ({ visible, detail, chart, windows, row }) => {
-    const hooks = window.__dhwBrowserHooks, w = hooks.witness;
-    hooks.observe = false; w.record(w.observer.takeRecords()); w.observer.disconnect();
-    return { polls: hooks.polls, builds: hooks.builds, removed: w.removed,
-      retained: w.elements.every(node => node.isConnected && w.root.contains(node)),
-      ancestry: w.ancestors.every(node => node.isConnected),
-      rootSame: w.root === document.querySelector(visible ? detail : row),
-      focus: document.activeElement === w.focused,
-      selection: JSON.stringify(w.selected) === JSON.stringify([...document.querySelectorAll(windows + '[aria-pressed="true"]')]
-        .map(node => node.dataset.dhwWindow)),
-      disclosures: w.timeline === document.querySelector('[data-dhw-disclosure="timeline"]')?.open &&
-        w.basis === document.querySelector('[data-dhw-disclosure="basis"]')?.open &&
-        w.energy === document.querySelector('[data-dhw-disclosure="energy"]')?.open,
-      chart: !!document.querySelector(chart),
-      tank: S.live?.tank, paintedTank: document.getElementById("svTank").textContent };
-  }, { visible, detail: DETAIL, chart: CHART, windows: WINDOWS, row: ROW });
-  assert.ok(server.valuesRequests >= requests + 3 && result.polls.length >= 3,
-    context + ": observe at least three actual /values responses");
-  assert.ok(result.polls[2].at - result.polls[0].at >= 3900,
-    context + ": recurring updates must use the real two-second cadence");
-  assert.ok(new Set(result.polls.map(poll => poll.tank)).size >= 3,
-    context + ": live scalar inputs change on every response, not a frozen fixture");
-  assert.equal(result.tank, Number(result.polls.at(-1).tank), context + ": latest generated tank value reaches liveData");
-  assert.ok(result.paintedTank.includes(Number(result.polls.at(-1).tank).toFixed(1)),
-    context + ": real scalar DOM advances while completed-window evidence stays stable");
-  assert.equal(result.rootSame && result.retained && result.ancestry, true,
-    context + ": unchanged plot, bars, prose and controls retain their connected DOM nodes");
-  assert.deepEqual(result.removed, [], context + ": even a detach-and-reattach of chart ancestry is forbidden");
-  assert.equal(result.focus && result.selection && result.disclosures, true,
-    context + ": live polling preserves selection, focus and native disclosure state");
-  assert.equal(result.builds, 0, context + ": scalar polling performs no repeated or hidden chart construction");
-  assert.equal(result.chart, chartMounted, context + ": chart mounting follows the timeline disclosure");
-}
-
 export async function assertDhwTimeline(page, server, context, { locales = false } = {}) {
   await page.focusEmulation(true);
   await page.evaluate("pollStop(); pollSchedule = () => {}; true");
   await page.waitFor("!_pollBusy && !S.histBusy.size");
   const originalStatus = await page.evaluate(`(() => {
-    window.__dhwBrowserOriginal = { state: Object.fromEntries(Object.entries(S).map(([key, value]) =>
-      [key, value instanceof Map ? new Map(value) : value instanceof Set ? new Set(value) : value])), lang: LANG,
-      selection: typeof dhwSelection === 'object' ? {...dhwSelection} : null };
+    window.__dhwBrowserOriginal = {
+      state: Object.fromEntries(Object.entries(S).map(([k, v]) =>
+        [k, v instanceof Map ? new Map(v) : v instanceof Set ? new Set(v) : v])),
+      lang: LANG,
+    };
     return S.status;
   })()`);
+
   const status = structuredClone(originalStatus);
   const timeline = makeTimeline();
-  const check = { id: "dhw_loss", verdict: "ok", evidence: "observation", reason: "observation_only",
-    observed_s: 28800, required_s: 0, max_k_h: 4.5, windows: 8, high_windows: 7,
-    quiet_high_windows: 0, pump_windows: 7, draw_windows: 6, high_with_pump: 7, high_pump_off: 0,
-    circulation_on_s: 0, circulation_known_s: 0, candidate_s: 120, settle_remaining_s: 0,
-    blocked: false, aborts: 3, abort_reasons: ["charge", "blind"], best_aborted_s: 3300, timeline };
-  Object.assign(status, { boot_id: "dhw-browser-fixture", uptime_s: NOW,
-    ui: { ...status.ui, lang: "en" }, hp: { ...status.hp, connected: true },
-    diagnostics: { ...status.diagnostics, enabled: true, source: "x10a", effective_source: "x10a",
-      available_sources: ["x10a", "modbus"] },
+  const check = {
+    id: "dhw_loss", verdict: "ok", evidence: "observation", reason: "observation_only",
+    observed_s: 28800, required_s: 0, max_k_h: 2.7, windows: 5, blocked: false, timeline,
+  };
+  Object.assign(status, {
+    boot_id: "dhw-browser-fixture",
+    uptime_s: NOW,
+    ui: { ...status.ui, lang: "en" },
+    hp: { ...status.hp, connected: true },
+    diagnostics: { ...status.diagnostics, enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a", "modbus"] },
     modbus: { ...status.modbus, host: "192.0.2.20", enabled: true, connected: true, profile: "homehub" },
-    history: { epoch: 1, rows: [] },
+    history: {
+      epoch: 1,
+      rows: [{ id: "dhw_tank", label: "DHW tank temp. (R5T)" }],
+      modbus_rows: [{ id: "dhw_tank", label: "Tank temperature" }],
+    },
     ntp: { ...status.ntp, synced: true, time: new Date(UNIX * 1000).toISOString() },
-    health: { status: "ok", source: "x10a", source_fresh: true, source_age_s: 0,
-      persist: "flash", full_span: true, span_s: 86400, checks: [check] } });
-  let tick = 0, revision = 0;
-  const values = () => ({ values: [
-    { concept: "dhw_tank", label: "DHW tank temp. (R5T)", value: (44 + ++tick / 10).toFixed(1),
-      unit: "°C", reg: 0x61, group: "Domestic hot water" },
-    { label: "DHW setpoint", value: "48", unit: "°C", reg: 0x60, group: "Domestic hot water" },
-  ] });
-  const publish = async (beforeValues, { valuesUnavailable = false } = {}) => {
+    health: {
+      status: "ok", source: "x10a", source_fresh: true, source_age_s: 0,
+      persist: "flash", full_span: true, span_s: 86400,
+      checks: [
+        { id: "fault", verdict: "ok", evidence: "manufacturer", active: 0, observed_s: 3600 },
+        check,
+      ],
+    },
+  });
+
+  let tick = 0, revision = 0, histT0 = UNIX - (SAMPLES - 1) * 300;
+  const values = () => ({
+    values: [
+      { concept: "dhw_tank", label: "DHW tank temp. (R5T)", value: (44 + ++tick / 10).toFixed(1), unit: "°C", reg: 0x61, group: "Domestic hot water" },
+      { label: "DHW setpoint", value: "48", unit: "°C", reg: 0x60, group: "Domestic hot water" },
+    ],
+    modbus: [
+      { off: 14, label: "Tank temperature", value: 47.2, unit: "°C", history: "dhw_tank", concept: "dhw_tank" },
+    ],
+  });
+
+  const publish = async () => {
     await page.evaluate("pollStop(); pollSchedule = () => {}; true");
-    // A normal native release defers guarded rendering until the next permitted poll; its hold
-    // timer does not paint. Let that hold/gesture finish before this scenario's single poll.
     await page.waitFor("!_pollBusy && !S.clickHold && !S.scrub");
     status.uptime_s = NOW + ++revision;
-    status.ntp.time = new Date((UNIX + revision) * 1000).toISOString();
-    const trace = check.timeline;
-    if (trace) {
-      trace.window_end_s = status.uptime_s;
-      if (trace.observed_end_s != null && trace.live) trace.observed_end_s = status.uptime_s;
-      if (Object.hasOwn(trace, "unix_s")) trace.unix_s = UNIX + revision;
+    status.ntp.time = status.ntp.synced ? new Date((UNIX + revision) * 1000).toISOString() : null;
+    if (check.timeline) {
+      check.timeline.window_end_s = status.uptime_s;
+      if (check.timeline.observed_end_s != null && check.timeline.live) check.timeline.observed_end_s = status.uptime_s;
+      if (Object.hasOwn(check.timeline, "unix_s")) check.timeline.unix_s = UNIX + revision;
     }
-    const requests = server.valuesRequests;
-    let releaseValues;
-    const valuesGate = beforeValues ? new Promise(resolve => { releaseValues = resolve; }) : undefined;
-    // An empty network response fails the real JSON read in refreshValues.
-    server.setTelemetry({ status, values: valuesUnavailable ? () => undefined : values, histories: {}, valuesGate });
-    try {
-      await page.evaluate("pollSchedule = window.__browserPollSchedule; pollNow(); true");
-      if (beforeValues) {
-        await page.waitFor(`S.status.ntp.time === ${JSON.stringify(status.ntp.time)} && _pollBusy`);
-        await beforeValues();
-      }
-    } finally {
-      releaseValues?.();
-    }
+    const histories = makeHistories(status.boot_id, status.history.epoch, histT0, revision % 3);
+    server.setTelemetry({ status, values, histories });
+    const reqBefore = server.valuesRequests;
+    await page.evaluate("pollSchedule = window.__browserPollSchedule; pollNow(); true");
     await page.waitFor(`S.status?.boot_id === ${JSON.stringify(status.boot_id)} &&
-      S.status.ntp.time === ${JSON.stringify(status.ntp.time)} && !_pollBusy`, { timeoutMs: 12000 });
-    assert.ok(server.valuesRequests > requests, context + ": a status scenario must also render real values");
+      S.status.uptime_s === ${status.uptime_s} && !_pollBusy`, { timeoutMs: 12000 });
+    assert.ok(server.valuesRequests > reqBefore, `${context}: poll must fetch real values`);
     await page.evaluate("pollStop(); pollSchedule = () => {}; true");
     await settle(page);
   };
-  const empty = async label => {
-    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(WINDOWS)}).length`), 0,
-      context + "/" + label + ": prior timed windows must be withdrawn");
-    assert.equal(await page.evaluate(`!!document.querySelector(${JSON.stringify(DETAIL + " .checkup-dhw-empty")})?.textContent.trim()`), true,
-      context + "/" + label + ": missing/empty evidence has explicit copy, not zero-filled bars");
-  };
-  const [first, zero, draw, both, last] = timeline.windows;
-  const latest = last.end_s;
+
   try {
     await page.evaluate(`(() => {
-      if (typeof checkupDhwChartHtml !== 'function') throw new Error('production DHW timeline builder is unavailable');
-      window.__dhwBrowserHooks = { chart: checkupDhwChartHtml, values: refreshValues,
-        observe: false, builds: 0, polls: [], trusted: {click:0,pointerdown:0,keydown:0} };
-      const hooks = window.__dhwBrowserHooks;
-      checkupDhwChartHtml = (...args) => { if (hooks.observe) hooks.builds++; return hooks.chart(...args); };
-      refreshValues = async (...args) => {
-        const ok = await hooks.values(...args);
-        if (ok && hooks.observe) hooks.polls.push({at:performance.now(),
-          tank:S._values.find(row => row.concept === 'dhw_tank')?.value});
-        return ok;
-      };
-      hooks.input = event => {
-        if (event.isTrusted && event.target.closest?.(${JSON.stringify(DETAIL + ", " + ROW)})) hooks.trusted[event.type]++;
-      };
-      for (const name of Object.keys(hooks.trusted)) document.addEventListener(name, hooks.input, true);
       S.hist = new Map(); S.histPin = new Map(); S.histHidden = new Map();
       S.histBusy = new Set(); S.histRequests = new Map(); S.histAwait = new Map();
       S.histIdentity = null; S.histUptime = null; S.descOpen = new Set();
-      S.scrub = null; S.clickHold = false; S.insp = null; S.dashboardCard = 'diagnosis';
-      showStage('dashboard'); return true;
+      S.scrub = null; S.clickHold = false; S.insp = null; S.dhwCoolSelection = null;
+      S.dashboardCard = "diagnosis";
+      showStage("dashboard");
+      return true;
     })()`);
     await publish();
-    assert.equal(await page.evaluate(`document.querySelector(${JSON.stringify(ROW)}).getAttribute('aria-expanded')`), "false");
-    await evaluate(page, row => document.querySelector(row).focus(), ROW);
-    let requests = server.valuesRequests;
-    await beginContinuity(page, false);
-    await finishContinuity(page, server, requests, false, context + "/collapsed");
 
-    await tap(page, ROW);
+    // 1. Verify model:health_dhw_loss is NOT rendered in the Diagnosis card (#valueGroups).
+    assert.equal(await page.evaluate('Boolean(document.querySelector(\'#valueGroups button[data-desc="model:health_dhw_loss"]\'))'), false,
+      `${context}: Diagnosis card must not render button[data-desc="model:health_dhw_loss"]`);
+
+    // 2. Open the DHW tank / thermal store schematic target.
+    await tap(page, TANK_HIT);
+    await page.waitFor(`S.insp === "tank" && Boolean(document.querySelector(${JSON.stringify(PLOT)}))`);
     await settle(page);
-    const hero = await page.evaluate(`(() => {
-      const root = document.querySelector(${JSON.stringify(DETAIL)});
-      return { unit: root.querySelector('.checkup-dhw-unit').textContent.trim(), text:root.innerText,
-        expectedUnit:t('check.dhw.hour_unit'), expectedMissing:t('check.dhw.context_missing'),
-        timeline:root.querySelector('[data-dhw-disclosure="timeline"]').open,
-        mounted:!!root.querySelector('[data-dhw-timeline]'),
-        basis:root.querySelector('[data-dhw-disclosure="basis"]').open,
-        energy:root.querySelector('[data-dhw-disclosure="energy"]').open };
-    })()`);
-    assert.equal(await heroValue(page), "4.5", context + ": hero retains the aggregate maximum, distinct from the timed chart's 2.7");
-    assert.equal(hero.unit, hero.expectedUnit, context + ": hero shows degrees Celsius per hour");
-    assert.equal(hero.timeline || hero.basis || hero.energy, false, context + ": all supporting disclosures start collapsed");
-    assert.equal(hero.mounted, false, context + ": opening the diagnosis does not construct a hidden chart");
-    assert.ok(hero.text.includes(hero.expectedMissing), context + ": an unmatched maximum leaves time and circumstances unknown");
-    if (process.argv.includes("--dhw-only")) {
-      requests = server.valuesRequests;
-      await beginContinuity(page, true);
-      await finishContinuity(page, server, requests, true, context + "/timeline-folded", false);
-    }
-    await tap(page, `${TIMELINE} > summary`);
-    await page.waitFor(`!!document.querySelector(${JSON.stringify(CHART)}) && !S.clickHold`);
-    await settle(page);
-    await assertGeometry(page, timeline, context);
-    await assertLayout(page, context + "/en");
-    await capture(page, context + "/en");
+    await assertLayout(page, `${context}/initial`);
+    await capture(page, `${context}/initial`);
 
-    await tap(page, windowButton(first.end_s));
-    await assertSelection(page, first.end_s, context + "/pointer");
-    const gap = await evaluate(page, ({ chart, at, windowEnd }) => {
-      const plot = document.querySelector(chart + ' .checkup-dhw-plot');
-      const r = plot.getBoundingClientRect();
-      const x = r.left + (at - windowEnd + 86400) * r.width / 86400, y = r.top + r.height / 2;
-      return {x,y,blank:!document.elementFromPoint(x,y)?.closest('[data-dhw-window]')};
-    }, { chart: CHART, at: (first.end_s + zero.start_s) / 2, windowEnd: timeline.window_end_s });
-    assert.equal(gap.blank, true, context + ": a real unobserved gap has no fabricated selectable zero");
-    await page.nativeClick(gap.x, gap.y);
-    await assertSelection(page, first.end_s, context + "/blank-does-not-select");
-    await tap(page, windowButton(zero.end_s));
-    await assertSelection(page, zero.end_s, context + "/zero");
-    await tap(page, `${CHART} button[data-dhw-action="previous"]`);
-    await assertSelection(page, first.end_s, context + "/previous");
-    await tap(page, `${CHART} button[data-dhw-action="next"]`);
-    await assertSelection(page, zero.end_s, context + "/next");
-    // Explicit focus is setup only; every state-changing keyboard action below is trusted input.
-    await evaluate(page, selector => document.querySelector(selector).focus(), windowButton(zero.end_s));
-    await key(page, "End", "End", 35);
-    await assertSelection(page, latest, context + "/End", true);
-    await key(page, "ArrowLeft", "ArrowLeft", 37);
-    await assertSelection(page, both.end_s, context + "/ArrowLeft", true);
-    await key(page, "Home", "Home", 36);
-    await assertSelection(page, first.end_s, context + "/Home", true);
-    await key(page, "ArrowRight", "ArrowRight", 39);
-    await assertSelection(page, zero.end_s, context + "/ArrowRight", true);
-    await key(page, "Enter", "Enter", 13);
-    await assertSelection(page, zero.end_s, context + "/Enter", true);
-    await key(page, " ", "Space", 32);
-    await assertSelection(page, zero.end_s, context + "/Space", true);
-    await key(page, "Escape", "Escape", 27);
-    await assertSelection(page, latest, context + "/Escape", true);
-    await tap(page, `${TIMELINE} > summary`);
-    await page.waitFor(`!document.querySelector(${JSON.stringify(CHART)}) && !S.descOpen.has('dhw:timeline')`);
-    await tap(page, `${TIMELINE} > summary`);
-    await page.waitFor(`!!document.querySelector(${JSON.stringify(CHART)}) && S.descOpen.has('dhw:timeline')`);
-    await assertSelection(page, latest, context + "/timeline-reopened");
-
-    await tap(page, `${BASIS} > summary`);
-    await tap(page, `${ENERGY} > summary`);
-    const disclosures = await page.evaluate(`(() => {
-      const basis = document.querySelector(${JSON.stringify(BASIS)}), energy = document.querySelector(${JSON.stringify(ENERGY)});
-      return {basis:basis.open,energy:energy.open,basisText:basis.innerText,energyText:energy.innerText};
-    })()`);
-    assert.equal(disclosures.basis && disclosures.energy, true, context + ": native summaries reveal their real content");
-    assert.match(disclosures.basisText, /R5T/, context + ": data details explain the single-sensor limitation");
-    assert.match(disclosures.basisText, /8/, context + ": basis retains aggregate window totals, not only timed records");
-    assert.match(disclosures.basisText, /3/, context + ": discarded-candidate evidence is still available");
-    for (const phrase of [/200\s*l/i, /COP/, /1\.05\s*kWh/, /0\.35[–−-]0\.42\s*kWh/, /not measured energy/i])
-      assert.match(disclosures.energyText, phrase, context + ": one-hour energy illustration preserves explicit assumptions");
-    assert.doesNotMatch(disclosures.energyText, /per day|kWh\/day|25\.12/,
-      context + ": maximum cooling is never extrapolated into a daily meter reading");
-    await tap(page, windowButton(draw.end_s));
-    await assertSelection(page, draw.end_s, context + "/3615-second-window");
-    const stamps = await evaluate(page, ({ chart, trace, window }) => {
-      const formatter = new Intl.DateTimeFormat('en', {month:'short',day:'numeric',
-        hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23',timeZoneName:'shortOffset'});
-      const frameUnix = trace.unix_s - trace.window_end_s;
-      return { expected:[window.start_s,window.end_s].map(s => formatter.format(new Date((frameUnix+s)*1000))),
-        actual:document.querySelector(chart + ' [data-dhw-readout="time"]').textContent,
-        coverage:document.querySelector(chart + ' [data-dhw-readout="coverage"]').textContent };
-    }, { chart: CHART, trace: timeline, window: draw });
-    for (const stamp of stamps.expected) assert.ok(stamps.actual.includes(stamp),
-      context + ": selected wall times map exact timeline coordinates through the supplied anchor");
-    assert.match(stamps.coverage, /60:15/, context + ": coverage preserves a real 3615-second completion, not a fabricated clock-hour bucket");
-    await evaluate(page, selector => document.querySelector(selector).focus({preventScroll:true}), windowButton(draw.end_s));
-    await settle(page);
-    requests = server.valuesRequests;
-    await beginContinuity(page, true);
-    await finishContinuity(page, server, requests, true, context + "/open-selected");
-
-    // Expiry of an older saved bucket can change aggregate evidence without changing any timed
-    // plotted window. Its scalar reading must update without discarding the selected plot.
-    await page.evaluate(`window.__dhwBrowserHooks.aggregate = {
-      chart:document.querySelector(${JSON.stringify(CHART)}), focused:document.activeElement }; true`);
-    Object.assign(check, { max_k_h: 4.4, windows: 7, observed_s: 25200,
-      high_windows: 6, pump_windows: 6, draw_windows: 5, high_with_pump: 6 });
-    await publish();
-    assert.equal(await heroValue(page), "4.4",
-      context + ": a later aggregate scalar updates the hero instead of freezing the accepted frame");
-    assert.equal(await page.evaluate(`window.__dhwBrowserHooks.aggregate.chart === document.querySelector(${JSON.stringify(CHART)}) &&
-      window.__dhwBrowserHooks.aggregate.focused === document.activeElement`), true,
-      context + ": changed scalar text retains the chart and its keyboard focus");
-    await assertSelection(page, draw.end_s, context + "/new-aggregate");
-
-    // A quantized aggregate bucket can expire before an exact completion near the 24h left edge.
-    // Hero/disclosure structure may change, but that unchanged trace and its ancestry must not move.
-    const aggregateBeforeEdge = { ...check };
-    const edgeEnd = NOW - 86400 + 600;
-    check.timeline = { ...timeline, epoch: timeline.epoch + 100, since_s: edgeEnd - 3600, windows: [{
-      start_s: edgeEnd - 3600, end_s: edgeEnd, rate_k_h: 4.4, observed_s: 3590,
-      pump_marker: true, draw_marker: false,
-    }] };
-    Object.assign(check, { windows: 1, observed_s: 3600, high_windows: 1,
-      pump_windows: 1, draw_windows: 0, high_with_pump: 1 });
-    await publish();
-    await evaluate(page, selector => document.querySelector(selector).focus({ preventScroll: true }), windowButton(edgeEnd));
-    await evaluate(page, ({ chart, basis }) => {
-      const hooks = window.__dhwBrowserHooks, root = document.querySelector(chart);
-      const nodes = [root, ...root.querySelectorAll("*")], ancestors = [];
-      for (let node = root.parentNode; node; node = node.parentNode) ancestors.push(node);
-      const tracked = new Set([...nodes, ...ancestors]), removed = [];
-      const record = records => {
-        for (const item of records) for (const node of item.removedNodes)
-          if (tracked.has(node)) removed.push(node.nodeName);
+    // 3. Verify shaded bands under #dhwCoolingClip: only >= 0.8 windows shaded, peak marked, gaps unshaded, --dhw-cooling colour.
+    const expectedShaded = timeline.windows.filter(w => w.rate_k_h >= 0.8); // 4 windows: quiet, draw, peak(both), pump
+    const rendered = await evaluate(page, ({ plotSel, bandsSel, legendSel, gapAtS, chartStartUnix }) => {
+      const plot = document.querySelector(plotSel);
+      const bands = [...document.querySelectorAll(bandsSel)];
+      const legend = document.querySelector(legendSel);
+      const clip = plot.querySelector("#dhwCoolingClip");
+      const clipPaths = [...clip.querySelectorAll("path")];
+      const drawnX10a = [...plot.querySelectorAll("svg > .vhist-area:not(.mb)")];
+      const filled = (x, y) => clipPaths.some(p => p.isPointInFill(new DOMPoint(x, y)));
+      const style = getComputedStyle(bands[0]);
+      const colour = document.createElement("canvas").getContext("2d");
+      colour.fillStyle = style.fill;
+      colour.fillRect(0, 0, 1, 1);
+      const [r, g, b] = colour.getImageData(0, 0, 1, 1).data;
+      const gapX = ((gapAtS - chartStartUnix) / ((288 - 1) * 300)) * HIST_W;
+      return {
+        sourceAttr: plot.dataset.dhwSource,
+        bands: bands.map(el => ({
+          end: Number(el.dataset.dhwBand),
+          rate: Number(el.dataset.dhwRate),
+          peak: el.classList.contains("is-peak"),
+          clipParent: el.parentElement.getAttribute("clip-path"),
+        })),
+        clipMatchesX10a: clipPaths.length > 0 && clipPaths.map(p => p.getAttribute("d")).join() === drawnX10a.map(p => p.getAttribute("d")).join(),
+        gapUnfilled: !filled(gapX, HIST_H - 1),
+        aboveUnfilled: !filled(HIST_W / 2, 1),
+        belowFilled: filled(HIST_W * 0.9, HIST_H - 1),
+        pinkTone: r > g && b > g && Number(style.fillOpacity) > 0 && Number(style.fillOpacity) < 1 && getComputedStyle(legend).color === style.fill,
+        legendText: legend.textContent,
+        briefText: document.getElementById("inspFlowDiagnosis").innerText,
       };
-      const observer = new MutationObserver(record);
-      observer.observe(document, { childList: true, subtree: true });
-      hooks.aggregateEdge = { root, nodes, ancestors, removed, record, observer,
-        focus: document.activeElement, basis: document.querySelector(basis).open };
-      hooks.observe = true; hooks.builds = 0;
-    }, { chart: CHART, basis: BASIS });
-    try {
-      for (const available of [false, true]) {
-        Object.assign(check, { verdict: available ? "ok" : "collecting",
-          reason: available ? "observation_only" : "day_incomplete",
-          max_k_h: available ? 4.4 : null, windows: available ? 1 : 0,
-          observed_s: available ? 3600 : 0, high_windows: available ? 1 : 0,
-          pump_windows: available ? 1 : 0, high_with_pump: available ? 1 : 0 });
-        await publish();
-        const edge = await evaluate(page, ({ chart, basis, energy }) => {
-          const hooks = window.__dhwBrowserHooks, w = hooks.aggregateEdge;
-          w.record(w.observer.takeRecords());
-          const disclosure = document.querySelector(energy);
-          return { retained: w.root === document.querySelector(chart) &&
-              w.nodes.every(node => node.isConnected && w.root.contains(node)) &&
-              w.ancestors.every(node => node.isConnected), removed: w.removed,
-            focus: document.activeElement === w.focus,
-            basis: document.querySelector(basis)?.open === w.basis,
-            energyVisible: !!disclosure?.getClientRects().length, builds: hooks.builds };
-        }, { chart: CHART, basis: BASIS, energy: ENERGY });
-        const label = context + "/aggregate-" + (available ? "returns" : "expires");
-        assert.equal(edge.retained && edge.focus && edge.basis, true,
-          label + ": scalar availability changes retain the connected plot, focus and basis state");
-        assert.deepEqual(edge.removed, [], label + ": no temporary detach of the plot or its ancestors");
-        assert.equal(edge.builds, 0, label + ": unchanged timed records never rebuild the chart");
-        assert.equal(edge.energyVisible, available, label + ": no energy illustration without an aggregate rate");
-        assert.deepEqual(await selected(page), [edgeEnd], label + ": retained evidence stays selected independently of aggregate counts");
-      }
-    } finally {
-      await page.evaluate(`window.__dhwBrowserHooks.aggregateEdge.observer.disconnect();
-        window.__dhwBrowserHooks.observe=false; true`);
-      Object.assign(check, aggregateBeforeEdge);
-      await publish();
+    }, { plotSel: PLOT, bandsSel: BANDS, legendSel: LEGEND_SHOW, gapAtS: UNIX - (NOW - (CHART_START_S + 113 * 300)), chartStartUnix: histT0 });
+
+    assert.equal(rendered.sourceAttr, "x10a", `${context}: plot binds to X10A source`);
+    assert.deepEqual(rendered.bands.map(b => b.end), expectedShaded.map(w => w.end_s),
+      `${context}: only rate_k_h >= 0.8 windows render .vhist-dhw-band (0.4 is excluded)`);
+    assert.deepEqual(rendered.bands.map(b => b.peak), [false, false, true, false],
+      `${context}: .is-peak marks only the strongest 2.7 °C/h window`);
+    assert.ok(rendered.bands.every(b => b.clipParent === "url(#dhwCoolingClip)"),
+      `${context}: all bands clip to #dhwCoolingClip`);
+    assert.deepEqual([rendered.clipMatchesX10a, rendered.gapUnfilled, rendered.aboveUnfilled, rendered.belowFilled, rendered.pinkTone],
+      [true, true, true, true, true], `${context}: cooling bands clip strictly to the X10A curve and leave gaps unshaded`);
+    assert.equal(rendered.legendText, await page.evaluate('t("check.dhw.show")'));
+    assert.ok(rendered.briefText.includes("X10A") && rendered.briefText.includes("2.7 °C/h"),
+      `${context}: #inspTankDiagnosis shows strongest cooling rate`);
+
+    // 4. Click [data-dhw-cool-show]: selects peak first, reveals .vhist-dhw-readout, then cycles through shaded windows.
+    const assertSelected = async (win, ctx) => {
+      const state = await evaluate(page, ({ bandsSel, readoutSel, endS }) => {
+        const bands = [...document.querySelectorAll(bandsSel)];
+        const selected = bands.filter(b => b.classList.contains("selected"));
+        const readout = document.querySelector(readoutSel);
+        const strong = readout?.querySelector("strong")?.textContent || "";
+        const span = readout?.querySelector("span")?.textContent || "";
+        return {
+          selectedEnds: selected.map(b => Number(b.dataset.dhwBand)),
+          hidden: readout?.hidden,
+          strong, span,
+          sentences: span.split(/[.!?。！？]+/).filter(s => s.trim()).length,
+          belowChart: document.querySelector("#inspHist .vhist-plot").getBoundingClientRect().bottom <= readout.getBoundingClientRect().top,
+          pinned: S.histPin.has("dhw_tank"),
+        };
+      }, { bandsSel: BANDS, readoutSel: READOUT, endS: win.end_s });
+      assert.deepEqual(state.selectedEnds, [win.end_s], `${ctx}: selected band must match ${win.end_s}`);
+      assert.equal(state.hidden, false, `${ctx}: .vhist-dhw-readout must be visible`);
+      assert.equal(state.belowChart, true, `${ctx}: readout must appear below the chart`);
+      assert.equal(state.pinned, false, `${ctx}: selecting a cooling band must not pin the curve`);
+      assert.ok(state.strong.includes(`${win.rate_k_h} °C/h`), `${ctx}: readout header shows rate`);
+      assert.ok(state.sentences >= 1 && state.sentences <= 3, `${ctx}: readout explanation <= 3 sentences`);
+      const expectedKey = win.pump_marker && win.draw_marker ? "check.dhw.cause_both"
+        : win.pump_marker ? "check.dhw.cause_pump"
+        : win.draw_marker ? "check.dhw.cause_draw" : "check.dhw.cause_quiet";
+      assert.equal(state.span, await page.evaluate(`t(${JSON.stringify(expectedKey)})`),
+        `${ctx}: readout explanation matches ${expectedKey}`);
+    };
+
+    const [wQuiet, wLow, wDraw, wPeak, wPump] = timeline.windows;
+    await tap(page, LEGEND_SHOW);
+    await assertSelected(wPeak, `${context}/legend-first-picks-peak`);
+    await capture(page, `${context}/peak-selected`);
+
+    // Click again -> wraps to wPump, then wQuiet, then wDraw, then back to wPeak.
+    await tap(page, LEGEND_SHOW);
+    await assertSelected(wPump, `${context}/legend-cycle-pump`);
+    await evaluate(page, sel => document.querySelector(sel).focus(), LEGEND_SHOW);
+    await key(page, "Enter", "Enter", 13);
+    await assertSelected(wQuiet, `${context}/legend-enter-quiet`);
+
+    // 5. Native tap on shaded bands for all 4 marker combinations + negative taps above curve & on unshaded < 0.8 region.
+    await tap(page, `${BANDS}[data-dhw-band="${wDraw.end_s}"]`, { yFraction: 0.05, isPlotBand: true });
+    await page.evaluate('S.histPin.delete("dhw_tank"); renderInspect(); true');
+    await assertSelected(wQuiet, `${context}/tap-above-curve-keeps-prior`);
+
+    // Tap inside the curve at the unshaded < 0.8 window (wLow): must NOT select a cooling band.
+    const lowPoint = await evaluate(page, ({ plotSel, lowStartS, lowEndS, chartStartUnix, nowS, unixNow }) => {
+      const plot = document.querySelector(plotSel);
+      const r = plot.getBoundingClientRect();
+      const midUnix = unixNow - (nowS - (lowStartS + lowEndS) / 2);
+      const frac = (midUnix - chartStartUnix) / ((288 - 1) * 300);
+      return { x: r.left + frac * r.width, y: r.top + r.height * 0.85 };
+    }, { plotSel: PLOT, lowStartS: wLow.start_s, lowEndS: wLow.end_s, chartStartUnix: histT0, nowS: status.uptime_s, unixNow: UNIX + revision });
+    await page.bringToFront();
+    await page.nativeClick(lowPoint.x, lowPoint.y);
+    await page.frame();
+    await page.evaluate('S.histPin.delete("dhw_tank"); renderInspect(); true');
+    await assertSelected(wQuiet, `${context}/tap-unshaded-low-rate-keeps-prior`);
+
+    for (const [label, win] of [["draw", wDraw], ["pump-draw", wPeak], ["pump", wPump], ["quiet", wQuiet]]) {
+      await tap(page, `${BANDS}[data-dhw-band="${win.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
+      await assertSelected(win, `${context}/tap-${label}`);
     }
-    // Inactive cards may retain a cached plot, but cannot build or expose an interactive hidden one.
-    await tap(page, '#cardNav [data-card="group:Domestic hot water"]');
-    await page.evaluate("window.__dhwBrowserHooks.observe=true; window.__dhwBrowserHooks.builds=0; true");
-    await publish();
-    assert.equal(await page.evaluate(`(() => {
-      const chart = document.querySelector(${JSON.stringify(CHART)});
-      return !chart || chart.getClientRects().length === 0;
-    })()`), true, context + ": changing dashboard cards hides the cached plot and its controls");
-    assert.equal(await page.evaluate("window.__dhwBrowserHooks.builds"), 0, context + ": an unselected card does no hidden chart work");
-    await page.evaluate("window.__dhwBrowserHooks.observe=false; true");
-    await tap(page, '#cardNav [data-card="diagnosis"]');
-    await page.waitFor(`!!document.querySelector(${JSON.stringify(CHART)})`);
 
-    for (const reset of ["timeline", "history", "source-modbus", "source-x10a", "boot"]) {
-      await tap(page, windowButton(first.end_s));
-      await assertSelection(page, first.end_s, context + "/before-" + reset);
-      if (reset === "timeline") timeline.epoch++;
-      if (reset === "history") status.history.epoch++;
-      if (reset.startsWith("source-")) {
-        status.health.source = status.diagnostics.source = status.diagnostics.effective_source = reset.slice(7);
-      }
-      if (reset === "boot") status.boot_id = "dhw-browser-other-boot";
-      await publish();
-      await assertSelection(page, latest, context + "/reset-" + reset);
-    }
+    // Keyboard scrub on the plot still reads the numeric curve.
+    await evaluate(page, sel => document.querySelector(sel).focus(), PLOT);
+    await key(page, "End", "End", 35);
+    assert.equal(await evaluate(page, sel => !document.querySelector(sel).querySelector(".vhist-mark.vhist-live[data-source=x10a]").hidden, PLOT), true,
+      `${context}: keyboard scrub still updates live marker on numeric curve`);
 
-    const plotState = () => evaluate(page, chart => ({
-      stale: document.getElementById("valueGroups").dataset.dhwStale,
-      top: document.querySelector(chart + " .checkup-dhw-plot").getBoundingClientRect().top,
-    }), CHART);
-    const beforePoll = await plotState();
-    assert.equal(beforePoll.stale, "false");
-    await publish(async () => {
-      assert.deepEqual(await plotState(), beforePoll,
-        context + ": a fresh status leaves the plot stable while values are pending");
-    });
+    // 6. Toggle X10A series visibility: hiding removes bands while keeping #inspTankDiagnosis; showing restores them.
+    await tap(page, `${HIST_HOST} [data-hist-series="x10a"]`);
+    assert.equal(await evaluate(page, sel => document.querySelectorAll(sel).length, BANDS), 0,
+      `${context}: hiding X10A series removes its cooling bands`);
+    assert.ok((await page.evaluate(`document.getElementById("inspFlowDiagnosis").innerText`)).includes("2.7 °C/h"),
+      `${context}: hiding series preserves #inspFlowDiagnosis`);
+    await tap(page, `${HIST_HOST} [data-hist-series="x10a"]`);
+    assert.equal(await evaluate(page, sel => document.querySelectorAll(sel).length, BANDS), 4,
+      `${context}: restoring X10A series restores cooling bands`);
 
-    const staleNoteVisible = () => page.evaluate(`(() => {
-      const note = document.querySelector(${JSON.stringify(DETAIL + " .checkup-dhw-stale")});
-      return !!note?.innerText.trim() && note.getClientRects().length > 0 && getComputedStyle(note).display !== 'none';
-    })()`);
-    await tap(page, windowButton(first.end_s));
-    await page.waitFor("!S.clickHold");
-    const priorDiagnostics = page.diagnostics.length;
-    server.setTelemetry({ status, statusUnavailable: true, values, histories: {} });
-    await page.evaluate("pollSchedule = window.__browserPollSchedule; pollNow(); true");
-    await page.waitFor("S.transportUnavailable === 'status' && !_pollBusy");
-    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
-    assert.equal(await staleNoteVisible(), true, context + ": a real status failure labels the retained snapshot");
-    await publish(async () => {
-      assert.equal(await page.evaluate("S.transportUnavailable"), "values");
-      assert.equal(await staleNoteVisible(), false,
-        context + ": accepted status clears stale DHW even while recovering values are held");
-    }, { valuesUnavailable: true });
-    assert.equal(await page.evaluate("S.transportUnavailable"), "values",
-      context + ": the browser must actually reject the values response");
-    assert.equal(await staleNoteVisible(), false, context + ": failed values do not mark fresh DHW stale");
-    await assertSelection(page, first.end_s, context + "/values-failure-retains-selection");
+    // 7. Modbus source switching: bands move onto Modbus curve and #inspFlowDiagnosis labels Modbus.
+    status.health.source = status.diagnostics.source = status.diagnostics.effective_source = "modbus";
     await publish();
-    const expectedFailure = page.diagnostics.findIndex((line, index) =>
-      index >= priorDiagnostics && /Failed to load resource.*500/.test(line));
-    if (expectedFailure >= 0) page.diagnostics.splice(expectedFailure, 1);
+    assert.deepEqual(await evaluate(page, ({ plotSel, bandsSel }) => {
+      const plot = document.querySelector(plotSel);
+      const clip = [...plot.querySelectorAll("#dhwCoolingClip path")].map(p => p.getAttribute("d")).join();
+      const mb = [...plot.querySelectorAll("svg > .vhist-area.mb")].map(p => p.getAttribute("d")).join();
+      return {
+        source: plot.dataset.dhwSource,
+        bands: document.querySelectorAll(bandsSel).length,
+        clipMatchesModbus: clip.length > 0 && clip === mb,
+        brief: document.getElementById("inspFlowDiagnosis").innerText.includes("Modbus"),
+      };
+    }, { plotSel: PLOT, bandsSel: BANDS }), { source: "modbus", bands: 4, clipMatchesModbus: true, brief: true },
+    `${context}: Modbus diagnosis binds cooling bands strictly to the Modbus curve`);
+    status.health.source = status.diagnostics.source = status.diagnostics.effective_source = "x10a";
 
-    // An equal rate identifies one matching timed hour. Scope retirement must withdraw its
-    // date and paired observations before the delayed values frame, just like the bars.
-    check.max_k_h = both.rate_k_h;
-    await publish();
-    const matched = await evaluate(page, detail => {
-      const root = document.querySelector(detail);
-      return { time: root.querySelector(".checkup-dhw-time")?.innerText,
-        context: root.querySelector(".checkup-dhw-assessment").innerText,
-        label: t("check.dhw.context_hour"), pump: t("check.dhw.context_pump"),
-        draw: t("check.dhw.context_draw"), uncertainty: t("check.dhw.context_title") };
-    }, DETAIL);
-    assert.equal(await heroValue(page), "2.7", context + ": the compact view renders the matching aggregate value");
-    const [hourLabel, interval] = matched.time?.split("\n") || [];
-    assert.equal(hourLabel, matched.label, context + ": the timed hour is labelled as a matching reading");
-    assert.ok(interval?.trim() && matched.context.includes(matched.pump) &&
-      matched.context.includes(matched.draw) && matched.context.includes(matched.uncertainty),
-    context + ": the matching hour explains both observations while leaving the cause open");
-    check.max_k_h = 4.4;
-    await evaluate(page, selector => document.querySelector(selector).focus({ preventScroll: true }),
-      windowButton(latest));
-    delete check.timeline;
-    await publish(async () => {
-      assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(WINDOWS)}).length`), 0,
-        context + ": adopting an omitted/redacted timeline withdraws old precise data before delayed values finish");
-      assert.equal(await evaluate(page, detail => [...document.querySelector(detail)
-        .querySelectorAll("[data-dhw-evidence]")].some(node => node.getClientRects().length > 0), DETAIL), false,
-      context + ": adopting an omitted timeline also withdraws the prior timed hero evidence");
-      assert.equal(await evaluate(page, selector => document.activeElement.matches(selector), ROW), true,
-        context + ": withdrawing the focused chart returns focus to the diagnosis row");
-      assert.equal(await staleNoteVisible(), false,
-        context + ": an omitted timeline is not stale readings while values are pending");
-    });
-    await empty("omitted-redacted");
-    assert.equal(await staleNoteVisible(), false,
-      context + ": a fresh aggregate-only frame displays only the timed-evidence availability message");
-    assert.equal(await heroValue(page), "4.4");
-    assert.equal(await evaluate(page, detail => document.querySelector(detail).innerText
-      .includes(t("check.dhw.context_missing")), DETAIL), true,
-    context + ": aggregate-only evidence explicitly leaves its time and circumstances unknown");
-    check.timeline = { ...timeline, epoch: 0, live: false };
-    await publish();
-    await empty("malformed");
-    assert.equal(await staleNoteVisible(), false, context + ": malformed detail cannot assert stale readings");
-    check.timeline = { ...timeline, windows: [] };
-    await publish();
-    await empty("no-timed-completions");
-    check.timeline = timeline;
-    await publish();
-    await assertSelection(page, latest, context + "/after-omission");
-
+    // 8. Relative (unsynced) timeline + undated trend: bands still align without wall dates.
+    const savedUnix = timeline.unix_s;
+    const savedT0 = histT0;
     delete timeline.unix_s;
-    await publish();
-    const relative = await page.evaluate(`(() => {
-      const chart = document.querySelector(${JSON.stringify(CHART)});
-      return { clock:chart.dataset.dhwClock, axis:chart.querySelector('.checkup-dhw-axis').textContent,
-        time:chart.querySelector('[data-dhw-readout="time"]').textContent };
-    })()`);
-    assert.equal(relative.clock, "relative", context + ": status NTP alone cannot invent a timeline wall anchor");
-    assert.match(relative.axis, /24\s*h/);
-    assert.equal((relative.time.match(/before snapshot/g) || []).length, 2,
-      context + ": both range endpoints explicitly mean relative durations before this snapshot");
-    assert.doesNotMatch(relative.time, /2026|\bGMT|\bUTC/, context + ": missing unix_s never fabricates dated clock readings");
     status.ntp.synced = false;
+    status.history.epoch += 1;
+    histT0 = null;
     await publish();
-    assert.equal(await page.evaluate(`document.querySelector(${JSON.stringify(CHART)}).dataset.dhwClock`), "relative");
+    assert.equal(await evaluate(page, sel => document.querySelectorAll(sel).length, BANDS), 4,
+      `${context}: live unsynced timeline aligns on relative trend`);
+    await tap(page, LEGEND_SHOW);
+    const relHeader = await page.evaluate(`document.querySelector(${JSON.stringify(READOUT)} + " strong").textContent`);
+    assert.doesNotMatch(relHeader, /2026|GMT|UTC/, `${context}: relative mode must not fabricate wall dates`);
+    timeline.unix_s = savedUnix;
+    status.ntp.synced = true;
+    status.history.epoch += 1;
+    histT0 = savedT0;
 
+    // 9. #inspFlowDiagnosis states: locations_missing, stale, blocked (no_window), waiting, unavailable, disabled.
+    const diagText = () => page.evaluate('document.getElementById("inspFlowDiagnosis").innerText');
+
+    // locations_missing when max_k_h >= 0.8 and no visible bands
+    timeline.windows = [wLow]; // only 0.4 < 0.8 -> 0 visible bands while max_k_h is 2.7
+    await publish();
+    assert.equal(await evaluate(page, sel => document.querySelectorAll(sel).length, BANDS), 0);
+    assert.ok((await diagText()).includes(await page.evaluate('t("check.dhw.locations_missing")')),
+      `${context}: missing visible bands for >= 0.8 rate shows locations_missing`);
+
+    // stale when source_fresh === false (and when !timeline.live)
+    timeline.windows = makeTimeline().windows;
     status.health.source_fresh = false;
-    status.health.source_age_s = 900;
-    check.reason = "source_stale";
+    await publish();
+    assert.ok((await diagText()).includes(await page.evaluate('t("check.dhw.stale")')),
+      `${context}: source_fresh=false shows stale caveat`);
+    status.health.source_fresh = true;
     timeline.live = false;
     await publish();
-    assert.equal(await page.evaluate("document.getElementById('valueGroups').dataset.dhwStale"), "true",
-      context + ": a stale source is explicitly stale, not a current zero");
-    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(WINDOWS)}).length`), timeline.windows.length,
-      context + ": staleness does not erase valid completed historical windows");
-    assert.equal(await staleNoteVisible(), true, context + ": the visible reader can recognize a historical snapshot");
+    assert.ok((await diagText()).includes(await page.evaluate('t("check.dhw.stale")')),
+      `${context}: !timeline.live shows stale caveat`);
+    timeline.live = true;
 
-    const completed = { ...check };
-    Object.assign(check, { verdict: "collecting", reason: "no_eligible_windows", windows: 0, max_k_h: null,
-      candidate_s: 3300, observed_s: 3300, aborts: 0, abort_reasons: [], best_aborted_s: 0,
-      timeline: { ...timeline, windows: [], observed_end_s: timeline.window_end_s - 2, live: true } });
-    status.health.source_fresh = true; status.health.source_age_s = 0;
+    // blocked -> no_window
+    Object.assign(check, { verdict: "unavailable", blocked: true, max_k_h: null, windows: 0, timeline: { ...timeline, windows: [] } });
     await publish();
-    await empty("collecting");
-    assert.equal(await page.evaluate(`document.querySelector(${JSON.stringify(ROW + " .vrow-val")}).innerText`),
-      await page.evaluate("t('check.status.collecting')"), context + ": a candidate is not a measured zero");
-    assert.equal(await page.evaluate(`!!document.querySelector(${JSON.stringify(ENERGY)})`), false,
-      context + ": no rate means no numeric energy illustration");
-    Object.assign(check, { verdict: "unavailable", blocked: true, aborts: 14,
-      abort_reasons: ["blind"], best_aborted_s: 3300 });
-    await publish();
-    await empty("blocked");
-    assert.equal(await page.evaluate(`document.querySelector(${JSON.stringify(ROW + " .vrow-val")}).innerText`),
-      await page.evaluate("t('check.status.no_window')"), context + ": a blocked day does not keep promising collection");
-    assert.doesNotMatch(await page.evaluate(`document.querySelector(${JSON.stringify(DETAIL)}).innerText`), /\b0\s*K\/h|\bkWh\b/,
-      context + ": blocked or missing evidence never masquerades as zero cooling/energy");
+    assert.equal(await evaluate(page, sel => document.querySelectorAll(sel).length, BANDS), 0);
+    assert.ok((await diagText()).includes(await page.evaluate('t("check.dhw.no_window")')),
+      `${context}: blocked shows no_window`);
 
-    Object.assign(check, completed, { timeline, max_k_h: both.rate_k_h, reason: "observation_only" });
-    timeline.live = true; timeline.unix_s = UNIX;
-    status.ntp.synced = true; status.health.source_fresh = true; status.health.source_age_s = 0;
+    // collecting -> waiting
+    Object.assign(check, { verdict: "collecting", blocked: false, max_k_h: null, windows: 0 });
     await publish();
-    for (const disclosure of [BASIS, ENERGY]) {
-      if (!await page.evaluate(`document.querySelector(${JSON.stringify(disclosure)}).open`))
-        await tap(page, disclosure + " > summary");
-    }
+    assert.ok((await diagText()).includes(await page.evaluate('t("check.dhw.waiting")')),
+      `${context}: collecting shows waiting`);
+
+    // unavailable -> N/A
+    Object.assign(check, { verdict: "unavailable", blocked: false, max_k_h: null, windows: 0 });
+    await publish();
+    assert.ok((await diagText()).includes(await page.evaluate('t("check.status.unavailable")')),
+      `${context}: unavailable shows N/A`);
+
+    // diagnostics.enabled = false -> #inspTankDiagnosis hidden, bands = 0, ordinary dhw_tank graph remains
+    Object.assign(check, { verdict: "ok", blocked: false, max_k_h: 2.7, windows: 5, timeline });
+    status.diagnostics.enabled = false;
+    await publish();
+    assert.deepEqual(await evaluate(page, ({ briefSel, bandsSel, plotSel }) => ({
+      briefHidden: document.querySelector(briefSel).hidden,
+      bands: document.querySelectorAll(bandsSel).length,
+      plotPresent: Boolean(document.querySelector(plotSel + " .vhist-line")),
+      rowsVisible: document.getElementById("inspRows").getBoundingClientRect().height > 0,
+    }), { briefSel: DIAG_BRIEF, bandsSel: BANDS, plotSel: PLOT }),
+    { briefHidden: true, bands: 0, plotPresent: true, rowsVisible: true },
+    `${context}: disabling diagnostics hides tank cooling diagnosis while keeping the tank trend`);
+
+    // 10. Optional full-locale matrix check on narrow viewport.
+    status.diagnostics.enabled = true;
+    await publish();
     const languages = locales ? await page.evaluate("Array.from(UI_LANGS)") : ["en"];
-    if (locales) assert.equal(await page.evaluate("innerWidth"), 320, context + ": the full locale matrix uses the narrow 320px phone");
     for (const language of languages) {
-      await evaluate(page, async language => { await setLang(language); renderApp(); }, language);
+      await evaluate(page, async l => { await setLang(l); renderApp(); }, language);
       await settle(page);
-      const layout = await assertLayout(page, context + "/locale/" + language);
-      assert.equal(layout.lang, language, context + ": use the actual shipped locale catalog");
-      assert.match(await page.evaluate(`document.querySelector(${JSON.stringify(ENERGY)}).textContent`), /200.*COP/s,
-        context + "/" + language + ": localized energy copy retains its water-volume and COP assumptions");
-      if (["en", "de"].includes(language)) await capture(page, context + "/locale/" + language);
-      if (language === "de" && process.env.DAIKIN_BROWSER_EVIDENCE_DIR) {
-        // Also retain the compact German card, using real summary actions rather than posed DOM.
-        const compactDisclosures = [TIMELINE, BASIS, ENERGY];
-        for (const disclosure of compactDisclosures) await tap(page, disclosure + " > summary");
-        assert.equal(await evaluate(page, selectors => selectors.every(selector =>
-          !document.querySelector(selector).open), compactDisclosures), true);
-        assert.equal(await page.evaluate(`!!document.querySelector(${JSON.stringify(CHART)})`), false);
-        await assertLayout(page, context + "/locale/de-compact");
-        await capture(page, context + "/locale/de-compact");
-        for (const disclosure of compactDisclosures) await tap(page, disclosure + " > summary");
-        assert.equal(await evaluate(page, selectors => selectors.every(selector =>
-          document.querySelector(selector).open), compactDisclosures), true);
-      }
+      const layout = await assertLayout(page, `${context}/locale/${language}`);
+      assert.equal(layout.lang, language);
+      await tap(page, LEGEND_SHOW);
+      const exp = await page.evaluate(`document.querySelector(${JSON.stringify(READOUT)} + " span")?.textContent || ""`);
+      const sentences = exp.split(/[.!?。！？]+/).filter(s => s.trim());
+      assert.ok(sentences.length >= 1 && sentences.length <= 3,
+        `${context}/locale/${language}: readout explanation must be <= 3 sentences`);
     }
-    const trusted = await page.evaluate("window.__dhwBrowserHooks.trusted");
-    assert.ok(trusted.click >= 8 && trusted.pointerdown >= 8 && trusted.keydown >= 7,
-      context + ": actions must execute through trusted native pointer/touch and keyboard events");
-    assert.deepEqual(page.diagnostics, [], context + ": real DHW lifecycles emit no browser exceptions or console errors");
-    console.log("DHW timeline checked: " + context + "; 5 real timed windows, independent aggregate totals; " +
-      languages.length + " locales; native " + (page.inputMode === "touch" ? "iPad touch" : "pointer/keyboard") +
-      "; collapsed/open 3-response recurring polling continuity");
+
+    assert.deepEqual(page.diagnostics, [], `${context}: DHW tank cooling tests emitted browser errors`);
+    console.log(`DHW cooling inspector checked: ${context}; 5 windows (>= 0.8 shaded, < 0.8 unshaded), 4 causes, X10A/Modbus, ${languages.length} locale(s)`);
   } finally {
     await page.evaluate("pollStop(); pollSchedule = () => {}; true");
     await page.waitFor("!_pollBusy");
     server.setTelemetry();
     await page.evaluate(`(async () => {
-      const hooks = window.__dhwBrowserHooks, original = window.__dhwBrowserOriginal;
-      if (hooks) {
-        hooks.observe = false; hooks.witness?.observer.disconnect();
-        checkupDhwChartHtml = hooks.chart; refreshValues = hooks.values;
-        for (const name of Object.keys(hooks.trusted)) document.removeEventListener(name, hooks.input, true);
-      }
+      const original = window.__dhwBrowserOriginal;
       if (original) {
-        for (const key of Object.keys(S)) if (!Object.hasOwn(original.state,key)) delete S[key];
-        Object.assign(S, original.state); S.clickHold = false;
-        if (original.selection) dhwSelection = original.selection;
-        await setLang(original.lang); renderApp();
+        for (const key of Object.keys(S)) if (!Object.hasOwn(original.state, key)) delete S[key];
+        Object.assign(S, original.state);
+        S.clickHold = false;
+        S.inspSig = null;
+        S.inspHistSig = null;
+        delete _html.valueGroups;
+        await setLang(original.lang);
+        renderApp();
+        window.scrollTo(0, 0);
       }
-      delete window.__dhwBrowserHooks; delete window.__dhwBrowserOriginal;
+      delete window.__dhwBrowserOriginal;
       return true;
     })()`);
+    await page.frame();
+    await settle(page);
     await page.focusEmulation(false);
   }
 }
