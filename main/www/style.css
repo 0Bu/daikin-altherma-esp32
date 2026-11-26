@@ -448,14 +448,14 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
   padding: 5px 0; border-top: 1px solid var(--line); font-size: 12.5px;
 }
 .inspect-row span:first-child { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
-.inspect-row span:last-child { font-weight: 600; color: var(--fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.inspect-row span:last-child { font-weight: 600; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* A source comparison belongs to the Modbus value immediately above it, not to the description.
    It therefore gets no divider of its own; the next reading supplies the next list line. */
 .inspect-rows > .mb-delta { margin: -1px 0 0; padding: 0 0 5px; }
 .inspect-flow-diagnosis, #inspPressure { margin-top: 10px; }
 .inspect-diagnosis-result {
   display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px;
-  color: var(--fg);
+  color: var(--muted);
 }
 .inspect-diagnosis-result span { min-width: 0; overflow-wrap: anywhere; }
 .inspect-diagnosis-result strong { white-space: nowrap; }
@@ -511,9 +511,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 }
 .conn-val {
   width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); text-align: right;
+  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); text-align: right;
 }
 .conn-val.ok { color: var(--ok); } .conn-val.warn { color: var(--warn); } .conn-val.err { color: var(--err); }
+.conn-val.dim { color: var(--muted); }
 /* The runtime failure uses the SAME geometry as a value-row explainer: one full-row clip directly
    below the label/value/edit header, a list divider across the row, and an inset body that slides
    out from under that divider. Keeping the text inside .conn-value made the tongue only as wide as
@@ -696,7 +697,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow-label { font-size: 14.5px; color: var(--muted); }
 /* full-width value line (e.g. the model name in the Model card) — wraps instead of squeezing a row */
 .vname { font-size: 15px; font-weight: 600; color: var(--fg); line-height: 1.35; padding: 9px 0; border-top: 1px solid var(--line); }
-.vrow-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; }
+.vrow-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
 .vrow-val.ok { color: var(--ok); } .vrow-val.warn { color: var(--warn); } .vrow-val.err { color: var(--err); }
 .vrow-val.dim { color: var(--muted); }
 .vrow-val:empty { display: none; }
@@ -762,7 +763,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    does properly; capping a value that already has a line to itself only makes it wrap again. */
 .settings-split-action {
   flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: auto; display: inline-flex;
-  align-items: center; justify-content: flex-end; gap: 6px; text-align: right;
+  align-items: center; justify-content: flex-end; gap: 6px; text-align: right; color: var(--muted);
 }
 .settings-info-value { flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: auto; text-align: right; }
 .settings-split-action > span { min-width: 0; overflow-wrap: anywhere; }
@@ -771,7 +772,8 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .settings-split-info:hover .vrow-chev,
 .settings-whole-info-row:hover .vrow-label,
 .settings-whole-info-row:hover .vrow-chev,
-.settings-split-action:hover { color: var(--brand-strong); }
+.settings-split-action:hover,
+.settings-split-action:hover .vrow-val { color: var(--brand-strong); }
 /* Native checkbox semantics with a compact switch presentation. The input remains focusable and
    announces its checked state through role=switch; the painted track carries no text or meaning on
    its own. */
@@ -1712,7 +1714,7 @@ button.fault-chip[aria-pressed="true"] {
 }
 /* The same reading from the gateway, as its OWN row in the inspector's member list — label and
    value both petrol, so the row reads as one statement from one instrument. Needs to beat
-   .inspect-row span:first-child/:last-child, which set the two-tone label/value ink; equal
+   .inspect-row span:first-child/:last-child, which set the neutral label/value ink; equal
    specificity, won on order, which is why this block stays BELOW them in the file. */
 .inspect-row.mb-row span { color: var(--src-mb); }
 /* A value the Modbus stack supplied: the fallback stand-in, and every row of the Modbus-only group. */
@@ -1812,7 +1814,7 @@ svg .sc-val.sc-mb .vrow-unit, svg .sc-sub.sc-mb .vrow-unit { fill: var(--src-mb)
   gap: 4px 12px; font-size: 12.5px; line-height: 1.35;
 }
 .wf-fact-k { color: var(--muted); }
-.wf-fact-v { color: var(--fg); font-weight: 500; text-align: right; }
+.wf-fact-v { color: var(--muted); font-weight: 600; text-align: right; }
 .wf-foot { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
 .wf-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .wf-btn { flex: 0 1 auto; padding: 7px 12px; font-size: 13px; border-radius: 10px; }

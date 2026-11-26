@@ -36,13 +36,17 @@ is English-only, and the captive provisioning page is separate from the main UI 
 | `--brand`, `--brand-strong`, `--brand-sky` | Identity, navigation, primary actions, focus and highlights |
 | `--brand-navy` | Reserved accent, currently unused |
 | `--brand-tint` | Provisioning hero and explanation panels |
-| `--bg`, `--card`, `--fg`, `--muted`, `--line` | Page, surfaces, text, labels and dividers |
+| `--bg`, `--card`, `--fg`, `--muted`, `--line` | Page, surfaces, headings/KPIs (`--fg`), labels and neutral row values (`--muted`), dividers |
 | `--ok`, `--warn`, `--err` | Connected/running, attention and fault states |
 | `--flow-hot`, `--flow-cold` | Thermal supply/return direction, independent of health |
 
 Brand colours identify actions; semantic colours identify states. Warm/cold pipe colours never
 claim a healthy or faulty plant. Theme follows `prefers-color-scheme`; light and dark are both
-supported. Text meets AA contrast on its actual surface, with visible keyboard focus.
+supported. Text meets AA contrast on its actual surface, with visible keyboard focus. Neutral row
+values across cards, Settings connections, schematic inspector rows, and expanded working-figure
+facts share `--muted` (separated from labels by semibold weight), while `--fg` is reserved for
+headings, hero values, KPI tiles, and emphasized inline text; semantic and Modbus-sourced values
+keep `--ok`, `--warn`, `--err`, and `--src-mb`.
 
 ## 3. Layout tokens
 

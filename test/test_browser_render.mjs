@@ -3004,6 +3004,181 @@ async function assertWorkingFigure(page, context) {
   }
 }
 
+async function assertCardValueColorConsistency(page, context) {
+  await page.evaluate(`(() => {
+    window.__browserColorConsistencyOriginal = {
+      status: S.status,
+      values: S._values,
+      modbus: S._modbus,
+      open: new Set(S.descOpen),
+      card: S.dashboardCard,
+      insp: S.insp,
+      stage: S.stage,
+      transportUnavailable: S.transportUnavailable,
+      clickHold: S.clickHold,
+    };
+    S.status = structuredClone(S.status);
+    S.status.hp = { ...(S.status.hp || {}), connected: true };
+    S.status.detect = { ...(S.status.detect || {}), valid: true, capacity_kw: 8 };
+    S.status.diagnostics = { ...(S.status.diagnostics || {}), enabled: true, effective_source: "x10a" };
+    S.status.mqtt = { ...(S.status.mqtt || {}), configured: false, connected: false };
+    S.status.wifi = { ...(S.status.wifi || {}), connected: true, rssi: -55, ssid: "ExampleNet" };
+    S.status.modbus = { ...(S.status.modbus || {}), host: "homehub.fixture.invalid", enabled: true, connected: true, profile: "homehub" };
+    S.status.health = {
+      full_span: true, span_s: 86400, source_fresh: true, source_age_s: 2,
+      available: 8, assessable: 3, evaluated: 3,
+      checks: [
+        { id: "fault", verdict: "warn", evidence: "manufacturer", active: 1, code: "E5" },
+        { id: "cycling", verdict: "info", evidence: "project", starts: 20, mean_s: 360 },
+        { id: "retries", verdict: "ok", evidence: "experimental", seen: 0 },
+      ],
+    };
+    S.status.refrigerant_service = {
+      state: "observing", continuous_s: 900, samples: 15,
+      metrics: { compressor_rps: { min: 25, mean: 30, max: 35 } },
+    };
+    S.status.working_figure = {
+      supported: true, state: "measured", pel_source: "x10a_inv", source_fresh: true,
+      is_estimate: true, is_compressor_only: true, az: 2.21, break_even_az: null,
+      tariffs_configured: false, full_window: true, coverage_pct: 99, observed_s: 85500,
+      heat_kwh: 22.1, elec_kwh: 10.0, outdoor_mean_c: 4.5, outdoor_min_c: 1.2,
+      defrost_s: 0, buh_s: 0, bsh_excluded_s: 0, limited_buh: false, unpaired_buh: false, ct_unwired: false,
+    };
+    S._values = [
+      { label: "Operation Mode", value: "Heating", unit: "", reg: 0x60 },
+      { label: "DHW Tank Temp. (R5T)", value: "45.0", unit: "°C", reg: 0x61 },
+      { label: "DHW setpoint", value: "48", unit: "°C", reg: 0x61 },
+    ];
+    S._modbus = [
+      { off: 33, label: "DHW reheat", value: 0, unit: "" },
+      { off: 50, label: "Outdoor temperature", value: 4.5, unit: "°C", concept: "outdoor_temp" },
+    ];
+    S.descOpen = new Set(["observation:working_figure"]);
+    S.insp = "tank";
+    S.inspSig = null;
+    S.inspHistSig = null;
+    S.transportUnavailable = null;
+    S.clickHold = false;
+    showStage("dashboard");
+    renderApp();
+    return true;
+  })()`);
+  try {
+    await page.frame();
+    const dashColors = await page.evaluate(`(() => {
+      const resolveVar = (expr) => {
+        const probe = document.createElement("span");
+        probe.style.color = expr;
+        document.body.appendChild(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      };
+      const colorOf = (sel) => {
+        const el = document.querySelector(sel);
+        return el ? getComputedStyle(el).color : null;
+      };
+      return {
+        tokens: {
+          muted: resolveVar("var(--muted)"),
+          fg: resolveVar("var(--fg)"),
+          ok: resolveVar("var(--ok)"),
+          warn: resolveVar("var(--warn)"),
+          err: resolveVar("var(--err)"),
+          mb: resolveVar("var(--src-mb)"),
+        },
+        wfMeasured: colorOf("[data-desc='observation:working_figure'] .vrow-val"),
+        refrigerantObserving: colorOf("[data-desc='service:refrigerant'] .vrow-val"),
+        checkFaultErr: colorOf("[data-desc='model:health_fault'] .vrow-val.err"),
+        checkCyclingWarn: colorOf("[data-desc='model:health_cycling'] .vrow-val.warn"),
+        checkRetriesDim: colorOf("[data-desc='model:health_retries'] .vrow-val.dim"),
+        wfFactVal: colorOf("[data-desc='observation:working_figure'] + .vdesc .wf-fact-v"),
+        wfKpiVal: colorOf("[data-desc='observation:working_figure'] + .vdesc .wf-kpi-val"),
+        operationVal: colorOf("[data-dashboard-card='group:Operation'] .vrow-val"),
+        modbusOnlyVal: colorOf("[data-dashboard-card='modbus'] .vrow-val.src-val-mb"),
+        modelHeading: colorOf("[data-dashboard-card='model'] .vname"),
+        inspectNow: colorOf("#inspNow"),
+        inspectRowX10a: colorOf("#inspRows .inspect-row:not(.mb-row) span:last-child"),
+        inspectRowMb: colorOf("#inspRows .inspect-row.mb-row span:last-child"),
+      };
+    })()`);
+    const t = dashColors.tokens;
+    assert.equal(dashColors.wfMeasured, t.muted, `${context}: neutral working figure must be muted`);
+    assert.equal(dashColors.refrigerantObserving, t.muted, `${context}: neutral refrigerant service row must be muted`);
+    assert.equal(dashColors.wfFactVal, t.muted, `${context}: working figure fact values must be muted`);
+    assert.equal(dashColors.operationVal, t.muted, `${context}: neutral Operation card row value must be muted`);
+    assert.equal(dashColors.inspectRowX10a, t.muted, `${context}: neutral schematic inspector row value must be muted`);
+    assert.equal(dashColors.checkFaultErr, t.err, `${context}: fault verdict must keep error colour`);
+    assert.equal(dashColors.checkCyclingWarn, t.warn, `${context}: info verdict must keep warn colour`);
+    assert.equal(dashColors.checkRetriesDim, t.muted, `${context}: experimental retries observation must remain muted`);
+    assert.equal(dashColors.modbusOnlyVal, t.mb, `${context}: Modbus card row value must keep petrol colour`);
+    assert.equal(dashColors.inspectRowMb, t.mb, `${context}: Modbus inspector row must keep petrol colour`);
+    assert.equal(dashColors.modelHeading, t.fg, `${context}: model heading must stay foreground ink`);
+    assert.equal(dashColors.inspectNow, t.fg, `${context}: inspector headline reading must stay foreground ink`);
+    assert.equal(dashColors.wfKpiVal, t.fg, `${context}: working figure KPI tile must stay foreground ink`);
+
+    await page.evaluate(`(() => {
+      S.status.working_figure = {
+        ...S.status.working_figure,
+        state: "partial", full_window: false,
+      };
+      renderApp();
+      showStage("settings");
+      return true;
+    })()`);
+    await page.frame();
+    const settingsColors = await page.evaluate(`(() => {
+      const colorOf = (sel) => {
+        const el = document.querySelector(sel);
+        return el ? getComputedStyle(el).color : null;
+      };
+      return {
+        wfPartial: colorOf("[data-desc='observation:working_figure'] .vrow-val"),
+        connDisabled: colorOf("#connTile [data-edit='mqtt'] .conn-val"),
+        connOk: colorOf("#connTile [data-edit='wifi'] .conn-val.ok"),
+        boardVal: colorOf("#settingsCards .hardware-config-open.settings-split-action.vrow-val"),
+        protocolLinkOk: colorOf("[data-desc='protocol:link'] .vrow-val.ok"),
+      };
+    })()`);
+    assert.equal(settingsColors.wfPartial, t.muted, `${context}: provisional working figure must be muted`);
+    assert.equal(settingsColors.connDisabled, t.muted, `${context}: disabled connection row value must be muted`);
+    assert.equal(settingsColors.connOk, t.ok, `${context}: connected WiFi row value must keep ok colour`);
+    assert.equal(settingsColors.boardVal, t.muted, `${context}: Settings hardware split value must be muted`);
+    assert.equal(settingsColors.protocolLinkOk, t.ok, `${context}: connected X10A protocol link row must keep ok colour`);
+
+    await page.evaluate(`(() => {
+      S.transportUnavailable = "status";
+      renderSettings();
+      return true;
+    })()`);
+    await page.frame();
+    const dimmedConn = await page.evaluate(`(() => {
+      const el = document.querySelector("#connTile .conn-val.dim");
+      return el ? getComputedStyle(el).color : null;
+    })()`);
+    assert.equal(dimmedConn, t.muted, `${context}: dimmed connection row value must be muted`);
+  } finally {
+    await page.evaluate(`(() => {
+      const orig = window.__browserColorConsistencyOriginal;
+      S.status = orig.status;
+      S._values = orig.values;
+      S._modbus = orig.modbus;
+      S.descOpen = orig.open;
+      S.dashboardCard = orig.card;
+      S.insp = orig.insp;
+      S.inspSig = null;
+      S.inspHistSig = null;
+      S.transportUnavailable = orig.transportUnavailable;
+      S.clickHold = orig.clickHold;
+      delete window.__browserColorConsistencyOriginal;
+      showStage(orig.stage || "dashboard");
+      renderApp();
+      return true;
+    })()`);
+    await page.frame();
+  }
+}
+
 async function assertNativeAltherma4(page, context, locale = "en") {
   const readingFormat = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 1, maximumFractionDigits: 1,
@@ -4116,6 +4291,9 @@ try {
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
       await assertWorkingFigure(page, `${viewport.name}/${locale}/working-figure`);
+      if (locale === browserLocales[0]) {
+        await assertCardValueColorConsistency(page, `${viewport.name}/${locale}/value-colors`);
+      }
       if (!mutation && locale === "en") {
         await assertDhwTimeline(page, server, `${viewport.name}/${locale}/dhw`, { locales: viewport.name === "phone" });
       }

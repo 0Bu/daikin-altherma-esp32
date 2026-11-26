@@ -104,8 +104,44 @@ assert.match(hydronicSource,
              /w\.range\("pump_command_pct",\s*"pump_command",\s*"pct",\s*totals\.command,\s*totals\.command_samples,\s*known\)/);
 assert.match(statusSource, /if\s*\(v\s*<\s*0\)\s*\{\s*j\s*\+=\s*"null";\s*return;\s*\}/,
              "unestablished check numbers must serialize as null");
+assert.match(style, /\.vrow-val\s*\{[^}]*color:\s*var\(--muted\)/s,
+             "neutral value rows across all cards must use muted ink");
 assert.match(style, /\.vrow-val\.dim\s*\{[^}]*color:\s*var\(--muted\)/s,
              "CHECKING/observation-only rows need a distinct neutral visual state");
+assert.match(style, /\.vrow-val\.ok\s*\{[^}]*color:\s*var\(--ok\)/s,
+             "ok value rows must keep semantic green ink");
+assert.match(style, /\.vrow-val\.warn\s*\{[^}]*color:\s*var\(--warn\)/s,
+             "warn value rows must keep semantic amber ink");
+assert.match(style, /\.vrow-val\.err\s*\{[^}]*color:\s*var\(--err\)/s,
+             "error value rows must keep semantic red ink");
+assert.match(style, /\.vrow-val\.src-val-mb,\s*\.src-val-mb\s*\{[^}]*color:\s*var\(--src-mb\)/s,
+             "Modbus value rows must keep petrol provenance ink");
+assert.match(style, /\.conn-val\s*\{[^}]*color:\s*var\(--muted\)/s,
+             "neutral connection rows must use muted ink");
+assert.match(style, /\.conn-val\.dim\s*\{[^}]*color:\s*var\(--muted\)/s,
+             "dimmed connection rows must use muted ink");
+assert.match(style, /\.conn-val\.ok\s*\{[^}]*color:\s*var\(--ok\)/s,
+             "ok connection rows must keep semantic green ink");
+assert.match(style, /\.conn-val\.warn\s*\{[^}]*color:\s*var\(--warn\)/s,
+             "warn connection rows must keep semantic amber ink");
+assert.match(style, /\.conn-val\.err\s*\{[^}]*color:\s*var\(--err\)/s,
+             "error connection rows must keep semantic red ink");
+assert.match(style, /\.settings-split-action\s*\{[^}]*color:\s*var\(--muted\)/s,
+             "neutral split Settings action values must use muted ink");
+assert.match(style, /\.inspect-row span:last-child\s*\{[^}]*color:\s*var\(--muted\)/s,
+             "neutral schematic inspector row values must use muted ink");
+assert.match(style, /\.inspect-row\.mb-row span\s*\{[^}]*color:\s*var\(--src-mb\)/s,
+             "Modbus inspector rows must keep petrol provenance ink");
+assert.match(style, /\.inspect-diagnosis-result\s*\{[^}]*color:\s*var\(--muted\)/s,
+             "neutral diagnosis inspector result rows must use muted ink");
+assert.match(style, /\.wf-fact-v\s*\{[^}]*color:\s*var\(--muted\)/s,
+             "expanded working-figure fact values must use muted ink");
+assert.match(style, /\.vname\s*\{[^}]*color:\s*var\(--fg\)/s,
+             "model heading must remain foreground ink");
+assert.match(style, /\.inspect-now\s*\{[^}]*color:\s*var\(--fg\)/s,
+             "schematic inspector headline reading must remain foreground ink");
+assert.match(style, /\.wf-kpi-val\s*\{[^}]*color:\s*var\(--fg\)/s,
+             "working-figure KPI values must remain foreground ink");
 assert.match(style, /\.mb-tag\s*\{[^}]*opacity:\s*\.5;/s,
              "Modbus source badge must stay visually subordinate to the reading");
 assert.match(checkupSource, /if \(apply_reset_locked\(s_x10a\)\) return;/,
