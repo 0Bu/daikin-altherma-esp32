@@ -177,6 +177,72 @@ function histX10aAvailable(h) {
 
 const histX10aDown = () => typeof x10aDown === "function" ? x10aDown() : S.status?.hp?.connected === false;
 
+// Declarative state-block overlays painted behind numeric X10A curves when a paired binary state
+// witness (such as Modbus compressor/pump running) is available alongside an active numeric ring.
+const NUMERIC_STATE_OVERLAYS = Object.freeze({
+  comp_rps: Object.freeze([
+    { id: "compressor_state", source: "modbus", active: 10, cls: "mb" },
+  ]),
+  pump_speed: Object.freeze([
+    { id: "pump_state", source: "modbus", active: 10, cls: "mb" },
+  ]),
+});
+const numericStateOverlaySpecs = (id, scope = "") =>
+  (NUMERIC_STATE_OVERLAYS[id] || []).filter((ov) => !scope || ov.source === scope);
+const numericStateOverlayOffered = (ov) => ov.source === "modbus" ? hasModbusHist(ov.id)
+  : ov.source === "env3" ? hasEnv3Hist(ov.id) : hasHist(ov.id);
+const numericStateOverlayKey = (ov) => `overlay:${ov.source}:${ov.id}`;
+const numericStateOverlaySourceName = (source) =>
+  source === "modbus" ? "Modbus" : source === "env3" ? "ENV III" : "X10A";
+const numericStateOverlayHidden = (id, ov) =>
+  !!S.histHidden?.get(id)?.has(numericStateOverlayKey(ov));
+const numericStateOverlayStateText = (ov, value) =>
+  value === ov.active ? t("state.on") : value === 0 ? t("state.off") : "";
+function numericStateOverlayRevision(id, scope = "") {
+  const specs = numericStateOverlaySpecs(id, scope);
+  if (!specs.length) return "";
+  return specs.map((ov) => {
+    const offered = numericStateOverlayOffered(ov);
+    const ring = offered ? S.hist.get(histCacheKey(ov.id, ov.source)) : null;
+    const live = typeof stateHistoryCurrent === "function" ? stateHistoryCurrent(ov.id, ov.source) : null;
+    return [
+      ov.source, ov.id, offered ? 1 : 0,
+      historyRingRevision(ring),
+      live?.present ? (live.value ?? "gap") : "absent",
+      numericStateOverlayHidden(id, ov) ? "hidden" : "shown",
+    ].join(":");
+  }).join(",");
+}
+function numericStateOverlaysForView(view, scope = "") {
+  const specs = numericStateOverlaySpecs(view.id, scope);
+  if (!specs.length) return [];
+  const out = [];
+  for (const spec of specs) {
+    const offered = numericStateOverlayOffered(spec);
+    const raw = offered ? expireHistSamples(S.hist.get(histCacheKey(spec.id, spec.source))) : null;
+    const live = typeof stateHistoryCurrent === "function"
+      ? stateHistoryCurrent(spec.id, spec.source) : { present: false, value: null };
+    const hasRecorded = !!raw && !raw.err && Array.isArray(raw.v) && raw.v.some((v) => v != null);
+    const hasLive = !!(live.present && live.value != null);
+    if (!(offered && (hasRecorded || hasLive)) && !hasLive) continue;
+    const samples = view.v.map((_, j) => hasRecorded ? alignAuxSample(view, raw, j) : null);
+    out.push({
+      spec,
+      id: spec.id,
+      source: spec.source,
+      cls: spec.cls ? " " + spec.cls : histSourceClass(spec.source),
+      key: numericStateOverlayKey(spec),
+      name: numericStateOverlaySourceName(spec.source),
+      raw,
+      samples,
+      activeFlags: samples.map((v) => v === spec.active),
+      live,
+      hidden: numericStateOverlayHidden(view.id, spec),
+    });
+  }
+  return out;
+}
+
 function histHiddenSet(h) {
   if (S.histHidden?.has(h.id)) {
     const saved = S.histHidden.get(h.id);
@@ -207,6 +273,7 @@ function histVisibleSeries(h) {
 // Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
 const histViewRevision = view =>
   [S.histEpoch, view.gen, view.t0, view.refreshFailed || view.aged, tankAuxRevision(view.tankAux),
+    numericStateOverlayRevision(view.id, view.scope),
     histVisibleSeries(view).map(series => `${series.source}:${histRetained(series.raw) ? "retained" : "fresh"}`).join(",")].join("/");
 function histRevision(view) {
   return ` data-rev="${esc(histViewRevision(view))}"`;
@@ -247,6 +314,17 @@ function histRetainedMarker(series, fraction, cls = "", top = 50) {
 
 function histSeriesToggle(id, source) {
   const h = historyView(id);
+  const overlay = h?.stateOverlays?.find((ov) => ov.key === source);
+  if (overlay) {
+    const hidden = new Set(histHiddenSet(h));
+    if (overlay.hidden) hidden.delete(source); else hidden.add(source);
+    cancelHistoryGesture();
+    S.histHidden.set(id, hidden);
+    S.clickHold = false;
+    S.inspHistSig = null;
+    renderTrendHosts();
+    return;
+  }
   const s = h?.series?.find((q) => q.source === source);
   if (!s) return;
   const visible = histVisibleSeries(h);
@@ -528,6 +606,9 @@ function ensureHistPair(id, mode = "open") {
       request(row, "x10a", hasHist(row));
       request(row, "modbus", hasModbusHist(row));
     }
+  }
+  for (const ov of numericStateOverlaySpecs(id)) {
+    request(ov.id, ov.source, numericStateOverlayOffered(ov));
   }
   if (requests.length) return Promise.all(requests);
 }
@@ -949,7 +1030,10 @@ function historyView(id, source = "") {
   let view = alignedHistoryView(id, offered);
   if (view) view.scope = source;
   if (view && id === "dhw_tank") view.tankAux = tankAuxHistories();
-  if (!STATE_HIST[id]) return view;
+  if (!STATE_HIST[id]) {
+    if (view) view.stateOverlays = numericStateOverlaysForView(view, source);
+    return view;
+  }
   if (!view?.v.some(v => v != null)) {
     const live = offered.filter(s => (s.source === "x10a" ? hasHist(id) : hasModbusHist(id)) &&
       stateHistoryCurrent(id, s.source).value != null);
@@ -1729,7 +1813,9 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   const hasExplanation = pressureDiagnosis && findingExplanation && visible.some(s => s.source === "x10a");
   const showExplanation = hasExplanation && pi >= 0 && S.histPin.get(id)?.pressureInspector;
   const pressureAttr = hasExplanation ? " data-pressure-assessment" : "";
-  const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
+  const overlays = view.stateOverlays || [];
+  const shownOverlays = overlays.filter((ov) => !ov.hidden);
+  const sourceAttr = view.series.length === 1 && !overlays.length ? ` data-source="${esc(view.series[0].source)}"` : "";
   let pinCross = "", pinMarks = "";
   if (pi >= 0) {
     const frac = scrubFrac(pi, n);
@@ -1760,9 +1846,35 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   }
   const grid = histYGridHtml(scale, shownUnit, { avoidY });
   const legendItems = (identifySource || view.series.length > 1 ||
-    view.series[0].source === "modbus")
+    view.series[0].source === "modbus" || overlays.length > 0)
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
+  let overlayBands = "";
+  if (shownOverlays.length) {
+    const step = n > 1 ? HIST_W / (n - 1) : HIST_W;
+    for (const ov of shownOverlays) {
+      for (const [from, count] of boolRuns(ov.activeFlags)) {
+        const x0 = n > 1 ? Math.max(0, X(from) - step / 2) : 0;
+        const x1 = n > 1 ? Math.min(HIST_W, X(from + count - 1) + step / 2) : HIST_W;
+        const x = Math.round(x0 * 10);
+        const w = (Math.round(x1 * 10) - x) / 10;
+        overlayBands += `<rect class="vhist-phase vhist-phase-state${ov.cls}" x="${(x / 10).toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${HIST_H}"/>`;
+      }
+      if (ov.live?.value === ov.spec.active && !ov.activeFlags[n - 1]) {
+        const lw = Math.max(3, Math.min(step / 2, 6));
+        overlayBands += `<rect class="vhist-phase vhist-phase-state vhist-phase-live${ov.cls}" x="${(HIST_W - lw).toFixed(1)}" y="0" width="${lw.toFixed(1)}" height="${HIST_H}"/>`;
+      }
+    }
+  }
+  for (const ov of overlays) {
+    const liveState = numericStateOverlayStateText(ov.spec, ov.live?.value);
+    const label = liveState ? `${ov.name} · ${liveState}` : ov.name;
+    legendItems.push(
+      `<button type="button" class="vhist-source vhist-overlay-source${ov.cls}" ` +
+      `data-hist-id="${esc(view.id)}" data-hist-series="${esc(ov.key)}" aria-pressed="${!ov.hidden}">` +
+      `<i></i>${esc(label)}</button>`
+    );
+  }
   let flowSvg = "", flowAttr = "", flowReadout = "";
   if (flowBands.length) {
     const minimum = flow.minimum;
@@ -1857,7 +1969,7 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${pressureAttr}${histRevision(view)}${flowAttr}${dhwAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", chartName || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}"` +
         `${showExplanation ? ' aria-describedby="inspPressureExplanation"' : ""}>` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${phaseBands}${area}${flowSvg}${dhwSvg}${line}${dots}</svg>` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${overlayBands}${phaseBands}${area}${flowSvg}${dhwSvg}${line}${dots}</svg>` +
         threshHtml + nowDots + findingMark + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
@@ -2189,6 +2301,11 @@ function numericTipEntries(h, i, aux) {
     }
     rows.push({ source: s.source, label: s.source === "modbus" ? "Modbus" : s.name, text });
   }
+  const shownOverlays = (h.stateOverlays || []).filter((ov) => !ov.hidden);
+  for (const ov of shownOverlays) {
+    const stateText = numericStateOverlayStateText(ov.spec, ov.samples[i]);
+    if (stateText) rows.push({ source: ov.source, label: ov.name, text: stateText });
+  }
   const active = h.tankAux
     ? (aux ? aux.filter((phase) => phase.flags[i]) : DHW_PHASE_SERIES.filter((phase, j) =>
         dhwPhaseVisible(h, phase.source) &&
@@ -2203,7 +2320,7 @@ function numericTipEntries(h, i, aux) {
       else if (pv <= PRESSURE_LOW_BAR * 10) pressureNote = t("check.detail.pressure.info");
     }
   }
-  return { multi: visible.length > 1, rows, note: pressureNote || active.join(" + ") };
+  return { multi: visible.length > 1 || shownOverlays.length > 0, rows, note: pressureNote || active.join(" + ") };
 }
 
 // Accessibility keeps time and readings together. Visible numeric bubbles omit the selected time;

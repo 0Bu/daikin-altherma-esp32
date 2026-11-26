@@ -1878,7 +1878,7 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   full.S.live = full.liveData();
 
   const noExtraRowsCards = [
-    "hp", "disch", "lp", "eev", "dt", "pth", "cop", "spaceh", "flow", "flow_switch", "wp",
+    "comp", "hp", "disch", "lp", "eev", "dt", "pth", "cop", "spaceh", "flow", "flow_switch", "wp",
     "ou", "phe", "heat", "rhot", "rcold", "wsup", "wtank", "wheat", "wret",
   ];
   for (const key of noExtraRowsCards) {
@@ -1919,7 +1919,7 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
     "pump inspector keeps only Water pump signal");
 }
 
-// ── 24. Compressor inspector: Input 31 in dual-stack, deduplicated on X10A down, absent offline ─
+// ── 24. Compressor & pump inspectors: Modbus state in chart overlay when X10A active, headline on X10A down ─
 {
   const compVals = [X("INV frequency (rps)", "42", "comp_rps", { unit: "rps", reg: 0x30 })];
   const compMb = [M(31, "Compressor running", "1", null, { unit: "", binary: true })];
@@ -1928,34 +1928,34 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   dual.S.live = dual.liveData();
   const compHead = dual.inspCurRow(dual.INSPECT.comp);
   assert.equal(compHead?.label, "INV frequency (rps)");
-  const dualRows = Array.from(dual.inspValues(dual.INSPECT.comp, compHead, null));
-  assert.equal(dualRows.length, 1, "dual-stack comp inspector adds Modbus Input 31 below chart");
-  assert.equal(dualRows[0].x10a, null);
-  assert.equal(dualRows[0].mb?.off, 31);
-  assert.equal(dualRows[0].compare, undefined, "binary Input 31 must not be delta-compared against rps");
+  assert.deepEqual(Array.from(dual.inspValues(dual.INSPECT.comp, compHead, null)), [],
+    "dual-stack comp inspector omits Modbus Input 31 bottom row (rendered as chart blocks)");
 
-  dual.S.insp = "comp";
-  const sigOn = dual.inspectSig(dual.INSPECT.comp);
-  dual.S._modbus = [M(31, "Compressor running", "0", null, { unit: "", binary: true })];
-  const sigOff = dual.inspectSig(dual.INSPECT.comp);
-  assert.notEqual(sigOn, sigOff, "inspectSig must repaint when Modbus Input 31 flips ON/OFF");
-  dual.S.insp = null;
+  const pumpVals = [
+    X("Water pump operation", "1", "pump_running", { unit: "", binary: true, reg: 0x60 }),
+    X("Water pump signal", "20", "pump_signal", { unit: "", reg: 0x62 }),
+  ];
+  const pumpMb = [M(30, "Circulation pump running", "1", "pump_running", { unit: "", binary: true })];
+  const dualPump = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: pumpVals, modbus: pumpMb });
+  dualPump.S.live = dualPump.liveData();
+  const pumpHead = dualPump.inspCurRow(dualPump.INSPECT.pump);
+  assert.equal(pumpHead?.label, "Water pump operation");
+  const dualPumpRows = Array.from(dualPump.inspValues(dualPump.INSPECT.pump, pumpHead, null));
+  assert.deepEqual(dualPumpRows.map((m) => m.x10a?.label), ["Water pump signal"],
+    "dual-stack pump inspector keeps only Water pump signal (Modbus Input 30 rendered as chart blocks)");
 
-  const mbOnly = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: compVals, modbus: compMb });
-  mbOnly.S.live = mbOnly.liveData();
-  mbOnly.S.insp = "comp";
-  const fb = mbOnly.mbForInspect("comp");
-  assert.equal(fb?.off, 31, "X10A down promotes Input 31 to comp headline");
-  assert.deepEqual(Array.from(mbOnly.inspValues(mbOnly.INSPECT.comp, null, fb)), [],
-    "X10A down must not duplicate Input 31 below the comp headline");
-  mbOnly.S.insp = null;
-
-  for (const state of [{ mbEnabled: false, mbConnected: false }, { mbEnabled: true, mbConnected: false }]) {
-    const noMb = ctx({ x10a: true, ...state, values: compVals, modbus: compMb });
-    noMb.S.live = noMb.liveData();
-    const head = noMb.inspCurRow(noMb.INSPECT.comp);
-    assert.deepEqual(Array.from(noMb.inspValues(noMb.INSPECT.comp, head, null)), [],
-      `comp inspector hides Input 31 when Modbus is ${state.mbEnabled ? "offline" : "disabled"}`);
+  for (const [key, vals, mbs, expectedOff] of [
+    ["comp", compVals, compMb, 31],
+    ["pump", pumpVals, pumpMb, 30],
+  ]) {
+    const mbOnly = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: vals, modbus: mbs });
+    mbOnly.S.live = mbOnly.liveData();
+    mbOnly.S.insp = key;
+    const fb = mbOnly.mbForInspect(key);
+    assert.equal(fb?.off, expectedOff, `X10A down promotes Input ${expectedOff} to ${key} headline`);
+    assert.deepEqual(Array.from(mbOnly.inspValues(mbOnly.INSPECT[key], null, fb)), [],
+      `X10A down must not duplicate Input ${expectedOff} below the ${key} headline`);
+    mbOnly.S.insp = null;
   }
 }
 

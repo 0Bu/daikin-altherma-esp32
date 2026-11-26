@@ -448,4 +448,59 @@ for (const failOld of [false, true]) {
   assert.equal(rendered.at(-1), "", "INV pel keeps inspector history hidden");
   ui.S.insp = null;
 }
+
+// Dual-stack compressor & pump inspectors repaint #inspHist with numeric trends + live Modbus overlay flips.
+{
+  await reset();
+  const rendered = [];
+  context.MB_PAIRS = [];
+  context.replaceHistoryHtml = (_el, html) => rendered.push(html);
+  context.displayHomeHubLabel = (r) => r.label;
+  context.displayReadingLabel = (l) => l;
+  context.inspFieldText = (_e, _f) => "Inspector";
+  const dual = fixture();
+  dual.hp.connected = true;
+  dual.modbus.enabled = true;
+  dual.modbus.connected = true;
+  dual.history.rows = [
+    { id: "comp_rps", label: "INV frequency (rps)" },
+    { id: "pump_signal", label: "Water pump signal" },
+  ];
+  dual.history.modbus_rows = [
+    { id: "compressor_state", label: "Compressor running" },
+    { id: "pump_state", label: "Circulation pump running" },
+  ];
+  await status(dual);
+  ui.S._modbus = [
+    { off: 31, history: "compressor_state", label: "Compressor running", value: "1", binary: true },
+    { off: 30, history: "pump_state", label: "Circulation pump running", value: "0", binary: true },
+  ];
+  ui.S.hist.set("comp_rps", { at: Date.now(), gen: 1, dt: 300, unit: "rps", b0: 1, held: [], v: [0, 200, 300] });
+  ui.S.hist.set("pump_speed", { at: Date.now(), gen: 1, dt: 300, unit: "%", b0: 1, held: [], v: [0, 500, 1000] });
+  ui.S.hist.set(ui.histCacheKey("compressor_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 1, held: [], v: [0, 10, 0] });
+  ui.S.hist.set(ui.histCacheKey("pump_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 1, held: [], v: [0, 10, 10] });
+
+  ui.S.insp = "comp";
+  ui.S.inspHistSig = "";
+  ui.renderInspectHist({ trend: "comp_rps" }, { label: "INV frequency (rps)", unit: "rps" });
+  const compBefore = rendered.length;
+  assert.match(rendered.at(-1), /data-hist="comp_rps"/);
+  assert.match(rendered.at(-1), /vhist-phase vhist-phase-state mb/);
+  assert.match(rendered.at(-1), /vhist-phase-live mb/);
+  assert.match(rendered.at(-1), /Modbus · state\.on/);
+
+  ui.S._modbus[0].value = "0";
+  ui.renderInspectHist({ trend: "comp_rps" }, { label: "INV frequency (rps)", unit: "rps" });
+  assert.equal(rendered.length, compBefore + 1, "live Modbus flip repaints comp inspector chart");
+  assert.match(rendered.at(-1), /Modbus · state\.off/);
+  assert.doesNotMatch(rendered.at(-1), /vhist-phase-live/);
+
+  ui.S.insp = "pump";
+  ui.S.inspHistSig = "";
+  ui.renderInspectHist({ trend: "pump_speed" }, { label: "Water pump operation", unit: "" });
+  assert.match(rendered.at(-1), /data-hist="pump_speed"/);
+  assert.match(rendered.at(-1), /vhist-phase vhist-phase-state mb/);
+  assert.match(rendered.at(-1), /Modbus · state\.off/);
+  ui.S.insp = null;
+}
 console.log("snapshot identity admission and shared history awaits pass");
