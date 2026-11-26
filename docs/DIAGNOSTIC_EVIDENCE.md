@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 9129ba25dc46ef80952a60bc51aab02bd209bcf5649b33a3c1bd5ce31ee0c105 -->
+<!-- diagnostic-evidence-contract: a07c55a01df742dc5d748ed4f19445ec5f38fa567c067082b819a7ae84ec6760 -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -355,11 +355,17 @@ The aggregate report retains `max_k_h`, `windows`, `high_windows`, `quiet_high_w
 `circulation_known_s`, `blocked`, and abort counts/reasons, and can include a candidate carried
 across a restart whose exact original start was unavailable for plotting. Each timed record in
 `timeline.windows` pairs an accepted window's `start_s`/`end_s`, `rate_k_h`, `observed_s`,
-`pump_marker`, and `draw_marker`. In the **DHW tank / thermal store** inspector, completed
+`pump_marker`, `draw_marker`, and per-window `circulation` state (`unknown`, `on`, `off`, or
+`off_settled`, packed into two bits of each 6-byte persisted window slot in schema `DXT2`/`DMT2`
+without increasing RAM or flash size). In the **DHW tank / thermal store** inspector, completed
 windows with `rate_k_h >= 0.8` K/h are shaded under the active source's `dhw_tank` curve (visually
-distinguishing peak window(s) and selection), and selecting a shaded window or using the legend
-button shows its time range, rate, and an up-to-3-sentence readout bounded to `pump_marker` and
-`draw_marker`. The UI no longer displays the former energy calculation example.
+distinguishing peak window(s) and selection), and the **DHW tank cooling** legend button toggles band
+visibility (`aria-pressed`). Tapping a shaded window toggles its selection (a second tap on the
+selected window or a tap outside dismisses it) to show the window's time range, rate, and a
+2-to-3-sentence readout bounded to drop shape (`draw_marker`), external circulation overlap
+(`circulation`), and internal-pump exclusion (`pump_marker`). Below the chart, a labelled summary
+reports the active rate or status alongside 24-hour external circulation correlation when
+configured; the UI no longer displays the former energy calculation example.
 
 **Project boundary:** These thresholds (`0.8` K/h shading/high-rate threshold, `0.4` K / 10-minute
 draw-like anchor), endpoint confirmation with a 30-second closing grace, one-hour intervals and

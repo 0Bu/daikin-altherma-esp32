@@ -1826,6 +1826,7 @@ function renderInspectHist(e, row, mode = "", flow = null, dhw = null) {
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh),
                liveGen, auxGen, overlaySig, sourceDefault, flowScaleKey, flowReference, dhwReference,
+               id === "dhw_tank" ? String(!!S.dhwCoolHidden) : "",
                JSON.stringify(pin ?? null),
                pressureChart ? JSON.stringify([!!pressure, pressure?.finding]) : ""].join("|");
   if (sig === S.inspHistSig) return started;
@@ -1886,6 +1887,8 @@ function renderInspect(mode = "") {
     flow.source, flow.minimum, flow.locationsMissing, flow.unsupported, flow.agreement,
   ]) : "") + (dhw ? JSON.stringify([
     dhw.source, dhw.maxRate, dhw.blocked, dhw.unsupported, dhw.stale,
+    dhw.highWindows, dhw.highWithPump, dhw.highPumpOff, dhw.circOnS, dhw.circKnownS,
+    dhw.circConfigured, dhw.circName,
     dhw.timeline?.epoch ?? null, dhw.timeline?.windows?.length ?? 0, hasDhwBands,
   ]) : "") + (heater ? JSON.stringify([
     heater.which, heater.source, heater.runtimeText, heater.isZero, heater.observedS,

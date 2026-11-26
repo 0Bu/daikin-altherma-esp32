@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -196,16 +196,21 @@ I18N.pl = localeValues([
   /* check.status.observation */ "POMIAR",
   /* check.status.experimental */ "TESTOWO",
   /* check.status.unavailable */ "N/D",
-  /* check.dhw.show */ "Pokaż wychładzanie zasobnika",
   /* check.dhw.maximum */ "Najsilniejsze wychładzanie zasobnika",
   /* check.dhw.waiting */ "Oczekiwanie na odpowiednie okno godzinne.",
   /* check.dhw.no_window */ "Brak ukończonego okna godzinnego w ciągu ostatnich 24 h.",
   /* check.dhw.locations_missing */ "W bieżącym wykresie nie ma okna czasowego dla starszych odczytów o tej wartości.",
   /* check.dhw.stale */ "Bieżące odczyty wychładzania zasobnika są niedostępne lub nieaktualne; zaznaczone okna są historyczne.",
-  /* check.dhw.cause_both */ "W tej godzinie pracowała wewnętrzna pompa wody, a temperatura zasobnika gwałtownie spadła. Może to wynikać z poboru ciepłej wody, wewnętrznej cyrkulacji obiegu lub szybkiego stygnięcia zasobnika. Sam czujnik R5T nie pozwala ustalić dokładnej przyczyny.",
-  /* check.dhw.cause_pump */ "W tej godzinie pracowała wewnętrzna pompa wody bez profilu spadku przypominającego pobór. Wychładzanie może być spowodowane cyrkulacją obiegu, niezauważonym poborem ciepłej wody lub stratami ciepła. Sam czujnik R5T nie pozwala ustalić dokładnej przyczyny.",
-  /* check.dhw.cause_draw */ "Zarejestrowano gwałtowny spadek temperatury, gdy wewnętrzna pompa wody nie zgłaszała pracy. Zwykle odpowiada to poborowi ciepłej wody lub szybkiemu mieszaniu w zasobniku. Sam czujnik R5T nie dowodzi poboru ani nie wyklucza innych strat.",
-  /* check.dhw.cause_quiet */ "W tej godzinie nie odnotowano ani pracy pompy wewnętrznej, ani gwałtownego spadku podobnego do poboru. Możliwe przyczyny to postojowe straty ciepła, cyrkulacja zewnętrzna lub grawitacyjna albo powolny pobór ciepłej wody. Sam czujnik R5T pozostawia dokładną przyczynę otwartą.",
+  /* check.dhw.shape_step */ "Skokowy spadek temperatury w tej godzinie — pasuje do poboru ciepłej wody lub krótkiego mieszania.",
+  /* check.dhw.shape_steady */ "Ciągłe wychładzanie bez nagłego skoku — pasuje do strat postojowych, grawitacji lub ciągłej cyrkulacji.",
+  /* check.dhw.circ_on */ "Zewnętrzna pompa cyrkulacyjna pracowała w tej godzinie (≥ 5 min), co odpowiada stracie przez cyrkulację.",
+  /* check.dhw.circ_off */ "Zewnętrzna pompa cyrkulacyjna była wyłączona przez co najmniej 2 godziny, więc strata przez cyrkulację zewnętrzną jest tu mało prawdopodobna.",
+  /* check.dhw.pump_off */ "Pompa wewnętrzna nie pracowała, więc odbiór ciepła przez zawór 3-drogowy jest mało prawdopodobny; sam czujnik R5T nie dowodzi przyczyny.",
+  /* check.dhw.pump_on */ "Wewnętrzna pompa obiegowa pracowała w tej godzinie, więc odbiór ciepła przez zawór 3-drogowy pozostaje możliwy; sam czujnik R5T nie dowodzi przyczyny.",
+  /* check.dhw.circ_label */ "Zewnętrzna pompa cyrkulacyjna",
+  /* check.dhw.summary_phases */ (n) => `${n} silna(-e) faza(-y) wychładzania (≥ 0,8 °C/h) w 24 h.`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name} pracowała podczas ${withPump} z ${total} silnych faz.`,
+  /* check.dhw.summary_circ_off */ (name) => `${name} pozostawała wyłączona (≥ 2 h) podczas zarejestrowanych silnych faz.`,
   /* check.detail.value_label */ "Wartość:",
   /* check.detail.assessment_label */ "Ocena:",
   /* check.detail.ok */ "Reguła nie zadziałała w czytelnych danych.",

@@ -1512,6 +1512,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                         ufield(",\"observed_s\":", w.observed_s);
                         bfield(",\"pump_marker\":", w.pump_marker);
                         bfield(",\"draw_marker\":", w.draw_marker);
+                        qfield(",\"circulation\":", logic::dhw_circ_state_name(w.circ));
                         j += "}";
                     }
                     j += "]}";

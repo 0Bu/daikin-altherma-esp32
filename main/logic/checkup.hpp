@@ -1273,6 +1273,15 @@ template <bool Timed>
         loss_tenths_k_h > b.max_loss_tenths_k_h)
         b.max_loss_tenths_k_h = static_cast<int16_t>(loss_tenths_k_h);
 
+    const bool source_covered =
+        st.segment_circulation_known_s * 100u >= observed_s * DHW_LOSS_CIRC_KNOWN_PCT;
+    const DhwCircState circ =
+        (source_covered && st.segment_circulation_on_s >= DHW_LOSS_CIRC_MIN_ON_S) ? DhwCircState::On
+        : (source_covered && st.segment_circulation_on_s == 0)
+            ? (st.circulation_off_run_s >= DHW_LOSS_CIRC_OFF_SETTLE_S ? DhwCircState::OffSettled
+                                                                      : DhwCircState::Off)
+            : DhwCircState::Unknown;
+
     if (loss_tenths_k_h >= DHW_LOSS_HIGH_TENTHS_K_H) {
         b.high_windows = checkup_add_u8(b.high_windows, 1);
         // Ordinary hot-water use can produce a large net drop. Only hours without either
@@ -1282,12 +1291,9 @@ template <bool Timed>
         // Against the OBSERVED seconds, not the span: the witness is only decoded on cycles this
         // segment could see, so measuring its coverage against blind time would charge it for
         // silence on a different bus.
-        const bool source_covered = st.segment_circulation_known_s * 100u >=
-                                    observed_s * DHW_LOSS_CIRC_KNOWN_PCT;
-        if (source_covered && st.segment_circulation_on_s >= DHW_LOSS_CIRC_MIN_ON_S)
+        if (circ == DhwCircState::On)
             b.high_with_pump = checkup_add_u8(b.high_with_pump, 1);
-        else if (source_covered && st.segment_circulation_on_s == 0 &&
-                 st.circulation_off_run_s >= DHW_LOSS_CIRC_OFF_SETTLE_S)
+        else if (circ == DhwCircState::OffSettled)
             b.high_pump_off = checkup_add_u8(b.high_pump_off, 1);
     }
 
@@ -1296,7 +1302,7 @@ template <bool Timed>
     if constexpr (Timed) {
         if (!st.segment_carried_s)
             trace->record(st.segment_start_us, now_us, loss_tenths_k_h, observed_s,
-                          st.segment_pump_on, st.segment_draw_like);
+                          st.segment_pump_on, st.segment_draw_like, circ);
     }
 
     // Adjacent, non-overlapping one-hour windows preserve the sensor resolution and keep every

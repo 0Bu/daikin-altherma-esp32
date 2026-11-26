@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const itAria = (x) => (l, d) => `${l} — cronologia ${x}. ${d}. I tasti freccia leggono i singoli campioni.`;
 const itMb = (a, p = "al") => (r) => `${a}${r ? ` ${p} registro ${r}` : ""}.`;
 I18N.it = localeValues([
@@ -191,16 +191,21 @@ I18N.it = localeValues([
   /* check.status.observation */ "MISURA",
   /* check.status.experimental */ "IN PROVA",
   /* check.status.unavailable */ "N/D",
-  /* check.dhw.show */ "Mostra raffreddamento serbatoio",
   /* check.dhw.maximum */ "Massimo raffreddamento del serbatoio",
   /* check.dhw.waiting */ "In attesa di una finestra di un’ora idonea.",
   /* check.dhw.no_window */ "Nessuna finestra di un’ora completata nelle ultime 24 h.",
   /* check.dhw.locations_missing */ "Nel grafico attuale non è disponibile alcuna finestra temporale per le letture precedenti con questo valore.",
   /* check.dhw.stale */ "Le letture attuali del raffreddamento del serbatoio mancano o sono obsolete; le finestre evidenziate sono storiche.",
-  /* check.dhw.cause_both */ "Durante quest’ora la pompa dell’acqua interna è stata attiva e la temperatura del serbatoio è scesa rapidamente. Ciò può derivare da un prelievo di acqua calda, da circolazione nel circuito interno o da un rapido raffreddamento del serbatoio. Il solo sensore R5T non può stabilire la causa esatta.",
-  /* check.dhw.cause_pump */ "Durante quest’ora la pompa dell’acqua interna è stata attiva senza un profilo di calo simile a un prelievo. Il raffreddamento può essere causato da circolazione del circuito, prelievo di acqua calda inosservato o dispersioni termiche. Il solo sensore R5T non può stabilire la causa esatta.",
-  /* check.dhw.cause_draw */ "È stato registrato un rapido calo di temperatura mentre la pompa dell’acqua interna non risultava in funzione. Ciò corrisponde tipicamente a un prelievo di acqua calda o a un rapido rimescolamento nel serbatoio. Il solo sensore R5T non può provare un prelievo né escludere altre perdite.",
-  /* check.dhw.cause_quiet */ "In quest’ora non sono stati registrati né il funzionamento della pompa interna né un calo rapido simile a un prelievo. Le cause possibili includono dispersioni da fermo, circolazione esterna o per gravità, oppure un prelievo lento di acqua calda. Il solo sensore R5T lascia aperta la causa esatta.",
+  /* check.dhw.shape_step */ "Calo rapido della temperatura in quest’ora — compatibile con prelievo di acqua calda o rapido rimescolamento.",
+  /* check.dhw.shape_steady */ "Raffreddamento continuo senza sbalzi — compatibile con dispersioni da fermo, circolazione naturale o ricircolo attivo.",
+  /* check.dhw.circ_on */ "La pompa di ricircolo esterna era attiva in quest’ora (≥ 5 min), in linea con una perdita da ricircolo.",
+  /* check.dhw.circ_off */ "La pompa di ricircolo esterna è rimasta spenta per almeno 2 ore, rendendo improbabile una perdita esterna qui.",
+  /* check.dhw.pump_off */ "La pompa interna era ferma, rendendo improbabile una perdita tramite la valvola a 3 vie; il solo R5T non prova la causa.",
+  /* check.dhw.pump_on */ "La pompa di riscaldamento interna era attiva, quindi una perdita tramite la valvola a 3 vie resta possibile; il solo R5T non prova la causa.",
+  /* check.dhw.circ_label */ "Pompa di ricircolo esterna",
+  /* check.dhw.summary_phases */ (n) => `${n} fase/i di raffreddamento marcato (≥ 0,8 °C/h) in 24 h.`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name} attiva in ${withPump} su ${total} fasi marcate.`,
+  /* check.dhw.summary_circ_off */ (name) => `${name} è rimasta spenta (≥ 2 h) durante le fasi marcate rilevate.`,
   /* check.detail.value_label */ "Valore:",
   /* check.detail.assessment_label */ "Valutazione:",
   /* check.detail.ok */ "La regola non è scattata nei dati leggibili.",

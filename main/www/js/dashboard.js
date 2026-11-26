@@ -2405,7 +2405,8 @@ function checkupDhwTimeline(c) {
         w.end_s <= trace.window_end_s - 86400 || w.end_s > trace.window_end_s ||
         !Number.isFinite(w.rate_k_h) || w.rate_k_h < 0 ||
         !uint(w.observed_s) || w.observed_s > w.end_s - w.start_s ||
-        typeof w.pump_marker !== "boolean" || typeof w.draw_marker !== "boolean") return null;
+        typeof w.pump_marker !== "boolean" || typeof w.draw_marker !== "boolean" ||
+        (w.circulation !== undefined && !["unknown", "on", "off", "off_settled"].includes(w.circulation))) return null;
     end = w.end_s;
   }
   return trace;
@@ -2426,27 +2427,61 @@ function checkupDhwReport() {
   const unsupported = c.verdict === "unavailable";
   const stale = health.source_fresh === false || c.reason === "source_stale" ||
     (timeline ? !timeline.live : false);
-  return { source, maxRate, timeline, blocked, unsupported, stale };
+  const circ = S.status.circulation_source;
+  const nonNegInt = n => Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  return {
+    source, maxRate, timeline, blocked, unsupported, stale,
+    windows: nonNegInt(c.windows),
+    highWindows: nonNegInt(c.high_windows),
+    highWithPump: nonNegInt(c.high_with_pump),
+    highPumpOff: nonNegInt(c.high_pump_off),
+    circOnS: nonNegInt(c.circulation_on_s),
+    circKnownS: nonNegInt(c.circulation_known_s),
+    circConfigured: circ?.configured === true,
+    circName: typeof circ?.name === "string" ? circ.name.trim() : "",
+  };
 }
 
 function checkupDhwCoolingExplanation(w) {
-  if (w.pump_marker && w.draw_marker) return t("check.dhw.cause_both");
-  if (w.pump_marker) return t("check.dhw.cause_pump");
-  if (w.draw_marker) return t("check.dhw.cause_draw");
-  return t("check.dhw.cause_quiet");
+  const parts = [t(w.draw_marker ? "check.dhw.shape_step" : "check.dhw.shape_steady")];
+  if (w.circulation === "on") parts.push(t("check.dhw.circ_on"));
+  else if (w.circulation === "off_settled") parts.push(t("check.dhw.circ_off"));
+  parts.push(t(w.pump_marker ? "check.dhw.pump_on" : "check.dhw.pump_off"));
+  return parts.join(" ");
 }
 
 function checkupDhwBriefHtml(dhw, hasVisibleBands) {
   if (!dhw) return "";
   const sourceLabel = dhw.source === "modbus" ? "Modbus" : "X10A";
   if (dhw.maxRate !== null) {
+    let summary = "";
+    if (dhw.highWindows > 0) {
+      let line = t("check.dhw.summary_phases", dhw.highWindows.toLocaleString(LANG));
+      if (dhw.circConfigured && dhw.circKnownS > 0) {
+        const label = dhw.circName ? `${t("check.dhw.circ_label")} (${dhw.circName})` : t("check.dhw.circ_label");
+        if (dhw.highWithPump > 0) {
+          line += " " + t("check.dhw.summary_circ_on", label,
+            dhw.highWithPump.toLocaleString(LANG), dhw.highWindows.toLocaleString(LANG));
+        } else if (dhw.highPumpOff > 0) {
+          line += " " + t("check.dhw.summary_circ_off", label);
+        }
+      }
+      summary = `<p>${esc(line)}</p>`;
+    }
     return inspectDiagnosisResultHtml(`${t("check.dhw.maximum")} · ${sourceLabel}`, `${checkupFmt1(dhw.maxRate)} °C/h`) +
+      summary +
       (dhw.maxRate >= 0.8 && !hasVisibleBands ? `<p>${esc(t("check.dhw.locations_missing"))}</p>` : "") +
       (dhw.stale ? `<p>${esc(t("check.dhw.stale"))}</p>` : "");
   }
-  if (dhw.blocked) return `<p>${esc(t("check.dhw.no_window"))}</p>`;
-  if (dhw.unsupported) return `<p>${esc(t("check.status.unavailable"))}</p>`;
-  return `<p>${esc(t("check.dhw.waiting"))}</p>`;
+  if (dhw.blocked) {
+    return inspectDiagnosisResultHtml(`${t("check.dhw_loss")} · ${sourceLabel}`, "—") +
+      `<p>${esc(t("check.dhw.no_window"))}</p>`;
+  }
+  if (dhw.unsupported) {
+    return inspectDiagnosisResultHtml(`${t("check.dhw_loss")} · ${sourceLabel}`, t("check.status.unavailable"));
+  }
+  return inspectDiagnosisResultHtml(`${t("check.dhw_loss")} · ${sourceLabel}`, t("check.status.collecting")) +
+    `<p>${esc(t("check.dhw.waiting"))}</p>`;
 }
 
 // Fault copy follows the unit’s reported class. A remembered message does not establish

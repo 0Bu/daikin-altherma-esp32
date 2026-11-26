@@ -66,8 +66,9 @@ vm.runInContext(
     checkupDhwHasRate, checkupDhwTimeline, checkupDhwReport,
     checkupDhwCoolingExplanation, checkupDhwBriefHtml,
     dhwCoolingBands, dhwCoolingTime, selectDhwCooling,
+    clearDhwCoolingSelection, toggleDhwCoolingOverlay,
     historyView, histHtml, histCacheKey, replaceHistoryHtml,
-    renderInspect, syncHistSources,
+    renderInspect, syncHistSources, liveData,
   };`,
   context,
   { filename: "main/www/app.sources" },
@@ -124,11 +125,20 @@ for (const patch of [
   { observed_s: 3616 }, { observed_s: -1 }, { rate_k_h: null }, { rate_k_h: NaN },
   { rate_k_h: Infinity }, { rate_k_h: -0.1 }, { rate_k_h: "1.7" },
   { pump_marker: 1 }, { draw_marker: null },
+  { circulation: "invalid" }, { circulation: 1 },
 ]) {
   const badWin = { ...trace, windows: [{ ...trace.windows[0], ...patch }] };
   assert.equal(ui.checkupDhwTimeline({ ...baseCheck, timeline: badWin }), null,
     `invalid window rejected: ${JSON.stringify(patch)}`);
 }
+const circTrace = {
+  ...trace,
+  windows: trace.windows.map((w, idx) => ({
+    ...w,
+    circulation: ["unknown", "on", "off", "off_settled"][idx],
+  })),
+};
+assert.deepEqual(ui.checkupDhwTimeline({ ...baseCheck, timeline: circTrace }), circTrace);
 assert.equal(ui.checkupDhwTimeline({ ...baseCheck, timeline: { ...trace, windows: [...trace.windows].reverse() } }), null);
 assert.equal(ui.checkupDhwTimeline({ ...baseCheck, timeline: { ...trace, windows: [trace.windows[0], trace.windows[0]] } }), null);
 assert.equal(ui.checkupDhwTimeline({ ...baseCheck, timeline: { ...trace, window_end_s: 101030 } }), null);
@@ -170,16 +180,48 @@ assert.deepEqual(
   { maxRate: ui.checkupDhwReport().maxRate, unsupported: ui.checkupDhwReport().unsupported },
   { maxRate: null, unsupported: true },
 );
-assert.equal(ui.checkupDhwBriefHtml(ui.checkupDhwReport(), false), `<p>${ui.t("check.status.unavailable")}</p>`);
+assert.equal(ui.checkupDhwBriefHtml(ui.checkupDhwReport(), false),
+  `<div class="inspect-diagnosis-result"><span>DHW tank cooling · X10A</span><strong class="num">${ui.t("check.status.unavailable")}</strong></div>`);
 
 setStatus({ verdict: "unavailable", blocked: true, max_k_h: null, windows: 0 });
-assert.equal(ui.checkupDhwBriefHtml(ui.checkupDhwReport(), false), `<p>${ui.t("check.dhw.no_window")}</p>`);
+assert.equal(ui.checkupDhwBriefHtml(ui.checkupDhwReport(), false),
+  `<div class="inspect-diagnosis-result"><span>DHW tank cooling · X10A</span><strong class="num">—</strong></div><p>${ui.t("check.dhw.no_window")}</p>`);
 
 setStatus({ verdict: "collecting", blocked: false, max_k_h: null, windows: 0 });
-assert.equal(ui.checkupDhwBriefHtml(ui.checkupDhwReport(), false), `<p>${ui.t("check.dhw.waiting")}</p>`);
+assert.equal(ui.checkupDhwBriefHtml(ui.checkupDhwReport(), false),
+  `<div class="inspect-diagnosis-result"><span>DHW tank cooling · X10A</span><strong class="num">${ui.t("check.status.collecting")}</strong></div><p>${ui.t("check.dhw.waiting")}</p>`);
+
+// 24-h external circulation correlation in brief summary (running vs settled off vs uncovered strong phases).
+setStatus(
+  { max_k_h: 2.7, windows: 5, high_windows: 4, high_with_pump: 2, high_pump_off: 0, circulation_on_s: 1200, circulation_known_s: 14000 },
+  {}, {}, { circulation_source: undefined },
+);
+S.status.circulation_source = { configured: true, name: "DHW circulation pump" };
+let rep = ui.checkupDhwReport();
+let corrBrief = ui.checkupDhwBriefHtml(rep, true);
+assert.ok(corrBrief.includes("4 strong cooling phase(s)"));
+assert.ok(corrBrief.includes("External circulation pump (DHW circulation pump) ran during 2 of 4 strong phases."));
+
+setStatus({
+  max_k_h: 2.7, windows: 5, high_windows: 4, high_with_pump: 0, high_pump_off: 2,
+  circulation_on_s: 0, circulation_known_s: 14400,
+});
+S.status.circulation_source = { configured: true, name: "DHW circulation pump" };
+corrBrief = ui.checkupDhwBriefHtml(ui.checkupDhwReport(), true);
+assert.ok(corrBrief.includes("External circulation pump (DHW circulation pump) stayed off (≥ 2 h) during observed strong phases."));
+
+// Known-off coverage solely outside settled strong phases must not claim pump stayed off during strong phases.
+setStatus({
+  max_k_h: 2.7, windows: 5, high_windows: 4, high_with_pump: 0, high_pump_off: 0,
+  circulation_on_s: 0, circulation_known_s: 14400,
+});
+S.status.circulation_source = { configured: true, name: "DHW circulation pump" };
+const uncoveredBrief = ui.checkupDhwBriefHtml(ui.checkupDhwReport(), true);
+assert.ok(uncoveredBrief.includes("4 strong cooling phase(s)"));
+assert.ok(!uncoveredBrief.includes("stayed off (≥ 2 h) during observed strong phases"));
 
 setStatus({ max_k_h: 2.7, windows: 4 }, { source_fresh: false });
-let rep = ui.checkupDhwReport();
+rep = ui.checkupDhwReport();
 assert.equal(rep.stale, true);
 assert.ok(ui.checkupDhwBriefHtml(rep, true).includes(ui.t("check.dhw.stale")));
 assert.ok(!ui.checkupDhwBriefHtml(rep, true).includes(ui.t("check.dhw.locations_missing")));
@@ -195,11 +237,13 @@ assert.ok(!ui.checkupDhwBriefHtml(rep, false).includes(ui.t("check.dhw.locations
 for (const lang of locales) {
   ui.lang(lang);
   for (const [pump_marker, draw_marker] of [[true, true], [true, false], [false, true], [false, false]]) {
-    const exp = ui.checkupDhwCoolingExplanation({ pump_marker, draw_marker });
-    assert.ok(exp.trim(), `${lang}: explanation non-empty`);
-    const sentences = exp.split(/[.!?。！？]+/).filter(s => s.trim());
-    assert.ok(sentences.length >= 1 && sentences.length <= 3,
-      `${lang}: explanation must be <= 3 sentences (saw ${sentences.length})`);
+    for (const circulation of ["unknown", "on", "off"]) {
+      const exp = ui.checkupDhwCoolingExplanation({ pump_marker, draw_marker, circulation });
+      assert.ok(exp.trim(), `${lang}: explanation non-empty`);
+      const sentences = exp.split(/[.!?。！？]+/).filter(s => s.trim());
+      assert.ok(sentences.length >= 2 && sentences.length <= 3,
+        `${lang}: explanation (${circulation}) must be 2..3 sentences (saw ${sentences.length})`);
+    }
   }
 }
 ui.lang("en");
@@ -304,8 +348,15 @@ assert.match(x10aHtml, /<clipPath id="dhwCoolingClip">.*<\/clipPath>/);
 assert.equal((x10aHtml.match(/class="vhist-dhw-band/g) || []).length, 3);
 assert.equal((x10aHtml.match(/class="vhist-dhw-band is-peak"/g) || []).length, 1);
 assert.match(x10aHtml, /data-dhw-source="x10a"/);
-assert.match(x10aHtml, /<button type="button" data-dhw-cool-show class="vhist-source vhist-legend-dhw-cool">/);
+assert.match(x10aHtml, /<button type="button" data-dhw-cool-show class="vhist-source vhist-legend-dhw-cool" aria-pressed="true"><i aria-hidden="true"><\/i>DHW tank cooling<\/button>/);
 assert.match(x10aHtml, /<div class="vhist-flow-readout vhist-dhw-readout" role="status" hidden>/);
+
+// Toggling legend overlay off hides cooling bands and readout while keeping aria-pressed="false".
+S.dhwCoolHidden = true;
+const hiddenBandsHtml = ui.histHtml("dhw_tank", "°C", "DHW tank", "", false, null, { dhw: x10aDhw });
+assert.doesNotMatch(hiddenBandsHtml, /dhwCoolingClip|data-dhw-band|vhist-dhw-readout/);
+assert.match(hiddenBandsHtml, /<button type="button" data-dhw-cool-show class="vhist-source vhist-legend-dhw-cool" aria-pressed="false">/);
+S.dhwCoolHidden = false;
 
 // Modbus report clips ONLY to the Modbus area path (with .mb class) and labels data-dhw-source="modbus".
 setStatus({}, { source: "modbus" }, { source: "modbus", effective_source: "modbus" });
@@ -315,6 +366,40 @@ assert.match(modbusHtml, /data-dhw-source="modbus"/);
 const clipBody = modbusHtml.match(/<clipPath id="dhwCoolingClip">([\s\S]*?)<\/clipPath>/)?.[1] || "";
 assert.ok(clipBody.includes('class="vhist-area mb"'), "Modbus clipPath must use Modbus area path");
 assert.ok(!clipBody.includes('class="vhist-area"'), "Modbus clipPath must not include X10A area path");
+
+// Pure Modbus-only board (hp.connected: false, empty X10A values & rows) in both waiting & active states.
+setStatus(
+  { verdict: "collecting", blocked: false, max_k_h: null, windows: 0, timeline: { ...trace, windows: [] } },
+  { source: "modbus" },
+  { enabled: true, source: "modbus", effective_source: "modbus", available_sources: ["modbus"] },
+);
+S.status.hp = { connected: false, values: 0 };
+S.status.modbus = { enabled: true, connected: true, profile: "homehub", profile_basis: "affirmative" };
+S.status.history = { epoch: 2, rows: [], modbus_rows: [{ id: "dhw_tank", label: "Domestic Hot Water temperature" }] };
+S._values = [];
+S._modbus = [{ off: 43, label: "Domestic Hot Water temperature", value: 46.2, unit: "°C", concept: "dhw_tank", history: "dhw_tank" }];
+S.live = ui.liveData();
+S.insp = "tank";
+S.inspSig = ""; S.inspHistSig = "";
+ui.renderInspect();
+assert.equal(doc.getElementById("inspFlowDiagnosis").hidden, false);
+assert.match(doc.getElementById("inspFlowDiagnosis").innerHTML, /DHW tank cooling · Modbus/);
+assert.ok(doc.getElementById("inspFlowDiagnosis").innerHTML.includes(ui.t("check.dhw.waiting")));
+
+setStatus(
+  { verdict: "ok", blocked: false, max_k_h: 2.7, windows: 4, high_windows: 3, timeline: structuredClone(circTrace) },
+  { source: "modbus" },
+  { enabled: true, source: "modbus", effective_source: "modbus", available_sources: ["modbus"] },
+);
+S.status.hp = { connected: false, values: 0 };
+S.status.modbus = { enabled: true, connected: true, profile: "homehub", profile_basis: "affirmative" };
+S.status.history = { epoch: 2, rows: [], modbus_rows: [{ id: "dhw_tank", label: "Domestic Hot Water temperature" }] };
+S.inspSig = ""; S.inspHistSig = "";
+ui.renderInspect();
+assert.match(doc.getElementById("inspFlowDiagnosis").innerHTML, /Strongest tank cooling · Modbus.*2\.7 °C\/h/);
+assert.match(doc.getElementById("inspHist").innerHTML, /data-dhw-source="modbus"/);
+assert.equal((doc.getElementById("inspHist").innerHTML.match(/class="vhist-dhw-band/g) || []).length, 3);
+S.insp = null; S.inspSig = ""; S.inspHistSig = "";
 
 // Single-point / all-null curves have no area under curve and omit cooling bands.
 S.hist.set("dhw_tank", {
@@ -327,7 +412,7 @@ S.hist.set("dhw_tank", {
   at: nowMs, receivedAt: nowMs, gen: 1, dt: 300, unit: "°C", b0: ringB0, t0: chartStart, held: [], v: chartVals,
 });
 
-// Mount into strict DOM #inspHist and exercise selectDhwCooling (button cycling, pointer hit/miss, focus restore).
+// Mount into strict DOM #inspHist and exercise tap-toggle & legend-toggle behaviour.
 const inspHist = doc.getElementById("inspHist");
 inspHist.hidden = false;
 ui.replaceHistoryHtml(inspHist, x10aHtml);
@@ -337,26 +422,6 @@ let readout = inspHist.querySelector(".vhist-dhw-readout");
 assert.equal(bandEls.length, 3);
 assert.equal(readout.hidden, true);
 
-// First button press picks the peak (band index 2: 96607, 2.7 °C/h), then cycles 0 -> 1 -> 2.
-assert.equal(ui.selectDhwCooling(plot), true);
-assert.equal(S.dhwCoolSelection.end_s, 96607);
-assert.equal(bandEls[2].classList.contains("selected"), true);
-assert.equal(readout.hidden, false);
-assert.match(readout.querySelector("strong").textContent, /2\.7 °C\/h/);
-assert.equal(readout.querySelector("span").textContent, ui.t("check.dhw.cause_both"));
-
-assert.equal(ui.selectDhwCooling(plot), true);
-assert.equal(S.dhwCoolSelection.end_s, 14630);
-assert.equal(bandEls[0].classList.contains("selected"), true);
-assert.equal(bandEls[2].classList.contains("selected"), false);
-assert.equal(readout.querySelector("span").textContent, ui.t("check.dhw.cause_quiet"));
-
-assert.equal(ui.selectDhwCooling(plot), true);
-assert.equal(S.dhwCoolSelection.end_s, 44631);
-assert.equal(bandEls[1].classList.contains("selected"), true);
-assert.equal(readout.querySelector("span").textContent, ui.t("check.dhw.cause_draw"));
-
-// Native tap geometry test on strict DOM: outside curve -> false; inside curve -> true.
 const svg = plot.querySelector("svg");
 svg.getBoundingClientRect = () => ({ left: 0, top: 0, right: ui.HIST_W, bottom: ui.HIST_H, width: ui.HIST_W, height: ui.HIST_H });
 for (const b of bandEls) {
@@ -367,12 +432,35 @@ for (const b of bandEls) {
 for (const p of svg.querySelectorAll("#dhwCoolingClip path")) {
   p.isPointInFill = pt => pt.y >= 40;
 }
+assert.equal(ui.selectDhwCooling(plot), false, "legend click no longer steps through bands");
 assert.equal(ui.selectDhwCooling(plot, Number(bandEls[0].getAttribute("x")) + 2, 10, 4), false,
   "tap above the curve must not select a band");
-assert.equal(S.dhwCoolSelection.end_s, 44631);
+assert.equal(S.dhwCoolSelection, null);
+// First tap on band[0] -> selects it & shows readout.
 assert.equal(ui.selectDhwCooling(plot, Number(bandEls[0].getAttribute("x")) + 2, 60, 4), true,
   "tap inside the curve selects the band under it");
 assert.equal(S.dhwCoolSelection.end_s, 14630);
+assert.equal(bandEls[0].classList.contains("selected"), true);
+assert.equal(readout.hidden, false);
+// Second tap on SAME band[0] -> toggles off selection & hides readout.
+assert.equal(ui.selectDhwCooling(plot, Number(bandEls[0].getAttribute("x")) + 2, 60, 4), true,
+  "second tap on selected band toggles explanation off");
+assert.equal(S.dhwCoolSelection, null);
+assert.equal(bandEls[0].classList.contains("selected"), false);
+assert.equal(readout.hidden, true);
+// Tap band[1], then band[2] -> switches directly.
+assert.equal(ui.selectDhwCooling(plot, Number(bandEls[1].getAttribute("x")) + 2, 60, 4), true);
+assert.equal(S.dhwCoolSelection.end_s, 44631);
+assert.equal(ui.selectDhwCooling(plot, Number(bandEls[2].getAttribute("x")) + 2, 60, 4), true);
+assert.equal(S.dhwCoolSelection.end_s, 96607);
+assert.equal(readout.querySelector("span").textContent,
+  ui.checkupDhwCoolingExplanation({ pump_marker: true, draw_marker: true }));
+// clearDhwCoolingSelection closes open readout on outside tap.
+ui.clearDhwCoolingSelection(plot);
+assert.equal(S.dhwCoolSelection, null);
+assert.equal(readout.hidden, true);
+// Re-select band[0] to test selection + focus restoration on [data-dhw-cool-show].
+assert.equal(ui.selectDhwCooling(plot, Number(bandEls[0].getAttribute("x")) + 2, 60, 4), true);
 
 // Focus restoration on [data-dhw-cool-show] when replaceHistoryHtml updates the plot.
 const showBtn = inspHist.querySelector("[data-dhw-cool-show]");

@@ -451,16 +451,19 @@ the centred **Defrost** label. The pill's active colour follows the current defr
 In the **DHW tank / thermal store** inspector (when Plant diagnostics is enabled and the active
 diagnostics source `X10A` or `Modbus` matches the visible `dhw_tank` series), shaded areas under
 the `dhw_tank` curve mark completed 1-hour windows with `rate_k_h >= 0.8` K/h, visually
-distinguishing the strongest window(s) and the active selection. Selecting a shaded area on the
-chart (or cycling through windows via the legend button) displays the window's time range, rate
-in °C/h, and up to 3 plain-language, evidence-bounded sentences explaining possible causes from
-that window's recorded `pump_marker` and `draw_marker` flags, without elaborate breakdowns or
-energy calculation examples. Preserve selection during same-scope polling and clear it when no
-qualifying windows remain. Below the chart, a compact summary shows the strongest recorded hourly
-rate (`°C/h`) when available—or the waiting, no-completed-window, or N/A status—plus concise
-notices when no chart window matches older readings at that rate or current tank-cooling inputs
-are stale or missing. See the [API contract](API.md#dhw-cooling-timeline) for retention and
-scope and [tank-cooling guidance](DIAGNOSTICS.md#domestic-hot-water-tank-cooling) for
+distinguishing the strongest window(s) and the active selection. The **DHW tank cooling** legend button
+toggles shaded-band visibility (`aria-pressed="false"` crosses out the legend label, closes any open
+readout, and lets chart taps pin timestamps normally). Tapping a shaded area on the chart toggles its
+selection (a second tap on the selected band or a tap outside dismisses it) to show the window's time
+range, rate in °C/h, and 2–3 plain-language, evidence-bounded sentences covering drop shape
+(`draw_marker`), external circulation overlap (`circulation`), and internal-pump exclusion (`pump_marker`),
+without elaborate breakdowns or energy calculation examples. Preserve selection during same-scope polling
+and clear it when no qualifying windows remain. Below the chart, a labelled summary shows the
+strongest recorded hourly rate (`°C/h`) plus 24-hour phase count and external-circulation correlation when
+configured—or a labelled header with the waiting, no-completed-window, or N/A status when no rate is
+available—plus concise notices when no chart window matches older readings at that rate or current
+tank-cooling inputs are stale or missing. See the [API contract](API.md#dhw-cooling-timeline) for
+retention and scope and [tank-cooling guidance](DIAGNOSTICS.md#domestic-hot-water-tank-cooling) for
 interpretation.
 
 In the **Backup heater (BUH)** and **Electric tank heater** (`BSH`) schematic inspectors (when Plant

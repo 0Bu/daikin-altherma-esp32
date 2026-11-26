@@ -29,6 +29,22 @@ inline uint32_t dhw_loss_wall_anchor_s(uint32_t window_end_s, int64_t before_us,
     return earliest > 0 && earliest == latest ? static_cast<uint32_t>(earliest) : 0;
 }
 
+enum class DhwCircState : uint8_t { Unknown = 0, On = 1, Off = 2, OffSettled = 3 };
+
+inline const char* dhw_circ_state_name(DhwCircState s) {
+    switch (s) {
+    case DhwCircState::On:
+        return "on";
+    case DhwCircState::Off:
+        return "off";
+    case DhwCircState::OffSettled:
+        return "off_settled";
+    case DhwCircState::Unknown:
+    default:
+        return "unknown";
+    }
+}
+
 struct DhwLossTraceWindow {
     uint32_t start_s     = 0; // whole-second timestamps in this trace's monotonic frame
     uint32_t end_s       = 0;
@@ -36,6 +52,7 @@ struct DhwLossTraceWindow {
     uint16_t observed_s  = 0;     // duration minus the evaluator's tolerated blind seconds
     bool     pump_marker = false; // internal hydronic pump, NOT the external circulation witness
     bool     draw_marker = false; // temperature shape, NOT proof of a water draw
+    DhwCircState circ        = DhwCircState::Unknown; // per-window external circulation overlap
 };
 
 // Caller-owned output. Clear metadata rather than constructing a large temporary on a task stack.
@@ -140,9 +157,9 @@ struct DhwLossTrace {
     // Called only at the evaluator's accepted completion, with its already-computed values.
     // At least an hour between adjacent completions proves the 24-record strict-horizon capacity.
     bool record(int64_t start_us, int64_t end_us, int rate_tenths, uint32_t observed_s,
-                bool pump_marker, bool draw_marker) {
+                bool pump_marker, bool draw_marker, DhwCircState circ = DhwCircState::Unknown) {
         if (!begun || start_us < 0 || end_us < start_us ||
-            end_us / 1000000 > UINT32_MAX - frame_offset_s)
+            end_us / 1000000 > UINT32_MAX - frame_offset_s || static_cast<uint8_t>(circ) > 3u)
             return false;
         const auto duration_s = static_cast<uint32_t>((end_us - start_us) / 1000000);
         if (duration_s < DHW_LOSS_TRACE_WINDOW_S / DHW_LOSS_TRACE_CAPACITY ||
@@ -166,6 +183,7 @@ struct DhwLossTrace {
         w.observed_s  = static_cast<uint16_t>(observed_s);
         w.pump_marker = pump_marker;
         w.draw_marker = draw_marker;
+        w.circ        = circ;
         ++count;
         return true;
     }

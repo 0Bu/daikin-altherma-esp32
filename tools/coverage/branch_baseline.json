@@ -2586,6 +2586,26 @@
       },
       "test_source_sha256": "e5291ba11b87b0395939886b9dc56d65b38c26afa436e5f5c25ca78956efd4d8",
       "validation_boundary": "Host Clang 17 and container GCC 13/15 exercised synthetic inputs; hosted CI confirmation and physical device behavior remain separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0, arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, pinned ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, release-coverage Docker, x86-64"
+      },
+      "hosted_confirmation": "The x86-64 release-coverage Docker result is the hosted candidate. Authoritative GitHub CI confirmation remains separate.",
+      "measurement_limits": [
+        "gcc-15-linux-ubuntu26 (aarch64) receives the identical measured GCC 15 x86-64 counts pending an arm64 Ubuntu 26.04 GCC 15 container run."
+      ],
+      "runner": "scripts/run-mock-tests.sh --coverage across clang-17-darwin, espressif/idf:v6.1.1 Docker (--with-host-tests), and daikin-altherma-esp32-release-coverage x86-64 Docker",
+      "scope": "Record per-window external circulation pump state (DhwCircState) in DhwLossTrace, v2 DXT2/DMT2/DXR2/DMR2 trace journal pages, and dhw_loss_step_traced: dhw_loss_trace.hpp 96/96->103/103 (Clang 17 Darwin) and 98/98->104/104 (GCC 13/15); dhw_loss_persist.hpp 77/90->78/90 (Clang) and 89/106->91/106 (GCC); checkup.hpp 1312/1375->1316/1379 (Clang) and 1489/1567->1497/1575 (GCC).",
+      "sources": {
+        "main/logic/checkup.hpp": "b0cdee38a7d0b482e6039131c97da915149cf4b2fb3a58cf61bf1807430cc3de",
+        "main/logic/dhw_loss_persist.hpp": "42f778dff8888c2a6f04aed4ef586418a8ac7641a429dad2d0c93b896c2cc6a8",
+        "main/logic/dhw_loss_trace.hpp": "1b0d7687bdd1d145ee78be6f8220c9d41962e8098412bff845655e8e1aa9b5a0"
+      },
+      "test_source_sha256": "84afd711e524f5dfb03b6c808efbf9ac10d176c00a51ceda47bc46ef5b4e9bd4",
+      "validation_boundary": "Host Clang 17 and container GCC 13/15 exercised synthetic inputs; hosted CI confirmation and physical device behavior remain separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2624,8 +2644,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1375,
-        "taken": 1312
+        "outcomes": 1379,
+        "taken": 1316
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 361,
@@ -2701,11 +2721,11 @@
       },
       "main/logic/dhw_loss_persist.hpp": {
         "outcomes": 90,
-        "taken": 77
+        "taken": 78
       },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 96,
-        "taken": 96
+        "outcomes": 103,
+        "taken": 103
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 184,
@@ -3130,8 +3150,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1567,
-        "taken": 1489
+        "outcomes": 1575,
+        "taken": 1497
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 443,
@@ -3207,11 +3227,11 @@
       },
       "main/logic/dhw_loss_persist.hpp": {
         "outcomes": 106,
-        "taken": 89
+        "taken": 91
       },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 98,
-        "taken": 98
+        "outcomes": 104,
+        "taken": 104
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,
@@ -3636,8 +3656,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1567,
-        "taken": 1489
+        "outcomes": 1575,
+        "taken": 1497
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 443,
@@ -3713,11 +3733,11 @@
       },
       "main/logic/dhw_loss_persist.hpp": {
         "outcomes": 106,
-        "taken": 89
+        "taken": 91
       },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 98,
-        "taken": 98
+        "outcomes": 104,
+        "taken": 104
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,
@@ -4142,8 +4162,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1567,
-        "taken": 1489
+        "outcomes": 1575,
+        "taken": 1497
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 443,
@@ -4219,11 +4239,11 @@
       },
       "main/logic/dhw_loss_persist.hpp": {
         "outcomes": 106,
-        "taken": 89
+        "taken": 91
       },
       "main/logic/dhw_loss_trace.hpp": {
-        "outcomes": 98,
-        "taken": 98
+        "outcomes": 104,
+        "taken": 104
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,

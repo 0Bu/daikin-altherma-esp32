@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -191,16 +191,21 @@ I18N.fi = localeValues([
   /* check.status.observation */ "MITTAUS",
   /* check.status.experimental */ "KOKEILU",
   /* check.status.unavailable */ "EI KOSKE",
-  /* check.dhw.show */ "Näytä varaajan jäähtyminen",
   /* check.dhw.maximum */ "Voimakkain varaajan jäähtyminen",
   /* check.dhw.waiting */ "Odotetaan vaatimukset täyttävää yhden tunnin jaksoa.",
   /* check.dhw.no_window */ "Ei valmista yhden tunnin jaksoa viimeisen 24 h aikana.",
   /* check.dhw.locations_missing */ "Nykyisessä kuvaajassa ei ole aikajaksoa aiemmille mittauksille tällä arvolla.",
   /* check.dhw.stale */ "Nykyiset varaajan jäähtymisen mittaustiedot puuttuvat tai ovat vanhentuneet; merkityt jaksot ovat historiallisia.",
-  /* check.dhw.cause_both */ "Sisäinen vesipumppu kävi ja varaajan lämpötila laski nopeasti tämän tunnin aikana. Tämä voi johtua lämpimän veden käytöstä, sisäisestä kiertovirtauksesta tai varaajan nopeasta jäähtymisestä. Pelkkä anturi R5T ei pysty määrittämään tarkkaa syytä.",
-  /* check.dhw.cause_pump */ "Sisäinen vesipumppu kävi tämän tunnin aikana ilman vedenottoa muistuttavaa laskuprofiilia. Jäähtyminen voi johtua kiertovirtauksesta, huomaamattomasta lämpimän veden käytöstä tai lämpöhäviöstä. Pelkkä anturi R5T ei pysty määrittämään tarkkaa syytä.",
-  /* check.dhw.cause_draw */ "Nopea lämpötilan lasku havaittiin, kun sisäinen vesipumppu ei ilmoittanut käyvänsä. Tämä sopii tyypillisesti lämpimän veden käyttöön tai nopeaan sekoittumiseen varaajassa. Pelkkä anturi R5T ei voi todistaa vedenottoa eikä sulkea pois muita häviöitä.",
-  /* check.dhw.cause_quiet */ "Tämän tunnin aikana ei havaittu sisäisen pumpun käyntiä eikä vedenottoa muistuttavaa nopeaa laskua. Mahdollisia syitä ovat seisontalämpöhäviö, ulkoinen tai painovoimainen kierto tai hidas lämpimän veden otto. Pelkkä anturi R5T jättää tarkan syyn avoimeksi.",
+  /* check.dhw.shape_step */ "Äkillinen lämpötilan lasku tänä tuntina — sopii lämpimän veden ottoon tai nopeaan sekoittumiseen.",
+  /* check.dhw.shape_steady */ "Tasainen jäähtyminen ilman äkillistä hyppyä — sopii seisontahäviöön, painovoimaiseen kiertoon tai käyvään kiertopumppuun.",
+  /* check.dhw.circ_on */ "Ulkoinen kiertovesipumppu kävi tänä tuntina (≥ 5 min), mikä sopii kiertohäviöön.",
+  /* check.dhw.circ_off */ "Ulkoinen kiertovesipumppu oli pois päältä vähintään 2 tuntia, joten ulkoinen kiertohäviö on täällä epätodennäköinen.",
+  /* check.dhw.pump_off */ "Sisäinen pumppu oli pysähtyneenä, joten lämpöhäviö 3-tieventtiilin kautta on epätodennäköinen; pelkkä R5T ei todista syytä.",
+  /* check.dhw.pump_on */ "Sisäinen lämmityspumppu kävi tänä tuntina, joten lämmön siirtyminen 3-tieventtiilin kautta on mahdollista; pelkkä R5T ei todista syytä.",
+  /* check.dhw.circ_label */ "Ulkoinen kiertovesipumppu",
+  /* check.dhw.summary_phases */ (n) => `${n} voimakas(ta) jäähtymisjakso(a) (≥ 0,8 °C/h) 24 h aikana.`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name} kävi ${withPump}/${total} voimakkaan jakson aikana.`,
+  /* check.dhw.summary_circ_off */ (name) => `${name} oli pois päältä (≥ 2 h) havaituissa voimakkaissa jaksoissa.`,
   /* check.detail.value_label */ "Arvo:",
   /* check.detail.assessment_label */ "Arvio:",
   /* check.detail.ok */ "Sääntö ei lauennut luettavissa tiedoissa.",

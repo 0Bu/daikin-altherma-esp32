@@ -234,9 +234,13 @@ The `window_end_s`, `since_s`, and non-null `observed_end_s` coordinates are uin
 
 Each `timeline.windows` entry has `start_s` and `end_s` (uint32 timeline seconds), `rate_k_h`
 (nonnegative net sensor cooling, serialized with one decimal), `observed_s` (readable seconds,
-excluding tolerated blind time), and boolean `pump_marker` and `draw_marker`. The pump marker is
+excluding tolerated blind time), boolean `pump_marker` and `draw_marker`, and `circulation`
+(`"unknown"`, `"on"`, `"off"`, or `"off_settled"`). The pump marker is
 internal hydronic-pump presence, **not** the external circulation witness. The draw marker is a
-temperature-shape observation, **not** proven water use. Neither marker measures duration or cause.
+temperature-shape observation, **not** proven water use. `circulation` captures the optional
+external DHW circulation pump witness for that exact window under the same 90% coverage, 5-minute
+ON, and 2-hour continuous OFF settling bounds (`"off"` means 90% known and zero ON seconds without
+reaching the 2-hour settled OFF threshold). None of these markers measures duration or proves a cause.
 
 Actual endpoints are independently quantized to whole seconds. The evaluator accepts 3600–3630
 elapsed whole seconds; the quantized endpoint difference can therefore be 3600–3631 seconds.

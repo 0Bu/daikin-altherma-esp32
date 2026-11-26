@@ -59,19 +59,19 @@ async function key(page, name, code, keyCode) {
 }
 
 function makeTimeline() {
-  const windowAt = (ago, duration, rate, pump_marker, draw_marker) => ({
+  const windowAt = (ago, duration, rate, pump_marker, draw_marker, circulation = "unknown") => ({
     start_s: NOW - ago, end_s: NOW - ago + duration, rate_k_h: rate,
-    observed_s: duration, pump_marker, draw_marker,
+    observed_s: duration, pump_marker, draw_marker, circulation,
   });
   return {
     epoch: 1, window_end_s: NOW, since_s: NOW - 80000, observed_end_s: NOW,
     unix_s: UNIX, live: true,
     windows: [
-      windowAt(78000, 3600, 1.8, false, false), // quiet
-      windowAt(64000, 3600, 0.4, false, false), // < 0.8 -> must remain unshaded
-      windowAt(46000, 3600, 1.2, false, true),  // draw
-      windowAt(24000, 3600, 2.7, true, true),   // peak: pump + draw
-      windowAt(10000, 3600, 1.4, true, false),  // pump
+      windowAt(78000, 3600, 1.8, false, false, "off_settled"), // quiet + circ off
+      windowAt(64000, 3600, 0.4, false, false, "unknown"),     // < 0.8 -> must remain unshaded
+      windowAt(46000, 3600, 1.2, false, true, "unknown"),      // draw + unknown circ (2 sentences)
+      windowAt(24000, 3600, 2.7, true, true, "on"),            // peak: pump + draw + circ on
+      windowAt(10000, 3600, 1.4, true, false, "off"),          // pump + circ off
     ],
   };
 }
@@ -166,13 +166,16 @@ export async function assertDhwTimeline(page, server, context, { locales = false
   const timeline = makeTimeline();
   const check = {
     id: "dhw_loss", verdict: "ok", evidence: "observation", reason: "observation_only",
-    observed_s: 28800, required_s: 0, max_k_h: 2.7, windows: 5, blocked: false, timeline,
+    observed_s: 28800, required_s: 0, max_k_h: 2.7, windows: 5,
+    high_windows: 4, high_with_pump: 1, high_pump_off: 1, circulation_on_s: 900, circulation_known_s: 14400,
+    blocked: false, timeline,
   };
   Object.assign(status, {
     boot_id: "dhw-browser-fixture",
     uptime_s: NOW,
     ui: { ...status.ui, lang: "en" },
     hp: { ...status.hp, connected: true },
+    circulation_source: { configured: true, name: "DHW circulation pump" },
     diagnostics: { ...status.diagnostics, enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a", "modbus"] },
     modbus: { ...status.modbus, host: "192.0.2.20", enabled: true, connected: true, profile: "homehub" },
     history: {
@@ -229,6 +232,7 @@ export async function assertDhwTimeline(page, server, context, { locales = false
       S.histBusy = new Set(); S.histRequests = new Map(); S.histAwait = new Map();
       S.histIdentity = null; S.histUptime = null; S.descOpen = new Set();
       S.scrub = null; S.clickHold = false; S.insp = null; S.dhwCoolSelection = null;
+      S.dhwCoolHidden = false;
       S.dashboardCard = "diagnosis";
       showStage("dashboard");
       return true;
@@ -289,13 +293,19 @@ export async function assertDhwTimeline(page, server, context, { locales = false
       `${context}: all bands clip to #dhwCoolingClip`);
     assert.deepEqual([rendered.clipMatchesX10a, rendered.gapUnfilled, rendered.aboveUnfilled, rendered.belowFilled, rendered.pinkTone],
       [true, true, true, true, true], `${context}: cooling bands clip strictly to the X10A curve and leave gaps unshaded`);
-    assert.equal(rendered.legendText, await page.evaluate('t("check.dhw.show")'));
+    assert.equal(rendered.legendText, await page.evaluate('t("check.dhw_loss")'));
     assert.ok(rendered.briefText.includes("X10A") && rendered.briefText.includes("2.7 °C/h"),
-      `${context}: #inspTankDiagnosis shows strongest cooling rate`);
+      `${context}: #inspFlowDiagnosis shows strongest cooling rate`);
+    assert.ok(rendered.briefText.includes("4 strong cooling phase(s)") && rendered.briefText.includes("DHW circulation pump"),
+      `${context}: #inspFlowDiagnosis shows 24-h external circulation correlation`);
 
-    // 4. Click [data-dhw-cool-show]: selects peak first, reveals .vhist-dhw-readout, then cycles through shaded windows.
+    // 4. Native tap selection + tap-again toggle + tap-outside dismiss + legend visibility toggle.
+    const expectedExplanation = async (win) => page.evaluate(`(() => {
+      const w = ${JSON.stringify(win)};
+      return checkupDhwCoolingExplanation(w);
+    })()`);
     const assertSelected = async (win, ctx) => {
-      const state = await evaluate(page, ({ bandsSel, readoutSel, endS }) => {
+      const state = await evaluate(page, ({ bandsSel, readoutSel }) => {
         const bands = [...document.querySelectorAll(bandsSel)];
         const selected = bands.filter(b => b.classList.contains("selected"));
         const readout = document.querySelector(readoutSel);
@@ -309,38 +319,40 @@ export async function assertDhwTimeline(page, server, context, { locales = false
           belowChart: document.querySelector("#inspHist .vhist-plot").getBoundingClientRect().bottom <= readout.getBoundingClientRect().top,
           pinned: S.histPin.has("dhw_tank"),
         };
-      }, { bandsSel: BANDS, readoutSel: READOUT, endS: win.end_s });
+      }, { bandsSel: BANDS, readoutSel: READOUT });
       assert.deepEqual(state.selectedEnds, [win.end_s], `${ctx}: selected band must match ${win.end_s}`);
       assert.equal(state.hidden, false, `${ctx}: .vhist-dhw-readout must be visible`);
       assert.equal(state.belowChart, true, `${ctx}: readout must appear below the chart`);
       assert.equal(state.pinned, false, `${ctx}: selecting a cooling band must not pin the curve`);
       assert.ok(state.strong.includes(`${win.rate_k_h} °C/h`), `${ctx}: readout header shows rate`);
-      assert.ok(state.sentences >= 1 && state.sentences <= 3, `${ctx}: readout explanation <= 3 sentences`);
-      const expectedKey = win.pump_marker && win.draw_marker ? "check.dhw.cause_both"
-        : win.pump_marker ? "check.dhw.cause_pump"
-        : win.draw_marker ? "check.dhw.cause_draw" : "check.dhw.cause_quiet";
-      assert.equal(state.span, await page.evaluate(`t(${JSON.stringify(expectedKey)})`),
-        `${ctx}: readout explanation matches ${expectedKey}`);
+      assert.ok(state.sentences >= 2 && state.sentences <= 3, `${ctx}: readout explanation 2..3 sentences`);
+      assert.equal(state.span, await expectedExplanation(win), `${ctx}: readout explanation matches correlation`);
+    };
+    const assertDeselected = async (ctx) => {
+      const state = await evaluate(page, ({ bandsSel, readoutSel }) => ({
+        selected: document.querySelectorAll(bandsSel + ".selected").length,
+        hidden: document.querySelector(readoutSel)?.hidden ?? true,
+        sel: S.dhwCoolSelection,
+      }), { bandsSel: BANDS, readoutSel: READOUT });
+      assert.deepEqual(state, { selected: 0, hidden: true, sel: null }, `${ctx}: cooling selection must be cleared`);
     };
 
     const [wQuiet, wLow, wDraw, wPeak, wPump] = timeline.windows;
-    await tap(page, LEGEND_SHOW);
-    await assertSelected(wPeak, `${context}/legend-first-picks-peak`);
+    for (const [label, win] of [["quiet", wQuiet], ["draw", wDraw], ["pump-draw", wPeak], ["pump", wPump]]) {
+      await tap(page, `${BANDS}[data-dhw-band="${win.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
+      await assertSelected(win, `${context}/tap-${label}`);
+    }
     await capture(page, `${context}/peak-selected`);
 
-    // Click again -> wraps to wPump, then wQuiet, then wDraw, then back to wPeak.
-    await tap(page, LEGEND_SHOW);
-    await assertSelected(wPump, `${context}/legend-cycle-pump`);
-    await evaluate(page, sel => document.querySelector(sel).focus(), LEGEND_SHOW);
-    await key(page, "Enter", "Enter", 13);
-    await assertSelected(wQuiet, `${context}/legend-enter-quiet`);
+    // Tap the SAME selected band again -> must deselect and hide readout without pinning.
+    await tap(page, `${BANDS}[data-dhw-band="${wPump.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
+    await assertDeselected(`${context}/tap-same-toggles-off`);
+    assert.equal(await page.evaluate('S.histPin.has("dhw_tank")'), false,
+      `${context}: second tap on selected band must not pin the curve`);
 
-    // 5. Native tap on shaded bands for all 4 marker combinations + negative taps above curve & on unshaded < 0.8 region.
-    await tap(page, `${BANDS}[data-dhw-band="${wDraw.end_s}"]`, { yFraction: 0.05, isPlotBand: true });
-    await page.evaluate('S.histPin.delete("dhw_tank"); renderInspect(); true');
-    await assertSelected(wQuiet, `${context}/tap-above-curve-keeps-prior`);
-
-    // Tap inside the curve at the unshaded < 0.8 window (wLow): must NOT select a cooling band.
+    // Select band again, tap above curve / unshaded region -> dismisses readout & pins timestamp cleanly.
+    await tap(page, `${BANDS}[data-dhw-band="${wPeak.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
+    await assertSelected(wPeak, `${context}/reselect-peak`);
     const lowPoint = await evaluate(page, ({ plotSel, lowStartS, lowEndS, chartStartUnix, nowS, unixNow }) => {
       const plot = document.querySelector(plotSel);
       const r = plot.getBoundingClientRect();
@@ -351,13 +363,45 @@ export async function assertDhwTimeline(page, server, context, { locales = false
     await page.bringToFront();
     await page.nativeClick(lowPoint.x, lowPoint.y);
     await page.frame();
+    await assertDeselected(`${context}/tap-unshaded-clears-selection`);
+    assert.equal(await page.evaluate('S.histPin.has("dhw_tank")'), true,
+      `${context}: tapping outside cooling bands still pins timestamps`);
     await page.evaluate('S.histPin.delete("dhw_tank"); renderInspect(); true');
-    await assertSelected(wQuiet, `${context}/tap-unshaded-low-rate-keeps-prior`);
 
-    for (const [label, win] of [["draw", wDraw], ["pump-draw", wPeak], ["pump", wPump], ["quiet", wQuiet]]) {
-      await tap(page, `${BANDS}[data-dhw-band="${win.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
-      await assertSelected(win, `${context}/tap-${label}`);
-    }
+    // Legend button [data-dhw-cool-show] toggles cooling bands visibility & strikethrough without selecting bands.
+    await tap(page, `${BANDS}[data-dhw-band="${wPeak.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
+    await assertSelected(wPeak, `${context}/before-legend-hide`);
+    await tap(page, LEGEND_SHOW);
+    const hiddenState = await evaluate(page, ({ legendSel, bandsSel, readoutSel }) => {
+      const btn = document.querySelector(legendSel);
+      return {
+        pressed: btn?.getAttribute("aria-pressed"),
+        lineThrough: btn ? getComputedStyle(btn).textDecorationLine : "",
+        bands: document.querySelectorAll(bandsSel).length,
+        readoutExists: !!document.querySelector(readoutSel),
+        hiddenFlag: S.dhwCoolHidden,
+      };
+    }, { legendSel: LEGEND_SHOW, bandsSel: BANDS, readoutSel: READOUT });
+    assert.equal(hiddenState.pressed, "false");
+    assert.ok(hiddenState.lineThrough.includes("line-through"), `${context}: hidden legend must use strikethrough`);
+    assert.equal(hiddenState.bands, 0);
+    assert.equal(hiddenState.readoutExists, false);
+    assert.equal(hiddenState.hiddenFlag, true);
+    assert.ok(!(await page.evaluate('document.getElementById("inspFlowDiagnosis").innerText')).includes(await page.evaluate('t("check.dhw.locations_missing")')),
+      `${context}: hiding bands in legend must not trigger locations_missing`);
+    await capture(page, `${context}/legend-hidden`);
+
+    // Keyboard Enter on focused legend button toggles bands back ON without auto-opening a readout.
+    await evaluate(page, sel => document.querySelector(sel).focus(), LEGEND_SHOW);
+    await key(page, "Enter", "Enter", 13);
+    await settle(page);
+    const shownAgain = await evaluate(page, ({ legendSel, bandsSel, readoutSel }) => ({
+      pressed: document.querySelector(legendSel)?.getAttribute("aria-pressed"),
+      bands: document.querySelectorAll(bandsSel).length,
+      readoutHidden: document.querySelector(readoutSel)?.hidden ?? true,
+    }), { legendSel: LEGEND_SHOW, bandsSel: BANDS, readoutSel: READOUT });
+    assert.deepEqual(shownAgain, { pressed: "true", bands: 4, readoutHidden: true },
+      `${context}: re-enabling cooling bands shows all bands without opening a readout`);
 
     // Keyboard scrub on the plot still reads the numeric curve.
     await evaluate(page, sel => document.querySelector(sel).focus(), PLOT);
@@ -390,7 +434,44 @@ export async function assertDhwTimeline(page, server, context, { locales = false
       };
     }, { plotSel: PLOT, bandsSel: BANDS }), { source: "modbus", bands: 4, clipMatchesModbus: true, brief: true },
     `${context}: Modbus diagnosis binds cooling bands strictly to the Modbus curve`);
-    status.health.source = status.diagnostics.source = status.diagnostics.effective_source = "x10a";
+
+    // 7b. Pure Modbus-only board without X10A (hp.connected: false, values: [], only modbus_rows).
+    const savedHp = structuredClone(status.hp);
+    const savedDiag = structuredClone(status.diagnostics);
+    const savedRows = structuredClone(status.history.rows);
+    status.hp = { ...status.hp, connected: false, values: 0 };
+    status.diagnostics = { enabled: true, source: "modbus", effective_source: "modbus", available_sources: ["modbus"] };
+    status.health.source = "modbus";
+    status.history.rows = [];
+    status.history.epoch += 1;
+    // Empty/waiting state on pure Modbus-only must show labelled DHW tank cooling · Modbus header.
+    Object.assign(check, { verdict: "collecting", blocked: false, max_k_h: null, windows: 0, high_windows: 0, timeline: { ...timeline, windows: [] } });
+    server.setTelemetry({ status, values: () => ({ values: [], modbus: values().modbus }), histories: makeHistories(status.boot_id, status.history.epoch, histT0, revision % 3) });
+    await page.evaluate("pollSchedule = window.__browserPollSchedule; pollNow(); true");
+    await page.waitFor(`S.status?.history?.epoch === ${status.history.epoch} && !_pollBusy`, { timeoutMs: 12000 });
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    await settle(page);
+    assert.ok((await page.evaluate('document.getElementById("inspFlowDiagnosis").innerText')).includes("DHW tank cooling · Modbus"),
+      `${context}: Modbus-only waiting state shows labelled DHW header`);
+    // Active windows on pure Modbus-only (with no X10A history rows) render bands clipped strictly to Modbus curve.
+    Object.assign(check, {
+      verdict: "ok", blocked: false, max_k_h: 2.7, windows: 5,
+      high_windows: 4, high_with_pump: 1, high_pump_off: 1, circulation_on_s: 900, circulation_known_s: 14400,
+      timeline,
+    });
+    server.setTelemetry({ status, values: () => ({ values: [], modbus: values().modbus }), histories: makeHistories(status.boot_id, status.history.epoch, histT0, revision % 3) });
+    await page.evaluate("pollSchedule = window.__browserPollSchedule; pollNow(); true");
+    await page.waitFor(`document.querySelectorAll(${JSON.stringify(BANDS)}).length === 4 && !_pollBusy`, { timeoutMs: 12000 });
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    await settle(page);
+    await tap(page, `${BANDS}[data-dhw-band="${wPeak.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
+    await capture(page, `${context}/modbus-only`);
+    await tap(page, `${BANDS}[data-dhw-band="${wPeak.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
+    status.hp = savedHp;
+    status.diagnostics = savedDiag;
+    status.history.rows = savedRows;
+    status.history.epoch += 1;
+    status.health.source = "x10a";
 
     // 8. Relative (unsynced) timeline + undated trend: bands still align without wall dates.
     const savedUnix = timeline.unix_s;
@@ -402,9 +483,10 @@ export async function assertDhwTimeline(page, server, context, { locales = false
     await publish();
     assert.equal(await evaluate(page, sel => document.querySelectorAll(sel).length, BANDS), 4,
       `${context}: live unsynced timeline aligns on relative trend`);
-    await tap(page, LEGEND_SHOW);
+    await tap(page, `${BANDS}[data-dhw-band="${wPeak.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
     const relHeader = await page.evaluate(`document.querySelector(${JSON.stringify(READOUT)} + " strong").textContent`);
     assert.doesNotMatch(relHeader, /2026|GMT|UTC/, `${context}: relative mode must not fabricate wall dates`);
+    await tap(page, `${BANDS}[data-dhw-band="${wPeak.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
     timeline.unix_s = savedUnix;
     status.ntp.synced = true;
     status.history.epoch += 1;
@@ -474,11 +556,12 @@ export async function assertDhwTimeline(page, server, context, { locales = false
       await settle(page);
       const layout = await assertLayout(page, `${context}/locale/${language}`);
       assert.equal(layout.lang, language);
-      await tap(page, LEGEND_SHOW);
+      await tap(page, `${BANDS}[data-dhw-band="${wPeak.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
       const exp = await page.evaluate(`document.querySelector(${JSON.stringify(READOUT)} + " span")?.textContent || ""`);
       const sentences = exp.split(/[.!?。！？]+/).filter(s => s.trim());
-      assert.ok(sentences.length >= 1 && sentences.length <= 3,
-        `${context}/locale/${language}: readout explanation must be <= 3 sentences`);
+      assert.ok(sentences.length >= 2 && sentences.length <= 3,
+        `${context}/locale/${language}: readout explanation must be 2..3 sentences (saw ${sentences.length})`);
+      await tap(page, `${BANDS}[data-dhw-band="${wPeak.end_s}"]`, { yFraction: 0.85, isPlotBand: true });
     }
 
     assert.deepEqual(page.diagnostics, [], `${context}: DHW tank cooling tests emitted browser errors`);

@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -191,16 +191,21 @@ I18N.nb = localeValues([
   /* check.status.observation */ "MÅLING",
   /* check.status.experimental */ "TESTVIS",
   /* check.status.unavailable */ "N/A",
-  /* check.dhw.show */ "Vis tankavkjøling",
   /* check.dhw.maximum */ "Sterkeste tankavkjøling",
   /* check.dhw.waiting */ "Venter på et kvalifiserende entimesvindu.",
   /* check.dhw.no_window */ "Ingen fullført entimesperiode de siste 24 t.",
   /* check.dhw.locations_missing */ "Det finnes ikke noe tidsvindu i gjeldende graf for eldre målinger med denne verdien.",
   /* check.dhw.stale */ "Aktuelle måleverdier for tankavkjøling mangler eller er utdaterte; markerte vinduer er historiske.",
-  /* check.dhw.cause_both */ "Den interne vannpumpen gikk og tanktemperaturen falt raskt i løpet av denne timen. Dette kan skyldes varmtvannsbruk, intern kretssirkulasjon eller rask tankavkjøling. Føler R5T alene kan ikke fastslå den nøyaktige årsaken.",
-  /* check.dhw.cause_pump */ "Den interne vannpumpen gikk i løpet av denne timen uten en tappeliknende fallprofil. Avkjøling kan skyldes kretssirkulasjon, ubemerket varmtvannsbruk eller varmetap. Føler R5T alene kan ikke fastslå den nøyaktige årsaken.",
-  /* check.dhw.cause_draw */ "Det ble registrert et raskt temperaturfall mens den interne vannpumpen ikke meldte drift. Dette passer typisk med varmtvannsbruk eller rask blanding i tanken. Føler R5T alene kan ikke bevise tapping eller utelukke andre tap.",
-  /* check.dhw.cause_quiet */ "Verken drift av intern pumpe eller et tappeliknende raskt fall ble registrert i denne timen. Mulige årsaker er stillestående varmetap, ekstern sirkulasjon eller selvsirkulasjon, eller langsom tapping av varmtvann. Føler R5T alene lar den nøyaktige årsaken stå åpen.",
+  /* check.dhw.shape_step */ "Plutselig temperaturfall denne timen — passer med varmtvannstapping eller rask blanding.",
+  /* check.dhw.shape_steady */ "Jevn avkjøling uten brått fall — passer med stillestående varmetap, selvsirkulasjon eller aktiv sirkulasjon.",
+  /* check.dhw.circ_on */ "Den eksterne sirkulasjonspumpen gikk denne timen (≥ 5 min), noe som passer med sirkulasjonstap.",
+  /* check.dhw.circ_off */ "Den eksterne sirkulasjonspumpen var av i minst 2 timer, noe som gjør eksternt sirkulasjonstap lite sannsynlig her.",
+  /* check.dhw.pump_off */ "Den interne pumpen sto stille, slik at varmetap via 3-veisventilen er usannsynlig; R5T alene beviser ikke årsaken.",
+  /* check.dhw.pump_on */ "Den interne varmepumpen gikk denne timen, så internt varmetap via 3-veisventilen er mulig; R5T alene beviser ikke årsaken.",
+  /* check.dhw.circ_label */ "Ekstern sirkulasjonspumpe",
+  /* check.dhw.summary_phases */ (n) => `${n} kraftig(e) avkjølingsfase(r) (≥ 0,8 °C/t) på 24 t.`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name} gikk i ${withPump} av ${total} kraftige faser.`,
+  /* check.dhw.summary_circ_off */ (name) => `${name} var av (≥ 2 h) under observerte kraftige faser.`,
   /* check.detail.value_label */ "Måling:",
   /* check.detail.assessment_label */ "Vurdering:",
   /* check.detail.ok */ "Regelen ble ikke utløst i lesbare data.",
