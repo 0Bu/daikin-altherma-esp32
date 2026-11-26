@@ -2196,6 +2196,127 @@ try {
     S.hist.delete("leaving_water");
     S.hist.delete("water_pressure");
 
+    // Numeric X10A curves with paired Modbus binary states (`comp_rps` + `compressor_state`,
+    // `pump_speed` + `pump_state`) draw full-height transparent petrol blocks behind the curve,
+    // expose a toggleable `Modbus · An/Aus` legend, and surface Modbus state in the tooltip.
+    for (const ovCase of [
+      {
+        id: "comp_rps", title: "Verdichter", unit: "rps", x10aRows: [{ id: "comp_rps", label: "INV frequency (rps)" }],
+        mbId: "compressor_state", mbLabel: "Compressor running", mbOff: 31,
+        x10aVals: [0, 200, 350, null, 200], x10aTexts: ["0,0 rps", "20,0 rps", "35,0 rps", null, "20,0 rps"],
+        mbVals: [0, 10, 10, 0, null], mbLiveStart: "1",
+      },
+      {
+        id: "pump_speed", title: "Umwälzpumpe", unit: "%", x10aRows: [{ id: "pump_signal", label: "Water pump signal" }],
+        mbId: "pump_state", mbLabel: "Circulation pump running", mbOff: 30,
+        x10aVals: [0, 450, 800, null, 450], x10aTexts: ["0,0 %", "45,0 %", "80,0 %", null, "45,0 %"],
+        mbVals: [0, 10, 10, 0, null], mbLiveStart: "1",
+      },
+    ]) {
+      S.status.history.rows = ovCase.x10aRows;
+      S.status.history.modbus_rows = [{ id: ovCase.mbId, label: ovCase.mbLabel }];
+      S.status.hp = { connected: true };
+      S.status.modbus = { enabled: true, connected: true, host: "192.0.2.30", port: 502, unit_id: 1 };
+      S._modbus = [{ off: ovCase.mbOff, history: ovCase.mbId, label: ovCase.mbLabel, value: ovCase.mbLiveStart, binary: true }];
+      S.hist.set(ovCase.id, { at: Date.now(), gen: 1, dt: 300, unit: ovCase.unit, t0: 1768720000, b0: 200,
+        held: [], v: ovCase.x10aVals });
+      S.hist.set(h.histCacheKey(ovCase.mbId, "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
+        held: [], v: ovCase.mbVals });
+
+      const ovView = h.historyView(ovCase.id);
+      assert.equal(ovView.stateOverlays?.length, 1, `${ovCase.id} attaches its Modbus state overlay`);
+      const ovHtml = h.histHtml(ovCase.id, ovCase.unit, ovCase.title);
+      const ovSvg = ovHtml.slice(ovHtml.indexOf("<svg "), ovHtml.indexOf("</svg>"));
+      const blockAt = ovSvg.indexOf('<rect class="vhist-phase vhist-phase-state mb"');
+      const areaAt = ovSvg.indexOf('<path class="vhist-area"');
+      const lineAt = ovSvg.indexOf('<path class="vhist-line"');
+      assert.ok(blockAt >= 0 && areaAt > blockAt && lineAt > blockAt,
+        `${ovCase.id} renders transparent Modbus blocks behind numeric area and line`);
+      assert.equal((ovSvg.match(/class="vhist-phase vhist-phase-state mb"/g) || []).length, 1,
+        `${ovCase.id} paints blocks only for active ON phases, leaving OFF and gaps empty`);
+      assert.match(ovSvg, /vhist-phase vhist-phase-state vhist-phase-live mb/,
+        `${ovCase.id} adds a right-edge live block when Modbus is ON and the last bucket is not ON`);
+      assert.doesNotMatch(ovHtml, /data-hist="[^"]+" data-source="x10a"/,
+        `${ovCase.id} keeps data-source unset when overlays exist so scrubView retains Modbus overlays`);
+
+      assert.match(ovHtml, /<button type="button" class="vhist-source"[^>]*data-hist-series="x10a"[^>]*disabled><i><\/i>X10A<\/button>/,
+        `${ovCase.id} keeps X10A fixed in legend`);
+      assert.match(ovHtml, new RegExp(
+        `<button type="button" class="vhist-source vhist-overlay-source mb" data-hist-id="${ovCase.id}" data-hist-series="overlay:modbus:${ovCase.mbId}" aria-pressed="true"><i><\\/i>Modbus · An<\\/button>`),
+        `${ovCase.id} shows toggleable active Modbus · An legend`);
+
+      // Tooltip exposes both X10A numeric value and Modbus state, including gaps/contradictions.
+      assert.equal(h.scrubText(ovView, 0, false), `X10A ${ovCase.x10aTexts[0]}\nModbus Aus`);
+      assert.equal(h.scrubText(ovView, 1, false), `X10A ${ovCase.x10aTexts[1]}\nModbus An`);
+      assert.equal(h.scrubText(ovView, 3, false), "Modbus Aus",
+        `${ovCase.id} shows Modbus state even in an X10A gap`);
+      assert.equal(h.scrubText(ovView, 4, false), `X10A ${ovCase.x10aTexts[4]}`,
+        `${ovCase.id} omits Modbus in a Modbus gap`);
+      assert.match(h.histReadout(ovView, 1), /class="vhist-tip-label mb">Modbus<\/span><span class="vhist-tip-val">An<\/span>/);
+
+      // Live ON -> OFF flip removes live block and updates legend to Modbus · Aus.
+      S._modbus[0].value = "0";
+      const offHtml = h.histHtml(ovCase.id, ovCase.unit, ovCase.title);
+      assert.doesNotMatch(offHtml, /vhist-phase-live/);
+      assert.match(offHtml, /Modbus · Aus<\/button>/);
+
+      // When last recorded bucket is already ON and live is ON, no duplicate live-edge rect is emitted.
+      S._modbus[0].value = "1";
+      S.hist.set(h.histCacheKey(ovCase.mbId, "modbus"), { at: Date.now(), gen: 2, dt: 300, unit: "", t0: 1768720000, b0: 200,
+        held: [], v: [0, 10, 10, 0, 10] });
+      assert.doesNotMatch(h.histHtml(ovCase.id, ovCase.unit, ovCase.title), /vhist-phase-live/);
+
+      // Pin stays intact while toggling overlay visibility off and back on.
+      h.histPinToggle(ovCase.id, 1);
+      assert.equal(h.histPinIndex(ovCase.id, h.historyView(ovCase.id)), 1);
+      h.histSeriesToggle(ovCase.id, `overlay:modbus:${ovCase.mbId}`);
+      const hiddenHtml = h.histHtml(ovCase.id, ovCase.unit, ovCase.title);
+      assert.doesNotMatch(hiddenHtml, /vhist-phase-state/);
+      assert.match(hiddenHtml, /aria-pressed="false"/);
+      assert.equal(h.histPinIndex(ovCase.id, h.historyView(ovCase.id)), 1,
+        "toggling Modbus overlay preserves an X10A pin");
+      assert.equal(h.scrubText(h.historyView(ovCase.id), 1, false), ovCase.x10aTexts[1],
+        "hiding Modbus overlay omits Modbus from tooltips");
+      h.histSeriesToggle(ovCase.id, `overlay:modbus:${ovCase.mbId}`);
+      assert.match(h.histHtml(ovCase.id, ovCase.unit, ovCase.title), /vhist-phase-state/);
+      S.histPin.delete(ovCase.id);
+      S.histHidden.delete(ovCase.id);
+
+      // Disconnected Modbus retains recorded blocks without live ON/OFF status.
+      S.status.modbus.connected = false;
+      const retainedHtml = h.histHtml(ovCase.id, ovCase.unit, ovCase.title);
+      assert.match(retainedHtml, /vhist-phase-state mb/);
+      assert.doesNotMatch(retainedHtml, /vhist-phase-live/);
+      assert.match(retainedHtml, /><i><\/i>Modbus<\/button>/);
+
+      // ensureHistPair fetches both X10A inputs and the Modbus state overlay ring.
+      S.status.modbus.connected = true;
+      h.syncHistSources();
+      S.hist.clear();
+      fetchedUrls = [];
+      const prevFetch = context.fetch;
+      context.fetch = async (url) => {
+        fetchedUrls.push(url);
+        return historyReply(url, { dt: 300, unit: "", label: "State", b0: undefined, boot_b0: -1, v: [10] });
+      };
+      try {
+        await h.ensureHistPair(ovCase.id, "open");
+      } finally {
+        context.fetch = prevFetch;
+      }
+      assert.equal(fetchedUrls.some((u) => u.includes(`row=${ovCase.mbId}&source=modbus`)), true,
+        `${ovCase.id} ensureHistPair fetches ${ovCase.mbId}`);
+
+      // Modbus disabled/absent removes overlay blocks and legend.
+      S.hist.set(ovCase.id, { at: Date.now(), gen: 1, dt: 300, unit: ovCase.unit, t0: 1768720000, b0: 200,
+        held: [], v: ovCase.x10aVals });
+      S.status.history.modbus_rows = [];
+      S._modbus = [];
+      const plainHtml = h.histHtml(ovCase.id, ovCase.unit, ovCase.title);
+      assert.doesNotMatch(plainHtml, /vhist-phase-state|vhist-overlay-source|vhist-legend/);
+      S.hist.clear();
+    }
+
     S.status.history.rows = prevRows;
     S.status.history.modbus_rows = prevMbRows;
     S._values = prevValues;

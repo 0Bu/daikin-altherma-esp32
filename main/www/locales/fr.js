@@ -1,4 +1,4 @@
-// translation-source: 0c72d1c7f1cb1a4375687f7206c23cfde3b07d4cdde68ef440d4154b1a2cd7ab
+// translation-source: 6e1980f034f1b0bc7565a07a3a33aa195e09d53586bb00882bbfba4ccf3623be
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([

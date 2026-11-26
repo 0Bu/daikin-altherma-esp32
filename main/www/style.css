@@ -1244,6 +1244,12 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 }
 .vhist-source.vhist-phase-outline i { border: 1px dashed var(--vhist-colour); }
 .vhist-source.vhist-phase-outline i { background: transparent; }
+/* Generic transparent state-block overlays behind numeric trends (e.g. Modbus ON/OFF phases). */
+.vhist-phase.vhist-phase-state.mb { fill: var(--src-mb); opacity: .16; }
+.vhist-source.vhist-overlay-source i {
+  border-top: none;
+  background: color-mix(in srgb, var(--vhist-colour) 28%, transparent);
+}
 /* The live end of the series. An HTML dot, not an SVG circle: the plot is scaled non-uniformly, so
    a circle inside it would render as an ellipse (app.js maps its % position onto the same scale). */
 .vhist-now { position: absolute; right: 0; width: 7px; height: 7px; border-radius: 50%;
