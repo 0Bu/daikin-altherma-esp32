@@ -359,7 +359,7 @@ def validate_dhw_trace_sources(sources, error):
             or impl_body.count('ifconstexpr(Timed)') != 2
             or impl_body.count('ifconstexpr(Timed){if(!st.segment_carried_s)'
                                'trace->record(st.segment_start_us,now_us,loss_tenths_k_h,observed_s,'
-                               'st.segment_pump_on,st.segment_draw_like);}') != 1):
+                               'st.segment_pump_on,st.segment_draw_like,circ);}') != 1):
         raise error('stop observation DHW detail: shared forced-inline rule/real pure/null dispatch changed')
     logic_code = masked(sources['main/logic/checkup.hpp'])
     if (re.search(r'\bDhwLossTimeline\b', logic_code)
@@ -731,7 +731,7 @@ def self_test(budgets, sources, error):
         ('main/checkup.cpp', 'commit_and_fold_locked',
          'slot.dhw_trace_forgotten.load(std::memory_order_acquire)', 'false'),
         ('main/logic/checkup.hpp', 'dhw_loss_step_impl', 'if (!st.segment_carried_s)', 'if (true)'),
-        ('main/logic/checkup.hpp', 'dhw_loss_step_impl', 'st.segment_draw_like);', 'false);'),
+        ('main/logic/checkup.hpp', 'dhw_loss_step_impl', 'st.segment_draw_like, circ);', 'false, circ);'),
         ('main/logic/checkup.hpp', 'dhw_loss_step_impl', 's.r5t_ok', 'true'),
         ('main/logic/checkup.hpp', 'dhw_loss_step_impl', 'if constexpr (Timed)', 'if (trace)'),
         ('main/logic/checkup.hpp', 'dhw_loss_step', '<false>', '<true>'),
@@ -789,7 +789,7 @@ def self_test(budgets, sources, error):
             raise AssertionError('accepted unmeasured outlined journal/index/scan helper ' + name)
     dhw_outlines = [
         'daik::logic::DhwLossTrace::observe(long long, bool)',
-        'daik::logic::DhwLossTrace::record(long long, long long, int, unsigned long, bool, bool)',
+        'daik::logic::DhwLossTrace::record(long long, long long, int, unsigned long, bool, bool, daik::logic::DhwCircState)',
         'daik::logic::DhwLossTrace::snapshot(daik::logic::DhwLossTimeline&, long long, unsigned long)',
         'daik::logic::DhwLossTimeline::clear()',
         '_ZN4daik5logic12DhwLossTrace7observeExb',

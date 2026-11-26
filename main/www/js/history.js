@@ -1685,37 +1685,54 @@ function dhwCoolingTime(time, b) {
   return `${rel(b.start_s)} – ${rel(b.end_s)}`;
 }
 
+function clearDhwCoolingSelection(plot) {
+  S.dhwCoolSelection = null;
+  if (!plot) return;
+  for (const b of plot.querySelectorAll("[data-dhw-band]")) b.classList.remove("selected");
+  const readout = plot.closest(".vhist")?.querySelector(".vhist-dhw-readout");
+  if (readout) {
+    readout.hidden = true;
+    const strong = readout.querySelector("strong");
+    const span = readout.querySelector("span");
+    if (strong) strong.textContent = "";
+    if (span) span.textContent = "";
+  }
+}
+
+function toggleDhwCoolingOverlay() {
+  S.dhwCoolHidden = !S.dhwCoolHidden;
+  if (S.dhwCoolHidden) S.dhwCoolSelection = null;
+  cancelHistoryGesture();
+  S.clickHold = false;
+  S.inspHistSig = null;
+  renderTrendHosts();
+}
+
 function selectDhwCooling(plot, clientX, clientY, tolerance = 0) {
+  if (clientX == null || S.dhwCoolHidden) return false;
   const bands = [...plot.querySelectorAll("[data-dhw-band]")];
   if (!bands.length) return false;
-  let picked;
-  if (clientX == null) {
-    const cur = bands.findIndex(b => b.classList.contains("selected"));
-    if (cur < 0) {
-      const peaks = bands.filter(b => b.classList.contains("is-peak"));
-      picked = peaks.at(-1) || bands.at(-1);
-    } else {
-      picked = bands[(cur + 1) % bands.length];
-    }
-  } else {
-    const svg = plot.querySelector("svg");
-    const bounds = svg.getBoundingClientRect();
-    const curve = [...svg.querySelectorAll("#dhwCoolingClip path")];
-    if (!bounds.width || !bounds.height) return false;
-    let best = tolerance;
-    for (const b of bands) {
-      const r = b.getBoundingClientRect();
-      const distance = Math.max(0, r.left - clientX, clientX - r.right);
-      if (!r.width || distance > best || (picked && distance === best)) continue;
-      const x = Math.min(r.right, Math.max(r.left, clientX));
-      const point = new DOMPoint((x - bounds.left) / bounds.width * HIST_W,
-        (clientY - bounds.top) / bounds.height * HIST_H);
-      if (!curve.some(area => area.isPointInFill(point))) continue;
-      picked = b;
-      best = distance;
-    }
+  const svg = plot.querySelector("svg");
+  const bounds = svg?.getBoundingClientRect();
+  const curve = svg ? [...svg.querySelectorAll("#dhwCoolingClip path")] : [];
+  if (!bounds?.width || !bounds?.height || !curve.length) return false;
+  let picked = null, best = tolerance;
+  for (const b of bands) {
+    const r = b.getBoundingClientRect();
+    const distance = Math.max(0, r.left - clientX, clientX - r.right);
+    if (!r.width || distance > best || (picked && distance === best)) continue;
+    const x = Math.min(r.right, Math.max(r.left, clientX));
+    const point = new DOMPoint((x - bounds.left) / bounds.width * HIST_W,
+      (clientY - bounds.top) / bounds.height * HIST_H);
+    if (!curve.some(area => area.isPointInFill(point))) continue;
+    picked = b;
+    best = distance;
   }
   if (!picked) return false;
+  if (picked.classList.contains("selected")) {
+    clearDhwCoolingSelection(plot);
+    return true;
+  }
   S.dhwCoolSelection = {
     end_s: Number(picked.dataset.dhwBand),
     source: plot.dataset.dhwSource || "",
@@ -1899,26 +1916,28 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   }
   let dhwSvg = "", dhwAttr = "", dhwReadout = "";
   if (dhwBands.length && dhwCurveArea) {
-    const time = new Intl.DateTimeFormat(LANG, { dateStyle: "short", timeStyle: "short" });
-    const selectedDhw = S.dhwCoolSelection?.source === dhw.source &&
-      S.dhwCoolSelection?.epoch === dhw.timeline.epoch
-      ? dhwBands.find(b => b.end_s === S.dhwCoolSelection.end_s) : null;
-    const dhwWindows = dhwBands.map(b => {
-      const header = `${dhwCoolingTime(time, b)} · ${checkupFmt1(b.rate_k_h)} °C/h`;
-      const explanation = checkupDhwCoolingExplanation(b);
-      return `<rect class="vhist-dhw-band${b.isPeak ? " is-peak" : ""}${b === selectedDhw ? " selected" : ""}"` +
-        ` x="${b.x.toFixed(3)}" y="0" width="${b.width.toFixed(3)}" height="${HIST_H}"` +
-        ` data-dhw-band="${b.end_s}" data-dhw-rate="${b.rate_k_h}"` +
-        ` data-dhw-header="${esc(header)}" data-dhw-readout="${esc(explanation)}"/>`;
-    }).join("");
-    dhwSvg = `<defs><clipPath id="dhwCoolingClip">${dhwCurveArea}</clipPath></defs>` +
-      `<g clip-path="url(#dhwCoolingClip)">${dhwWindows}</g>`;
-    dhwAttr = ` data-dhw-source="${esc(dhw.source)}" data-dhw-epoch="${esc(String(dhw.timeline.epoch))}"`;
-    legendItems.push(`<button type="button" data-dhw-cool-show class="vhist-source vhist-legend-dhw-cool">` +
-      `<i aria-hidden="true"></i>${esc(t("check.dhw.show"))}</button>`);
-    dhwReadout = `<div class="vhist-flow-readout vhist-dhw-readout" role="status"${selectedDhw ? "" : " hidden"}>` +
-      `<strong>${selectedDhw ? esc(`${dhwCoolingTime(time, selectedDhw)} · ${checkupFmt1(selectedDhw.rate_k_h)} °C/h`) : ""}</strong>` +
-      `<span>${selectedDhw ? esc(checkupDhwCoolingExplanation(selectedDhw)) : ""}</span></div>`;
+    legendItems.push(`<button type="button" data-dhw-cool-show class="vhist-source vhist-legend-dhw-cool"` +
+      ` aria-pressed="${!S.dhwCoolHidden}"><i aria-hidden="true"></i>${esc(t("check.dhw_loss"))}</button>`);
+    if (!S.dhwCoolHidden) {
+      const time = new Intl.DateTimeFormat(LANG, { dateStyle: "short", timeStyle: "short" });
+      const selectedDhw = S.dhwCoolSelection?.source === dhw.source &&
+        S.dhwCoolSelection?.epoch === dhw.timeline.epoch
+        ? dhwBands.find(b => b.end_s === S.dhwCoolSelection.end_s) : null;
+      const dhwWindows = dhwBands.map(b => {
+        const header = `${dhwCoolingTime(time, b)} · ${checkupFmt1(b.rate_k_h)} °C/h`;
+        const explanation = checkupDhwCoolingExplanation(b);
+        return `<rect class="vhist-dhw-band${b.isPeak ? " is-peak" : ""}${b === selectedDhw ? " selected" : ""}"` +
+          ` x="${b.x.toFixed(3)}" y="0" width="${b.width.toFixed(3)}" height="${HIST_H}"` +
+          ` data-dhw-band="${b.end_s}" data-dhw-rate="${b.rate_k_h}"` +
+          ` data-dhw-header="${esc(header)}" data-dhw-readout="${esc(explanation)}"/>`;
+      }).join("");
+      dhwSvg = `<defs><clipPath id="dhwCoolingClip">${dhwCurveArea}</clipPath></defs>` +
+        `<g clip-path="url(#dhwCoolingClip)">${dhwWindows}</g>`;
+      dhwAttr = ` data-dhw-source="${esc(dhw.source)}" data-dhw-epoch="${esc(String(dhw.timeline.epoch))}"`;
+      dhwReadout = `<div class="vhist-flow-readout vhist-dhw-readout" role="status"${selectedDhw ? "" : " hidden"}>` +
+        `<strong>${selectedDhw ? esc(`${dhwCoolingTime(time, selectedDhw)} · ${checkupFmt1(selectedDhw.rate_k_h)} °C/h`) : ""}</strong>` +
+        `<span>${selectedDhw ? esc(checkupDhwCoolingExplanation(selectedDhw)) : ""}</span></div>`;
+    }
   }
   if (isPressure) {
     legendItems.push(

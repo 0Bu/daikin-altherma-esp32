@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -191,16 +191,21 @@ I18N.ja = localeValues([
   /* check.status.observation */ "測定値",
   /* check.status.experimental */ "試験的",
   /* check.status.unavailable */ "利用不可",
-  /* check.dhw.show */ "タンク冷却を表示",
   /* check.dhw.maximum */ "最大のタンク冷却",
   /* check.dhw.waiting */ "条件を満たす1時間窓を待っています。",
   /* check.dhw.no_window */ "過去24時間に完了した1時間窓はありません。",
   /* check.dhw.locations_missing */ "この値の前回の測定に対応する時間窓は現在のグラフにありません。",
   /* check.dhw.stale */ "現在のタンク冷却の測定値が欠けているか古くなっています。マークされた時間窓は過去の記録です。",
-  /* check.dhw.cause_both */ "この1時間に内部水ポンプが作動し、タンク温度が急激に低下しました。お湯の使用、内部ループ循環、またはタンクの急速な冷却が原因になり得ます。R5Tセンサー単独では正確な原因を特定できません。",
-  /* check.dhw.cause_pump */ "この1時間に内部水ポンプが作動しましたが、取湯に似た温度低下プロファイルは見られませんでした。ループ循環、気づかれにくいお湯の使用、または放熱損失が原因の可能性があります。R5Tセンサー単独では正確な原因を特定できません。",
-  /* check.dhw.cause_draw */ "内部水ポンプの運転が報告されていない間に急激な温度低下が記録されました。通常はお湯の使用またはタンク内の急速な混合に当てはまります。R5Tセンサー単独では取湯を証明できず、他の損失も除外できません。",
-  /* check.dhw.cause_quiet */ "この1時間には内部ポンプの作動も取湯に似た急激な低下も記録されませんでした。考えられる原因には待機放熱損失、外部循環や自然循環、または緩やかなお湯の使用が含まれます。R5Tセンサー単独では正確な原因を特定できません。",
+  /* check.dhw.shape_step */ "この1時間で温度が急低下しました — 給湯の使用またはタンク内の急速な混合に一致します。",
+  /* check.dhw.shape_steady */ "急変のない継続的な冷却です — 待機放熱、自然循環、または連続循環に一致します。",
+  /* check.dhw.circ_on */ "この1時間中に外部循環ポンプが稼働しており（5分以上）、循環による放熱と一致します。",
+  /* check.dhw.circ_off */ "外部循環ポンプは少なくとも2時間停止しており、外部循環による損失の可能性は低い状態です。",
+  /* check.dhw.pump_off */ "内部ポンプが停止していたため、三方弁経由の熱流出の可能性は低くなりますが、R5Tのみでは原因を断定できません。",
+  /* check.dhw.pump_on */ "内部暖房ポンプが稼働していたため、三方弁経由の熱流出の可能性がありますが、R5Tのみでは原因を断定できません。",
+  /* check.dhw.circ_label */ "外部循環ポンプ",
+  /* check.dhw.summary_phases */ (n) => `24時間で強い冷却時間帯（0.8 °C/h以上）が${n}件あります。`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name}は${total}件中${withPump}件の強い低下時間帯に稼働しました。`,
+  /* check.dhw.summary_circ_off */ (name) => `${name}は記録された強い低下時間帯に停止していました（2時間以上）。`,
   /* check.detail.value_label */ "値:",
   /* check.detail.assessment_label */ "評価:",
   /* check.detail.ok */ "読めたデータでこのルールに該当しません。",

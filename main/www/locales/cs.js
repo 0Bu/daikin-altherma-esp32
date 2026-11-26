@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -191,16 +191,21 @@ I18N.cs = localeValues([
   /* check.status.observation */ "MĚŘENÍ",
   /* check.status.experimental */ "ZKUŠEBNĚ",
   /* check.status.unavailable */ "N/A",
-  /* check.dhw.show */ "Zobrazit chladnutí zásobníku",
   /* check.dhw.maximum */ "Nejsilnější chladnutí zásobníku",
   /* check.dhw.waiting */ "Čeká se na vyhovující hodinové okno.",
   /* check.dhw.no_window */ "Žádné dokončené hodinové okno za posledních 24 h.",
   /* check.dhw.locations_missing */ "Pro starší měření s touto hodnotou není v aktuálním grafu dostupné žádné časové okno.",
   /* check.dhw.stale */ "Aktuální údaje o chladnutí zásobníku chybí nebo jsou zastaralé; vyznačená okna jsou historická.",
-  /* check.dhw.cause_both */ "V této hodině běželo vnitřní vodní čerpadlo a teplota v zásobníku prudce klesla. Příčinou může být odběr teplé vody, vnitřní cirkulace okruhu nebo rychlé chladnutí zásobníku. Samotné čidlo R5T přesnou příčinu neurčí.",
-  /* check.dhw.cause_pump */ "V této hodině běželo vnitřní vodní čerpadlo bez poklesu typického pro odběr. Chladnutí může způsobovat cirkulace okruhu, nepovšimnutý odběr teplé vody nebo tepelná ztráta. Samotné čidlo R5T přesnou příčinu neurčí.",
-  /* check.dhw.cause_draw */ "Byl zaznamenán prudký pokles teploty, zatímco vnitřní vodní čerpadlo nehlásilo chod. To obvykle odpovídá odběru teplé vody nebo rychlému promíchání v zásobníku. Samotné čidlo R5T odběr neprokazuje ani nevylučuje jiné ztráty.",
-  /* check.dhw.cause_quiet */ "V této hodině nebyl zaznamenán chod vnitřního čerpadla ani prudký pokles podobný odběru. Možné příčiny zahrnují klidové tepelné ztráty, vnější či samotížnou cirkulaci nebo pomalý odběr teplé vody. Samotné čidlo R5T nechává přesnou příčinu otevřenou.",
+  /* check.dhw.shape_step */ "Skokový pokles teploty v této hodině — odpovídá odběru teplé vody nebo krátkému promíchání.",
+  /* check.dhw.shape_steady */ "Plynulé chladnutí bez náhlého skoku — odpovídá klidovým ztrátám, samotíži nebo běžící cirkulaci.",
+  /* check.dhw.circ_on */ "Externí cirkulační čerpadlo v této hodině běželo (≥ 5 min), což odpovídá ztrátě cirkulací.",
+  /* check.dhw.circ_off */ "Externí cirkulační čerpadlo bylo alespoň 2 hodiny vypnuté, takže ztráta vnější cirkulací je zde nepravděpodobná.",
+  /* check.dhw.pump_off */ "Vnitřní čerpadlo stálo, takže odvod tepla přes 3cestný ventil je nepravděpodobný; samotné čidlo R5T příčinu nedokazuje.",
+  /* check.dhw.pump_on */ "Vnitřní topné čerpadlo v této hodině běželo, takže odvod tepla přes 3cestný ventil zůstává možný; samotné čidlo R5T příčinu nedokazuje.",
+  /* check.dhw.circ_label */ "Externí cirkulační čerpadlo",
+  /* check.dhw.summary_phases */ (n) => `${n} silná(-é) fáze chladnutí (≥ 0,8 °C/h) za 24 h.`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name} běželo u ${withPump} z ${total} silných fází.`,
+  /* check.dhw.summary_circ_off */ (name) => `${name} bylo během zaznamenaných silných fází vypnuté (≥ 2 h).`,
   /* check.detail.value_label */ "Hodnota:",
   /* check.detail.assessment_label */ "Vyhodnocení:",
   /* check.detail.ok */ "Pravidlo se v čitelných datech neaktivovalo.",

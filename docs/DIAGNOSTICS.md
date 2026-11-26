@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 91e348f156d6746ceeef97d1044776473c26aa06428a5bfc60475176777b6b99 -->
+<!-- user-docs-contract: 8ad662750578bf1efe55b4f0e56b693254581440e99a477829239f5a838eb2ca -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -91,17 +91,19 @@ fixed. No generic normal target is shown for faults.
 ### Domestic-hot-water tank cooling
 
 **In plain language:** Open **DHW tank / thermal store** in the schematic for the tank sensor
-(R5T) temperature trend and, when Plant diagnostics is enabled, the strongest recorded hourly
-cooling rate in **°C per hour** (equivalent to **K/h**) plus highlighted cooling windows at or
-above the project's **0.8 K/h** threshold under the curve. Tapping a shaded area on the chart, or
-using the **Show tank cooling** legend button, displays the window's time range, cooling rate, and
-a short explanation (up to three sentences) of possible causes based on whether the internal water
-pump ran or a rapid drop occurred.
+(R5T) temperature trend and, when Plant diagnostics is enabled, a labelled summary with the strongest
+recorded hourly cooling rate in **°C per hour** (equivalent to **K/h**), the 24-hour count of strong
+cooling phases (**≥ 0.8 K/h**) paired with external circulation pump overlap when configured, and
+highlighted cooling windows under the curve. Use the **DHW tank cooling** legend button to show or
+hide the shaded bands. Tapping a shaded area toggles a short explanation (two to three sentences) below
+the chart describing whether the drop was sudden or steady, whether the optional external circulation
+pump ran or was off during that hour, and whether the internal heating pump stayed off (making active
+3-way-valve heat draw unlikely) or ran.
 
 **Meaning:** Tank cooling is an observation-only result: it produces no summary **NOTE**, **OK**,
 or **WARNING** judgement. When no completed one-hour window is
-available yet, a concise status below the chart states whether the board is waiting for a
-qualifying one-hour window, saw no completed one-hour window in the last 24 hours, or lacks the
+available yet, a labelled header and concise status below the chart state whether the board is waiting
+for a qualifying one-hour window, saw no completed one-hour window in the last 24 hours, or lacks the
 required signals on the active profile. Concise notices also appear when older readings at the
 displayed rate have no matching chart window or when current tank-cooling inputs are missing or
 stale (leaving marked windows historical). The optional external circulation witness keeps its own

@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -191,16 +191,21 @@ I18N.fr = localeValues([
   /* check.status.observation */ "MESURE",
   /* check.status.experimental */ "À L’ESSAI",
   /* check.status.unavailable */ "N/D",
-  /* check.dhw.show */ "Afficher le refroidissement du ballon",
   /* check.dhw.maximum */ "Plus fort refroidissement du ballon",
   /* check.dhw.waiting */ "En attente d’une fenêtre d’une heure admissible.",
   /* check.dhw.no_window */ "Aucune fenêtre d’une heure complète sur les dernières 24 h.",
   /* check.dhw.locations_missing */ "Aucune fenêtre temporelle du graphique actuel n’est disponible pour les relevés antérieurs à cette valeur.",
   /* check.dhw.stale */ "Les mesures actuelles du refroidissement du ballon manquent ou sont périmées ; les fenêtres marquées sont historiques.",
-  /* check.dhw.cause_both */ "La pompe à eau interne a fonctionné et la température du ballon a chuté rapidement durant cette heure. Cela peut résulter d’un puisage d’eau chaude, d’une circulation en boucle interne ou d’un refroidissement rapide du ballon. La sonde R5T seule ne permet pas d’établir la cause exacte.",
-  /* check.dhw.cause_pump */ "La pompe à eau interne a fonctionné durant cette heure sans profil de chute évoquant un puisage. Le refroidissement peut provenir d’une circulation de boucle, d’un puisage d’eau chaude inaperçu ou de pertes thermiques. La sonde R5T seule ne permet pas d’établir la cause exacte.",
-  /* check.dhw.cause_draw */ "Une chute rapide de température a été enregistrée alors que la pompe à eau interne ne signalait pas de marche. Cela correspond typiquement à un puisage d’eau chaude ou à un brassage rapide dans le ballon. La sonde R5T seule ne peut ni prouver un puisage ni exclure d’autres pertes.",
-  /* check.dhw.cause_quiet */ "Ni fonctionnement de la pompe interne ni chute rapide évoquant un puisage n’ont été enregistrés durant cette heure. Les causes possibles incluent les pertes à l’arrêt, une circulation externe ou par thermosiphon, ou un puisage lent d’eau chaude. La sonde R5T seule laisse la cause exacte ouverte.",
+  /* check.dhw.shape_step */ "Chute brusque de température sur cette heure — correspond à un puisage ou à un brassage rapide.",
+  /* check.dhw.shape_steady */ "Refroidissement continu sans à-coup — correspond aux pertes à l’arrêt, au thermosiphon ou à une circulation active.",
+  /* check.dhw.circ_on */ "La pompe de circulation externe a tourné durant cette heure (≥ 5 min), ce qui correspond à une perte par circulation.",
+  /* check.dhw.circ_off */ "La pompe de circulation externe est restée arrêtée au moins 2 heures, rendant une perte externe peu probable ici.",
+  /* check.dhw.pump_off */ "La pompe interne est restée arrêtée, rendant une perte par la vanne 3 voies improbable ; R5T seule ne prouve pas la cause.",
+  /* check.dhw.pump_on */ "La pompe de chauffage interne a tourné, laissant possible une perte par la vanne 3 voies ; R5T seule ne prouve pas la cause.",
+  /* check.dhw.circ_label */ "Pompe de circulation externe",
+  /* check.dhw.summary_phases */ (n) => `${n} phase(s) de refroidissement marqué (≥ 0,8 °C/h) en 24 h.`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name} a tourné lors de ${withPump} des ${total} phases marquées.`,
+  /* check.dhw.summary_circ_off */ (name) => `${name} est restée arrêtée (≥ 2 h) pendant les phases marquées observées.`,
   /* check.detail.value_label */ "Valeur :",
   /* check.detail.assessment_label */ "Évaluation :",
   /* check.detail.ok */ "Cette règle n’a pas été déclenchée dans les données lisibles.",

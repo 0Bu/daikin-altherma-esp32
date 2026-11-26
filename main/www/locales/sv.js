@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -191,16 +191,21 @@ I18N.sv = localeValues([
   /* check.status.observation */ "MÄTVÄRDE",
   /* check.status.experimental */ "TESTVIS",
   /* check.status.unavailable */ "EJ AKTUELL",
-  /* check.dhw.show */ "Visa tankavsvalning",
   /* check.dhw.maximum */ "Kraftigaste tankavsvalning",
   /* check.dhw.waiting */ "Väntar på ett godkänt entimmesfönster.",
   /* check.dhw.no_window */ "Inget slutfört entimmesfönster under de senaste 24 h.",
   /* check.dhw.locations_missing */ "Det finns inget tidsfönster i det aktuella diagrammet för äldre mätvärden med detta värde.",
   /* check.dhw.stale */ "Aktuella mätvärden för tankavsvalningen saknas eller är inaktuella; markerade fönster är historiska.",
-  /* check.dhw.cause_both */ "Den interna vattenpumpen gick och tanktemperaturen föll snabbt under denna timme. Det kan bero på varmvattentappning, intern kretscirkulation eller snabb tankavsvalning. Enbart givaren R5T kan inte fastställa den exakta orsaken.",
-  /* check.dhw.cause_pump */ "Den interna vattenpumpen gick under denna timme utan en tappningsliknande fallprofil. Avsvalning kan orsakas av kretscirkulation, obemärkt varmvattentappning eller värmeförlust. Enbart givaren R5T kan inte fastställa den exakta orsaken.",
-  /* check.dhw.cause_draw */ "Ett snabbt temperaturfall registrerades medan den interna vattenpumpen inte rapporterade drift. Detta passar vanligtvis med varmvattentappning eller snabb omblandning i tanken. Enbart givaren R5T kan varken bevisa tappning eller utesluta andra förluster.",
-  /* check.dhw.cause_quiet */ "Varken drift av den interna pumpen eller ett tappningsliknande snabbt fall registrerades under denna timme. Möjliga orsaker är stilleståndsförluster, extern eller självcirkulation eller en långsam varmvattentappning. Enbart givaren R5T lämnar den exakta orsaken öppen.",
+  /* check.dhw.shape_step */ "Plötsligt temperaturfall denna timme — passar med varmvattentappning eller snabb omblandning.",
+  /* check.dhw.shape_steady */ "Jämn avsvalning utan språng — passar med stilleståndsförlust, självcirkulation eller aktiv cirkulation.",
+  /* check.dhw.circ_on */ "Den externa cirkulationspumpen gick denna timme (≥ 5 min), vilket passar med cirkulationsförlust.",
+  /* check.dhw.circ_off */ "Den externa cirkulationspumpen var avstängd i minst 2 timmar, vilket gör extern cirkulationsförlust osannolik här.",
+  /* check.dhw.pump_off */ "Den interna pumpen stod stilla, så värmeuttag via 3-vägsventilen är osannolikt; R5T ensam bevisar inte orsaken.",
+  /* check.dhw.pump_on */ "Den interna värmepumpen gick denna timme, så värmeuttag via 3-vägsventilen förblir möjligt; R5T ensam bevisar inte orsaken.",
+  /* check.dhw.circ_label */ "Extern cirkulationspump",
+  /* check.dhw.summary_phases */ (n) => `${n} kraftig(a) avsvalningsfas(er) (≥ 0,8 °C/h) på 24 h.`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name} gick under ${withPump} av ${total} kraftiga faser.`,
+  /* check.dhw.summary_circ_off */ (name) => `${name} var avstängd (≥ 2 h) under observerade kraftiga faser.`,
   /* check.detail.value_label */ "Mätning:",
   /* check.detail.assessment_label */ "Bedömning:",
   /* check.detail.ok */ "Regeln utlöstes inte i läsbara data.",

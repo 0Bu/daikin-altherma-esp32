@@ -301,37 +301,37 @@ try {
   // Independently specified real endpoints, rates and paired context; not generated from the
   // fixture's modulo expressions, hourly aggregate count, hero maximum or evenly spaced bars.
   const dhwWindows=[
-    [86369,90000,0,3599,false,false],
-    [90000,93600,0.7,3581,true,false],
-    [93600,97200,1.4,3562,false,true],
-    [97200,100800,2.1,3543,true,false],
-    [100800,104400,0.3,3524,false,false],
-    [104400,108000,1,3600,true,true],
-    [108000,111600,1.7,3581,false,false],
-    [111600,115200,2.4,3562,true,false],
-    [115200,118800,0.6,3543,false,true],
-    [118800,122400,1.3,3524,true,false],
-    [122400,126000,2,3600,false,false],
-    [126000,129600,0.2,3581,true,true],
-    [129600,133200,0.9,3562,false,false],
-    [133200,136800,1.6,3543,true,false],
-    [136800,140400,2.3,3524,false,true],
-    [140400,144000,0.5,3600,true,false],
-    [144000,147600,1.2,3581,false,false],
-    [147600,151200,1.9,3562,true,true],
-    [151200,154800,0.1,3543,false,false],
-    [154800,158400,0.8,3524,true,false],
-    [158400,162000,1.5,3600,false,true],
-    [162000,165600,2.2,3581,true,false],
-    [165600,169200,0.4,3562,false,false],
-    [169200,172800,1.1,3543,true,true],
-  ].map(([start_s,end_s,rate_k_h,observed_s,pump_marker,draw_marker])=>
-    ({start_s,end_s,rate_k_h,observed_s,pump_marker,draw_marker}));
+    [86369,90000,0,3599,false,false,"unknown"],
+    [90000,93600,0.7,3581,true,false,"on"],
+    [93600,97200,1.4,3562,false,true,"off"],
+    [97200,100800,2.1,3543,true,false,"off_settled"],
+    [100800,104400,0.3,3524,false,false,"unknown"],
+    [104400,108000,1,3600,true,true,"on"],
+    [108000,111600,1.7,3581,false,false,"off"],
+    [111600,115200,2.4,3562,true,false,"off_settled"],
+    [115200,118800,0.6,3543,false,true,"unknown"],
+    [118800,122400,1.3,3524,true,false,"on"],
+    [122400,126000,2,3600,false,false,"off"],
+    [126000,129600,0.2,3581,true,true,"off_settled"],
+    [129600,133200,0.9,3562,false,false,"unknown"],
+    [133200,136800,1.6,3543,true,false,"on"],
+    [136800,140400,2.3,3524,false,true,"off"],
+    [140400,144000,0.5,3600,true,false,"off_settled"],
+    [144000,147600,1.2,3581,false,false,"unknown"],
+    [147600,151200,1.9,3562,true,true,"on"],
+    [151200,154800,0.1,3543,false,false,"off"],
+    [154800,158400,0.8,3524,true,false,"off_settled"],
+    [158400,162000,1.5,3600,false,true,"unknown"],
+    [162000,165600,2.2,3581,true,false,"on"],
+    [165600,169200,0.4,3562,false,false,"off"],
+    [169200,172800,1.1,3543,true,true,"off_settled"],
+  ].map(([start_s,end_s,rate_k_h,observed_s,pump_marker,draw_marker,circulation])=>
+    ({start_s,end_s,rate_k_h,observed_s,pump_marker,draw_marker,circulation}));
   const dhwX10a={epoch:71,window_end_s:172800,since_s:80000,observed_end_s:172799,
     unix_s:2000000000,live:true,windows:dhwWindows};
   const dhwModbus={epoch:83,window_end_s:174000,since_s:166000,observed_end_s:173999,
     unix_s:1999999993,live:false,windows:[
-      {start_s:169400,end_s:173000,rate_k_h:3.3,observed_s:3581,pump_marker:false,draw_marker:true},
+      {start_s:169400,end_s:173000,rate_k_h:3.3,observed_s:3581,pump_marker:false,draw_marker:true,circulation:"off_settled"},
     ]};
   const dhwUnsynced={epoch:71,window_end_s:172800,since_s:80000,observed_end_s:172799,
     live:true,windows:dhwWindows};
@@ -495,7 +495,8 @@ try {
               `${name}/${key}: unsigned monotonic metadata or trusted anchor`);
         const rawWindows=timeline.windows.map(window=>
           `{"start_s":${window.start_s},"end_s":${window.end_s},"rate_k_h":${window.rate_k_h.toFixed(1)},`+
-          `"observed_s":${window.observed_s},"pump_marker":${window.pump_marker},"draw_marker":${window.draw_marker}}`);
+          `"observed_s":${window.observed_s},"pump_marker":${window.pump_marker},"draw_marker":${window.draw_marker},`+
+          `"circulation":${JSON.stringify(window.circulation)}}`);
         assert.ok(text.includes('"windows":['+rawWindows.join(",")+"]"),
           `${name}: completed records must stream compactly without invented metadata`);
         for(const [index,window] of timeline.windows.entries()) {

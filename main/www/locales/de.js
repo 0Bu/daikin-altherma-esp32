@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -191,16 +191,21 @@ I18N.de = localeValues([
   /* check.status.observation */ "MESSWERT",
   /* check.status.experimental */ "TESTWEISE",
   /* check.status.unavailable */ "ENTFÄLLT",
-  /* check.dhw.show */ "Auskühlung im Verlauf zeigen",
   /* check.dhw.maximum */ "Stärkste Speicherauskühlung",
   /* check.dhw.waiting */ "Warten auf eine geeignete Messstunde.",
   /* check.dhw.no_window */ "Keine abgeschlossene Messstunde in den letzten 24 h.",
   /* check.dhw.locations_missing */ "Für ältere Messungen mit diesem Wert ist im aktuellen Verlauf kein Zeitfenster verfügbar.",
   /* check.dhw.stale */ "Aktuelle Messwerte zur Speicherauskühlung fehlen oder sind veraltet; markierte Fenster sind historische Beobachtungen.",
-  /* check.dhw.cause_both */ "In dieser Stunde lief die interne Wasserpumpe und die Speichertemperatur sank rasch. Das kann durch Warmwasserentnahme, interne Kreislaufzirkulation oder rasche Speicherauskühlung entstehen. Der Fühler R5T allein belegt die genaue Ursache nicht.",
-  /* check.dhw.cause_pump */ "In dieser Stunde lief die interne Wasserpumpe ohne zapfähnliches Abfallprofil. Die Abkühlung kann durch Kreislaufzirkulation, unbemerkte Warmwasserentnahme oder Wärmeverlust entstehen. Der Fühler R5T allein belegt die genaue Ursache nicht.",
-  /* check.dhw.cause_draw */ "Es wurde ein rascher Temperaturabfall erfasst, während die interne Wasserpumpe keinen Lauf meldete. Das passt typischerweise zu Warmwasserentnahme oder rascher Durchmischung im Speicher. Der Fühler R5T allein beweist weder eine Entnahme noch schließt er andere Verluste aus.",
-  /* check.dhw.cause_quiet */ "In dieser Stunde wurden weder Betrieb der internen Pumpe noch ein zapfähnlicher schneller Abfall erfasst. Mögliche Ursachen sind Bereitschaftsverluste, externe oder Schwerkraftzirkulation sowie eine langsame Entnahme. Der Fühler R5T allein lässt die genaue Ursache offen.",
+  /* check.dhw.shape_step */ "Sprunghafter Temperaturabfall in dieser Stunde — passt zu Warmwasserentnahme oder kurzer Durchmischung.",
+  /* check.dhw.shape_steady */ "Stetiges Auskühlen ohne plötzlichen Sprung — passt zu Bereitschaftsverlust, Schwerkraftzirkulation oder laufender Zirkulation.",
+  /* check.dhw.circ_on */ "Die externe Zirkulationspumpe lief in dieser Stunde (≥ 5 min), was zu Wärmeverlust über die Zirkulation passt.",
+  /* check.dhw.circ_off */ "Die externe Zirkulationspumpe war mindestens 2 Stunden aus, sodass Wärmeverlust durch sie hier unwahrscheinlich ist.",
+  /* check.dhw.pump_off */ "Die interne Wasserpumpe stand still, sodass Wärmeabzug über das 3-Wege-Ventil unwahrscheinlich ist; Fühler R5T allein beweist die Ursache nicht.",
+  /* check.dhw.pump_on */ "Die interne Heizkreispumpe lief in dieser Stunde, sodass interner Wärmeabzug über das 3-Wege-Ventil möglich bleibt; Fühler R5T allein beweist die Ursache nicht.",
+  /* check.dhw.circ_label */ "Externe Zirkulationspumpe",
+  /* check.dhw.summary_phases */ (n) => `${n} starke Abkühlphase(n) (≥ 0,8 °C/h) in 24 h.`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name} lief bei ${withPump} von ${total} starken Phasen.`,
+  /* check.dhw.summary_circ_off */ (name) => `${name} war während beobachteter starker Phasen aus (≥ 2 h).`,
   /* check.detail.value_label */ "Messwert:",
   /* check.detail.assessment_label */ "Bewertung:",
   /* check.detail.ok */ "Diese Regel löste in den lesbaren Daten nicht aus.",

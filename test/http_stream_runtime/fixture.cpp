@@ -900,7 +900,8 @@ int main(int argc, char** argv) {
                                static_cast<uint16_t>((i * 7) % 25),
                                static_cast<uint16_t>(i ? 3600 - (i % 5) * 19 : 3599),
                                i % 2 != 0,
-                               i % 3 == 2};
+                               i % 3 == 2,
+                               static_cast<daik::logic::DhwCircState>(i % 4)};
         }
         const auto full       = x10a;
         auto&      modbus     = dhw_timelines[1];
@@ -912,7 +913,8 @@ int main(int argc, char** argv) {
         modbus.observed       = true;
         modbus.live           = false;
         modbus.count          = 1;
-        modbus.windows[0]     = {169400, 173000, 33, 3581, false, true};
+        modbus.windows[0]     = {
+            169400, 173000, 33, 3581, false, true, daik::logic::DhwCircState::OffSettled};
 
         const auto framed = +[](httpd_req_t* req) {
             // The same pure framing helpers used by MCP get_status, not a second serializer.
@@ -961,14 +963,13 @@ int main(int argc, char** argv) {
         const auto maximum_row = checkup_wire(maximum, "dhw_loss");
         check(
             maximum_row.find("{\"start_s\":86369,\"end_s\":90000,\"rate_k_h\":0.0,"
-                             "\"observed_s\":3599,\"pump_marker\":false,\"draw_marker\":false}") !=
-                    std::string_view::npos &&
-                maximum_row.find(
-                    "\"observed_s\":3581,\"pump_marker\":true,\"draw_marker\":false}") !=
-                    std::string_view::npos &&
-                maximum_row.find(
-                    "\"observed_s\":3562,\"pump_marker\":false,\"draw_marker\":true}") !=
-                    std::string_view::npos,
+                             "\"observed_s\":3599,\"pump_marker\":false,\"draw_marker\":false,"
+                             "\"circulation\":\"unknown\"}") != std::string_view::npos &&
+                maximum_row.find("\"observed_s\":3581,\"pump_marker\":true,\"draw_marker\":false,"
+                                 "\"circulation\":\"on\"}") != std::string_view::npos &&
+                maximum_row.find("\"observed_s\":3562,\"pump_marker\":false,\"draw_marker\":true,"
+                                 "\"circulation\":\"off\"}") != std::string_view::npos &&
+                maximum_row.find("\"circulation\":\"off_settled\"}") != std::string_view::npos,
             "DHW wire lost a real 3631-second endpoint, numeric zero, coverage or paired markers");
         size_t records = 0;
         for (size_t pos = 0;

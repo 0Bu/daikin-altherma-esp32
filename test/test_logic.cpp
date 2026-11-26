@@ -15478,6 +15478,44 @@ static void test_dhw_loss_trace() {
         CHECK(exact.snapshot(out, 5400 * us, CHECKUP_MAX_GAP_S));
         CHECK(out.windows[0].start_s >= 100 &&
               out.windows[0].end_s - out.windows[0].start_s == 3600);
+        CHECK(out.windows[0].circ == DhwCircState::Unknown);
+    }
+    // External circulation pump correlation states recorded directly by dhw_loss_step_traced.
+    {
+        auto st                       = dhw_past_hold();
+        auto sample                   = readable();
+        sample.circulation_configured = true;
+        sample.circulation_known      = true;
+        sample.circulation_on         = false;
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        // 1) Continuous off below 2 h -> Off
+        for (int sec = 0; sec <= 3601; ++sec) {
+            sample.r5t_tenths = 500 - sec * 12 / 3600;
+            dhw_loss_step_traced(st, b, sample, &exact, sec * us);
+        }
+        CHECK(exact.snapshot(out, 3601 * us, CHECKUP_MAX_GAP_S) && out.count == 1);
+        CHECK(out.windows[0].circ == DhwCircState::Off);
+        // 2) Next hour still off continuously past 2 h settle -> OffSettled
+        for (int sec = 3602; sec <= 7201; ++sec) {
+            sample.r5t_tenths = 488 - (sec - 3601) * 12 / 3600;
+            dhw_loss_step_traced(st, b, sample, &exact, sec * us);
+        }
+        CHECK(exact.snapshot(out, 7201 * us, CHECKUP_MAX_GAP_S) && out.count == 2);
+        CHECK(out.windows[1].circ == DhwCircState::OffSettled);
+        // 3) Third hour with circulation ON for >= 5 min -> On
+        for (int sec = 7202; sec <= 10801; ++sec) {
+            sample.circulation_on = (sec >= 7300 && sec < 7700);
+            sample.r5t_tenths     = 476 - (sec - 7201) * 12 / 3600;
+            dhw_loss_step_traced(st, b, sample, &exact, sec * us);
+        }
+        CHECK(exact.snapshot(out, 10801 * us, CHECKUP_MAX_GAP_S) && out.count == 3);
+        CHECK(out.windows[2].circ == DhwCircState::On);
+        CHECK(std::string_view(dhw_circ_state_name(DhwCircState::Unknown)) == "unknown");
+        CHECK(std::string_view(dhw_circ_state_name(DhwCircState::On)) == "on");
+        CHECK(std::string_view(dhw_circ_state_name(DhwCircState::Off)) == "off");
+        CHECK(std::string_view(dhw_circ_state_name(DhwCircState::OffSettled)) == "off_settled");
+        CHECK(std::string_view(dhw_circ_state_name(static_cast<DhwCircState>(4))) == "unknown");
     }
 }
 
@@ -15497,8 +15535,9 @@ static void test_dhw_loss_restore() {
     for (size_t i = 0; i < page.count; ++i) {
         const auto     start = frame - DHW_LOSS_TRACE_WINDOW_S + static_cast<uint32_t>(i) * 3600;
         const uint16_t rate  = i ? 45 : 0;
-        CHECK(dhw_loss_trace_pack(page.records[i],
-                                  {start, start + 3600, rate, 3591, i % 2 == 1, i == 23}, frame));
+        const auto     circ  = static_cast<DhwCircState>(i % 4);
+        CHECK(dhw_loss_trace_pack(
+            page.records[i], {start, start + 3600, rate, 3591, i % 2 == 1, i == 23, circ}, frame));
     }
     CHECK(dhw_loss_trace_page_valid(page, false));
     CHECK(!dhw_loss_trace_page_valid(page, true));
@@ -15514,18 +15553,23 @@ static void test_dhw_loss_restore() {
     CHECK(trace.snapshot(timeline, 10 * us, CHECKUP_MAX_GAP_S));
     CHECK(!timeline.live && !timeline.observed && timeline.count == 24 && timeline.epoch == 1);
     CHECK(timeline.window_end_s == frame + 10);
-    CHECK(timeline.windows[0].rate_tenths == 0 && timeline.windows[0].observed_s == 3591);
+    CHECK(timeline.windows[0].rate_tenths == 0 && timeline.windows[0].observed_s == 3591 &&
+          timeline.windows[0].circ == DhwCircState::Unknown);
+    CHECK(timeline.windows[1].circ == DhwCircState::On);
+    CHECK(timeline.windows[2].circ == DhwCircState::Off);
     CHECK(timeline.windows[23].end_s == frame - 10 && timeline.windows[23].draw_marker &&
-          timeline.windows[23].pump_marker && timeline.windows[23].rate_tenths == 45);
+          timeline.windows[23].pump_marker && timeline.windows[23].rate_tenths == 45 &&
+          timeline.windows[23].circ == DhwCircState::OffSettled);
     CHECK(!dhw_loss_trace_restore(trace, page, 10, saved + 20));
     trace.observe(12 * us, true);
     CHECK(trace.snapshot(timeline, 12 * us, CHECKUP_MAX_GAP_S));
     CHECK(timeline.live && timeline.observed_end_s == frame + 12 &&
           timeline.windows[23].end_s == frame - 10);
     trace.observe(3612 * us, true);
-    CHECK(trace.record(12 * us, 3612 * us, 15, 3600, false, true));
+    CHECK(trace.record(12 * us, 3612 * us, 15, 3600, false, true, DhwCircState::On));
     CHECK(trace.snapshot(timeline, 3612 * us, CHECKUP_MAX_GAP_S) && timeline.count == 24 &&
-          timeline.windows[23].start_s == frame + 12);
+          timeline.windows[23].start_s == frame + 12 &&
+          timeline.windows[23].circ == DhwCircState::On);
     CHECK(trace.snapshot(timeline, (3612 + 86400LL) * us, CHECKUP_MAX_GAP_S) &&
           timeline.count == 0);
     trace.epoch = UINT32_MAX;
@@ -15555,19 +15599,29 @@ static void test_dhw_loss_restore() {
     CHECK(trace.count == 2);
     trace.discard_restored();
     CHECK(trace.count == 1 && trace.windows[trace.head].start_s == frame);
-    page.records[0][5] |= 0x80;
+    // Rate > 900 overflows into the 10-bit rate field (bits 34..43 -> bytes 4..5).
+    const uint8_t saved_b5 = page.records[0][5];
+    page.records[0][5] |= 0x0f;
     CHECK(!dhw_loss_trace_page_valid(page, false));
     trace.reset();
     CHECK(!dhw_loss_trace_restore(trace, page, 1, saved + 2));
-    page.records[0][5] &= 0x7f;
+    page.records[0][5] = saved_b5;
     page.count = 2; // following old window overlaps or is out of order
     CHECK(!dhw_loss_trace_page_valid(page, false));
     for (const auto& invalid :
          {DhwLossTraceWindow{10, 9}, DhwLossTraceWindow{1, frame + 1}, DhwLossTraceWindow{0, 3600},
           DhwLossTraceWindow{frame - 3599, frame}, DhwLossTraceWindow{frame - 3632, frame},
           DhwLossTraceWindow{frame - 3600, frame, 901},
-          DhwLossTraceWindow{frame - 3600, frame, 0, 3601}})
+          DhwLossTraceWindow{frame - 3600, frame, 0, 3601},
+          DhwLossTraceWindow{frame - 3600, frame, 0, 3600, false, false,
+                             static_cast<DhwCircState>(4)}})
         CHECK(!dhw_loss_trace_pack(page.records[0], invalid, frame));
+    {
+        DhwLossTrace invalid_trace;
+        invalid_trace.observe(0, true);
+        CHECK(!invalid_trace.record(0, 3600 * us, 0, 3600, false, false,
+                                    static_cast<DhwCircState>(4)));
+    }
     DhwLossTraceWindow decoded;
     CHECK(!dhw_loss_trace_unpack(page.records[0], 1, decoded));
     page.reserved[0] = 1;
@@ -15585,6 +15639,8 @@ static void test_dhw_loss_restore() {
     header.rings[0] = header.rings[1] = header.rings[2] = 1;
     CHECK(dhw_loss_trace_header_matches(header, true));
     CHECK(!dhw_loss_trace_header_matches(header, false));
+    header.catalog_fp = 0x31544d44u; // v1 DMT1 must be retired cleanly
+    CHECK(!dhw_loss_trace_header_matches(header, true));
     header.catalog_fp = dhw_loss_trace_schema(false, true);
     CHECK(dhw_loss_trace_header_matches(header, false));
     header.source = static_cast<uint8_t>(HistoryJournalSource::X10a);

@@ -37,6 +37,7 @@ const S = {
   histPin: new Map(),
   flowMinSelection: null,
   dhwCoolSelection: null,
+  dhwCoolHidden: false,
   cyclingScope: null,
   cyclingPin: null,
   cyclingHover: null,

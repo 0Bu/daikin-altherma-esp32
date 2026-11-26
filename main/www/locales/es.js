@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -191,16 +191,21 @@ I18N.es = localeValues([
   /* check.status.observation */ "MEDICIÓN",
   /* check.status.experimental */ "EN PRUEBA",
   /* check.status.unavailable */ "N/D",
-  /* check.dhw.show */ "Mostrar enfriamiento del depósito",
   /* check.dhw.maximum */ "Mayor enfriamiento del depósito",
   /* check.dhw.waiting */ "A la espera de una ventana de una hora válida.",
   /* check.dhw.no_window */ "Ninguna ventana de una hora completada en las últimas 24 h.",
   /* check.dhw.locations_missing */ "No hay ninguna ventana temporal disponible en el gráfico actual para lecturas anteriores con este valor.",
   /* check.dhw.stale */ "Faltan lecturas actuales del enfriamiento del depósito o están desactualizadas; las ventanas marcadas son históricas.",
-  /* check.dhw.cause_both */ "La bomba de agua interna funcionó y la temperatura del depósito bajó rápidamente durante esta hora. Esto puede deberse al consumo de agua caliente, a circulación en el circuito interno o a un enfriamiento rápido del depósito. La sonda R5T por sí sola no puede determinar la causa exacta.",
-  /* check.dhw.cause_pump */ "La bomba de agua interna funcionó durante esta hora sin un perfil de caída similar al consumo. El enfriamiento puede deberse a circulación del circuito, consumo inadvertido de agua caliente o pérdida térmica. La sonda R5T por sí sola no puede determinar la causa exacta.",
-  /* check.dhw.cause_draw */ "Se registró una caída rápida de temperatura mientras la bomba de agua interna no indicaba estar en marcha. Esto suele encajar con un consumo de agua caliente o una mezcla rápida dentro del depósito. La sonda R5T por sí sola no puede probar una extracción ni descartar otras pérdidas.",
-  /* check.dhw.cause_quiet */ "En esta hora no se registró ni funcionamiento de la bomba interna ni una caída rápida similar al consumo. Entre las causas posibles figuran pérdidas térmicas en reposo, circulación externa o por gravedad, o un consumo lento de agua caliente. La sonda R5T por sí sola deja abierta la causa exacta.",
+  /* check.dhw.shape_step */ "Caída brusca de temperatura en esta hora — encaja con consumo de agua caliente o mezcla rápida.",
+  /* check.dhw.shape_steady */ "Enfriamiento continuo sin caída brusca — encaja con pérdidas en reposo, termosifón o circulación activa.",
+  /* check.dhw.circ_on */ "La bomba de circulación externa funcionó en esta hora (≥ 5 min), lo que encaja con pérdida por circulación.",
+  /* check.dhw.circ_off */ "La bomba de circulación externa llevó al menos 2 horas apagada, por lo que su pérdida resulta improbable aquí.",
+  /* check.dhw.pump_off */ "La bomba interna estuvo parada, por lo que una fuga térmica por la válvula de 3 vías es improbable; R5T por sí sola no prueba la causa.",
+  /* check.dhw.pump_on */ "La bomba de calefacción interna funcionó en esta hora, así que la fuga por la válvula de 3 vías sigue siendo posible; R5T por sí sola no prueba la causa.",
+  /* check.dhw.circ_label */ "Bomba de circulación externa",
+  /* check.dhw.summary_phases */ (n) => `${n} fase(s) de enfriamiento fuerte (≥ 0,8 °C/h) en 24 h.`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name} funcionó en ${withPump} de ${total} fases fuertes.`,
+  /* check.dhw.summary_circ_off */ (name) => `${name} estuvo apagada (≥ 2 h) durante las fases fuertes observadas.`,
   /* check.detail.value_label */ "Valor:",
   /* check.detail.assessment_label */ "Evaluación:",
   /* check.detail.ok */ "La regla no se activó en datos legibles.",

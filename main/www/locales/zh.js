@@ -1,4 +1,4 @@
-// translation-source: 050b8ae847ab51b7bc0d7833cca4f28e6b4f6a5b2abaf00c297a14ba5ca66c37
+// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -191,16 +191,21 @@ I18N.zh = localeValues([
   /* check.status.observation */ "测量值",
   /* check.status.experimental */ "实验性",
   /* check.status.unavailable */ "不可用",
-  /* check.dhw.show */ "显示水箱降温",
   /* check.dhw.maximum */ "最强水箱降温",
   /* check.dhw.waiting */ "正在等待符合条件的一小时窗口。",
   /* check.dhw.no_window */ "过去 24 小时内没有已完成的一小时窗口。",
   /* check.dhw.locations_missing */ "当前图表中没有此数值较早读数的时间窗口。",
   /* check.dhw.stale */ "当前水箱降温读数缺失或已过时；标记的窗口均为历史记录。",
-  /* check.dhw.cause_both */ "这一小时内内部水泵运行，同时水箱温度迅速下降。这可能由用热水、内部管路循环或水箱快速散热引起。仅凭 R5T 传感器无法确定确切原因。",
-  /* check.dhw.cause_pump */ "这一小时内内部水泵运行，但未出现类似取水的骤降曲线。降温可能由管路循环、未察觉的用热水或热损失引起。仅凭 R5T 传感器无法确定确切原因。",
-  /* check.dhw.cause_draw */ "在内部水泵未报告运行的情况下记录到温度迅速下降。这通常符合用热水或水箱内快速混合的特征。仅凭 R5T 传感器既无法证明存在取水，也不能排除其他热损失。",
-  /* check.dhw.cause_quiet */ "这一小时内既未记录到内部水泵运行，也未记录到类似取水的快速下降。可能的原因包括静置热损失、外部循环或重力循环，以及缓慢取用热水。仅凭 R5T 传感器无法确定确切原因。",
+  /* check.dhw.shape_step */ "该小时内温度骤降 — 符合取用热水或水箱内快速混合的特征。",
+  /* check.dhw.shape_steady */ "温度持续平稳下降且无骤降 — 符合静置散热、重力循环或持续外部循环的特征。",
+  /* check.dhw.circ_on */ "该小时内外部循环泵运行（≥ 5 分钟），符合外部循环散热特征。",
+  /* check.dhw.circ_off */ "外部循环泵已持续关闭至少 2 小时，此处不大可能由外部循环造成散热。",
+  /* check.dhw.pump_off */ "内部水泵保持停止，因此不大可能通过三通阀流失热量；仅凭 R5T 无法证实原因。",
+  /* check.dhw.pump_on */ "内部采暖泵在该小时内运行，因此仍存在通过三通阀散热的可能；仅凭 R5T 无法证实原因。",
+  /* check.dhw.circ_label */ "外部循环泵",
+  /* check.dhw.summary_phases */ (n) => `24 小时内出现 ${n} 个明显降温时段（≥ 0.8 °C/h）。`,
+  /* check.dhw.summary_circ_on */ (name, withPump, total) => `${name}在 ${total} 个明显时段中有 ${withPump} 个同步运行。`,
+  /* check.dhw.summary_circ_off */ (name) => `在观测到的明显降温时段内${name}保持关闭（≥ 2 小时）。`,
   /* check.detail.value_label */ "数值：",
   /* check.detail.assessment_label */ "评估：",
   /* check.detail.ok */ "可读数据未触发本项规则。",

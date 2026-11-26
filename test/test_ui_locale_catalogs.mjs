@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 969, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 974, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -166,26 +166,39 @@ for (const code of codes) {
     }
   }
   for (const key of [
-    "check.dhw.show", "check.dhw.maximum", "check.dhw.waiting",
+    "check.dhw_loss", "check.dhw.maximum", "check.dhw.waiting",
     "check.dhw.no_window", "check.dhw.locations_missing", "check.dhw.stale",
+    "check.dhw.shape_step", "check.dhw.shape_steady",
+    "check.dhw.circ_on", "check.dhw.circ_off",
+    "check.dhw.pump_off", "check.dhw.pump_on", "check.dhw.circ_label",
   ]) {
     const val = dict[key];
     assert.equal(typeof val, "string", `${code}/${key} must be a string`);
     assert.ok(val.trim(), `${code}/${key} is empty`);
     if (code !== "en") assert.notEqual(val, catalog.en[key], `${code}/${key} falls back to English`);
   }
-  const dhwCauses = ["check.dhw.cause_both", "check.dhw.cause_pump", "check.dhw.cause_draw", "check.dhw.cause_quiet"]
-    .map(key => {
-      const val = dict[key];
-      assert.equal(typeof val, "string", `${code}/${key} must be a string`);
-      assert.ok(val.trim(), `${code}/${key} is empty`);
-      if (code !== "en") assert.notEqual(val, catalog.en[key], `${code}/${key} falls back to English`);
-      const sentences = val.split(/[.!?。！？]+/).filter(s => s.trim());
-      assert.ok(sentences.length >= 1 && sentences.length <= 3,
-        `${code}/${key} must be at most 3 sentences (saw ${sentences.length})`);
-      return val;
-    });
-  assert.equal(new Set(dhwCauses).size, 4, `${code} DHW cause explanations must be distinct`);
+  for (const key of [
+    "check.dhw.shape_step", "check.dhw.shape_steady",
+    "check.dhw.circ_on", "check.dhw.circ_off",
+    "check.dhw.pump_off", "check.dhw.pump_on",
+  ]) {
+    const sentences = dict[key].split(/[.!?。！？]+/).filter(s => s.trim());
+    assert.equal(sentences.length, 1,
+      `${code}/${key} must be one sentence so combined readout stays <= 3 sentences (saw ${sentences.length})`);
+  }
+  assert.notEqual(dict["check.dhw.shape_step"], dict["check.dhw.shape_steady"], `${code} step vs steady`);
+  assert.notEqual(dict["check.dhw.circ_on"], dict["check.dhw.circ_off"], `${code} circ_on vs circ_off`);
+  assert.notEqual(dict["check.dhw.pump_off"], dict["check.dhw.pump_on"], `${code} pump_off vs pump_on`);
+  for (const [key, args] of [
+    ["check.dhw.summary_phases", [3]],
+    ["check.dhw.summary_circ_on", [dict["check.dhw.circ_label"], 2, 3]],
+    ["check.dhw.summary_circ_off", [dict["check.dhw.circ_label"]]],
+  ]) {
+    assert.equal(typeof dict[key], "function", `${code}/${key} must be a formatter function`);
+    const rendered = dict[key](...args);
+    assert.ok(typeof rendered === "string" && rendered.trim(), `${code}/${key} rendered empty`);
+    if (code !== "en") assert.notEqual(rendered, catalog.en[key](...args), `${code}/${key} falls back to English`);
+  }
 }
 assert.doesNotMatch(catalog.ja["check.detail.collecting"]("2 h", "24 h"), /(?:h|min)件/,
   "Japanese collecting progress must describe elapsed time, not item counts");

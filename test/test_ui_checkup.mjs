@@ -301,28 +301,30 @@ assert.ok(ui.dhwBrief(withDhwStatus({
 }), true).includes(ui.text("en", "check.dhw.stale")));
 
 assert.equal(ui.dhwBrief(withDhwStatus({ verdict: "unavailable", blocked: true, max_k_h: null, windows: 0 }), false),
-  `<p>${ui.text("en", "check.dhw.no_window")}</p>`);
+  `<div class="inspect-diagnosis-result"><span>DHW tank cooling · X10A</span><strong class="num">—</strong></div><p>${ui.text("en", "check.dhw.no_window")}</p>`);
 assert.equal(ui.dhwBrief(withDhwStatus({ verdict: "unavailable", blocked: false, max_k_h: null, windows: 0 }), false),
-  `<p>${ui.text("en", "check.status.unavailable")}</p>`);
+  `<div class="inspect-diagnosis-result"><span>DHW tank cooling · X10A</span><strong class="num">${ui.text("en", "check.status.unavailable")}</strong></div>`);
 assert.equal(ui.dhwBrief(withDhwStatus({ verdict: "collecting", blocked: false, max_k_h: null, windows: 0 }), false),
-  `<p>${ui.text("en", "check.dhw.waiting")}</p>`);
+  `<div class="inspect-diagnosis-result"><span>DHW tank cooling · X10A</span><strong class="num">${ui.text("en", "check.status.collecting")}</strong></div><p>${ui.text("en", "check.dhw.waiting")}</p>`);
 assert.equal(ui.dhwBrief(null, false), "");
 
 for (const lang of locales) {
   ui.setLang(lang);
-  const causes = [
-    ui.dhwExplain({ pump_marker: true, draw_marker: true }),
-    ui.dhwExplain({ pump_marker: true, draw_marker: false }),
-    ui.dhwExplain({ pump_marker: false, draw_marker: true }),
-    ui.dhwExplain({ pump_marker: false, draw_marker: false }),
-  ];
-  assert.equal(new Set(causes).size, 4, `${lang}: all 4 DHW cause explanations must be distinct`);
-  for (const text of causes) {
-    assert.ok(text.trim(), `${lang}: DHW cause explanation must be non-empty`);
-    const sentences = text.split(/[.!?。！？]+/).filter(s => s.trim());
-    assert.ok(sentences.length >= 1 && sentences.length <= 3,
-      `${lang}: DHW cause explanation must be <= 3 sentences (saw ${sentences.length})`);
+  const causes = [];
+  for (const pump_marker of [true, false]) {
+    for (const draw_marker of [true, false]) {
+      for (const circulation of ["unknown", "on", "off", "off_settled"]) {
+        const text = ui.dhwExplain({ pump_marker, draw_marker, circulation });
+        causes.push(text);
+        assert.ok(text.trim(), `${lang}: DHW cause explanation must be non-empty`);
+        const sentences = text.split(/[.!?。！？]+/).filter(s => s.trim());
+        const expected = (circulation === "on" || circulation === "off_settled") ? 3 : 2;
+        assert.equal(sentences.length, expected,
+          `${lang}: DHW cause explanation (${circulation}) must be ${expected} sentences (saw ${sentences.length})`);
+      }
+    }
   }
+  assert.equal(new Set(causes).size, 12, `${lang}: distinct combinations without settled-off collapse to 12`);
 }
 ui.setLang("en");
 
@@ -1695,13 +1697,13 @@ assert.equal(ui.ready({
   assert.ok(ui.value({ id: "fault", verdict: "info", active: 0, latest: { code: "U4", age_s: 120 } }).includes("U4"));
   assert.ok(ui.value({ id: "fault", verdict: "info", active: null, latest: { code: "H9" } }).includes("H9"));
 
-  // dhw_loss brief matrix: blocked, waiting, unavailable, low rate (< 0.8), high rate + stale.
-  assert.ok(ui.dhwBrief({ source: "x10a", maxRate: null, blocked: true, unsupported: false, stale: false }, false)
-    .includes(ui.text("en", "check.dhw.no_window")));
-  assert.ok(ui.dhwBrief({ source: "x10a", maxRate: null, blocked: false, unsupported: false, stale: false }, false)
-    .includes(ui.text("en", "check.dhw.waiting")));
-  assert.ok(ui.dhwBrief({ source: "x10a", maxRate: null, blocked: false, unsupported: true, stale: false }, false)
-    .includes(ui.text("en", "check.status.unavailable")));
+  // dhw_loss brief matrix: blocked, waiting, unavailable, low rate (< 0.8), high rate + stale + Modbus header.
+  const blockedModbus = ui.dhwBrief({ source: "modbus", maxRate: null, blocked: true, unsupported: false, stale: false }, false);
+  assert.ok(blockedModbus.includes("DHW tank cooling · Modbus") && blockedModbus.includes(ui.text("en", "check.dhw.no_window")));
+  const waitModbus = ui.dhwBrief({ source: "modbus", maxRate: null, blocked: false, unsupported: false, stale: false }, false);
+  assert.ok(waitModbus.includes("DHW tank cooling · Modbus") && waitModbus.includes(ui.text("en", "check.dhw.waiting")));
+  const unavailX10a = ui.dhwBrief({ source: "x10a", maxRate: null, blocked: false, unsupported: true, stale: false }, false);
+  assert.ok(unavailX10a.includes("DHW tank cooling · X10A") && unavailX10a.includes(ui.text("en", "check.status.unavailable")));
   const lowBrief = ui.dhwBrief({ source: "x10a", maxRate: 0.4, blocked: false, unsupported: false, stale: false }, false);
   assert.ok(lowBrief.includes("0.4 °C/h") && !lowBrief.includes(ui.text("en", "check.dhw.locations_missing")));
   const staleHighBrief = ui.dhwBrief({ source: "modbus", maxRate: 2.5, blocked: false, unsupported: false, stale: true }, true);

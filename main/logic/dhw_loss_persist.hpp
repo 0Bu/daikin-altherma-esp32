@@ -6,8 +6,8 @@
 namespace daik::logic {
 
 constexpr uint32_t dhw_loss_trace_schema(bool is_modbus, bool barrier) {
-    if (is_modbus) return barrier ? 0x31524d44u : 0x31544d44u; // DMR1 / DMT1
-    return barrier ? 0x31525844u : 0x31545844u;                // DXR1 / DXT1
+    if (is_modbus) return barrier ? 0x32524d44u : 0x32544d44u; // DMR2 / DMT2
+    return barrier ? 0x32525844u : 0x32545844u;                // DXR2 / DXT2
 }
 
 struct DhwLossTracePage {
@@ -38,12 +38,15 @@ inline bool dhw_loss_trace_pack(uint8_t (&bytes)[6], const DhwLossTraceWindow& w
     if (w.start_s > w.end_s || w.end_s > frame_end_s) return false;
     const uint32_t age      = frame_end_s - w.end_s;
     const uint32_t duration = w.end_s - w.start_s;
+    const uint8_t  circ     = static_cast<uint8_t>(w.circ);
     if (age >= DHW_LOSS_TRACE_WINDOW_S || duration < DHW_LOSS_TRACE_MIN_DURATION_S ||
-        duration > DHW_LOSS_TRACE_MAX_DURATION_S || w.observed_s > duration || w.rate_tenths > 900)
+        duration > DHW_LOSS_TRACE_MAX_DURATION_S || w.observed_s > duration ||
+        w.rate_tenths > 900 || circ > 3u)
         return false;
     const uint64_t bits = age | (uint64_t{duration - DHW_LOSS_TRACE_MIN_DURATION_S} << 17) |
                           (uint64_t{w.observed_s} << 22) | (uint64_t{w.rate_tenths} << 34) |
-                          (uint64_t{w.pump_marker} << 44) | (uint64_t{w.draw_marker} << 45);
+                          (uint64_t{w.pump_marker} << 44) | (uint64_t{w.draw_marker} << 45) |
+                          (uint64_t{circ} << 46);
     for (size_t i = 0; i < sizeof(bytes); ++i) bytes[i] = static_cast<uint8_t>(bits >> (8 * i));
     return true;
 }
@@ -57,8 +60,9 @@ inline bool dhw_loss_trace_unpack(const uint8_t (&bytes)[6], uint32_t frame_end_
     const auto duration = DHW_LOSS_TRACE_MIN_DURATION_S + static_cast<uint32_t>((bits >> 17) & 31);
     const auto observed = static_cast<uint16_t>((bits >> 22) & 0xfff);
     const auto rate     = static_cast<uint16_t>((bits >> 34) & 0x3ff);
-    if (bits >> 46 || age >= DHW_LOSS_TRACE_WINDOW_S || age + duration > frame_end_s ||
-        observed > duration || rate > 900)
+    const auto circ     = static_cast<DhwCircState>((bits >> 46) & 3u);
+    if (age >= DHW_LOSS_TRACE_WINDOW_S || age + duration > frame_end_s || observed > duration ||
+        rate > 900)
         return false;
     const uint32_t end = frame_end_s - age;
     w                  = {end - duration,
@@ -66,7 +70,8 @@ inline bool dhw_loss_trace_unpack(const uint8_t (&bytes)[6], uint32_t frame_end_
                           rate,
                           observed,
                           (bits & (1ull << 44)) != 0,
-                          (bits & (1ull << 45)) != 0};
+                          (bits & (1ull << 45)) != 0,
+                          circ};
     return true;
 }
 
