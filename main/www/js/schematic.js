@@ -961,9 +961,8 @@ const INSPECT = {
     trend: "comp_rps",
     t: { en: "Compressor", de: "Verdichter" },
     re: /inv frequency/i, sample: "INV frequency (rps)",
-    // Keep the compressor's own HomeHub run flag below the X10A speed chart without pairing
-    // binary ON/OFF onto a numeric rps axis or duplicating it when X10A is down.
-    rows: [{ mbOff: 31 }],
+    // Modbus Input 31 (compressor_state) renders as transparent state blocks on comp_rps while
+    // X10A is active and falls back to the standalone compressor_state timeline when X10A is down.
   },
   out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)" },
   ouhx: {
@@ -1287,6 +1286,9 @@ const INSPECT = {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },
     aria: { en: "Circulation pump", de: "Umwälzpumpe" },
     trend: "pump_speed",
+    // Modbus Input 30 (pump_state) renders as transparent state blocks on pump_speed while X10A is
+    // active (and falls back to pump_state when X10A is down), keeping only Water pump signal below.
+    omitModbusTwin: true,
     what: {
       en: "Moves water in the loop and 3WV branch. Inverted X10A signal (raw 0 = max, 100 = stop, [0, 100] → 100–0 %) proves no RPM, rotation, head or flow; read ON/OFF and flow separately, even stopped.",
       de: "Fördert Wasser durch Kreis und 3WV-Zweig. Invertiertes X10A-Signal (roh 0 = Max, 100 = Stopp, [0, 100] → 100–0 %) belegt weder RPM noch Rotation, Förderhöhe oder Durchfluss; An/Aus und Durchfluss getrennt lesen, auch im Stillstand.",
@@ -1527,7 +1529,7 @@ function inspValues(e, row, fb) {
   const members = inspMembers(e, row, fb);
   // Keep the old comparison contract: a second opinion is only meaningful while the primary
   // headline has a current value.
-  const twin = e && row && row.value != null ? mbTwin(row) : null;
+  const twin = e && !e.omitModbusTwin && row && row.value != null ? mbTwin(row) : null;
   return twin ? [{ x10a: null, mb: twin, compare: row }, ...members] : members;
 }
 
@@ -1776,8 +1778,14 @@ function renderInspectHist(e, row, mode = "", flow = null, dhw = null) {
   const id = (useMbFallback ? mbFallbackId : explicitId)
     || (row ? histIdFor(row.label) : pairedId || (e?.sample ? histIdFor(e.sample) : ""));
   if (id && mayFetch) {
-    if (trendSource) request(id, trendSource);
-    else started = ensureHistPair(id, mode);
+    if (trendSource) {
+      request(id, trendSource);
+      if (!useMbFallback && typeof numericStateOverlaySpecs === "function") {
+        for (const ov of numericStateOverlaySpecs(id, trendSource)) {
+          if (numericStateOverlayOffered(ov)) request(ov.id, ov.source);
+        }
+      }
+    } else started = ensureHistPair(id, mode);
     if (trendSource && id === "dhw_tank") {
       request("smart_grid_mode");
       request("smart_grid_mode", "modbus");
@@ -1795,6 +1803,8 @@ function renderInspectHist(e, row, mode = "", flow = null, dhw = null) {
     ? historyView(id, trendSource) : null;
   const liveGen = state?.gen || "";
   const auxGen = id === "dhw_tank" ? tankAuxRevision(tankAuxHistories()) : "";
+  const overlaySig = id && !useMbFallback && typeof numericStateOverlayRevision === "function"
+    ? numericStateOverlayRevision(id, trendSource) : "";
   const sourceDefault = h && mh && !S.histHidden?.has(id) ? histX10aDown() : "";
   const flowScaleKey = id === "flow" || id === "pth"
     ? [typeof modbusFlowScaleUnverified === "function" && modbusFlowScaleUnverified(),
@@ -1815,7 +1825,7 @@ function renderInspectHist(e, row, mode = "", flow = null, dhw = null) {
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh),
-               liveGen, auxGen, sourceDefault, flowScaleKey, flowReference, dhwReference,
+               liveGen, auxGen, overlaySig, sourceDefault, flowScaleKey, flowReference, dhwReference,
                JSON.stringify(pin ?? null),
                pressureChart ? JSON.stringify([!!pressure, pressure?.finding]) : ""].join("|");
   if (sig === S.inspHistSig) return started;

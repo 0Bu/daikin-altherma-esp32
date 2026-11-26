@@ -281,8 +281,8 @@ explanation, optional history, then owned supplementary values (if any). Assembl
 with no single measurement have no headline, numeric chart, or duplicated pill rows; they explain
 the part and its live state in prose. A target omits its own duplicated headline row and never
 duplicates readings owned by another schematic card; it keeps a current HomeHub twin of the same
-quantity with its comparison and any un-pilled sub-readings owned solely by that component (compressor
-running, tank setpoint/disinfection, pump signal, BUH stage 2/capacity, operating-mode
+quantity with its comparison and any un-pilled sub-readings owned solely by that component (tank
+setpoint/disinfection, pump signal, BUH stage 2/capacity, operating-mode
 thermostat/fault code, room setpoint, and electrical CT/inverter currents).
 
 **Flow rate** follows that order. Its trend comes after the explanation and Normal note. The
@@ -315,7 +315,13 @@ column to the left of the plot (multi-scale outdoor climate follows the first vi
 own colour, and water pressure suppresses ticks colliding with its severity thresholds); gaps break
 both curve and fill, and a lone sample is a dot. Paired X10A and Modbus series share one chart, axis
 and cursor, with blue/petrol source legends; paired Modbus starts active when available and toggles
-in the legend. Room-temperature readings from X10A and HomeHub retain their own values and
+in the legend. Numeric X10A curves paired with a binary Modbus state witness (`comp_rps` with
+`compressor_state`, `pump_speed` with `pump_state`) paint full-height translucent petrol blocks
+behind the curve for active Modbus phases (plus a right-edge live block when currently active),
+expose a toggleable `Modbus · ON/OFF` legend button (active by default while `X10A` remains fixed
+for the numeric Y-axis), and include Modbus `ON`/`OFF` in the shared scrub tooltip while omitting
+gaps; when only Modbus is available, those inspectors fall back to their standalone categorical
+state timelines. Room-temperature readings from X10A and HomeHub retain their own values and
 attribution across source replacement.
 
 Computed readings chart their own units and expressions, not an input relabelled as output.
