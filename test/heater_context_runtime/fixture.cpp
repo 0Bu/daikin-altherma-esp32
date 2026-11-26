@@ -857,16 +857,24 @@ static void retired_catalog() {
 static void shutdown_budget() {
     reset();
     service();
-    for (unsigned hour = 0; hour < 24; ++hour) {
+    for (unsigned hour = 0; hour < 22; ++hour) {
         observe(int64_t(hour) * H + S);
         observe(int64_t(hour) * H + 11 * S);
+        sdk::now_us = int64_t(hour + 1) * H;
+        heater_context_expire();
+        CHECK(drain(2) == 2);
     }
+    observe(22 * H + S);
+    observe(22 * H + 11 * S);
+    observe(23 * H + S);
+    observe(23 * H + 11 * S);
     CHECK(report().counters.on_us == 240 * S && report().observed_hours == 24);
     heater_context_seal();
     const auto n = sdk::reads;
-    CHECK(drain(12) == 12);
-    CHECK(sdk::reads - n == 12);
+    CHECK(drain(2) == 2);
+    CHECK(sdk::reads - n == 2);
     CHECK(report().persistence_pending && report().counters.on_us == 240 * S);
+    CHECK(drain(12) == 2 && !report().persistence_pending && report().counters.on_us == 240 * S);
 }
 static void rollback_only_callback() { sdk::origin_us -= 2 * H; }
 static void rollback_replay_callback() {
@@ -1049,7 +1057,12 @@ static void wide_window() {
     CHECK(report().observed_hours == 24 && report().counters.on_us > UINT32_MAX);
     sdk::now_us += S;
     heater_context_expire();
-    CHECK(report().counters.on_us == uint64_t(23 * H - S) && report().observed_hours == 23);
+    CHECK(report().restore_pending && report().counters.on_us < uint64_t(23 * H - S));
+    const auto reads_before = sdk::reads;
+    service();
+    CHECK(sdk::reads - reads_before <= 48);
+    CHECK(!report().restore_pending && report().counters.on_us == uint64_t(23 * H - S) &&
+          report().observed_hours == 23);
 }
 static void partial_capabilities() {
     reset();
@@ -1126,9 +1139,8 @@ static void clock_anchor_jitter() {
     CHECK(wh::decode_data_into(wire, 192, d));
     CHECK(d.last - d.first == 30 * S && d.counters.readable_us == 30 * S);
 }
-static unsigned rotation_write(unsigned count) {
-    unsigned distinct = 0;
-    bool     seen[2][24]{};
+static unsigned rotation_write(unsigned count, bool (&seen)[2][24], unsigned& distinct) {
+    unsigned written = 0;
     for (unsigned i = 0; i < count; ++i) {
         CHECK(next());
         if (cursor % 16 == 0) {
@@ -1148,27 +1160,32 @@ static unsigned rotation_write(unsigned count) {
             ++distinct;
         }
         write(cursor++);
+        ++written;
     }
-    return distinct;
+    return written;
 }
 static void erase_rotation_progress() {
     reset();
     service();
+    bool     seen[2][24]{};
+    unsigned distinct = 0;
     for (unsigned h = 0; h < 20; ++h) {
         observe(int64_t(h) * H + S);
         observe(int64_t(h) * H + 11 * S);
+        sdk::now_us = int64_t(h + 1) * H;
+        heater_context_expire();
+        CHECK(rotation_write(2, seen, distinct) == 2);
     }
-    sdk::now_us = 20 * H;
-    CHECK(rotation_write(40) == 40);
+    CHECK(distinct == 40);
     CHECK(!next());
+    CHECK(!report().persistence_pending);
     CHECK(report().counters.on_us == 200 * S);
-    CHECK(permission(0) == HeaterContextErasePermission::Allowed);
-    std::memset(&flash[0], 0xff, 16 * sizeof(Record));
-    erased_sector(0);
+    CHECK(permission(0) == HeaterContextErasePermission::Protected);
+    CHECK(permission(48) == HeaterContextErasePermission::Allowed);
+    std::memset(&flash[48], 0xff, 16 * sizeof(Record));
+    erased_sector(48);
     service();
-    cursor = 48;
-    CHECK(rotation_write(16) == 16);
-    CHECK(!next());
+    CHECK(!next() && !report().persistence_pending);
     CHECK(report().counters.on_us == 200 * S);
     boot_at(ORIGIN + 20 * H + 60 * S);
     service();
@@ -1225,7 +1242,7 @@ static void reference_reconcile() {
     reset();
     put_data(0, 1, data());
     sequence    = 2;
-    sdk::now_us = H;
+    sdk::now_us = 60 * S;
     service();
     CHECK(!next());
     heater_context_flash_index_invalidate();
@@ -1242,16 +1259,23 @@ static void reference_reconcile() {
     heater_context_flash_index_invalidate();
     CHECK(report().counters.samples == 2 && report().restore_pending);
     service();
+    sdk::now_us = H;
     CHECK(next());
     wh::Data d;
     CHECK(wh::decode_data_into(wire, 192, d) && d.counters.samples == 2);
     write(32);
     CHECK(!next());
+    reset();
+    put_data(32, 2, data());
+    sequence    = 3;
+    sdk::now_us = 60 * S;
+    service();
     changed = data(0, S, 21 * S);
     put_data(33, 3, changed);
     sequence = 4;
     heater_context_flash_index_invalidate();
     service();
+    sdk::now_us = H;
     CHECK(report().counters.on_us == 10 * S);
     CHECK(next());
     CHECK(wh::decode_data_into(wire, 192, d) && d.counters.on_us == 10 * S);
@@ -1462,6 +1486,92 @@ static void codec_body_parity() {
     CHECK(wh::fingerprint(wh::Kind::Data) != hc::fingerprint(hc::Kind::Data) &&
           wh::fingerprint(wh::Kind::Fence) != hc::fingerprint(hc::Kind::Fence));
 }
+static void hot_pool_demotion() {
+    CHECK(heater_context_private_static_bytes() <= 4800);
+    reset();
+    service();
+    for (unsigned h = 0; h < 24; ++h) {
+        observe(int64_t(h) * H + S);
+        observe(int64_t(h) * H + 11 * S);
+        if (h < 23) {
+            sdk::now_us = int64_t(h + 1) * H;
+            heater_context_expire();
+        } else {
+            heater_context_seal();
+        }
+        CHECK(drain(2) == 2);
+    }
+    CHECK(!next() && !report().persistence_pending);
+    CHECK(!report().dropped && !(report().flags & hc::Loss));
+    CHECK(report().counters.on_us == 240 * S && report().observed_hours == 24);
+    reset();
+    service();
+    for (unsigned h = 0; h < 3; ++h) {
+        observe(int64_t(h) * H + S);
+        observe(int64_t(h) * H + 11 * S);
+    }
+    CHECK(report().dropped >= 2 && (report().flags & hc::Loss));
+    CHECK(report().observed_hours == 2 && report().counters.on_us == 20 * S);
+}
+static void targeted_clean_rebuild() {
+    reset();
+    uint64_t seq  = 1;
+    uint16_t slot = 0;
+    for (unsigned hour = 0; hour < 23; ++hour)
+        for (unsigned heater = 0; heater < 2; ++heater)
+            put_data(slot++, seq++, data(heater, S, 11 * S), ORIGIN / H + hour);
+    sequence    = seq;
+    sdk::now_us = 23 * H + 60 * S;
+    service();
+    CHECK(!report().restore_pending && report().counters.on_us == 230 * S &&
+          report().observed_hours == 23);
+    sdk::now_us = 24 * H;
+    heater_context_expire();
+    CHECK(report().restore_pending);
+    CHECK(!report().counters.on_us && report().observed_hours == 0);
+    const auto reads_before = sdk::reads;
+    for (unsigned i = 0; i < 60 && report().restore_pending; ++i) {
+        const auto step = sdk::reads;
+        heater_context_flash_service(reader, 1);
+        CHECK(sdk::reads - step <= 1);
+    }
+    CHECK(sdk::reads - reads_before <= 46);
+    CHECK(!report().restore_pending && report().counters.on_us == 220 * S &&
+          report().observed_hours == 22);
+    failures[4] = true;
+    sdk::now_us = 25 * H;
+    heater_context_expire();
+    CHECK(report().restore_pending && !report().counters.on_us);
+    heater_context_flash_service(reader, 256);
+    CHECK(report().restore_pending && (report().flags & hc::Incomplete) &&
+          !report().counters.on_us);
+    failures[4] = false;
+    sdk::now_us += HEATER_CONTEXT_FLASH_RETRY_US + 1;
+    service();
+    CHECK(!report().restore_pending && report().counters.on_us == 210 * S &&
+          report().observed_hours == 21);
+}
+static void clean_sector_erase_protection() {
+    reset();
+    service();
+    for (unsigned h = 0; h < 9; ++h) {
+        observe(int64_t(h) * H + S);
+        observe(int64_t(h) * H + 11 * S);
+        sdk::now_us = int64_t(h + 1) * H;
+        heater_context_expire();
+        CHECK(drain(2) == 2);
+    }
+    CHECK(report().counters.on_us == 90 * S && report().observed_hours == 9);
+    CHECK(permission(0) == HeaterContextErasePermission::Protected);
+    CHECK(permission(32) == HeaterContextErasePermission::Allowed);
+    std::memset(&flash[0], 0xff, 16 * sizeof(Record));
+    erased_sector(0);
+    CHECK(report().restore_pending && (report().flags & hc::Incomplete) &&
+          (report().flags & hc::Loss) && report().dropped > 0 && !report().counters.on_us);
+    service();
+    CHECK(!report().restore_pending && report().counters.on_us == 10 * S &&
+          report().observed_hours == 1);
+}
 int main(int argc, char** argv) {
     CHECK(argc == 2);
     const std::string name = argv[1];
@@ -1594,10 +1704,17 @@ int main(int argc, char** argv) {
         ghost_empty_payload();
     else if (name == "prefence_with_fresh")
         prefence_with_fresh();
+    else if (name == "hot_pool_demotion")
+        hot_pool_demotion();
+    else if (name == "targeted_clean_rebuild")
+        targeted_clean_rebuild();
+    else if (name == "clean_sector_erase_protection")
+        clean_sector_erase_protection();
     else {
         std::fprintf(stderr, "FAIL unknown_case\n");
         return 1;
     }
+    CHECK(heater_context_private_static_bytes() <= 4800);
     CHECK(!sdk::mutex || !sdk::mutex->owned);
     std::printf("PASS %s %u checks static-owner-sum=%zu (host ABI; excludes "
                 "inter-symbol padding)\n",

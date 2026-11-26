@@ -239,7 +239,7 @@ cases = ['cohort_actual_slots', 'service_pins_across_ticks', 'protected_corrupt_
          'blocking_deferred', 'blocking_invalidate', 'lost_scan_finish',
          'unrelated_erase_no_rewrite', 'unknown_mutation_no_rewrite', 'clock_negative_jitter',
          'rotation_progress', 'ghost_no_data', 'blocking_unknown_invalidate',
-         'dispatcher_sources', 'dispatcher_future_note']
+         'dispatcher_sources', 'dispatcher_future_note', 'clean_sector_protection_and_rebuild']
 if args.case and set(args.case) - set(cases):
     parser.error('unknown --case')
 results = []
@@ -352,7 +352,12 @@ if not args.case and all(not result['returncode'] for result in results):
         '        for (auto& c : heater) if (c.state & BaseKnown) c.state |= Dirty;')
     mutations.append(('dirty_all_cells_after_known_erase', 'mutant-store.cpp',
         store_source[:start] + body + store_source[end:], 'rotation_progress',
-        'real multi-sector rotation advances all40 distinct cells including youngest hours'))
+        'completed rotation leaves no artificial all-hours dirty backlog'))
+    mutations.append(('omit_clean_sector_protection', 'mutant-store.cpp', replace_one(store_source,
+        r'if \(\(c\.state & Occupied\) && c\.hot == kNoHot && \(c\.state & BasePresent\) &&',
+        'if (false && (c.state & Occupied) && c.hot == kNoHot && (c.state & BasePresent) &&'),
+        'clean_sector_protection_and_rebuild',
+        'active clean-cell sector returns Protected against rotation erase'))
     mutations.append(('wrong_successful_erase_sector', 'body_6.hpp', replace_one(prepare_body,
         r'heater_context_flash_sector_erased\(static_cast<uint16_t>\(slot\)\);',
         'heater_context_flash_sector_erased(0);'), 'unrelated_erase_no_rewrite',
@@ -371,6 +376,15 @@ if not args.case and all(not result['returncode'] for result in results):
     ghost = replace_one(dirty_unknown,
         r'return c.samples \|\| c.readable_us \|\| c.unreadable_us;',
         '(void)c; return true;')
+    ghost = replace_one(ghost,
+        r'if \(c\.hot == kNoHot \|\| !has_evidence\(s_hot\[c\.hot\]\.counters\)\)',
+        'if (false)')
+    ghost = replace_one(ghost,
+        r'if \(!\(c\.state & BasePresent\)\)',
+        'if (false)')
+    ghost = replace_one(ghost,
+        r'if \(!c\.revision \|\| !\(c\.state & DurableSeen\) \|\| \(c\.state & RefSuperseded\)\)',
+        'if (c.revision && (!(c.state & DurableSeen) || (c.state & RefSuperseded)))')
     mutations.append(('invent_empty_candidate_evidence', 'mutant-store.cpp', ghost,
         'ghost_no_data', 'real History writer never emits empty ghost Data after prefence reproof'))
     for tag, filename, contents, case, oracle in mutations:
