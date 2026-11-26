@@ -45,8 +45,9 @@ CASES = [
     'ghost_prefence', 'clock_anchor_limits', 'clock_hour_jitter', 'reference_reconcile',
     'reference_metadata_ack', 'invalid_sector_range', 'ghost_empty_payload', 'prefence_with_fresh',
     'prestart_guards', 'unsynced_recovery', 'conflicting_highest_sequence', 'codec_body_parity',
+    'hot_pool_demotion', 'targeted_clean_rebuild', 'clean_sector_erase_protection',
 ]
-if len(CASES) != len(set(CASES)) or len(CASES) != 62:
+if len(CASES) != len(set(CASES)) or len(CASES) != 65:
     raise RuntimeError('the complete owner case inventory must remain explicit and unique')
 if args.case and set(args.case) - set(CASES):
     parser.error('unknown --case')
@@ -122,9 +123,10 @@ def function_bounds(text, signature):
 def variants(original):
     result = [
         ('equal_endpoint', 'overlap', 'report().counters.on_us == 10 * S && report().counters.samples == 2',
-         once(original, 's_read.last >= c.first', 's_read.last > c.first')),
+         once(original, 's_read_buf.data.last >= c.first', 's_read_buf.data.last > c.first')),
         ('ack_dirty_clear', 'ack_race', 'd.heater == 0 && d.counters.on_us == 12 * S',
-         once(original, 'if (c.mutation == s_claim_mutation)', 'if (true)')),
+         once(original, 'if (c.hot != kNoHot && s_hot[c.hot].mutation == s_claim_mutation)',
+              'if (c.hot != kNoHot && true)')),
         ('data_without_proof', 'live_authority', '!next()',
          once(original, '!clock_ok(now, wall) || !s_proof || !s_enabled',
               '!clock_ok(now, wall) || false || !s_enabled')),
@@ -136,7 +138,7 @@ def variants(original):
               '/* deliberately omit yielded-finish retry */')),
         ('moving_anchor', 'clock_anchor_jitter', 'next()',
          once(original, 'if (!s_anchored)', 'if (true)')),
-        ('all_hours_dirty', 'erase_rotation_progress', 'rotation_write(40) == 40',
+        ('all_hours_dirty', 'erase_rotation_progress', '!report().persistence_pending',
          once(original, 'if (first >= logic::HISTORY_JOURNAL_SLOT_COUNT || first % per) return;',
               'if (first >= logic::HISTORY_JOURNAL_SLOT_COUNT || first % per) return;\n'
               'for(auto& h:s_cells)for(auto& c:h)if(c.state&BaseKnown)c.state|=Dirty;')),
@@ -144,15 +146,26 @@ def variants(original):
          once(original, 'if (c.revision && head.sequence > c.revision) c.state |= RefSuperseded;',
               '/* deliberately ignore newer physical revision */')),
         ('ack_flags_not_retained', 'reference_metadata_ack', '!next()',
-         once(original, 'c.flags |= s_write.flags;', '/* deliberately lose acknowledged flags */')),
+         once(original, 'c.flags |= s_claim_meta.flags;', '/* deliberately lose acknowledged flags */')),
         ('ack_loss_not_retained', 'reference_metadata_ack', '!next()',
-         once(original, 'if (s_write.lost > c.lost) c.lost = s_write.lost;',
+         once(original, 'if (s_claim_meta.lost > c.lost) c.lost = s_claim_meta.lost;',
               '/* deliberately lose acknowledged loss metadata */')),
         ('ignore_unsynced_clock', 'unsynced_recovery', 'sdk::reads == reads && !next()',
          once(original, 'if (!time_synced()) return -1;', 'if (false) return -1;')),
         ('accept_conflicting_highest_sequence', 'conflicting_highest_sequence',
          'm.restore_pending && (m.flags & hc::Incomplete) && (m.flags & hc::Loss) && !m.counters.on_us && !m.observed_hours',
          once(original, 'if (head.sequence == c.revision && slot != c.slot) {', 'if (false) {')),
+        ('omit_clean_sector_protection', 'clean_sector_erase_protection',
+         'permission(0) == HeaterContextErasePermission::Protected',
+         once(original, 'if ((c.state & Occupied) && c.hot == kNoHot && (c.state & BasePresent) &&',
+              'if (false && (c.state & Occupied) && c.hot == kNoHot && (c.state & BasePresent) &&')),
+        ('expose_stale_clean_totals', 'targeted_clean_rebuild',
+         '!report().counters.on_us && report().observed_hours == 0',
+         once(original, 'if (!s_clean_dirty) {', 'if (true) {')),
+        ('omit_clean_rebuild', 'targeted_clean_rebuild',
+         '!report().restore_pending && report().counters.on_us == 220 * S && report().observed_hours == 22',
+         once(original, 'if (!lock || !s_clean_dirty || !s_enabled || !s_confirmed || !s_proof ||',
+              'if (true || !lock || !s_clean_dirty || !s_enabled || !s_confirmed || !s_proof ||')),
     ]
     start, _, end = function_bounds(original, 'void known_append()')
     result.append(('stale_keeper_cache', 'keeper_append_cache',
@@ -167,15 +180,16 @@ def variants(original):
     result.append(('replay_no_clock', 'rollback_replay_callback',
                    '!report().counters.on_us && report().flags & hc::Clock',
                    original[:start] + part + original[end:]))
-    empty_start, _, empty_end = function_bounds(original, 'if (!has_evidence(s_read.counters))')
-    # Both redundant empty-hour defenses must be removed to reproduce the former ghost count.
-    empty = original[:empty_start] + '/* deliberately accept an empty observation */' + original[empty_end:]
-    empty = once(empty, '(c.state & (Live | BasePresent)) && has_evidence(c.counters) &&',
-                 '(c.state & (Live | BasePresent)) &&')
+    mat_body = original[start:end]
+    empty_start, _, empty_end = function_bounds(mat_body, 'if (!has_evidence(s_read_buf.data.counters))')
+    empty_mat = mat_body[:empty_start] + '/* deliberately accept an empty observation */' + mat_body[empty_end:]
+    empty = original[:start] + empty_mat + original[end:]
+    empty = once(empty, 'c.hot != kNoHot && (c.state & (Live | BasePresent)) &&\n                    has_evidence(s_hot[c.hot].counters) &&',
+                 'c.hot != kNoHot && (c.state & (Live | BasePresent)) &&')
     result.append(('empty_archive_counted', 'ghost_empty_payload',
                    '!report().counters.samples && report().observed_hours == 0', empty))
-    if len(result) != 16:
-        raise RuntimeError('all fourteen historical controls plus two new controls are required')
+    if len(result) != 19:
+        raise RuntimeError('all sixteen historical controls plus three new controls are required')
     return result
 
 
@@ -219,7 +233,7 @@ try:
     original = STORE.read_text()
     for name, pattern in [('token', r'if \(s_token == UINT32_MAX\)'),
                           ('epoch', r'if \(s_epoch == UINT32_MAX\)'),
-                          ('cell_mutation', r'if \(c.mutation == UINT32_MAX\)')]:
+                          ('cell_mutation', r'if \(hot\.mutation == UINT32_MAX\)')]:
         if len(re.findall(pattern, original)) != 1:
             raise RuntimeError('32-bit source guard changed; update its limit assessment: ' + name)
         source_guards[name] = 'Source inspected only; not runtime exhausted through public API.'

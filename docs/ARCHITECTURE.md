@@ -417,11 +417,13 @@ Reported heater flag context uses its own owner in `heater_context_store.cpp` (`
 independent of the legacy BUH/BSH diagnosis counters. It persists 192-byte per-heater hourly
 records and 32-byte Method-3 reset fences inside the shared physical Checkup journal envelope with
 its own format fingerprints (`heater_independent::fingerprint`), so older cohort records are
-never treated as current data. RAM storage is fixed (`2 x 24` = 48 cells, 8 reset fences, 192-byte
-wire buffer) with zero dynamic allocation; journal service validates committed CRC readbacks, keeps
-at most 256 Reader calls per 5 ms slice without holding `s_mutex` during flash reads, preserves
-lock ordering (`checkup -> heater` and `flash -> heater`), yields sector erases during active
-retention checks, and drains queued claims up to the bounded 12-record shutdown allowance.
+never treated as current data. Static RAM storage is bounded (`<= 4,800` B with zero dynamic
+allocation): `2 x 24` = 48 slot metadata records, a 4-slot hot counter pool for open/dirty hours,
+flash-backed clean totals with targeted slot rebuild on expiry/reproof, `8` reset fences, shared
+work staging, and a shared 192-byte read buffer; journal service validates committed CRC readbacks,
+keeps at most 256 Reader calls per 5 ms slice without holding `s_mutex` during flash reads, preserves
+lock ordering (`checkup -> heater` and `flash -> heater`), protects active clean and fence/damage
+sectors during rotation, and drains queued claims up to the bounded 12-record shutdown allowance.
 HTTP `/status` emits an unconfirmed placeholder (`confirmed: false`) in Modbus mode without
 reading X10A heater state, and MQTT `<base>/heater/{buh,bsh}` publishes one non-retained QoS 0
 snapshot per heater on the 10-second heartbeat cadence.

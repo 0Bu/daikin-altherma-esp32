@@ -25,15 +25,24 @@ enum CellState : uint8_t {
     DurableSeen   = 64,
     RefSuperseded = 128
 };
-struct Cell {
-    hd::HourCounters counters;
-    uint32_t         first = 0, last = 0, mutation = 0;
-    uint64_t         revision = 0;
-    int64_t          bucket   = 0;
-    uint16_t         slot = 0, flags = 0, lost = 0;
-    uint8_t          state = 0, pad = 0;
+constexpr uint8_t kHotCap  = 4;
+constexpr uint8_t kNoHot   = 0xff;
+constexpr uint8_t kNoOwner = 0xff;
+struct CellMeta {
+    uint64_t revision = 0;
+    int64_t  bucket   = 0;
+    uint32_t first = 0, last = 0;
+    uint16_t slot = 0, flags = 0, lost = 0;
+    uint8_t  state = 0, hot = 0;
 };
-static_assert(sizeof(Cell) == 192, "48 complete hourly cells, including all metadata");
+static_assert(sizeof(CellMeta) == 32, "48 compact hourly cell metadata entries");
+struct HotCell {
+    hd::HourCounters counters;
+    uint32_t         mutation = 0;
+    uint8_t          owner    = 0;
+    uint8_t          pad[3]{};
+};
+static_assert(sizeof(HotCell) <= 164, "bounded active/dirty hot-cell pool slot");
 bool has_evidence(const hd::HourCounters& c) {
     return c.samples || c.readable_us || c.unreadable_us;
 }
@@ -62,9 +71,12 @@ bool equal_counters(const hd::HourCounters& a, const hd::HourCounters& b) {
             return false;
     return true;
 }
-bool clean_reference_matches(const Cell& c, const wh::Data& d) {
-    return c.first == d.first && c.last == d.last && c.flags == d.flags && c.lost == d.lost &&
-           equal_counters(c.counters, d.counters);
+bool clean_meta_matches(const CellMeta& c, const wh::Data& d) {
+    return c.first == d.first && c.last == d.last && c.flags == d.flags && c.lost == d.lost;
+}
+bool clean_reference_matches(const hd::HourCounters& counters, const CellMeta& c,
+                             const wh::Data& d) {
+    return clean_meta_matches(c, d) && equal_counters(counters, d.counters);
 }
 struct Retirement {
     wh::Identity identity;
@@ -74,6 +86,11 @@ struct Retirement {
 struct KnownFence {
     wh::Identity identity;
     uint64_t     sequence = 0;
+};
+struct ClaimMeta {
+    wh::Identity identity;
+    uint16_t     capabilities = 0, flags = 0, lost = 0;
+    uint8_t      required = 0, reason = 0;
 };
 struct Scan {
     uint64_t mutation = 0, future = 0;
@@ -90,32 +107,55 @@ struct Erase {
     uint8_t                      phase  = 0;
     HeaterContextErasePermission result = HeaterContextErasePermission::Pending;
 };
-StaticSemaphore_t       s_mutex_storage;
-SemaphoreHandle_t       s_mutex = nullptr;
-Cell                    s_cells[2][24];
-Retirement              s_retire[8];
-KnownFence              s_fences[8];
-wh::Identity            s_identity;
-hd::State               s_reducer{{}, {}, 0, 0, 0};
-hd::Hour                s_delta;
-hd::Hour                s_split_delta;
-hh::Split               s_split{{{0}, {0}}};
-hd::Totals              s_projection[2];
-wh::Data                s_write, s_read;
-wh::Fence               s_write_fence, s_read_fence;
+StaticSemaphore_t s_mutex_storage;
+SemaphoreHandle_t s_mutex = nullptr;
+CellMeta          s_cells[2][24];
+HotCell           s_hot[kHotCap];
+hd::Totals        s_clean_totals[2];
+Retirement        s_retire[8];
+KnownFence        s_fences[8];
+wh::Identity      s_identity;
+hd::State         s_reducer{{}, {}, 0, 0, 0};
+hh::Split         s_split{{{0}, {0}}};
+union Work {
+    hd::Totals projection[2];
+    struct {
+        hd::Hour delta;
+        hd::Hour split_delta;
+    } record;
+    wh::Data  write;
+    wh::Fence write_fence;
+    constexpr Work() : projection{} {}
+} s_work;
+union ReadBuf {
+    wh::Data  data;
+    wh::Fence fence;
+    constexpr ReadBuf() : data{} {}
+} s_read_buf;
+ClaimMeta               s_claim_meta;
 uint8_t                 s_wire[192];
 HeaterContextFlashPiece s_piece{0};
 Scan                    s_scan;
 Erase                   s_erase;
 uint64_t                s_highest = 0, s_floor = 0, s_physical = 0, s_current_fence = 0;
 uint32_t                s_epoch = 0, s_generation = 0, s_token = 0, s_claim_mutation = 0;
-uint16_t                s_caps = 0, s_dropped = 0, s_flags = 0;
-uint8_t                 s_heaters = 0, s_claim_heater = 0;
+uint16_t s_caps = 0, s_dropped = 0, s_flags = 0, s_clean_flags = 0, s_clean_dropped = 0;
+uint8_t  s_heaters = 0, s_claim_heater = 0, s_clean_hours[2]{}, s_clean_replay = 0;
 bool s_enabled = false, s_confirmed = false, s_sealed = false, s_clock_bad = false, s_hard = false;
 bool s_proof = false, s_claim = false, s_outstanding = false, s_deferred = false;
 int64_t s_offset = 0, s_last_mono = 0, s_last_wall = 0, s_sample = -1, s_read_limit = -1,
         s_retry = 0;
-bool s_anchored = false;
+bool s_anchored = false, s_clean_dirty = false;
+
+constexpr size_t kPrivateStaticBytes =
+    sizeof(s_cells) + sizeof(s_hot) + sizeof(s_clean_totals) + sizeof(s_retire) + sizeof(s_fences) +
+    sizeof(s_identity) + sizeof(s_reducer) + sizeof(s_split) + sizeof(s_work) + sizeof(s_read_buf) +
+    sizeof(s_claim_meta) + sizeof(s_wire) + sizeof(s_piece) + sizeof(s_scan) + sizeof(s_erase) +
+    sizeof(s_mutex_storage) + sizeof(s_mutex) + sizeof(s_highest) * 4 + sizeof(s_epoch) * 4 +
+    sizeof(s_caps) * 5 + sizeof(s_heaters) * 3 + sizeof(s_clean_hours) + sizeof(s_enabled) * 10 +
+    sizeof(s_offset) * 6 + sizeof(s_anchored);
+static_assert(kPrivateStaticBytes <= 4800,
+              "heater context store static DRAM budget must remain <= 4800 B");
 
 struct Slice {
     size_t  left;
@@ -167,9 +207,132 @@ void known_append() {
         s_scan.mutation = s_physical;
     s_erase.phase = 0;
 }
+void release_hot(CellMeta& c) {
+    if (c.hot < kHotCap) {
+        wh::zero_object(s_hot[c.hot]);
+        s_hot[c.hot].owner = kNoOwner;
+    }
+    c.hot = kNoHot;
+}
+void invalidate_clean() {
+    s_clean_dirty  = true;
+    s_clean_replay = 0;
+}
+void fold_clean_cell(size_t h, size_t idx, const wh::Data& d, bool rebuilding = false) {
+    auto& c = s_cells[h][idx];
+    c.flags |= d.flags;
+    if (d.lost > c.lost) c.lost = d.lost;
+    c.state = uint8_t((c.state & ~Live) | BaseKnown | BasePresent);
+    c.hot   = kNoHot;
+    if (!s_clean_dirty || rebuilding || s_clean_replay > h * 24 + idx) {
+        hd::merge(s_clean_totals[h], d.counters);
+        ++s_clean_hours[h];
+        s_clean_flags |= c.flags;
+        if (c.lost > s_clean_dropped) s_clean_dropped = c.lost;
+    }
+}
+void demote_to_clean_locked(size_t h, size_t idx) {
+    auto& c = s_cells[h][idx];
+    if (c.hot >= kHotCap) {
+        c.hot = kNoHot;
+        return;
+    }
+    const auto& hc_counters = s_hot[c.hot].counters;
+    if (!has_evidence(hc_counters)) {
+        release_hot(c);
+        wh::zero_object(c);
+        c.hot = kNoHot;
+        return;
+    }
+    if (!s_clean_dirty || s_clean_replay > h * 24 + idx) {
+        hd::merge(s_clean_totals[h], hc_counters);
+        ++s_clean_hours[h];
+        s_clean_flags |= c.flags;
+        if (c.lost > s_clean_dropped) s_clean_dropped = c.lost;
+    }
+    release_hot(c);
+    c.state = uint8_t((c.state & ~Live) | BaseKnown | BasePresent);
+}
+uint8_t try_alloc_open_hot(uint8_t owner, int64_t wall) {
+    for (uint8_t i = 0; i < kHotCap; ++i)
+        if (s_hot[i].owner == kNoOwner) {
+            wh::zero_object(s_hot[i]);
+            s_hot[i].owner = owner;
+            return i;
+        }
+    for (uint8_t i = 0; i < kHotCap; ++i) {
+        const uint8_t oh = s_hot[i].owner / 24, oidx = s_hot[i].owner % 24;
+        const auto&   oc = s_cells[oh][oidx];
+        if (!(oc.state & Dirty) && (oc.state & BasePresent) && oc.bucket < wall / wh::HOUR_US) {
+            demote_to_clean_locked(oh, oidx);
+            wh::zero_object(s_hot[i]);
+            s_hot[i].owner = owner;
+            return i;
+        }
+    }
+    return kNoHot;
+}
+[[gnu::noinline]] uint8_t alloc_hot(size_t h, size_t idx, int64_t wall) {
+    const uint8_t owner = uint8_t(h * 24 + idx);
+    for (uint8_t i = 0; i < kHotCap; ++i)
+        if (s_hot[i].owner == kNoOwner) {
+            wh::zero_object(s_hot[i]);
+            s_hot[i].owner = owner;
+            return i;
+        }
+    uint8_t clean_pick = kNoHot;
+    for (uint8_t i = 0; i < kHotCap; ++i) {
+        const uint8_t oh = s_hot[i].owner / 24, oidx = s_hot[i].owner % 24;
+        const auto&   oc = s_cells[oh][oidx];
+        if (!(oc.state & Dirty) && (oc.state & BasePresent)) {
+            if (oc.bucket < wall / wh::HOUR_US) {
+                clean_pick = i;
+                break;
+            }
+            if (clean_pick == kNoHot) clean_pick = i;
+        }
+    }
+    if (clean_pick != kNoHot) {
+        const uint8_t oh = s_hot[clean_pick].owner / 24, oidx = s_hot[clean_pick].owner % 24;
+        demote_to_clean_locked(oh, oidx);
+        wh::zero_object(s_hot[clean_pick]);
+        s_hot[clean_pick].owner = owner;
+        return clean_pick;
+    }
+    uint8_t victim = 0;
+    for (uint8_t i = 1; i < kHotCap; ++i) {
+        const auto& vc = s_cells[s_hot[victim].owner / 24][s_hot[victim].owner % 24];
+        const auto& ic = s_cells[s_hot[i].owner / 24][s_hot[i].owner % 24];
+        if (ic.bucket < vc.bucket ||
+            (ic.bucket == vc.bucket && s_hot[i].owner < s_hot[victim].owner))
+            victim = i;
+    }
+    const uint8_t vh = s_hot[victim].owner / 24, vidx = s_hot[victim].owner % 24;
+    auto&         vc = s_cells[vh][vidx];
+    release_hot(vc);
+    wh::zero_object(vc);
+    vc.hot = kNoHot;
+    loss();
+    wh::zero_object(s_hot[victim]);
+    s_hot[victim].owner = owner;
+    return victim;
+}
 void clear_cells() {
     for (auto& heater : s_cells)
-        for (auto& cell : heater) wh::zero_object(cell);
+        for (auto& cell : heater) {
+            wh::zero_object(cell);
+            cell.hot = kNoHot;
+        }
+    for (auto& slot : s_hot) {
+        wh::zero_object(slot);
+        slot.owner = kNoOwner;
+    }
+    wh::zero_object(s_clean_totals);
+    s_clean_hours[0] = s_clean_hours[1] = 0;
+    s_clean_flags                       = 0;
+    s_clean_dropped                     = 0;
+    s_clean_dirty                       = false;
+    s_clean_replay                      = 0;
     wh::zero_object(s_reducer);
     hd::pause(s_reducer);
     s_sample = -1;
@@ -265,7 +428,12 @@ void expire_locked(int64_t now, int64_t wall) {
         for (auto& c : heater)
             if ((c.state & Occupied) && !wh::in_window(c.bucket, wall)) {
                 if (c.state & Dirty) loss();
+                if (c.hot != kNoHot)
+                    release_hot(c);
+                else if (c.state & BasePresent)
+                    invalidate_clean();
                 wh::zero_object(c);
+                c.hot = kNoHot;
             }
 }
 bool current_scan() {
@@ -294,7 +462,7 @@ bool any_pending() {
 }
 bool restore_pending() {
     if (!s_enabled || !s_confirmed || !s_heaters) return false;
-    if (!s_proof) return true;
+    if (!s_proof || s_clean_dirty) return true;
     for (const auto& heater : s_cells)
         for (const auto& c : heater)
             if ((c.state & Occupied) && (!(c.state & BaseKnown) || (c.state & Refused)))
@@ -303,7 +471,7 @@ bool restore_pending() {
 }
 HeaterContextStatus project_locked() {
     HeaterContextStatus m;
-    wh::zero_object(s_projection);
+    wh::zero_object(s_work.projection);
     const auto now = esp_timer_get_time(), wall = heater_wall_now();
     expire_locked(now, wall);
     m.epoch               = s_epoch;
@@ -319,20 +487,33 @@ HeaterContextStatus project_locked() {
     if (s_clock_bad || !m.dated) m.flags |= hc::Clock;
     if (s_hard) m.flags |= hc::Incomplete | hc::Loss;
     if (!m.confirmed || !m.dated) return m;
+    if (!s_clean_dirty) {
+        for (size_t h = 0; h < 2; ++h)
+            if ((s_heaters & (1u << h)) && s_clean_hours[h]) {
+                hd::merge(s_work.projection[h], s_clean_totals[h]);
+                m.observed_hours[h] = uint8_t(m.observed_hours[h] + s_clean_hours[h]);
+            }
+        if (s_clean_hours[0] || s_clean_hours[1]) {
+            if (s_clean_flags & hc::WireClock) m.flags |= hc::Clock;
+            if (s_clean_flags & hc::WireLoss) m.flags |= hc::Loss;
+            if (s_clean_dropped > m.dropped) m.dropped = s_clean_dropped;
+        }
+    }
     for (size_t h = 0; h < 2; ++h)
         if (s_heaters & (1u << h))
             for (const auto& c : s_cells[h])
-                if ((c.state & (Live | BasePresent)) && has_evidence(c.counters) &&
-                    wh::in_window(c.bucket, wall) && wh::end_not_future(c.bucket, c.last, wall)) {
-                    hd::merge(s_projection[h], c.counters);
+                if (c.hot != kNoHot && (c.state & (Live | BasePresent)) &&
+                    has_evidence(s_hot[c.hot].counters) && wh::in_window(c.bucket, wall) &&
+                    wh::end_not_future(c.bucket, c.last, wall)) {
+                    hd::merge(s_work.projection[h], s_hot[c.hot].counters);
                     ++m.observed_hours[h];
                     if (c.flags & hc::WireClock) m.flags |= hc::Clock;
                     if (c.flags & hc::WireLoss) m.flags |= hc::Loss;
                     if (c.lost > m.dropped) m.dropped = c.lost;
                 }
     for (size_t h = 0; h < 2; ++h) {
-        m.on_us[h]       = s_projection[h].on_us;
-        m.readable_us[h] = s_projection[h].readable_us;
+        m.on_us[h]       = s_work.projection[h].on_us;
+        m.readable_us[h] = s_work.projection[h].readable_us;
     }
     return m;
 }
@@ -345,13 +526,13 @@ bool claim_current() {
     if (!s_claim) return false;
     if (s_piece.kind == wh::Kind::Fence) {
         for (const auto& r : s_retire)
-            if (r.token == s_piece.token && wh::equal(r.identity, s_write_fence.identity))
+            if (r.token == s_piece.token && wh::equal(r.identity, s_claim_meta.identity))
                 return true;
         return false;
     }
     return s_piece.epoch == s_epoch && s_enabled && s_confirmed && !s_clock_bad && !s_hard &&
-           wh::equal(s_write.identity, s_identity) && s_write.capabilities == s_caps &&
-           s_write.required == s_heaters;
+           wh::equal(s_claim_meta.identity, s_identity) && s_claim_meta.capabilities == s_caps &&
+           s_claim_meta.required == s_heaters;
 }
 bool ordinary_physical(const wh::View& v) {
     return v.header && v.payload && v.capacity >= logic::HISTORY_JOURNAL_PAYLOAD_BYTES &&
@@ -380,39 +561,44 @@ void select_slot(uint16_t slot, const wh::View& v) {
         return;
     }
     if (kind == wh::Kind::Fence) {
-        if (!wh::decode_fence_into(v.payload, 32, s_read_fence) ||
-            s_read_fence.sequence != head.sequence || !add_fence(s_read_fence)) {
+        if (!wh::decode_fence_into(v.payload, 32, s_read_buf.fence) ||
+            s_read_buf.fence.sequence != head.sequence || !add_fence(s_read_buf.fence)) {
             scan_error(false);
             return;
         }
         return;
     }
-    if (!wh::decode_data_into(v.payload, 192, s_read)) {
+    if (!wh::decode_data_into(v.payload, 192, s_read_buf.data)) {
         scan_error(false);
         return;
     }
-    if (!wh::equal(s_read.identity, s_identity)) return;
-    if (s_read.capabilities != s_caps || s_read.required != s_heaters) {
+    if (!wh::equal(s_read_buf.data.identity, s_identity)) return;
+    if (s_read_buf.data.capabilities != s_caps || s_read_buf.data.required != s_heaters) {
         scan_error(false, hc::ScopeMismatch);
         return;
     }
-    if (!wh::end_not_future(head.bucket, s_read.last, s_scan.wall)) {
+    if (!wh::end_not_future(head.bucket, s_read_buf.data.last, s_scan.wall)) {
         if (head.bucket >= s_scan.wall / wh::HOUR_US - 23 && head.sequence > s_scan.future)
             s_scan.future = head.sequence;
         return;
     }
     if (!wh::in_window(head.bucket, s_scan.wall)) return;
-    auto& c = s_cells[s_read.heater][size_t(head.bucket % 24)];
+    auto& c = s_cells[s_read_buf.data.heater][size_t(head.bucket % 24)];
     if (c.state & BaseKnown) {
         if (c.bucket != head.bucket) return;
         if (c.revision && head.sequence > c.revision) c.state |= RefSuperseded;
-        if (c.revision == head.sequence && c.slot == slot &&
-            ((c.state & Dirty) || clean_reference_matches(c, s_read)))
-            c.state |= DurableSeen;
+        const bool match =
+            (c.state & Dirty) ||
+            (c.hot != kNoHot ? clean_reference_matches(s_hot[c.hot].counters, c, s_read_buf.data)
+                             : clean_meta_matches(c, s_read_buf.data));
+        if (c.revision == head.sequence && c.slot == slot && match) c.state |= DurableSeen;
         return; // authoritative materialized RAM is never an additive base again
     }
     if (!(c.state & Occupied) || c.bucket != head.bucket) {
+        if (c.hot != kNoHot) release_hot(c);
+        if (c.state & BasePresent) invalidate_clean();
         wh::zero_object(c);
+        c.hot    = kNoHot;
         c.bucket = head.bucket;
         c.state  = Occupied;
     }
@@ -463,20 +649,40 @@ void finish_scan_locked() {
     for (auto& heater : s_cells)
         for (auto& c : heater) {
             if (c.state & BaseKnown) {
-                if (!has_evidence(c.counters)) {
-                    wh::zero_object(c);
-                    continue;
-                }
-                if (c.revision && (!(c.state & DurableSeen) || (c.state & RefSuperseded))) {
-                    c.revision = 0;
-                    c.slot     = 0;
-                    c.state |= Dirty;
-                    s_flags |= hc::Loss;
+                if (c.hot != kNoHot) {
+                    if (!has_evidence(s_hot[c.hot].counters)) {
+                        release_hot(c);
+                        wh::zero_object(c);
+                        c.hot = kNoHot;
+                        continue;
+                    }
+                    if (c.revision && (!(c.state & DurableSeen) || (c.state & RefSuperseded))) {
+                        c.revision = 0;
+                        c.slot     = 0;
+                        c.state |= Dirty;
+                        s_flags |= hc::Loss;
+                    }
+                } else {
+                    if (!(c.state & BasePresent)) {
+                        wh::zero_object(c);
+                        c.hot = kNoHot;
+                        continue;
+                    }
+                    if (!c.revision || !(c.state & DurableSeen) || (c.state & RefSuperseded)) {
+                        wh::zero_object(c);
+                        c.hot = kNoHot;
+                        invalidate_clean();
+                        loss();
+                    }
                 }
             } else if ((c.state & Occupied) && c.revision <= cutoff) {
                 c.revision = 0;
                 c.slot     = 0;
-                if (!has_evidence(c.counters)) wh::zero_object(c);
+                if (c.hot == kNoHot || !has_evidence(s_hot[c.hot].counters)) {
+                    if (c.hot != kNoHot) release_hot(c);
+                    wh::zero_object(c);
+                    c.hot = kNoHot;
+                }
             }
         }
     s_scan.reading = true;
@@ -520,7 +726,7 @@ void materialize(HeaterContextReader reader, Slice& slice) {
         const bool ok    = reader && reader(slot, v);
         const bool valid = ok && wh::typed(v, wh::Kind::Data) && v.header->sequence == revision &&
                            v.header->bucket == bucket &&
-                           wh::decode_data_into(v.payload, 192, s_read);
+                           wh::decode_data_into(v.payload, 192, s_read_buf.data);
         SemGuard lock(s_mutex, 0);
         if (!lock) return;
         expire_locked(esp_timer_get_time(), heater_wall_now());
@@ -532,43 +738,139 @@ void materialize(HeaterContextReader reader, Slice& slice) {
         auto& c = s_cells[index / 24][index % 24];
         if (!(c.state & Occupied) || c.bucket != bucket || c.revision != revision || c.slot != slot)
             continue;
-        if (!wh::equal(s_read.identity, s_identity) || s_read.heater != index / 24 ||
-            s_read.required != s_heaters || s_read.capabilities != s_caps ||
-            !wh::end_not_future(bucket, s_read.last, s_scan.wall)) {
+        if (!wh::equal(s_read_buf.data.identity, s_identity) ||
+            s_read_buf.data.heater != index / 24 || s_read_buf.data.required != s_heaters ||
+            s_read_buf.data.capabilities != s_caps ||
+            !wh::end_not_future(bucket, s_read_buf.data.last, s_scan.wall)) {
             scan_error(false, hc::LatestFailure);
             return;
         }
-        if (!has_evidence(s_read.counters)) {
-            if (s_read.lost > s_dropped) s_dropped = s_read.lost;
-            if (s_read.flags & hc::WireLoss) s_flags |= hc::Loss;
-            if (s_read.flags & hc::WireClock) s_flags |= hc::Clock;
+        if (!has_evidence(s_read_buf.data.counters)) {
+            if (s_read_buf.data.lost > s_dropped) s_dropped = s_read_buf.data.lost;
+            if (s_read_buf.data.flags & hc::WireLoss) s_flags |= hc::Loss;
+            if (s_read_buf.data.flags & hc::WireClock) s_flags |= hc::Clock;
             if (c.state & Live) {
                 c.revision = 0;
                 c.slot     = 0;
                 c.state |= BaseKnown;
-            } else
+            } else {
                 wh::zero_object(c);
+                c.hot = kNoHot;
+            }
             ++s_scan.replay;
             continue; // a zero-evidence full revision is not an observed hour or an older fallback
         }
-        if ((c.state & Live) && s_read.last >= c.first) {
+        if ((c.state & Live) && s_read_buf.data.last >= c.first) {
             c.state |= Refused;
             s_flags |= hc::Incomplete | hc::Loss;
             ++s_scan.replay;
             continue;
         }
         if (c.state & Live) {
-            hd::merge(c.counters, s_read.counters);
-            c.first = s_read.first;
+            hd::merge(s_hot[c.hot].counters, s_read_buf.data.counters);
+            c.first = s_read_buf.data.first;
+            c.flags |= s_read_buf.data.flags;
+            if (s_read_buf.data.lost > c.lost) c.lost = s_read_buf.data.lost;
+            c.state |= BaseKnown | BasePresent;
         } else {
-            c.counters = s_read.counters;
-            c.first    = s_read.first;
-            c.last     = s_read.last;
+            c.first                = s_read_buf.data.first;
+            c.last                 = s_read_buf.data.last;
+            const uint8_t open_hot = (bucket == s_scan.wall / wh::HOUR_US && !s_sealed)
+                                         ? try_alloc_open_hot(index, s_scan.wall)
+                                         : kNoHot;
+            if (open_hot != kNoHot) {
+                s_hot[open_hot].counters = s_read_buf.data.counters;
+                c.hot                    = open_hot;
+                c.flags |= s_read_buf.data.flags;
+                if (s_read_buf.data.lost > c.lost) c.lost = s_read_buf.data.lost;
+                c.state |= BaseKnown | BasePresent;
+            } else {
+                fold_clean_cell(index / 24, index % 24, s_read_buf.data);
+            }
         }
-        c.flags |= s_read.flags;
-        if (s_read.lost > c.lost) c.lost = s_read.lost;
-        c.state |= BaseKnown | BasePresent;
         ++s_scan.replay;
+    }
+}
+void rebuild_clean(HeaterContextReader reader, Slice& slice) {
+    while (true) {
+        uint8_t  index;
+        uint16_t slot;
+        uint64_t revision;
+        int64_t  bucket;
+        uint32_t epoch;
+        {
+            SemGuard lock(s_mutex, 0);
+            if (!lock || !s_clean_dirty || !s_enabled || !s_confirmed || !s_proof || s_clock_bad ||
+                s_hard)
+                return;
+            const auto now = esp_timer_get_time(), wall = heater_wall_now();
+            expire_locked(now, wall);
+            if (!clock_ok(now, wall) || !s_clean_dirty || now < s_retry) return;
+            if (s_clean_replay == 0) {
+                wh::zero_object(s_clean_totals);
+                s_clean_hours[0] = s_clean_hours[1] = 0;
+                s_clean_flags                       = 0;
+                s_clean_dropped                     = 0;
+            }
+            if (s_clean_replay == 48) {
+                s_clean_dirty  = false;
+                s_clean_replay = 0;
+                return;
+            }
+            index   = s_clean_replay;
+            auto& c = s_cells[index / 24][index % 24];
+            if (!(c.state & Occupied) || c.hot != kNoHot || !(c.state & BasePresent) ||
+                !c.revision || !wh::in_window(c.bucket, wall)) {
+                ++s_clean_replay;
+                continue;
+            }
+            slot     = c.slot;
+            revision = c.revision;
+            bucket   = c.bucket;
+            epoch    = s_epoch;
+        }
+        if (!slice.take()) return;
+        wh::View   v;
+        const bool ok    = reader && reader(slot, v);
+        const bool valid = ok && wh::typed(v, wh::Kind::Data) && v.header->sequence == revision &&
+                           v.header->bucket == bucket &&
+                           wh::decode_data_into(v.payload, 192, s_read_buf.data);
+        SemGuard lock(s_mutex, 0);
+        if (!lock) return;
+        const auto now = esp_timer_get_time(), wall = heater_wall_now();
+        expire_locked(now, wall);
+        if (!s_clean_dirty || !s_enabled || !s_confirmed || !s_proof || s_clock_bad || s_hard ||
+            s_epoch != epoch || !clock_ok(now, wall))
+            return;
+        if (!valid) {
+            invalidate_clean();
+            scan_error(!ok, hc::LatestFailure);
+            return;
+        }
+        auto& c = s_cells[index / 24][index % 24];
+        if (s_clean_replay != index || !(c.state & Occupied) || c.hot != kNoHot ||
+            !(c.state & BasePresent) || c.bucket != bucket || c.revision != revision ||
+            c.slot != slot)
+            continue;
+        if (!wh::equal(s_read_buf.data.identity, s_identity) ||
+            s_read_buf.data.heater != index / 24 || s_read_buf.data.required != s_heaters ||
+            s_read_buf.data.capabilities != s_caps || revision <= s_current_fence ||
+            !wh::end_not_future(bucket, s_read_buf.data.last, wall)) {
+            invalidate_clean();
+            scan_error(false, hc::LatestFailure);
+            return;
+        }
+        if (!has_evidence(s_read_buf.data.counters)) {
+            if (s_read_buf.data.lost > s_dropped) s_dropped = s_read_buf.data.lost;
+            if (s_read_buf.data.flags & hc::WireLoss) s_flags |= hc::Loss;
+            if (s_read_buf.data.flags & hc::WireClock) s_flags |= hc::Clock;
+            wh::zero_object(c);
+            c.hot = kNoHot;
+            ++s_clean_replay;
+            continue;
+        }
+        fold_clean_cell(index / 24, index % 24, s_read_buf.data, true);
+        ++s_clean_replay;
     }
 }
 } // namespace
@@ -702,9 +1004,9 @@ void heater_context_record(int64_t sample, const hd::Sample& input) {
         return;
     const auto at       = sample + s_offset,
                previous = s_reducer.previous_us < 0 ? -1 : s_reducer.previous_us + s_offset;
-    wh::zero_object(s_delta);
-    const auto result = hd::step(s_reducer, s_delta, sample, s_generation, s_identity.schema,
-                                 s_heaters, s_caps, input);
+    wh::zero_object(s_work.record.delta);
+    const auto result = hd::step(s_reducer, s_work.record.delta, sample, s_generation,
+                                 s_identity.schema, s_heaters, s_caps, input);
     if (!hh::split(result, previous, at, s_split)) {
         hd::pause(s_reducer);
         return;
@@ -712,8 +1014,8 @@ void heater_context_record(int64_t sample, const hd::Sample& input) {
     for (size_t i = 0; i < s_split.count; ++i) {
         const auto& p = s_split.pieces[i];
         if (!wh::in_window(p.bucket, wall)) continue;
-        wh::zero_object(s_split_delta);
-        if (!hh::merge_piece(s_split_delta, s_delta, s_split, i)) {
+        wh::zero_object(s_work.record.split_delta);
+        if (!hh::merge_piece(s_work.record.split_delta, s_work.record.delta, s_split, i)) {
             s_hard = true;
             loss();
             hd::pause(s_reducer);
@@ -721,25 +1023,42 @@ void heater_context_record(int64_t sample, const hd::Sample& input) {
         }
         for (size_t h = 0; h < 2; ++h)
             if (s_heaters & (1u << h)) {
-                auto& c = s_cells[h][size_t(p.bucket % 24)];
+                const size_t idx = size_t(p.bucket % 24);
+                auto&        c   = s_cells[h][idx];
                 if (!(c.state & Occupied) || c.bucket != p.bucket) {
                     if (c.state & Dirty) loss();
+                    if (c.hot != kNoHot)
+                        release_hot(c);
+                    else if (c.state & BasePresent)
+                        invalidate_clean();
                     wh::zero_object(c);
+                    c.hot    = kNoHot;
                     c.bucket = p.bucket;
                     c.first  = p.first_offset_us;
                     c.state  = Occupied;
                     if (s_proof) c.state |= BaseKnown;
                 }
+                if (c.hot == kNoHot) {
+                    if (c.state & BasePresent) {
+                        c.revision = 0;
+                        c.slot     = 0;
+                        c.state &= uint8_t(~BasePresent);
+                        invalidate_clean();
+                        loss();
+                    }
+                    c.hot = alloc_hot(h, idx, wall);
+                }
+                auto& hot = s_hot[c.hot];
                 if (!(c.state & (Live | BasePresent))) c.first = p.first_offset_us;
                 if (p.first_offset_us < c.first) c.first = p.first_offset_us;
                 if (p.last_offset_us > c.last) c.last = p.last_offset_us;
-                if (c.mutation == UINT32_MAX) {
+                if (hot.mutation == UINT32_MAX) {
                     s_hard = true;
                     loss();
                     return;
                 }
-                ++c.mutation;
-                hd::merge(c.counters, s_split_delta.heater[h]);
+                ++hot.mutation;
+                hd::merge(hot.counters, s_work.record.split_delta.heater[h]);
                 c.state |= Live | Dirty;
             }
     }
@@ -756,7 +1075,7 @@ void heater_context_report(uint8_t heater, HeaterContextHeaterReport& out) {
     out.partial = out.restore_pending = true;
     if (!lock || heater >= 2) return;
     const auto m            = project_locked();
-    out.counters            = s_projection[heater];
+    out.counters            = s_work.projection[heater];
     out.epoch               = m.epoch;
     out.capabilities        = m.capabilities;
     out.flags               = m.flags;
@@ -777,7 +1096,7 @@ void heater_context_payload(logic::HeaterContextPayloadFields& out) {
         return;
     }
     const auto m = project_locked();
-    logic::heater_context_payload_project(out, s_projection, m);
+    logic::heater_context_payload_project(out, s_work.projection, m);
 }
 bool heater_context_flash_scan_begin() {
     SemGuard lock(s_mutex, 0);
@@ -793,6 +1112,7 @@ bool heater_context_flash_scan_begin() {
     s_scan.mutation = s_physical;
     s_scan.wall     = wall;
     s_scan.active   = true;
+    if (s_clean_dirty) s_clean_replay = 0;
     // Rebuild the bounded fence catalog, retaining the separately known current cutoff,
     // physical highwater and rollback floor. Safe retirement can then free old identities.
     for (auto& f : s_fences) wh::zero_object(f);
@@ -837,15 +1157,28 @@ void heater_context_flash_sector_erased(uint16_t first) {
     for (auto& heater : s_cells)
         for (auto& c : heater)
             if (c.revision && c.slot >= first && c.slot < first + per) {
-                c.revision = 0;
-                c.slot     = 0;
-                c.state &= uint8_t(~DurableSeen);
-                if ((c.state & BaseKnown) && has_evidence(c.counters))
-                    c.state |= Dirty;
-                else if (!has_evidence(c.counters))
+                if (c.hot != kNoHot) {
+                    c.revision = 0;
+                    c.slot     = 0;
+                    c.state &= uint8_t(~DurableSeen);
+                    if ((c.state & BaseKnown) && has_evidence(s_hot[c.hot].counters))
+                        c.state |= Dirty;
+                    else if (!has_evidence(s_hot[c.hot].counters)) {
+                        release_hot(c);
+                        wh::zero_object(c);
+                        c.hot = kNoHot;
+                    } else
+                        s_flags |= hc::LatestFailure | hc::Loss;
+                } else {
+                    const bool was_clean = (c.state & BasePresent) != 0;
                     wh::zero_object(c);
-                else
-                    s_flags |= hc::LatestFailure | hc::Loss;
+                    c.hot = kNoHot;
+                    if (was_clean) {
+                        invalidate_clean();
+                        s_flags |= hc::Incomplete | hc::Loss;
+                        loss();
+                    }
+                }
             }
 }
 void heater_context_flash_service(HeaterContextReader reader, size_t budget) {
@@ -878,6 +1211,7 @@ void heater_context_flash_service(HeaterContextReader reader, size_t budget) {
         if (slot + 1 == logic::HISTORY_JOURNAL_SLOT_COUNT) heater_context_flash_scan_finish();
     }
     materialize(reader, slice);
+    rebuild_clean(reader, slice);
 }
 
 bool heater_context_flash_next(HeaterContextReader, uint64_t sequence, HeaterContextFlashPiece& out,
@@ -913,27 +1247,30 @@ bool heater_context_flash_next(HeaterContextReader, uint64_t sequence, HeaterCon
         }
     bool encoded = false;
     if (retirement) {
-        wh::zero_object(s_write_fence);
-        s_write_fence.identity = retirement->identity;
-        s_write_fence.reason   = retirement->reason;
-        s_write_fence.sequence = sequence;
-        s_piece.kind           = wh::Kind::Fence;
-        s_piece.bytes          = 32;
-        s_piece.token          = retirement->token;
-        s_piece.bucket         = wall / wh::HOUR_US;
-        encoded                = wh::encode_fence(s_write_fence, s_wire, 32);
+        wh::zero_object(s_work.write_fence);
+        s_work.write_fence.identity = retirement->identity;
+        s_work.write_fence.reason   = retirement->reason;
+        s_work.write_fence.sequence = sequence;
+        wh::zero_object(s_claim_meta);
+        s_claim_meta.identity = retirement->identity;
+        s_claim_meta.reason   = retirement->reason;
+        s_piece.kind          = wh::Kind::Fence;
+        s_piece.bytes         = 32;
+        s_piece.token         = retirement->token;
+        s_piece.bucket        = wall / wh::HOUR_US;
+        encoded               = wh::encode_fence(s_work.write_fence, s_wire, 32);
     } else {
         if (!clock_ok(now, wall) || !s_proof || !s_enabled || !s_confirmed || s_clock_bad ||
             s_hard || pending_fence(s_identity))
             return false;
-        Cell* chosen = nullptr;
+        CellMeta* chosen = nullptr;
         for (size_t h = 0; h < 2; ++h)
             if (s_heaters & (1u << h))
                 for (auto& c : s_cells[h])
                     if ((c.state & (Occupied | Dirty | BaseKnown)) ==
                             (Occupied | Dirty | BaseKnown) &&
-                        !(c.state & Refused) && has_evidence(c.counters) &&
-                        wh::in_window(c.bucket, wall) &&
+                        !(c.state & Refused) && c.hot != kNoHot &&
+                        has_evidence(s_hot[c.hot].counters) && wh::in_window(c.bucket, wall) &&
                         wh::end_not_future(c.bucket, c.last, wall) &&
                         (c.bucket < wall / wh::HOUR_US || s_sealed) &&
                         (!chosen || c.bucket < chosen->bucket)) {
@@ -941,25 +1278,32 @@ bool heater_context_flash_next(HeaterContextReader, uint64_t sequence, HeaterCon
                         s_claim_heater = uint8_t(h);
                     }
         if (!chosen) return false;
-        wh::zero_object(s_write);
-        s_write.identity     = s_identity;
-        s_write.heater       = s_claim_heater;
-        s_write.required     = s_heaters;
-        s_write.capabilities = s_caps;
-        s_write.first        = chosen->first;
-        s_write.last         = chosen->last;
-        s_write.counters     = chosen->counters;
-        s_write.flags        = chosen->flags | hc::WirePartial;
-        s_write.lost         = chosen->lost;
-        if (s_dropped > s_write.lost) s_write.lost = s_dropped;
-        if (s_write.lost) s_write.flags |= hc::WirePartial | hc::WireLoss;
-        s_piece.kind   = wh::Kind::Data;
-        s_piece.bytes  = 192;
-        s_piece.bucket = chosen->bucket;
-        s_piece.token  = token();
+        const auto& hot = s_hot[chosen->hot];
+        wh::zero_object(s_work.write);
+        s_work.write.identity     = s_identity;
+        s_work.write.heater       = s_claim_heater;
+        s_work.write.required     = s_heaters;
+        s_work.write.capabilities = s_caps;
+        s_work.write.first        = chosen->first;
+        s_work.write.last         = chosen->last;
+        s_work.write.counters     = hot.counters;
+        s_work.write.flags        = chosen->flags | hc::WirePartial;
+        s_work.write.lost         = chosen->lost;
+        if (s_dropped > s_work.write.lost) s_work.write.lost = s_dropped;
+        if (s_work.write.lost) s_work.write.flags |= hc::WirePartial | hc::WireLoss;
+        wh::zero_object(s_claim_meta);
+        s_claim_meta.identity     = s_identity;
+        s_claim_meta.capabilities = s_caps;
+        s_claim_meta.required     = s_heaters;
+        s_claim_meta.flags        = s_work.write.flags;
+        s_claim_meta.lost         = s_work.write.lost;
+        s_piece.kind              = wh::Kind::Data;
+        s_piece.bytes             = 192;
+        s_piece.bucket            = chosen->bucket;
+        s_piece.token             = token();
         if (!s_piece.token) return false;
-        s_claim_mutation = chosen->mutation;
-        encoded          = wh::encode_data(s_write, s_wire, 192);
+        s_claim_mutation = hot.mutation;
+        encoded          = wh::encode_data(s_work.write, s_wire, 192);
     }
     if (!encoded) {
         s_hard = true;
@@ -1009,22 +1353,26 @@ void heater_context_flash_appended(const HeaterContextFlashPiece& p, uint16_t sl
     if (p.sequence > s_highest) s_highest = p.sequence;
     known_append();
     if (!claim_current()) {
-        if (p.kind == wh::Kind::Data) retire(s_write.identity, 1);
+        if (p.kind == wh::Kind::Data) retire(s_claim_meta.identity, 1);
         invalidate();
         s_retry = 0;
         s_claim = s_outstanding = s_deferred = false;
         return;
     }
     if (p.kind == wh::Kind::Fence) {
-        if (!add_fence(s_write_fence)) {
+        s_work.write_fence.sequence = p.sequence;
+        s_work.write_fence.identity = s_claim_meta.identity;
+        s_work.write_fence.reason   = s_claim_meta.reason;
+        std::memset(s_work.write_fence.pad, 0, sizeof(s_work.write_fence.pad));
+        if (!add_fence(s_work.write_fence)) {
             s_hard = true;
             loss();
         }
         for (auto& r : s_retire)
             if (r.token == p.token) wh::zero_object(r);
-        if (wh::equal(s_write_fence.identity, s_identity)) {
+        if (wh::equal(s_work.write_fence.identity, s_identity)) {
             s_current_fence = p.sequence;
-            if (s_write_fence.reason == 2 && p.sequence > s_floor) {
+            if (s_work.write_fence.reason == 2 && p.sequence > s_floor) {
                 s_clock_bad  = false;
                 s_anchored   = false;
                 s_read_limit = esp_timer_get_time();
@@ -1040,9 +1388,20 @@ void heater_context_flash_appended(const HeaterContextFlashPiece& p, uint16_t sl
         if ((c.state & Occupied) && c.bucket == p.bucket) {
             c.revision = p.sequence;
             c.slot     = slot;
-            c.flags |= s_write.flags;
-            if (s_write.lost > c.lost) c.lost = s_write.lost;
-            if (c.mutation == s_claim_mutation) c.state &= uint8_t(~Dirty);
+            c.flags |= s_claim_meta.flags;
+            if (s_claim_meta.lost > c.lost) c.lost = s_claim_meta.lost;
+            if (c.hot != kNoHot && s_hot[c.hot].mutation == s_claim_mutation) {
+                c.state        = uint8_t((c.state & ~Dirty) | BasePresent);
+                const auto now = esp_timer_get_time(), wall = heater_wall_now();
+                if (s_sample >= 0 && now > s_sample && now - s_sample > hd::MAX_GAP_US)
+                    hd::pause(s_reducer);
+                const bool reducer_past =
+                    s_sealed || !s_reducer.active ||
+                    (s_reducer.previous_us >= 0 &&
+                     c.bucket < (s_reducer.previous_us + s_offset) / wh::HOUR_US);
+                if (s_sealed || (wall >= 0 && c.bucket < wall / wh::HOUR_US && reducer_past))
+                    demote_to_clean_locked(s_claim_heater, size_t(p.bucket % 24));
+            }
         }
     }
     s_claim = s_outstanding = s_deferred = false;
@@ -1061,6 +1420,17 @@ HeaterContextErasePermission heater_context_flash_erase_permission(HeaterContext
         {
             SemGuard lock(s_mutex, 0);
             if (!lock) return HeaterContextErasePermission::Pending;
+            const auto now = esp_timer_get_time(), wall = heater_wall_now();
+            expire_locked(now, wall);
+            const bool synced_clock = clock_ok(now, wall);
+            for (size_t h = 0; h < 2; ++h)
+                for (const auto& c : s_cells[h])
+                    if ((c.state & Occupied) && c.hot == kNoHot && (c.state & BasePresent) &&
+                        c.revision && c.slot >= first && c.slot < first + per &&
+                        (!synced_clock || wh::in_window(c.bucket, wall))) {
+                        wh::zero_object(s_erase);
+                        return HeaterContextErasePermission::Protected;
+                    }
             if (!s_erase.phase || s_erase.epoch != s_epoch || s_erase.mutation != s_physical ||
                 s_erase.first != first) {
                 wh::zero_object(s_erase);
@@ -1089,14 +1459,15 @@ HeaterContextErasePermission heater_context_flash_erase_permission(HeaterContext
                 const auto kind = wh::kind(*v.header), oldkind = hc::kind(*v.header);
                 if (s_erase.phase == 1 && oldkind != wh::Kind::Unknown) protect = true;
                 if (kind != wh::Kind::Unknown && !wh::typed(v, kind)) protect = true;
-                if (kind == wh::Kind::Data && !wh::decode_data_into(v.payload, 192, s_read))
+                if (kind == wh::Kind::Data &&
+                    !wh::decode_data_into(v.payload, 192, s_read_buf.data))
                     protect = true;
                 if (kind == wh::Kind::Fence) {
-                    if (!wh::decode_fence_into(v.payload, 32, s_read_fence) ||
-                        s_read_fence.sequence != v.header->sequence)
+                    if (!wh::decode_fence_into(v.payload, 32, s_read_buf.fence) ||
+                        s_read_buf.fence.sequence != v.header->sequence)
                         protect = true;
-                    else if (s_erase.phase == 1 && s_read_fence.sequence > s_erase.cutoff)
-                        s_erase.cutoff = s_read_fence.sequence;
+                    else if (s_erase.phase == 1 && s_read_buf.fence.sequence > s_erase.cutoff)
+                        s_erase.cutoff = s_read_buf.fence.sequence;
                 }
                 if (s_erase.phase == 2 &&
                     (kind == wh::Kind::Data || oldkind == wh::Kind::Data ||
@@ -1130,13 +1501,5 @@ HeaterContextErasePermission heater_context_flash_erase_permission(HeaterContext
         }
     }
 }
-size_t heater_context_private_static_bytes() {
-    return sizeof(s_cells) + sizeof(s_retire) + sizeof(s_fences) + sizeof(s_identity) +
-           sizeof(s_reducer) + sizeof(s_delta) + sizeof(s_split_delta) + sizeof(s_split) +
-           sizeof(s_projection) + sizeof(s_write) + sizeof(s_read) + sizeof(s_write_fence) +
-           sizeof(s_read_fence) + sizeof(s_wire) + sizeof(s_piece) + sizeof(s_scan) +
-           sizeof(s_erase) + sizeof(s_mutex_storage) + sizeof(s_mutex) + sizeof(s_highest) * 4 +
-           sizeof(s_epoch) * 4 + sizeof(s_caps) * 3 + sizeof(s_heaters) * 2 +
-           sizeof(s_enabled) * 9 + sizeof(s_offset) * 6 + sizeof(s_anchored);
-}
+size_t heater_context_private_static_bytes() { return kPrivateStaticBytes; }
 } // namespace daik

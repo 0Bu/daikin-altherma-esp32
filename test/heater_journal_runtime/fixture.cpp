@@ -1211,17 +1211,37 @@ unsigned written_key(uint16_t slot, int64_t first_bucket) {
 }
 void shutdown_48_cells_best_effort() {
     boot_store(true);
-    dirty_live_hours(24, true);
+    require(heater_context_private_static_bytes() <= 4800,
+            "heater Store static DRAM stays within 4800 B budget");
+    for (unsigned hour = 0; hour < 22; ++hour) {
+        sample_at(int64_t(hour) * 3600 + 2);
+        sample_at(int64_t(hour) * 3600 + 12);
+        sdk::now_us = int64_t(hour + 1) * hc::HOUR_US;
+        heater_context_expire();
+        require(history_flash_service_journal(2, 0) == 2,
+                "each closed hour flushes and demotes to flash-backed clean archive");
+    }
+    sample_at(22 * 3600 + 2);
+    sample_at(22 * 3600 + 12);
+    sample_at(23 * 3600 + 2);
+    sample_at(23 * 3600 + 12);
+    sdk::now_us += 1000000;
+    heater_context_seal();
     require(heater_context_status().observed_hours[0] == 24 &&
                 heater_context_status().observed_hours[1] == 24,
             "all48 independent materialized cells are available before bounded shutdown");
     s_flash_next_slot = 128;
     clear_read_measurement();
-    require(history_flash_service_journal(12, 0) == 12 && programs == 24 &&
-                s_flash_next_sequence == 13,
-            "real twelve-record shutdown budget drains only twelve of48 dirty cells");
-    require(heater_context_status().persistence_pending && record_reads <= 24 && region_reads <= 12,
-            "best effort shutdown leaves remaining hours pending without hidden archive scan");
+    const unsigned programs_before = programs;
+    const uint64_t seq_before      = s_flash_next_sequence;
+    require(history_flash_service_journal(2, 0) == 2 && programs == programs_before + 4 &&
+                s_flash_next_sequence == seq_before + 2,
+            "bounded shutdown drains two of four hot dirty cells");
+    require(heater_context_status().persistence_pending && record_reads <= 4 && region_reads <= 2,
+            "best effort shutdown leaves remaining hot hours pending without hidden archive scan");
+    require(history_flash_service_journal(12, 0) == 2 &&
+                !heater_context_status().persistence_pending,
+            "remaining two dirty hot cells complete within twelve-record ceiling");
 }
 
 void clean_archive() {
@@ -1289,57 +1309,99 @@ void clock_negative_jitter() {
 void rotation_progress() {
     boot_store(true);
     const int64_t first_bucket = wall_bucket();
-    dirty_live_hours(20);
     // Three occupied sectors force three genuine prepare/keeper/erase callbacks.
     for (unsigned i = 0; i < 3; ++i) seed_ordinary(uint16_t(128 + i * 16), i + 1);
     s_flash_next_slot     = 128;
     s_flash_next_sequence = 4;
     std::array<bool, 48> seen{};
     unsigned             distinct = 0, committed = 0;
-    for (unsigned tick = 0; tick < 400 && committed < 40; ++tick) {
-        positive_tick();
-        if (!history_flash_service_journal(1, 0)) continue;
-        ++committed;
-        const auto key = written_key(uint16_t((s_flash_next_slot + HISTORY_JOURNAL_SLOT_COUNT - 1) %
-                                              HISTORY_JOURNAL_SLOT_COUNT),
-                                     first_bucket);
-        if (!seen[key]) {
-            seen[key] = true;
-            ++distinct;
+    for (unsigned h = 0; h < 20; ++h) {
+        sample_at(int64_t(h) * 3600 + 2);
+        sample_at(int64_t(h) * 3600 + 12);
+        sdk::now_us = int64_t(h + 1) * hc::HOUR_US;
+        heater_context_expire();
+        unsigned hour_committed = 0;
+        for (unsigned tick = 0; tick < 100 && hour_committed < 2; ++tick) {
+            positive_tick();
+            if (!history_flash_service_journal(1, 0)) continue;
+            ++committed;
+            ++hour_committed;
+            const auto key =
+                written_key(uint16_t((s_flash_next_slot + HISTORY_JOURNAL_SLOT_COUNT - 1) %
+                                     HISTORY_JOURNAL_SLOT_COUNT),
+                            first_bucket);
+            if (!seen[key]) {
+                seen[key] = true;
+                ++distinct;
+            }
         }
+        require(hour_committed == 2,
+                "each streamed closed hour commits and demotes cleanly within bounded ticks");
     }
     require(committed == 40 && distinct == 40 && seen[19] && seen[43] && erases == 3,
             "real multi-sector rotation advances all40 distinct cells including youngest hours");
-    require(history_flash_service_journal(12, 0) == 0,
+    require(!heater_context_status().persistence_pending &&
+                history_flash_service_journal(12, 0) == 0,
             "completed rotation leaves no artificial all-hours dirty backlog");
-    // Simulate ring wrap into the first written sector through the actual prepare body.
+    // Simulate ring wrap into the first written sector: active clean cells protect it from erase.
     s_flash_next_slot      = 128;
     s_flash_service_source = size_t(HistoryJournalSource::X10a);
     offer_legacy           = true;
+    require(settle_permission(128) == HeaterContextErasePermission::Protected,
+            "active clean-cell sector is protected during rotation");
+    require(history_flash_service_journal(1, 0) == 0 && s_flash_next_slot == 144 && erases == 3,
+            "ring wrap skips protected clean-cell sector without erasing it");
+    // Unrelated sector 176 erases without dirtying any of the 40 clean cells.
+    seed_ordinary(176, 90);
+    s_flash_next_slot = 176;
     require(history_flash_service_journal(1, 0) == 1 && erases == 4,
-            "real ring wrap erase retires exactly sixteen stored physical references");
-    offer_legacy      = false;
-    s_flash_next_slot = 176; // free fixture sector, not another owned reference
-    std::array<bool, 48> rewritten{};
-    unsigned             rewritten_count = 0;
-    for (unsigned tick = 0; tick < 150 && rewritten_count < 16; ++tick) {
-        positive_tick();
-        if (!history_flash_service_journal(1, 0)) continue;
-        const auto key = written_key(uint16_t(s_flash_next_slot - 1), first_bucket);
-        require(key % 24 < 8 && !rewritten[key],
-                "selective erase rewrites only the sixteen genuinely erased references once");
-        rewritten[key] = true;
-        ++rewritten_count;
-    }
-    require(rewritten_count == 16 && history_flash_service_journal(12, 0) == 0,
-            "selective16 reference rewrite leaves all other24 cells clean");
+            "unrelated sector erases cleanly without disturbing protected clean cells");
+    offer_legacy = false;
+    settle_store();
+    require(!heater_context_status().persistence_pending &&
+                history_flash_service_journal(12, 0) == 0,
+            "unrelated erase after rotation leaves all40 clean cells clean");
     require(heater_context_status().on_us[0] == 200000000 &&
                 heater_context_status().on_us[1] == 200000000,
-            "rotation and selective rewrite never alter authoritative observed counters");
+            "rotation never alters authoritative observed counters");
     boot_store();
     require(heater_context_status().on_us[0] == 200000000 &&
                 heater_context_status().on_us[1] == 200000000,
             "cold latest full revisions restore each rotated hour without summation");
+}
+void clean_sector_protection_and_rebuild() {
+    boot_store(true, false);
+    require(heater_context_private_static_bytes() <= 4800,
+            "heater Store static DRAM stays within 4800 B budget");
+    sdk::now_us          = 23 * hc::HOUR_US + 60000000LL;
+    const int64_t oldest = wall_bucket() - 23;
+    for (uint16_t h = 0; h < 23; ++h) seed_hours(h * 2, h * 2 + 1, oldest + h);
+    s_flash_next_sequence = 47;
+    heater_context_flash_index_invalidate();
+    settle_store();
+    auto status = heater_context_status();
+    require(!status.restore_pending && status.observed_hours[0] == 23 &&
+                status.on_us[0] == 23000000 && status.on_us[1] == 23000000,
+            "clean archive restores 23 closed hours per heater into clean totals");
+    s_flash_next_slot      = 0;
+    s_flash_service_source = size_t(HistoryJournalSource::X10a);
+    offer_legacy           = true;
+    require(settle_permission(0) == HeaterContextErasePermission::Protected,
+            "active clean-cell sector returns Protected against rotation erase");
+    require(history_flash_service_journal(1, 0) == 0 && s_flash_next_slot == 16 && erases == 0,
+            "History prepare skips protected clean-cell sector without erasing");
+    offer_legacy = false;
+    sdk::now_us  = 24 * hc::HOUR_US;
+    heater_context_expire();
+    status = heater_context_status();
+    require(status.restore_pending && status.on_us[0] == 0 && status.on_us[1] == 0,
+            "expired clean archive hides stale clean totals until targeted rebuild completes");
+    clear_read_measurement();
+    positive_tick();
+    status = heater_context_status();
+    require(record_reads <= 46 && !status.restore_pending && status.observed_hours[0] == 22 &&
+                status.on_us[0] == 22000000 && status.on_us[1] == 22000000,
+            "targeted clean rebuild restores exact 22 hours without full archive scan");
 }
 void ghost_no_data() {
     boot_store(true, false);
@@ -1356,6 +1418,7 @@ void ghost_no_data() {
     heater_context_flash_index_invalidate();
     settle_store();
     require(history_flash_service_journal(12, 0) == 0 && programs == 0 &&
+                !heater_context_status().persistence_pending &&
                 !heater_context_status().observed_hours[0] &&
                 !heater_context_status().observed_hours[1],
             "real History writer never emits empty ghost Data after prefence reproof");
@@ -1595,6 +1658,8 @@ int main(int argc, char** argv) {
             clock_negative_jitter();
         else if (name == "rotation_progress")
             rotation_progress();
+        else if (name == "clean_sector_protection_and_rebuild")
+            clean_sector_protection_and_rebuild();
         else if (name == "ghost_no_data")
             ghost_no_data();
         else if (name == "dispatcher_sources")
