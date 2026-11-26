@@ -1675,6 +1675,24 @@ button.fault-chip[aria-pressed="true"] {
 .checkup-fault-table tr.is-snapped td { background: color-mix(in srgb, var(--brand-sky) 14%, transparent); }
 .checkup-fault-sub { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 .checkup-fault-boundary { margin: 2px 0 0; }
+.checkup-retries-panel { display: grid; gap: 10px; }
+.checkup-retries-hero { display: grid; gap: 4px; }
+.checkup-retries-hero .vdesc-p { margin: 0; }
+.checkup-retries-meta { font-size: 12.5px; color: var(--muted); }
+.checkup-retries-list { display: grid; gap: 6px; }
+.checkup-retries-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.checkup-retries-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.retry-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--soft);
+  color: var(--muted); font-size: 12px; font-weight: 500;
+}
+.retry-chip.is-seen {
+  color: var(--fg); font-weight: 600; border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 15%, var(--card));
+}
+.retry-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; display: inline-block; }
+.checkup-retries-boundary { margin: 2px 0 0; }
 @media (max-width: 440px) {
   .checkup-fault-table { font-size: 11px; }
   .checkup-fault-table th, .checkup-fault-table td { padding: 4px 2px; }

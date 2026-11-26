@@ -18002,6 +18002,52 @@ static void test_checkup(bool with_trace) {
         CHECK(partial_b.retry_observed_s == 0);
         checkup_step(partial_st, partial_b, s, 3'000'000);
         CHECK(partial_b.retry_observed_s == 1);
+
+        // Per-counter slug mapping and 5-bit mask packing (must not interfere with bar_crit or
+        // dhw_hour_s).
+        CHECK(std::string(checkup_retry_counter_name(0)) == "discharge_temp");
+        CHECK(std::string(checkup_retry_counter_name(1)) == "inv_current");
+        CHECK(std::string(checkup_retry_counter_name(2)) == "high_pressure");
+        CHECK(std::string(checkup_retry_counter_name(3)) == "low_pressure");
+        CHECK(std::string(checkup_retry_counter_name(4)) == "fin_temp");
+        CHECK(std::string(checkup_retry_counter_name(5)).empty());
+
+        for (size_t bit = 0; bit < CHECKUP_RETRY_COUNT; ++bit) {
+            CheckupBucket mb;
+            mb.bar_crit   = 1;
+            mb.dhw_hour_s = 3600;
+            mb.add_retry_mask(static_cast<uint8_t>(1u << bit));
+            CHECK(mb.retry_mask() == static_cast<uint8_t>(1u << bit));
+            CHECK((mb.flags & CHECKUP_F_RETRY) != 0);
+            CHECK(mb.bar_crit == 1);
+            CHECK(mb.dhw_hour_s == 3600);
+        }
+        {
+            CheckupBucket zero_mb;
+            zero_mb.add_retry_mask(0);
+            CHECK(zero_mb.retry_mask() == 0);
+            CHECK((zero_mb.flags & CHECKUP_F_RETRY) == 0);
+        }
+
+        // Recording single and multiple simultaneous counter rises; decrease invalidates the
+        // interval.
+        CheckupState  mask_st;
+        CheckupBucket mask_b;
+        s                = retry_sample();
+        s.retry_value[0] = 1;
+        s.retry_value[3] = 2;
+        s.retry_value[4] = 4;
+        checkup_step(mask_st, mask_b, s, 0);
+        s.retry_value[0] = 2;
+        s.retry_value[4] = 5;
+        checkup_step(mask_st, mask_b, s, 1'000'000);
+        CHECK(mask_b.retry_observed_s == 1);
+        CHECK(mask_b.retry_mask() == ((1u << 0) | (1u << 4)));
+        s.retry_value[2] = 1; // rises
+        s.retry_value[3] = 1; // decreases -> invalidates whole interval
+        checkup_step(mask_st, mask_b, s, 2'000'000);
+        CHECK(mask_b.retry_observed_s == 1);
+        CHECK(mask_b.retry_mask() == ((1u << 0) | (1u << 4)));
     }
     {
         // The fault flags come from conv 203's OWN class table (logic/fault_state.hpp), so a class
@@ -19666,10 +19712,39 @@ static void test_checkup(bool with_trace) {
         CHECK(checkup_evaluate(w, noctr, FaultClass::Normal)[CheckupCheck::Retries].verdict ==
               CheckupVerdict::Unavailable);
         w.flags            = 0;
+        w.retry_mask       = 0;
         w.retry_observed_s = CHECKUP_REQUIRED_S;
         w.full_span        = false;
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Retries].verdict ==
               CheckupVerdict::Ok);
+
+        // Per-counter mask aggregation across hours and evaluation into CheckupReport.
+        CheckupRing retry_ring;
+        retry_ring.count = 2;
+        retry_ring.buf[0].add_retry_mask(1u << 1);
+        retry_ring.buf[1].add_retry_mask(1u << 3);
+        retry_ring.pending.retry_observed_s = 120;
+        const CheckupWindow agg_retry       = checkup_aggregate(retry_ring);
+        CHECK(agg_retry.retry_mask == ((1u << 1) | (1u << 3)));
+        const CheckupReport rep_retry = checkup_evaluate(agg_retry, full, FaultClass::Normal);
+        CHECK(rep_retry[CheckupCheck::Retries].verdict == CheckupVerdict::Info);
+        CHECK(rep_retry.retry_increased_mask == ((1u << 1) | (1u << 3)));
+
+        // Legacy CHECKUP_F_RETRY without retry_mask still produces Info with mask 0.
+        CheckupWindow legacy_retry     = day();
+        legacy_retry.flags             = CHECKUP_F_RETRY;
+        legacy_retry.retry_mask        = 0;
+        const CheckupReport rep_legacy = checkup_evaluate(legacy_retry, full, FaultClass::Normal);
+        CHECK(rep_legacy[CheckupCheck::Retries].verdict == CheckupVerdict::Info);
+        CHECK(rep_legacy.retry_increased_mask == 0);
+
+        CheckupWindow mask_only_retry = day();
+        mask_only_retry.flags         = 0;
+        mask_only_retry.retry_mask    = static_cast<uint8_t>(1u << 2);
+        const CheckupReport rep_mask_only =
+            checkup_evaluate(mask_only_retry, full, FaultClass::Normal);
+        CHECK(rep_mask_only[CheckupCheck::Retries].verdict == CheckupVerdict::Info);
+        CHECK(rep_mask_only.retry_increased_mask == static_cast<uint8_t>(1u << 2));
     }
     {
         // AGGREGATION. Supported observations remain visible and count as available, but only
@@ -25307,6 +25382,18 @@ static void test_history_persist() {
     checkup_words[offsetof(CheckupJournalPayload, checkup) + offsetof(CheckupBucket, starts)] ^= 1;
     CHECK(ch.crc != history_journal_crc_bytes(ch, checkup_words, sizeof(checkup_words)));
     checkup_words[offsetof(CheckupJournalPayload, checkup) + offsetof(CheckupBucket, starts)] ^= 1;
+    {
+        CheckupJournalPayload mask_crc_payload = checkup_payload;
+        mask_crc_payload.checkup.add_retry_mask(1u << 0);
+        uint8_t mask_words[CHECKUP_JOURNAL_PAYLOAD_BYTES] = {};
+        std::memcpy(mask_words, &mask_crc_payload, sizeof(mask_crc_payload));
+        CHECK(ch.crc != history_journal_crc_bytes(ch, mask_words, sizeof(mask_words)));
+        mask_crc_payload = checkup_payload;
+        mask_crc_payload.checkup.add_retry_mask(1u << 4);
+        std::memset(mask_words, 0, sizeof(mask_words));
+        std::memcpy(mask_words, &mask_crc_payload, sizeof(mask_crc_payload));
+        CHECK(ch.crc != history_journal_crc_bytes(ch, mask_words, sizeof(mask_words)));
+    }
     CHECK(!history_journal_header_matches(ch, checkup_journal_fingerprint() ^ 1u,
                                           CHECKUP_JOURNAL_WORDS, CHECKUP_DT_S));
     CHECK(!history_journal_header_matches(ch, checkup_journal_fingerprint(), CHECKUP_JOURNAL_WORDS,

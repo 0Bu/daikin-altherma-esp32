@@ -470,7 +470,7 @@ try {
     { id: "pressure", verdict: "info", min_bar: 0.8, current_bar: 1.2, observed_s: 3600, required_s: 3600 },
     { id: "flow", verdict: "ok", min_l_min: 14.0, observed_s: 3600, required_s: 3600,
       hydronic: { confirmed: true, current: true, dated: true, samples: 5, spread_k: { min: 1.5, mean: 2.0, max: 3.0 } } },
-    { id: "retries", verdict: "info", seen: true, observed_s: 3600, required_s: 3600 },
+    { id: "retries", verdict: "info", seen: true, counters: ["high_pressure"], observed_s: 3600, required_s: 3600 },
   ]) ui.checkupDetailHtml(ck, true, { source: "x10a", span_s: 86400, source_fresh: true });
   // Exercise checkupHeaterReport & checkupHeaterBriefHtml across all branches.
   assert.equal(ui.checkupHeaterReport(null), null);

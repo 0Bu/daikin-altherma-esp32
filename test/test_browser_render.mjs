@@ -1908,7 +1908,7 @@ async function assertPlantDiagnosis(page, context) {
           bsh_s: 64800, buh_observed_s: 72000, bsh_observed_s: 72000,
           observed_s: 72000, required_s: 0, context: heaterContext },
         { id: "retries", verdict: "info", evidence: "experimental", seen: 1,
-          observed_s: 7200, required_s: 0 }
+          counters: ["high_pressure"], observed_s: 7200, required_s: 0 }
       ]
     };
     S.status.diagnostics = { ...(S.status.diagnostics || {}), enabled: true, effective_source: "x10a" };
@@ -2005,7 +2005,7 @@ async function assertPlantDiagnosis(page, context) {
       S.status.health.checks[0].active = null;
       Object.assign(S.status.health.checks[4], { verdict: "warn", min_bar: 0.4, confirmed_critical: true });
       Object.assign(S.status.health.checks[6], { buh_s: 59, bsh_s: null, bsh_observed_s: 0 });
-      Object.assign(S.status.health.checks[7], { verdict: "ok", seen: 0 });
+      Object.assign(S.status.health.checks[7], { verdict: "ok", seen: 0, counters: [] });
       renderApp();
       return true;
     })()`);
@@ -2042,6 +2042,22 @@ async function assertPlantDiagnosis(page, context) {
         assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
         assert.ok(!block.text.some(text => text.includes(normalLabel)),
           `${context}/${block.id}: unit fault must not render a generic Normal block`);
+        continue;
+      }
+      if (block.id === "model:health_retries") {
+        assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
+        assert.ok(!block.text.some(text => text.includes(normalLabel)),
+          `${context}/${block.id}: retries must not render a generic Normal block`);
+        const retriesState = await page.evaluate(`(() => {
+          const panel = document.querySelector("[data-desc='model:health_retries']")?.closest('.vitem')
+            ?.querySelector('.checkup-retries-panel');
+          const chips = [...(panel?.querySelectorAll('[data-retry-counter]') || [])];
+          const seen = chips.filter(el => el.classList.contains('is-seen')).map(el => el.dataset.retryCounter);
+          return { hasPanel: !!panel, chipCount: chips.length, seen };
+        })()`);
+        assert.equal(retriesState.hasPanel, true, `${context}/${block.id}: dedicated retries panel renders`);
+        assert.equal(retriesState.chipCount, 5, `${context}/${block.id}: all 5 protection chips render`);
+        assert.deepEqual(retriesState.seen, ["high_pressure"], `${context}/${block.id}: increased counter chip marked`);
         continue;
       }
       assert.equal(block.count, 3, `${context}/${block.id}: exactly three blocks`);

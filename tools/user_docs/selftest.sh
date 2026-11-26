@@ -220,6 +220,17 @@ for component in main/logic/heater_context.hpp main/logic/heater_context_input.h
     run_case "heater guide fingerprint covers $component" 1 "U010 docs/DIAGNOSTICS.md"
 done
 
+echo "== 16. health_retries must not carry a generic Normal paragraph =="
+reset
+patch_file "$WORK/main/www/js/history.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read(); old = '  health_retries: {\n'
+if s.count(old) != 1: sys.exit(1)
+new = old + '    normal: "No increase recorded.",\n'
+open(p, 'w').write(s.replace(old, new, 1))
+PY
+run_case "generic Normal paragraph on health_retries is caught" 1 "U016 health_retries.en.normal"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "user docs audit selftest: all $pass cases caught"

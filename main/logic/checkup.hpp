@@ -190,6 +190,22 @@ constexpr int checkup_retry_index(unsigned reg, unsigned off, int conv) {
     if (off == 12u && conv == 310) return 4; // inverter fin temperature
     return -1;
 }
+constexpr const char* checkup_retry_counter_name(size_t index) {
+    switch (index) {
+    case 0:
+        return "discharge_temp";
+    case 1:
+        return "inv_current";
+    case 2:
+        return "high_pressure";
+    case 3:
+        return "low_pressure";
+    case 4:
+        return "fin_temp";
+    default:
+        return "";
+    }
+}
 
 // Exact sums describe accepted samples; a complete modulating run can exceed 65535 samples.
 struct CheckupOutdoorStats {
@@ -199,9 +215,15 @@ struct CheckupOutdoorStats {
 };
 static_assert(sizeof(CheckupOutdoorStats) == 12, "outdoor context cost changed");
 
+// Bucket flags — facts that happened at least once in the hour and have no useful magnitude.
+constexpr uint8_t CHECKUP_F_FAULT   = 1u << 0; // conv 203 read class Error
+constexpr uint8_t CHECKUP_F_WARNING = 1u << 1; // conv 203 read class Warning/Caution
+constexpr uint8_t CHECKUP_F_RETRY   = 1u << 2; // a protection-retry counter strictly INCREASED
+constexpr uint8_t CHECKUP_F_LOW_BAR = 1u << 3; // <=1.0 bar persisted for the confirmation period
+
 // ── One hour of evidence ────────────────────────────────────────────────────────────────────────
-// `covered_s` is the load-bearing field and the reason a fresh board cannot show a green verdict: it
-// counts the seconds actually OBSERVED in this hour, so an hour the firmware slept through, or a
+// `covered_s` is the load-bearing field and the reason a fresh board cannot show a green verdict:
+// it counts the seconds actually OBSERVED in this hour, so an hour the firmware slept through, or a
 // device that has been up for ten minutes, reports the small number it has rather than an implied
 // full day.
 struct CheckupBucket {
@@ -230,11 +252,13 @@ struct CheckupBucket {
     uint64_t flow_observed_s : 12;
     uint64_t retry_observed_s : 12;
     uint64_t bar_crit : 1; // <=0.5 bar confirmed for CHECKUP_PRESSURE_CONFIRM_S in this bucket
+    uint64_t retry_mask_low : 3;
     constexpr CheckupBucket()
         : covered_s(0), rps_observed_s(0), run_s(0), class_observed_s(0), dfr_observed_s(0),
           space_hour_low(0), dfr_pair_observed_s(0), dfr_run_s(0), defrost_s(0), buh_observed_s(0),
           buh_s(0), flags(0), bsh_observed_s(0), bsh_s(0), bar_observed_s(0), flow_observed_s(0),
-          retry_observed_s(0), bar_crit(0) {}
+          retry_observed_s(0), bar_crit(0), retry_mask_low(0), dhw_hour_s(0), retry_mask_high(0),
+          retry_mask_pad(0) {}
     // WHICH LOAD a compressor RUN served. RPS lives on 0x30; the 3-way valve and I/U mode live on
     // 0x60, so either page can time out alone. `class_observed_s` is the paired class clock: RPS
     // and valve must be readable together, plus I/U mode whenever the valve points at the room
@@ -274,7 +298,9 @@ struct CheckupBucket {
     // Start-not-witnessed is the remainder of censored_runs after the four exclusive causes above.
     // A saturated runtime is a lower bound and permanently blocks this window's runtime gate.
     uint16_t censored_runtime_s = 0;
-    uint16_t            dhw_hour_s = 0;  // positively witnessed DHW compressor seconds in this hour
+    uint16_t dhw_hour_s : 12; // positively witnessed DHW compressor seconds in this hour (0..3600)
+    uint16_t retry_mask_high : 2;        // bits 3..4 of the 5-bit per-counter retry increase mask
+    uint16_t retry_mask_pad : 2;         // reserved, zero-initialized
     CheckupOutdoorStats cycling_outdoor; // samples from completed, pure space-heating runs only
     CheckupOutdoorStats defrost_outdoor; // samples paired with known defrost + running compressor
 
@@ -286,16 +312,20 @@ struct CheckupBucket {
         space_hour_high = static_cast<uint8_t>(seconds >> 4);
         space_hour_low  = seconds & 0x0f;
     }
+    constexpr uint8_t retry_mask() const {
+        return static_cast<uint8_t>(retry_mask_low | (retry_mask_high << 3));
+    }
+    void add_retry_mask(uint8_t mask) {
+        const uint8_t combined = static_cast<uint8_t>((retry_mask() | mask) & 0x1fu);
+        retry_mask_low         = combined & 0x07u;
+        retry_mask_high        = (combined >> 3) & 0x03u;
+        if (combined) flags |= CHECKUP_F_RETRY;
+    }
 };
-
-// Bucket flags — facts that happened at least once in the hour and have no useful magnitude.
-constexpr uint8_t CHECKUP_F_FAULT   = 1u << 0;   // conv 203 read class Error
-constexpr uint8_t CHECKUP_F_WARNING = 1u << 1;   // conv 203 read class Warning/Caution
-constexpr uint8_t CHECKUP_F_RETRY   = 1u << 2;   // a protection-retry counter strictly INCREASED
-constexpr uint8_t CHECKUP_F_LOW_BAR = 1u << 3;   // <=1.0 bar persisted for the confirmation period
 
 // 80 bytes per hour: wider completed-run/context counts and a dated pressure minimum add
 // 384 bytes to the 24-slot ring. No sampling allocation or partition change is involved.
+static_assert(sizeof(CheckupBucket) == 80, "CheckupBucket must remain 80 bytes");
 constexpr size_t CHECKUP_BYTES = sizeof(CheckupBucket) * CHECKUP_BUCKETS;
 static_assert(CHECKUP_BYTES <= 1920,
               "the static checkup ring is too large for this heap-tight board");
@@ -1474,7 +1504,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             (s.retry_known_mask & s.retry_expected_mask) == s.retry_expected_mask &&
             (st.prev_retry_known_mask & s.retry_expected_mask) == s.retry_expected_mask &&
             st.prev_rps_known && s.rps_known;
-        bool retry_increased = false;
+        uint8_t retry_increased_mask = 0;
         if (retry_comparable) {
             for (size_t i = 0; i < CHECKUP_RETRY_COUNT; i++) {
                 if (!(s.retry_expected_mask & (1u << i))) continue;
@@ -1482,12 +1512,14 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                     retry_comparable = false;
                     break;
                 }
-                if (s.retry_value[i] > st.prev_retry_value[i]) retry_increased = true;
+                if (s.retry_value[i] > st.prev_retry_value[i]) {
+                    retry_increased_mask |= static_cast<uint8_t>(1u << i);
+                }
             }
         }
         if (retry_comparable) {
             b.retry_observed_s = checkup_add_hour_s(b.retry_observed_s, dt);
-            if (retry_increased) b.flags |= CHECKUP_F_RETRY;
+            if (retry_increased_mask) b.add_retry_mask(retry_increased_mask);
         }
 
         // Edges. Both sides must be KNOWN — an unreadable cycle in the middle of a run breaks the
@@ -1829,8 +1861,9 @@ struct CheckupWindow {
     uint32_t paired_defrosts = 0;
     int      min_bar   = CHECKUP_ABSENT;
     int      min_flow  = CHECKUP_ABSENT;
-    uint32_t min_bar_unix_s      = 0;
-    uint8_t  flags     = 0;
+    uint32_t min_bar_unix_s            = 0;
+    uint8_t  flags                     = 0;
+    uint8_t  retry_mask                = 0;
     bool     bar_crit                  = false;
     // Wider count/sum live only on the evaluating stack; the persisted per-hour representation
     // above stays compact while a full 24 h at one sample per second remains representable.
@@ -1886,6 +1919,7 @@ inline CheckupWindow checkup_aggregate(const CheckupRing& r) {
         w.defrosts  += b.defrosts;
         w.paired_defrosts += b.paired_defrosts;
         w.flags     |= b.flags;
+        w.retry_mask |= b.retry_mask();
         if (b.bar_crit) w.bar_crit = true;
         if (b.cycling_outdoor.samples) {
             w.cycling_outdoor_samples += b.cycling_outdoor.samples;
@@ -2368,6 +2402,7 @@ struct CheckupReport : CheckupCyclingEvidence {
     // remain observations and never decide the result.
     bool              cycling_split = false;
     uint8_t           dhw_abort_reasons = 0;
+    uint8_t           retry_increased_mask = 0;
     bool              dhw_blocked = false;
     bool              full_span = false;
     uint8_t           available = 0; // checks supported by the active profile
@@ -2665,7 +2700,9 @@ inline __attribute__((noinline)) CheckupReport checkup_evaluate(
     if (!cov.retries || !cov.rps) {
         set(CheckupCheck::Retries, CheckupVerdict::Unavailable, 0, 0);
     } else {
-        const bool seen = (w.flags & CHECKUP_F_RETRY) != 0;
+        const uint8_t mask     = static_cast<uint8_t>(w.retry_mask & 0x1fu);
+        const bool    seen     = ((w.flags & CHECKUP_F_RETRY) != 0) || (mask != 0);
+        r.retry_increased_mask = mask;
         set(CheckupCheck::Retries,
             seen ? CheckupVerdict::Info
                  : (w.retry_observed_s ? CheckupVerdict::Ok : CheckupVerdict::Collecting),

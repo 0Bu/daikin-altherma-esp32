@@ -201,7 +201,9 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
 | `flow` | `min_l_min`, independent `hydronic` observations, nullable `minimum_windows`, `heating_minimum`, `water_agreement` and `secondary_supply` |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s`, `context` |
-| `retries` | `seen` |
+| `retries` | `seen`, `counters` |
+
+For `retries`, `counters` lists the stable slugs (`discharge_temp`, `inv_current`, `high_pressure`, `low_pressure`, `fin_temp`) for any of the five protection counters that strictly increased in the 24-hour window (empty when none increased or unavailable).
 
 For `dhw_loss`, `max_k_h` is the maximum completed one-hour **net sensor cooling**, not standing
 heat loss. `high_windows` counts rates ≥0.8 K/h and `quiet_high_windows` retains the count without

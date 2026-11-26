@@ -48,7 +48,7 @@ for (const key of [
   "hours_epoch", "bucket", "end_unix_s", "elapsed_s", "space_s", "dhw_s",
   "outdoor_source", "outdoor_min_c", "outdoor_mean_c", "outdoor_samples",
   "min_bar", "current_bar", "min_unix_s", "confirmed_low", "confirmed_critical", "min_l_min",
-  "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
+  "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen", "counters",
   "latest", "base_code", "subcode", "ongoing", "stop_unknown", "start_unix_s", "secondary_code",
   "secondary_state", "timeline", "unix_s", "window_end_s", "observed_end_s", "boot_s", "live",
   "run_contexts", "flow_reference_fixed", "flow_typical_l_min",
@@ -1362,8 +1362,9 @@ assert.match(model.health_defrost.what, /removes frost from the outdoor unit/);
 assert.match(descriptionContext.modelDe.health_defrost[0], /entfernt die Anlage Reif von der Außeneinheit/);
 assert.match(JSON.stringify(model.health_pressure), /Chart guide:.*>1\.0 bar.*≤1\.0 bar.*≤0\.5 bar.*60 continuous seconds/);
 assert.match(JSON.stringify(model.health_flow), /Not nominal flow or proof of part load/);
-assert.match(JSON.stringify(model.health_retries), /while stopped or at a compressor-state boundary/);
-assert.match(JSON.stringify(model.health_retries), /Gaps, resets and non-rises do not count/);
+assert.ok(!("normal" in model.health_retries), "health_retries must not carry a generic Normal block");
+assert.match(JSON.stringify(model.health_retries), /when stopped or at compressor-state boundaries/);
+assert.match(JSON.stringify(model.health_retries), /gaps and resets are ignored/);
 assert.match(JSON.stringify(model.health_retries), /Stable counters cannot rule out limiting/);
 assert.doesNotMatch(JSON.stringify(model.health_retries), /with the compressor running|bei laufendem Verdichter/);
 
@@ -1393,6 +1394,15 @@ for (const lang of locales) {
         assert.ok(!body.includes(ui.text(lang, "normal.label")),
           `${lang}/${id}: must not render a generic Normal block`);
         assert.doesNotMatch(body, /check\.fault_/);
+      } else if (id === "health_retries") {
+        assert.ok(body.startsWith('<div class="checkup-retries-panel" data-checkup-retries><div class="checkup-retries-hero">'),
+          `${lang}/${id}: panel wraps hero first`);
+        assert.ok(!body.includes(ui.text(lang, "normal.label")),
+          `${lang}/${id}: must not render a generic Normal block`);
+        assert.doesNotMatch(body, /check\.retry_/);
+        const chipCount = (body.match(/data-retry-counter="/g) || []).length;
+        assert.equal(chipCount, verdict === "unavailable" ? 0 : 5,
+          `${lang}/${id}/${verdict}: expected monitored counter chips`);
       } else if (id === "health_cycling") {
         assert.match(diagnosis, /checkup-cycling-assessment/);
         assert.match(diagnosis, /data-checkup-hours/);
@@ -1751,6 +1761,41 @@ assert.equal(ui.ready({
   assert.equal(ui.value({ id: "retries", verdict: "info", seen: true }), "Increase");
   assert.equal(ui.value({ id: "retries", verdict: "ok", seen: false }), "No increase");
   assert.equal(ui.value({ id: "retries", verdict: "collecting", seen: null }), "CHECKING");
+  {
+    const okDetail = ui.detail({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0, observed_s: 21600, counters: [] }, false, { source: "x10a", source_fresh: true });
+    assert.ok(okDetail.includes("6 h"));
+    assert.equal((okDetail.match(/data-retry-counter="/g) || []).length, 5);
+    assert.equal((okDetail.match(/retry-chip is-seen/g) || []).length, 0);
+
+    const seenDetail = ui.detail({ id: "retries", verdict: "info", evidence: "experimental", seen: 1, observed_s: 7200, counters: ["high_pressure", "discharge_temp", "unknown_future"] }, false, { source: "x10a", source_fresh: true });
+    assert.ok(seenDetail.includes("2 h"));
+    assert.equal((seenDetail.match(/retry-chip is-seen/g) || []).length, 2);
+    assert.match(seenDetail, /class="retry-chip is-seen" data-retry-counter="discharge_temp"[^>]*>[^<]*<i class="retry-dot"[^>]*><\/i>Discharge temp\. ↑<\/span>/);
+    assert.match(seenDetail, /class="retry-chip is-seen" data-retry-counter="high_pressure"[^>]*>[^<]*<i class="retry-dot"[^>]*><\/i>High pressure ↑<\/span>/);
+    assert.doesNotMatch(seenDetail, /unknown_future/);
+    assert.ok(!seenDetail.includes(ui.text("en", "check.retry_counters_legacy")));
+
+    for (const legacy of [
+      { id: "retries", verdict: "info", evidence: "experimental", seen: 1, observed_s: 7200 },
+      { id: "retries", verdict: "info", evidence: "experimental", seen: 1, observed_s: 7200, counters: [] },
+    ]) {
+      const legacyDetail = ui.detail(legacy, false, { source: "x10a", source_fresh: true });
+      assert.ok(legacyDetail.includes(ui.text("en", "check.retry_counters_legacy")));
+      assert.equal((legacyDetail.match(/retry-chip is-seen/g) || []).length, 0);
+    }
+
+    const collectDetail = ui.detail({ id: "retries", verdict: "collecting", evidence: "experimental", observed_s: 0 }, false, { source: "x10a", source_fresh: true });
+    assert.ok(collectDetail.includes(ui.text("en", "check.retry_hero_collecting")));
+    assert.equal((collectDetail.match(/data-retry-counter="/g) || []).length, 5);
+
+    const unavailDetail = ui.detail({ id: "retries", verdict: "unavailable", evidence: "experimental", observed_s: 0 }, false, { source: "x10a", source_fresh: true });
+    assert.ok(unavailDetail.includes(ui.text("en", "check.detail.unavailable")));
+    assert.equal((unavailDetail.match(/data-retry-counter="/g) || []).length, 0);
+
+    const staleDetail = ui.detail({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0, observed_s: 3600, reason: "source_stale", counters: [] }, false, { source: "x10a", source_fresh: false, source_age_s: 45 });
+    assert.ok(staleDetail.includes(ui.text("en", "check.detail.source_stale")));
+    assert.ok(staleDetail.includes("45 s"));
+  }
   assert.equal(ui.value({ id: "flow", verdict: "ok", min_l_min: 13.4 }), "13.4 l/min");
   assert.equal(ui.value({ id: "flow", verdict: "collecting", min_l_min: null }), "CHECKING");
 }

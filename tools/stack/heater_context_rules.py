@@ -55877,7 +55877,7 @@ SOURCE_DIGESTS = {'main/checkup.cpp': 'e3b3b0c6a96fb6c4a6ab2231702ea21d842d3aef3
  'main/hp_poll.cpp': '06151f2006bfb87818e6051dff5ee8126f526ba3b9e9caaa6b5bccde7a742b7d',
  'main/http_chunks.hpp': 'a9f2edd8067bf3764eabf6a92558fcdf8114f1d57de79d53b239f88d0eaf3b35',
  'main/http_config.cpp': 'c1c53984eb146ef5c1923c07d53a36da63c96f3bf215d2917972d3f82ebd3514',
- 'main/http_status.cpp': '87f4031debbf63ad056375c2e90ec40922e6b3e43bd9e5412d1e74695851d0a8',
+ 'main/http_status.cpp': '4b304333da71e09e89211d8120bbc640bd6b63761f984c0172da25617bff9b7c',
  'main/logic/chunk_sink.hpp': 'd6a9ad61d443ddd95c948177c7a0fd7522f463dd09876e0bc28b4d960e90568f',
  'main/logic/heartbeat.hpp': '97754bc8a363a9002fd3995ab4ba5cb3eff8ddce15392e94ac9f62a9e74403d4',
  'main/logic/heater_context.hpp': '7291eb5ac0cbb2235260b497a0c4574938691da1e17e24c7067d24387b6e1646',
@@ -55941,7 +55941,7 @@ BODIES = {'main/checkup.cpp': {'bind_heater_locked': '55105a0ce8bb6072b46dc02435
                       'flash_read_heater_context': 'd29421bcb9801c2af557f20c8c7750698cdc6d1d8d9df757a0dcb607cc1b2350',
                       'history_flash_save': '9d875a548cc355fd0d1a3972c556a5a549327aa28966b2491b08b0fb0b0e304b'},
  'main/http_status.cpp': {'append_heater_context_status': 'e49ff0c153f32005a0cb245969acd1eb87d443da69cb7ef3f2df6e2485c7bbde',
-                          'append_status_json': '427ed9a137ef7f798d1fc7bb05cc76762b5a32e5c78db6c04bde73a4f25ba447'},
+                          'append_status_json': '3617937d59f6f8f34273726ad28132f35fc97697439917fdff5002f2f9394dd6'},
  'main/logic/heater_context_payload.hpp': {'append_heater_context_json': '41e8e8401f4333a219a777e4bd704e6cc63b04c144179f7e55089693094f848a'},
  'main/logic/json_output.hpp': {'json_output': '5790dc7aa7b68e0992a6689638a0d4b2288fedd0f3e9c9c421dfd5c5f2529f42'},
  'main/mqtt_ha.cpp': {'publish_heater_context': 'a726d5faae9ead0554fb2e99933cd7b332fc414f11d712cec436f09a2d38cef2'}}

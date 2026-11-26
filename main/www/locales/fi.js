@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -332,6 +332,18 @@ I18N.fi = localeValues([
   /* check.fault_severity_caution */ "Huomio",
   /* check.retry_seen */ "Nousu",
   /* check.retry_none */ "Ei nousua",
+  /* check.retry_hero_none */ (d) => `Yksikään viidestä suojalaskurista ei noussut ${d} vertailukelpoisen seurannan aikana.`,
+  /* check.retry_hero_none_short */ "Yksikään viidestä suojalaskurista ei noussut vertailukelpoisissa mittauksissa.",
+  /* check.retry_hero_seen */ (d) => `Suojalaskurin nousu havaittu ${d} vertailukelpoisen seurannan aikana.`,
+  /* check.retry_hero_seen_short */ "Suojalaskurin nousu havaittu vertailukelpoisissa mittauksissa.",
+  /* check.retry_hero_collecting */ "Odotetaan peräkkäisiä luettavia mittauksia kaikista viidestä laskurista ja kompressorin tilasta.",
+  /* check.retry_counters_legacy */ "Ainakin yksi laskuri nousi, mutta tämä näkymä ei kerro mikä niistä.",
+  /* check.retry_monitored */ "Valvotut suoja-alueet",
+  /* check.retry_counter.discharge_temp */ "Purkauslämpötila",
+  /* check.retry_counter.inv_current */ "Invertterivirta",
+  /* check.retry_counter.high_pressure */ "Korkeapaine",
+  /* check.retry_counter.low_pressure */ "Matalapaine",
+  /* check.retry_counter.fin_temp */ "Invertterin jäähdytin",
   /* service.metric.comp */ "Kompressori",
   /* service.metric.disch */ "Purkauslämpötila",
   /* service.metric.eev */ "Paisuntaventtiilin ohjaus",
@@ -1119,7 +1131,7 @@ MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["24 tunnin vedenpainekäyrä suljetussa vesipiirissä (X10A, 5 minuutin minimit).", "Käyrän ohje: >1,0 bar normaali, ≤1,0 bar matala, ≤0,5 bar kriittinen (diagnoosi ≥60 s yhtäjaksoisesti). Sallittu täyttö- ja käyttöpaine riippuu mallin ohjeesta ja järjestelmän korkeudesta; lukema yksin ei todista vuotoa tai vikaa."], // health_pressure
   ["Alin virtaus 60 s jatkuvan sisäisen pumpun käynnin jälkeen; erikseen: näytteillä painotetut veden lämpötilaeron, virtauksen ja pumpun ohjauksen tilastot 600 s lämmityksen alkujakson jälkeen.", "Ei nimellisvirtaus eikä osakuorman todiste. Koskee yhteistä vesipuolen lämmönvaihdinta. Pumpun ohjaus ei ole pyörimisnopeus eikä nostokorkeus. 600 s projektisuodatin (katkot ≤15 s) ei todista vakaata käyntiä, tavoitevertailua eikä hydraulista syytä."], // health_flow
   ["BUH/BSH ON-aika", "ei energiaa tai turhan lämmön todiste."], // health_heater
-  ["5 kokeellista laskuria", "vertailukelpoiset nousut; aukot/reset pois. Vakaus ei sulje pois rajoitusta eikä todista syytä."], // health_retries
+  ["Daikinin sisäiset kokeelliset suojalaskurit (0–7), joita verrataan peräkkäisissä mittauksissa myös pysähdyksen aikana ja kompressorin tilanvaihdoksissa. Daikin ei dokumentoi rajoja tai nollauksia; aukot ja nollaukset ohitetaan. Vakaa laskuri ei sulje pois rajoitusta eikä nousu todista vikaa tai syytä."], // health_retries
   ["RAM 24 h vakaa, laskut palautuvat; jatkuva lasku: ehkä vuoto; sopiva käynnistys virta päällä voi säilyttää RAM-käyrän. Muuten vain flash-lokin sopivat päivätyt 5 min aikasynkin jälkeen; 5 min välein lyhyt katko ei aina näy; avoin/uusimmat tallentamatta voivat puuttua."], // free_heap
   ["Suurin yhtenäinen vapaa RAM-lohko. TLS/OTA tarvitsee suuren yksittäisen lohkon; lasku vakaan kokonaismuistin rinnalla voi tarkoittaa pirstoutumista ja varausvirheitä."], // max_alloc
   ["Ulkoyksikön ID-sivulta luettu nimellisteholuokka, ei nykyinen lämpöteho."], // capacity

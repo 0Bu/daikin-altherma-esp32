@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 974, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 986, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -199,6 +199,15 @@ for (const code of codes) {
     assert.ok(typeof rendered === "string" && rendered.trim(), `${code}/${key} rendered empty`);
     if (code !== "en") assert.notEqual(rendered, catalog.en[key](...args), `${code}/${key} falls back to English`);
   }
+  for (const key of ["check.retry_hero_none", "check.retry_hero_seen"]) {
+    const rendered = dict[key]("6 h");
+    assert.equal(rendered.split("6 h").length, 2, `${code}/${key} must render duration once`);
+  }
+  const retryLabels = [
+    "discharge_temp", "inv_current", "high_pressure", "low_pressure", "fin_temp",
+  ].map((slug) => dict[`check.retry_counter.${slug}`]);
+  for (const label of retryLabels) assert.ok(label.trim(), `${code} retry counter label is empty`);
+  assert.equal(new Set(retryLabels).size, 5, `${code} retry counter labels must be distinct`);
 }
 assert.doesNotMatch(catalog.ja["check.detail.collecting"]("2 h", "24 h"), /(?:h|min)件/,
   "Japanese collecting progress must describe elapsed time, not item counts");
@@ -408,6 +417,8 @@ checkLocalizedRows("de", Object.values(catalogContext.__modelDescriptionCopy.de)
   Object.values(modelSchema), "model-description");
 assert.equal(catalogContext.__modelDescriptionCopy.de.health_fault.length, 1,
   "de health_fault must not retain a generic normal sentence");
+assert.equal(catalogContext.__modelDescriptionCopy.de.health_retries.length, 1,
+  "de health_retries must not retain a generic normal sentence");
 assert.equal(vm.runInContext("localeReady('de')", catalogContext), true);
 assert.equal(vm.runInContext(`(() => {
   const saved = MODEL_DESCRIPTION_I18N.de;
@@ -463,6 +474,8 @@ for (const code of codes.slice(2)) {
   checkLocalizedRows(code, modelRows, Object.values(modelSchema), "model-description");
   assert.equal(modelCopy.health_fault.length, 1,
     `${code} health_fault must not retain a generic normal sentence`);
+  assert.equal(modelCopy.health_retries.length, 1,
+    `${code} health_retries must not retain a generic normal sentence`);
   const joined = (id) => modelCopy[id].join(" ");
   assert.match(joined("health_dhw_loss"), /0[,.]8/, `${code} loses the 0.8 K/h project threshold`);
   assert.doesNotMatch(joined("health_dhw_loss"), /1[,.]85/,

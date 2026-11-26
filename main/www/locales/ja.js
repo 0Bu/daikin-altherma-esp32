@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -332,6 +332,18 @@ I18N.ja = localeValues([
   /* check.fault_severity_caution */ "注意",
   /* check.retry_seen */ "増加あり",
   /* check.retry_none */ "増加なし",
+  /* check.retry_hero_none */ (d) => `${d} の比較可能な観測では、5つの保護カウンタはいずれも増加していません。`,
+  /* check.retry_hero_none_short */ "比較可能な測定では、5つの保護カウンタはいずれも増加していません。",
+  /* check.retry_hero_seen */ (d) => `${d} の比較可能な観測で保護カウンタの増加を検出しました。`,
+  /* check.retry_hero_seen_short */ "比較可能な測定で保護カウンタの増加を検出しました。",
+  /* check.retry_hero_collecting */ "5つのカウンタと圧縮機状態の連続した読取可能な測定値を待機しています。",
+  /* check.retry_counters_legacy */ "少なくとも1つのカウンタが増加しましたが、このデータでは特定できません。",
+  /* check.retry_monitored */ "監視対象の保護領域",
+  /* check.retry_counter.discharge_temp */ "吐出温度",
+  /* check.retry_counter.inv_current */ "インバータ電流",
+  /* check.retry_counter.high_pressure */ "高圧",
+  /* check.retry_counter.low_pressure */ "低圧",
+  /* check.retry_counter.fin_temp */ "インバータ放熱板",
   /* service.metric.comp */ "圧縮機",
   /* service.metric.disch */ "吐出温度",
   /* service.metric.eev */ "膨張弁指令",
@@ -1119,7 +1131,7 @@ MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
   ["密閉水回路の24時間水圧推移（X10A、5分最小値）。", "グラフ目安：1.0 bar超 正常、1.0 bar以下 低い、0.5 bar以下 危険（診断は連続60秒以上で判定）。許容充填圧・運転圧は対象機種の説明書とシステム水頭により異なり、数値のみで漏水や故障は特定できません。"], // health_pressure
   ["内蔵ポンプの60秒連続運転後の最小流量。別途、600秒暖房立ち上がり後のサンプル重み付き水温差・流量・ポンプ指令統計。", "定格流量や部分負荷の証明ではない。共通水側熱交換器を対象。ポンプ指令は回転数や揚程ではない。600秒プロジェクト基準（15秒以下の欠測許容）は定常運転を示さず、目標比較や水理原因は判定しない。"], // health_flow
   ["BUH/BSHのON時間", "エネルギーや不要加熱の証明ではありません。"], // health_heater
-  ["5つの試験的カウンタ", "比較可能な増加のみ。欠測・リセット除外。安定でも制限を否定せず原因を証明しません。"], // health_retries
+  ["停止中や圧縮機状態の変化時も含め連続値で比較するダイキン内部の試験的保護カウンタ（0〜7）。しきい値やリセットは非公開のため、欠測とリセットは除外されます。安定でも制限を否定できず、増加も故障や原因を証明しません。"], // health_retries
   ["RAM 24時間：安定・低下後の回復は正常。低下が続けば漏れの可能性。対応する通電再起動でRAM曲線を残せます。5分刻みは短い停止を隠す場合あり。RAM不可なら、ログの時刻付き互換区間のみ時刻同期後にフラッシュ復元。未完了/直近未保存区間は欠ける場合あり。"], // free_heap
   ["最大の連続空きRAM。TLS/OTAは大きな1ブロックを必要とします。総空きRAMが安定して本値だけ低下すれば断片化と割当て失敗の恐れがあります。"], // max_alloc
   ["室外機IDページから読んだ定格容量クラス。現在の熱出力ではありません。"], // capacity

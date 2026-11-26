@@ -1,4 +1,4 @@
-// translation-source: 05e9b0c704e32e75ff37cd3fb41521715b21a0f3012adf045bb7663aa45386fe
+// translation-source: 8126dcd8c6c3c2acc1b4772bcbe4c5ac20377333acb428e58a0477d1d01d3040
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -332,6 +332,18 @@ I18N.fr = localeValues([
   /* check.fault_severity_caution */ "Prudence",
   /* check.retry_seen */ "Hausse",
   /* check.retry_none */ "Aucune hausse",
+  /* check.retry_hero_none */ (d) => `Aucun des cinq compteurs de protection n’a augmenté sur ${d} d’observation comparable.`,
+  /* check.retry_hero_none_short */ "Aucun des cinq compteurs de protection n’a augmenté sur des lectures comparables.",
+  /* check.retry_hero_seen */ (d) => `Hausse d’un compteur de protection relevée sur ${d} d’observation comparable.`,
+  /* check.retry_hero_seen_short */ "Hausse d’un compteur de protection relevée sur des lectures comparables.",
+  /* check.retry_hero_collecting */ "En attente de lectures consécutives lisibles des cinq compteurs et de l’état du compresseur.",
+  /* check.retry_counters_legacy */ "Au moins un compteur a augmenté, mais cette capture n’indique pas lequel.",
+  /* check.retry_monitored */ "Zones de protection surveillées",
+  /* check.retry_counter.discharge_temp */ "Temp. refoulement",
+  /* check.retry_counter.inv_current */ "Courant onduleur",
+  /* check.retry_counter.high_pressure */ "Haute pression",
+  /* check.retry_counter.low_pressure */ "Basse pression",
+  /* check.retry_counter.fin_temp */ "Radiateur onduleur",
   /* service.metric.comp */ "Compresseur",
   /* service.metric.disch */ "Température de refoulement",
   /* service.metric.eev */ "Commande de vanne de détente",
@@ -1263,7 +1275,7 @@ MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Courbe 24 h de la pression d’eau du circuit hydraulique fermé (X10A, minimums sur 5 min).", "Repères sur la courbe : >1,0 bar normale, ≤1,0 bar basse, ≤0,5 bar critique (diagnostic dès 60 s continues). La pression de remplissage et de service admissible dépend du manuel exact de l’appareil et de la hauteur du réseau ; la mesure seule ne prouve ni fuite ni panne."], // health_pressure
   ["Débit minimal après 60 s de marche continue de la pompe interne ; séparément : statistiques pondérées par échantillon d’écart thermique de l’eau, débit et commande de pompe après 600 s de mise en chauffe.", "Ni débit nominal ni preuve de charge partielle. Couvre l’échangeur à eau commun. La commande de pompe ne mesure ni vitesse ni hauteur manométrique. Filtre projet de 600 s (lacunes ≤15 s), sans prouver régime établi, comparaison cible ni cause hydraulique."], // health_flow
   ["Temps ON de BUH/BSH ", "pas énergie ni preuve de chaleur inutile."], // health_heater
-  ["5 compteurs expérimentaux ", "hausses comparables ; lacunes/reset ignorés. Stabilité n’exclut pas limitation ni ne prouve cause."], // health_retries
+  ["Compteurs internes Daikin expérimentaux (0–7) comparés entre lectures consécutives, même à l’arrêt ou aux transitions du compresseur. Daikin ne documente ni seuils ni remises à zéro ; lacunes et réinitialisations sont ignorées. La stabilité n’exclut pas une limitation et une hausse ne prouve ni défaut ni cause."], // health_retries
   ["RAM 24 h stable, creux résorbés; baisse durable: fuite possible. Redémarrage compatible alimenté: courbe RAM possible. Sinon, journal flash requis: 5 min datées compatibles après synchro. Le pas de 5 min peut cacher un bref arrêt. Ouvert/récents non sauvés peuvent manquer."], // free_heap
   ["Plus grand bloc contigu requis par TLS/OTA ; sa baisse avec RAM totale stable indique une fragmentation."], // max_alloc
   ["Puissance nominale de l’unité extérieure, pas sa production actuelle."], // capacity

@@ -445,7 +445,8 @@ static_assert(CHECKUP_JOURNAL_WORDS == 80, "CheckupJournalPayload must occupy 80
 // witnessed mode totals. Completed RAM hours retire at boot, and the DHW handoff stays compatible.
 // Layout 4 requires 60 s confirmation before low/critical water pressure enters min_bar.
 // Layout 5 embeds pel_source_fp and EnergyBucket (WORKING_FIGURE_METHOD_VERSION).
-inline constexpr uint32_t CHECKUP_JOURNAL_LAYOUT_VERSION = 5;
+// Layout 6 packs the 5-bit per-counter retry increase mask into CheckupBucket.
+inline constexpr uint32_t CHECKUP_JOURNAL_LAYOUT_VERSION = 6;
 
 inline uint32_t checkup_journal_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
@@ -456,7 +457,7 @@ inline uint32_t checkup_journal_fingerprint() {
     crc          = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupJournalPayload)));
     crc          = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupBucket, defrosts)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupBucket, censored_runtime_s)));
-    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupBucket, dhw_hour_s)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupBucket, cycling_outdoor)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, model_fp)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, source_fp)));
     crc =
