@@ -429,7 +429,7 @@ for (const failOld of [false, true]) {
   ui.S.hist.set(ui.histCacheKey("modbus_defrost_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 1, held: [], v: [0, 10, 0] });
   ui.S.hist.set(ui.histCacheKey("pump_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 1, held: [], v: [10, 10, 0] });
   ui.S.live = { pelSrc: "MB" };
-  for (const [insp, expectedId] of [["pel", "modbus_power"], ["ou", "compressor_state"],
+  for (const [insp, expectedId] of [["pel", "modbus_power"],
     ["comp", "compressor_state"], ["defrost", "modbus_defrost_state"], ["pump", "pump_state"]]) {
     ui.S.insp = insp;
     ui.S.inspHistSig = "";
@@ -437,6 +437,10 @@ for (const failOld of [false, true]) {
     assert.match(rendered.at(-1), new RegExp(`data-hist="${expectedId}"`),
       `${insp} inspector falls back to ${expectedId}`);
   }
+  ui.S.insp = "ou";
+  ui.S.inspHistSig = "";
+  ui.renderInspectHist({}, null);
+  assert.equal(rendered.at(-1), "", "ou inspector stays prose-only without duplicating compressor_state");
   ui.S.live = { pelSrc: "INV" };
   ui.S.insp = "pel";
   ui.S.inspHistSig = "";

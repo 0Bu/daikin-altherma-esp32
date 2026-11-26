@@ -961,6 +961,9 @@ const INSPECT = {
     trend: "comp_rps",
     t: { en: "Compressor", de: "Verdichter" },
     re: /inv frequency/i, sample: "INV frequency (rps)",
+    // Keep the compressor's own HomeHub run flag below the X10A speed chart without pairing
+    // binary ON/OFF onto a numeric rps axis or duplicating it when X10A is down.
+    rows: [{ mbOff: 31 }],
   },
   out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)" },
   ouhx: {
@@ -1767,7 +1770,6 @@ function renderInspectHist(e, row, mode = "", flow = null) {
   const explicitId = trendId && offered(trendId) ? trendId : "";
   const keepDefrostHistory = S.insp === "defrost" && checkupDefrostCheck(S.status);
   const mbFallbackId = S.insp === "pel" ? (!explicitId && S.live?.pelSrc === "MB" ? "modbus_power" : "")
-    : S.insp === "ou" ? (down ? "compressor_state" : "")
     : (!explicitId || (down && !keepDefrostHistory) ? (MB_INSPECT_TREND[S.insp] || "") : "");
   const useMbFallback = !!mbFallbackId && hasModbusHist(mbFallbackId);
   if (useMbFallback) trendSource = "modbus";

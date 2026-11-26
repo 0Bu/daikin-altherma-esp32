@@ -95,7 +95,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " mbUnitAbnormality," +
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, mbNoteHtml, mbDeltaHtml, descFor, inspCurRow, inspMember," +
-    " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
+    " inspMembers, inspValues, inspComparisonHtml, inspHeld, inspectSig, liveData, compressorRunning," +
     " waterMoving, pumpFlowConflict, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT, pumpCommandPercent, pumpNowText, inspectModbusSignature," +
     " pelMeasured, pelApproxText, PEL_INSPECT, vRow, vNum, highSideRow, inspHeldHtml, inspUnknownAge," +
     " inspFieldText, inspNowText, heldUnknownText, OUTDOOR_HX_RE };",
@@ -1870,6 +1870,7 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
     M(47, "Water pressure", "1.8", "pressure", { unit: "bar" }),
     M(49, "Room thermostat setpoint", "21.0", null),
     M(10, "DHW setpoint", "48.0", null),
+    M(31, "Compressor running", "1", null, { unit: "", binary: true }),
     M(33, "DHW tank booster", "0", null, { binary: true }),
   ];
   const full = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: vals, modbus: mbs });
@@ -1877,7 +1878,7 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   full.S.live = full.liveData();
 
   const noExtraRowsCards = [
-    "comp", "hp", "disch", "lp", "eev", "dt", "pth", "cop", "spaceh", "flow", "flow_switch", "wp",
+    "hp", "disch", "lp", "eev", "dt", "pth", "cop", "spaceh", "flow", "flow_switch", "wp",
     "ou", "phe", "heat", "rhot", "rcold", "wsup", "wtank", "wheat", "wret",
   ];
   for (const key of noExtraRowsCards) {
@@ -1916,6 +1917,46 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   const pumpRows = Array.from(full.inspValues(full.INSPECT.pump, full.inspCurRow(full.INSPECT.pump), null));
   assert.deepEqual(pumpRows.map((m) => m.x10a?.label), ["Water pump signal"],
     "pump inspector keeps only Water pump signal");
+}
+
+// ── 24. Compressor inspector: Input 31 in dual-stack, deduplicated on X10A down, absent offline ─
+{
+  const compVals = [X("INV frequency (rps)", "42", "comp_rps", { unit: "rps", reg: 0x30 })];
+  const compMb = [M(31, "Compressor running", "1", null, { unit: "", binary: true })];
+
+  const dual = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: compVals, modbus: compMb });
+  dual.S.live = dual.liveData();
+  const compHead = dual.inspCurRow(dual.INSPECT.comp);
+  assert.equal(compHead?.label, "INV frequency (rps)");
+  const dualRows = Array.from(dual.inspValues(dual.INSPECT.comp, compHead, null));
+  assert.equal(dualRows.length, 1, "dual-stack comp inspector adds Modbus Input 31 below chart");
+  assert.equal(dualRows[0].x10a, null);
+  assert.equal(dualRows[0].mb?.off, 31);
+  assert.equal(dualRows[0].compare, undefined, "binary Input 31 must not be delta-compared against rps");
+
+  dual.S.insp = "comp";
+  const sigOn = dual.inspectSig(dual.INSPECT.comp);
+  dual.S._modbus = [M(31, "Compressor running", "0", null, { unit: "", binary: true })];
+  const sigOff = dual.inspectSig(dual.INSPECT.comp);
+  assert.notEqual(sigOn, sigOff, "inspectSig must repaint when Modbus Input 31 flips ON/OFF");
+  dual.S.insp = null;
+
+  const mbOnly = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: compVals, modbus: compMb });
+  mbOnly.S.live = mbOnly.liveData();
+  mbOnly.S.insp = "comp";
+  const fb = mbOnly.mbForInspect("comp");
+  assert.equal(fb?.off, 31, "X10A down promotes Input 31 to comp headline");
+  assert.deepEqual(Array.from(mbOnly.inspValues(mbOnly.INSPECT.comp, null, fb)), [],
+    "X10A down must not duplicate Input 31 below the comp headline");
+  mbOnly.S.insp = null;
+
+  for (const state of [{ mbEnabled: false, mbConnected: false }, { mbEnabled: true, mbConnected: false }]) {
+    const noMb = ctx({ x10a: true, ...state, values: compVals, modbus: compMb });
+    noMb.S.live = noMb.liveData();
+    const head = noMb.inspCurRow(noMb.INSPECT.comp);
+    assert.deepEqual(Array.from(noMb.inspValues(noMb.INSPECT.comp, head, null)), [],
+      `comp inspector hides Input 31 when Modbus is ${state.mbEnabled ? "offline" : "disabled"}`);
+  }
 }
 
 console.log("UI source matrix: arbitration, Smart-Grid and mode-aware cooling semantics correct");
