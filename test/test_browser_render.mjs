@@ -101,7 +101,7 @@ const layoutAudit = `(() => {
     ".hdr-title, .hdr-name, .conn-label, .conn-value, .vrow-label, .vrow-val, .dashboard-card-label, .ota-alert-message, " +
     ".recovery-banner .crash-title, .recovery-banner .crash-meta, " +
     "#valueGroups .vitem.open .vdesc-inner, #valueGroups .vitem.open .vdesc-body, " +
-    "#valueGroups .vitem.open .vdesc-p, .heater-context th, .heater-context td, .heater-context caption"
+    "#valueGroups .vitem.open .vdesc-p"
   );
   for (const el of candidates) {
     if (!shown(el)) continue;
@@ -1987,11 +1987,11 @@ async function assertPlantDiagnosis(page, context) {
         standard: true, cells: [["SPAN", 0, label], ["SPAN", 0, [count, share][i]]],
       })), `${context}: the inspector ends with only the two standard defrost value rows`);
     };
-    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 4,
-      `${context}: render the four remaining diagnosis disclosures`);
+    assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 3,
+      `${context}: render the three remaining diagnosis disclosures`);
     assert.equal(await page.evaluate(`!!document.querySelector(
-      "[data-desc='model:health_pressure'], [data-desc='model:health_flow'], [data-desc='model:health_dhw_loss']")`), false,
-      `${context}: pressure, flow, and DHW tank cooling diagnoses belong in their inspectors`);
+      "[data-desc='model:health_pressure'], [data-desc='model:health_flow'], [data-desc='model:health_dhw_loss'], [data-desc='model:health_heater']")`), false,
+      `${context}: pressure, flow, DHW tank cooling, and heater diagnoses belong in their inspectors`);
     assert.equal(await hasElement(defrostAccordion), false, `${context}: the separate defrost disclosure is gone`);
     assert.equal(await hasElement(defrostHint), false, `${context}: an observation needs no defrost shortcut`);
     await expectDefrostPill(false, "observation");
@@ -2034,17 +2034,10 @@ async function assertPlantDiagnosis(page, context) {
         lastNormal: body.lastElementChild?.querySelector('.vdesc-n')?.innerText,
         text: Array.from(body.children, block => block.innerText) };
     })`);
-    assert.equal(blocks.length, 5, `${context}: include the independent refrigerant observation`);
+    assert.equal(blocks.length, 4, `${context}: include the independent refrigerant observation`);
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
       if (block.id === "model:health_cycling") continue;
-      if (block.id === "model:health_heater") {
-        assert.ok(block.count >= 5, `${context}/${block.id}: includes independent heater context blocks`);
-        assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
-        assert.equal(block.lastNormal, normalLabel, `${context}/${block.id}: Normal last`);
-        assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
-        continue;
-      }
       if (block.id === "model:health_fault") {
         assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
         assert.ok(!block.text.some(text => text.includes(normalLabel)),
@@ -2068,54 +2061,114 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: raw source coordinates stay outside the owner-facing explanation`);
     assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
       `${context}: populated selected metrics do not add a generic source sentence`);
-    const heaterTable = () => page.evaluate(`(() => {
-      const table = document.querySelector("[data-desc='model:health_heater']")
-        .closest('.vitem').querySelector('.heater-context');
-      return table ? { text: table.closest('.vdesc-body').innerText,
-        columns: table.querySelectorAll('thead th[scope=col]').length,
-        rows: table.querySelectorAll('tbody th[scope=row]').length,
-        valueWidth: table.querySelector('tbody td').getBoundingClientRect().width } : null;
+    const openHeaterInspector = async (which, selector) => {
+      await page.waitFor(`document.getElementById("inspect").getAnimations({subtree: true})
+        .every(animation => !(animation instanceof CSSTransition) || animation.playState !== "running")`);
+      await clickElement(page, selector);
+      await page.waitFor(`S.insp === ${JSON.stringify(which)} &&
+        document.getElementById("inspect").classList.contains("open") &&
+        document.getElementById("inspect").getAnimations({subtree: true})
+          .every(animation => !(animation instanceof CSSTransition) || animation.playState !== "running")`);
+    };
+    const heaterBriefState = () => page.evaluate(`(() => {
+      const box = document.getElementById("inspFlowDiagnosis");
+      const result = box.querySelector(".inspect-diagnosis-result");
+      return {
+        hidden: box.hidden,
+        label: result?.firstElementChild?.textContent || "",
+        value: result?.querySelector("strong.num")?.textContent || "",
+        text: box.innerText,
+        paragraphs: Array.from(box.querySelectorAll("p"), p => p.innerText),
+      };
     })()`);
-    const heaterInitial = await heaterTable();
-    assert.ok(heaterInitial, `${context}: actual heater disclosure contains its independent table`);
-    assert.equal(heaterInitial.columns, 2);
-    assert.equal(heaterInitial.rows, 15);
-    assert.ok(heaterInitial.valueWidth >= 100,
-      `${context}: each separate heater table leaves readable space for its values`);
-    assert.ok(heaterInitial.text.includes('<1 s / 0 s · 1'), `${context}: retain early flag sample`);
-    assert.ok(heaterInitial.text.includes(await page.evaluate("t('check.heater_context.states').split('|')[8]")),
-      `${context}: an unsupported heater cannot become reported OFF`);
-    await captureNativeEvidence(page, `${context}/heater`,
-      "[data-desc='model:health_heater']", ".vitem");
+    await page.evaluate("window.__heaterOrigHealth = structuredClone(S.status.health); window.__heaterOrigDiag = structuredClone(S.status.diagnostics); true");
+    await openHeaterInspector("buh", '#schem [data-insp="buh"]');
+    const buhInitial = await heaterBriefState();
+    assert.equal(buhInitial.hidden, false, `${context}: BUH inspector shows 24 h heater diagnosis`);
+    assert.equal(buhInitial.label, `${await page.evaluate("t('check.heater_insp.runtime')")} · X10A`);
+    assert.equal(buhInitial.value, await page.evaluate("checkupDuration(43200)"));
+    assert.ok(buhInitial.text.includes("<1 s"), `${context}: BUH retains early flag sample`);
+    assert.ok(buhInitial.text.includes(await page.evaluate("t('check.heater_insp.limit')")));
+    assertLayout(await page.evaluate(layoutAudit), `${context}/heater-buh`);
+    await captureNativeEvidence(page, `${context}/heater`, "#inspFlowDiagnosis", "#inspCard");
+
+    // Reactive poll update: legacy-null runtime with active independent BSH context + saturated/archive_incomplete.
     await page.evaluate(`(() => {
       const row = S.status.health.checks.find(c => c.id === 'heater');
       row.buh_s = row.bsh_s = null;
       row.context.bsh = structuredClone(row.context.buh);
       Object.assign(row.context.bsh, { on_s: 120, union_s: 3, unclassified_s: 117,
-        unknown_context_s: 120 });
+        unknown_context_s: 120, quiet_mild_notice: true });
       row.context.bsh.categories.emergency = { supported: true,
         positive_s: 3, evaluable_on_s: 10, positive_samples: 2 };
-      renderApp(); return true;
-    })()`);
-    await page.frame();
-    assert.ok((await heaterTable()).text.includes('3 s / 10 s · 2'),
-      `${context}: second heater keeps its own independent population without legacy runtime`);
-    assertLayout(await page.evaluate(layoutAudit), `${context}/heater-both`);
-    await page.evaluate(`(() => {
-      const row = S.status.health.checks.find(c => c.id === 'heater');
       Object.assign(row.context, { archive_incomplete: true, restore_pending: true });
       row.context.bsh.saturated = true;
-      renderApp(); return true;
+      renderApp();
+      return true;
     })()`);
     await page.frame();
-    assert.ok((await heaterTable()).text.includes('≥3 s / ≥10 s · ≥2'),
-      `${context}: saturated values retain lower bounds in the real DOM`);
-    const heaterBody = await page.evaluate(`document.querySelector("[data-desc='model:health_heater']")
-      .closest('.vitem').innerText`);
-    assert.ok(heaterBody.includes(await page.evaluate("t('check.heater_context.states').split('|')[5]")),
-      `${context}: damaged archive is explicit, not an ordinary pending wait`);
-    await captureNativeEvidence(page, `${context}/heater-partial`,
-      "[data-desc='model:health_heater']", ".vitem");
+    const buhReactive = await heaterBriefState();
+    assert.equal(buhReactive.hidden, false);
+    assert.equal(buhReactive.value, "", `${context}: reactive poll clears legacy runtime on BUH`);
+    assert.ok(buhReactive.text.includes("<1 s"), `${context}: reactive poll retains BUH flag sample`);
+    assert.ok(buhReactive.text.includes(await page.evaluate("t('check.heater_insp.archive_incomplete')")),
+      `${context}: reactive poll reveals incomplete archive on open BUH inspector`);
+
+    await openHeaterInspector("bsh", '#schem #gBshState[data-insp="bsh"]');
+    const bshPartial = await heaterBriefState();
+    assert.equal(bshPartial.hidden, false, `${context}: BSH inspector shows 24 h heater diagnosis`);
+    assert.ok(bshPartial.text.includes(`≥${await page.evaluate("checkupDuration(3)")}`),
+      `${context}: saturated BSH category retains lower bound in the real DOM`);
+    assert.ok(bshPartial.text.includes(await page.evaluate("t('check.heater_context.notice')")));
+    assert.ok(bshPartial.text.includes(await page.evaluate("t('check.heater_insp.archive_incomplete')")));
+    assert.ok(bshPartial.text.includes(await page.evaluate("t('check.heater_insp.limit')")));
+    assertLayout(await page.evaluate(layoutAudit), `${context}/heater-bsh`);
+    await captureNativeEvidence(page, `${context}/heater-partial`, "#inspFlowDiagnosis", "#inspCard");
+
+    // Modbus mode & disabled diagnostics transitions: check in EN and DE to avoid redundant transitions across all 13 locales.
+    if (["en", "de"].includes(context.split("/")[1])) {
+      await page.evaluate(`(() => {
+        S.status.diagnostics.effective_source = "modbus";
+        S.status.health.source = "modbus";
+        const row = S.status.health.checks.find(c => c.id === "heater");
+        row.bsh_s = 180;
+        renderApp();
+        return true;
+      })()`);
+      await page.frame();
+      const bshModbus = await heaterBriefState();
+      assert.equal(bshModbus.hidden, false);
+      assert.equal(bshModbus.label, `${await page.evaluate("t('check.heater_insp.runtime')")} · Modbus`);
+      assert.equal(bshModbus.value, await page.evaluate("checkupDuration(180)"));
+      assert.ok(!bshModbus.text.includes(await page.evaluate("t('check.heater_context.notice')")),
+        `${context}: Modbus BSH must omit X10A quiet-mild notice`);
+      assert.ok(!bshModbus.text.includes(await page.evaluate("t('check.heater_insp.archive_incomplete')")),
+        `${context}: Modbus BSH must omit X10A archive state`);
+      await openHeaterInspector("buh", '#schem [data-insp="buh"]');
+      const buhModbus = await heaterBriefState();
+      assert.equal(buhModbus.hidden, false);
+      assert.equal(buhModbus.text.trim(), await page.evaluate("t('check.heater_insp.unavailable')"));
+
+      // Diagnostics disabled hides #inspFlowDiagnosis on heater inspectors.
+      await page.evaluate("S.status.diagnostics.enabled = false; renderInspect(); true");
+      assert.equal(await page.evaluate('document.getElementById("inspFlowDiagnosis").hidden'), true,
+        `${context}: disabling diagnostics hides heater inspector diagnosis`);
+    }
+    await clickElement(page, "#inspClose");
+    await page.waitFor(`(() => {
+      const panel = document.getElementById("inspect");
+      return S.insp === null && !panel.classList.contains("open") &&
+        panel.getAnimations({ subtree: true }).every(anim =>
+          !(anim instanceof CSSTransition) || anim.playState !== "running");
+    })()`);
+    await page.evaluate(`(() => {
+      S.status.health = window.__heaterOrigHealth;
+      S.status.diagnostics = window.__heaterOrigDiag;
+      delete window.__heaterOrigHealth;
+      delete window.__heaterOrigDiag;
+      renderApp();
+      return true;
+    })()`);
     if (context.split("/")[1] === "en") {
       const serviceRow = "[data-desc='service:refrigerant']";
       await page.evaluate(`(() => {

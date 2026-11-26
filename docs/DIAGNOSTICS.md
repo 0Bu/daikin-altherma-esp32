@@ -20,8 +20,10 @@ switches to the independent affirmatively confirmed HomeHub (`EKRHH`) Modbus win
 
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
 Open a row to see what was measured and what the result means. The lowest water flow appears
-in the schematic's **Flow rate** inspector, and domestic-hot-water (DHW) tank cooling appears in
-the **DHW tank / thermal store** inspector. Observation windows can include gaps.
+in the schematic's **Flow rate** inspector, domestic-hot-water (DHW) tank cooling appears in
+the **DHW tank / thermal store** inspector, and electric backup and booster heater runtime
+observations appear separately in the **Backup heater (BUH)** and **Electric tank heater** (**BSH**)
+inspectors rather than as a card row. Observation windows can include gaps.
 Each row reports its own status directly; there is no aggregate card-header badge or health score
 for the installation.
 
@@ -264,26 +266,32 @@ flow.
 ### Electric backup and booster heaters
 
 **In plain language:** The board separately counts observed active seconds for the water-circuit
-electric backup heater (**BUH**) and tank electric booster heater (**BSH**).
+electric backup heater (**BUH**) and the tank electric booster heater (**BSH**). Open **Backup heater
+(BUH)** or **Electric tank heater** (**BSH**) in the schematic rather than looking for a row on the
+**Plant diagnostics** card; the two heaters are shown separately and are never merged.
 
-**Meaning:** **MEASURED** appears as soon as there is readable runtime evidence; it does not
-wait for a full day. A reported zero applies only to the observed intervals. A missing heater signal
-remains absent, rather than being counted as off.
+**Meaning:** Below the live chart, each inspector shows that heater's reported 24-hour ON time
+(**MEASURED** in firmware as soon as there is readable runtime evidence, without waiting for a full
+day). A reported zero applies only to the observed intervals, and a missing heater signal remains
+absent rather than being counted as off.
 
-When the card displays **X10A**, the expanded row also shows **reported heater flag context**
-separately for each heater (hidden in **Modbus** mode). The table gives positive time, evaluable ON
-time and positive samples for overlapping operating contexts. Unknown input stays unknown. A
-context with zero positive samples is limited to its evaluated population; it is not an absence
-finding for the whole day. The provisional Silent Mode + mild heating notice needs 15 minutes
-(900 s) of qualified accumulated flag-time, not necessarily one continuous run.
+On **X10A**, the inspector brief also lists up to three active accompanying operating contexts
+observed with the heater (for example, emergency flag, error status, Silent Mode + mild heating,
+defrost/recovery, hot-water route, outdoor temperature band, or compressor stopped) and displays a
+provisional notice when Silent Mode + mild heating reaches at least 15 minutes (`900 s`) of
+qualified accumulated flag time, not necessarily in one continuous run. Unknown input stays unknown,
+and incomplete 24-hour context archives or missing/stale current readings are flagged. On **Modbus**,
+**Electric tank heater** (**BSH**) shows its 24-hour Modbus runtime brief (while its live headline
+and timeline remain **X10A**-only), and **Backup heater (BUH)** shows unavailable.
 
-**Important limit:** Runtime does not establish electricity consumed, necessity or a defect.
-Controller settings, weather and operating schedules can make this activity intentional.
-The contexts report co-occurrence, not a controller's reason, calibration, or bivalence. Samples can
-miss intermediate changes. If stored records cannot be read or validated, totals are marked
-incomplete. Previously validated totals may remain visible during the same boot; new live
-observations remain separate. Reset, clock and incomplete-record safeguards are described in the
-evidence.
+**Important limit:** Runtime and flag duration do not establish electricity consumed, controller
+reason, necessity, bivalence, or a defect; controller settings, weather, and operating schedules
+can make this activity intentional. Contexts report co-occurrence rather than a controller reason or
+calibration, categories can overlap, and missing or between-sample signals remain unknown. If stored
+records cannot be read or validated, the 24-hour context archive is marked incomplete; previously
+validated totals may remain visible during the same boot while new live observations remain
+separate. Full per-category and audit counters stay available in `/status`, MQTT, and device reports,
+and reset, clock, and incomplete-record safeguards are described in the evidence.
 
 **Evidence and limits:** [Electric heaters](DIAGNOSTIC_EVIDENCE.md#diagnosis-heater)
 

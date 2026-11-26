@@ -55,7 +55,8 @@ vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   wire();
   this.__ui = { S, t, esp32CardHtml, circulationSettingsCardHtml,
                 refrigerantServiceRowHtml, workingFigureRowHtml, checkupCardHtml, checkupDetailHtml,
-                checkupFlowReport, checkupFlowBriefHtml, connLinks, liveData,
+                checkupFlowReport, checkupFlowBriefHtml, checkupHeaterReport, checkupHeaterBriefHtml,
+                connLinks, liveData,
                 renderApp, renderCards, histHtml, INSPECT };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
@@ -539,12 +540,47 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
     "Modbus flow report must omit X10A water agreement");
   assert.ok(!ui.checkupFlowBriefHtml(modbusFlowReport).includes(agreeLabel),
     "Modbus flow inspector must omit X10A water agreement rows");
-  const modbusHeater = { id: "heater", verdict: "ok", evidence: "observation", buh_s: 120, bsh_s: 0,
-    context: { confirmed: true, dated: true, buh: { supported: true, on_s: 120 }, bsh: { supported: false } } };
-  const modbusHeaterDetail = ui.checkupDetailHtml(modbusHeater, false, modbusOnly.health);
-  assert.ok(!modbusHeaterDetail.includes("heater-context") &&
-      !modbusHeaterDetail.includes(ui.t("check.heater_context.title")),
-    "Modbus heater detail must omit X10A heater context");
+  const modbusHeater = { id: "heater", verdict: "ok", evidence: "observation", buh_s: 120, bsh_s: 180,
+    context: { confirmed: true, dated: true, archive_incomplete: true,
+      buh: { supported: true, on_s: 120, quiet_mild_notice: true,
+        categories: { emergency: { supported: true, positive_s: 60, positive_samples: 2 } } },
+      bsh: { supported: true, on_s: 180, quiet_mild_notice: true,
+        categories: { emergency: { supported: true, positive_s: 60, positive_samples: 2 } } } } };
+  modbusOnly.health.checks = [modbusOkFlow, modbusHeater];
+  assert.ok(!ui.checkupCardHtml(true).includes("health_heater"),
+    "Modbus diagnostics card must omit health_heater");
+  const modbusBuhReport = ui.checkupHeaterReport("buh");
+  assert.equal(modbusBuhReport?.unsupported, true,
+    "Modbus heater report must mark BUH unavailable");
+  assert.equal(ui.checkupHeaterBriefHtml(modbusBuhReport),
+    `<p>${ui.t("check.heater_insp.unavailable")}</p>`,
+    "Modbus BUH inspector must render unavailable message");
+  const modbusBshReport = ui.checkupHeaterReport("bsh");
+  assert.deepEqual(Array.from(modbusBshReport?.activeContexts || []), [],
+    "Modbus BSH report must omit X10A heater contexts");
+  assert.equal(modbusBshReport?.archiveIncomplete, false);
+  assert.equal(modbusBshReport?.quietMildNotice, false);
+  assert.equal(modbusBshReport?.hasOnNoCategory, false);
+  const modbusBshBrief = ui.checkupHeaterBriefHtml(modbusBshReport);
+  assert.ok(modbusBshBrief.includes("Modbus") && modbusBshBrief.includes("3 min"),
+    "Modbus BSH inspector must render Modbus ON duration");
+  const escapeHtml = s => String(s).replace(/[&<>"]/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  for (const label of ui.t("check.heater_context.categories").split("|")) {
+    assert.ok(!modbusBshBrief.includes(escapeHtml(label)),
+      `Modbus BSH inspector must not leak X10A context category ${label}`);
+  }
+  assert.ok(!modbusBshBrief.includes(escapeHtml(ui.t("check.heater_context.notice"))),
+    "Modbus BSH inspector must not leak X10A quiet-mild notice");
+  assert.ok(!modbusBshBrief.includes(escapeHtml(ui.t("check.heater_insp.archive_incomplete"))),
+    "Modbus BSH inspector must not leak X10A archive state");
+  const x10aHealthy = HEALTHY();
+  x10aHealthy.diagnostics = { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] };
+  x10aHealthy.health = { source: "x10a", status: "ok", persist: "fresh", source_fresh: true,
+    checks: [{ id: "fault", verdict: "ok", active: 0 }, modbusHeater] };
+  ui.S.status = x10aHealthy;
+  assert.ok(!ui.checkupCardHtml(true).includes("health_heater"),
+    "X10A diagnostics card must omit health_heater");
   checks++;
 }
 
