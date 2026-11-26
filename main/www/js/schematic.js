@@ -1720,7 +1720,7 @@ function inspectSig(e, defrostRows = "", modbusDefrost = false) {
 //
 // Chart state has its own signature, independent of changing inspector readings. A new series
 // (`gen`), categorical live cap or pin updates its markup; ordinary scalar polls keep it mounted.
-function renderInspectHist(e, row, mode = "", flow = null) {
+function renderInspectHist(e, row, mode = "", flow = null, dhw = null) {
   if (flow?.minimum == null || (S.flowMinSelection &&
       (S.flowMinSelection.source !== flow.source || S.flowMinSelection.minimum !== flow.minimum)))
     S.flowMinSelection = null;
@@ -1801,12 +1801,22 @@ function renderInspectHist(e, row, mode = "", flow = null) {
        !!S.histHidden?.has(id)].join(":")
     : "";
   const flowReference = flow?.windows ? JSON.stringify([flow.source, flow.minimum, flow.windows]) : "";
+  const dhwAnchor = dhw?.timeline
+    ? (dhw.timeline.unix_s != null
+        ? dhw.timeline.unix_s - dhw.timeline.window_end_s
+        : `rel:${Math.floor(dhw.timeline.window_end_s / Math.max(60, h?.dt || mh?.dt || 60))}`)
+    : null;
+  const dhwReference = dhw?.timeline
+    ? JSON.stringify([dhw.source, dhw.maxRate, dhw.timeline.epoch, dhwAnchor,
+                      dhw.timeline.live, dhw.timeline.windows])
+    : dhw ? JSON.stringify([dhw.source, dhw.maxRate]) : "";
   const pressureChart = S.insp === "wp" && id === "water_pressure";
   const pressure = pressureChart ? pressureDiagnosis() : null;
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh),
-               liveGen, auxGen, sourceDefault, flowScaleKey, flowReference, JSON.stringify(pin ?? null),
+               liveGen, auxGen, sourceDefault, flowScaleKey, flowReference, dhwReference,
+               JSON.stringify(pin ?? null),
                pressureChart ? JSON.stringify([!!pressure, pressure?.finding]) : ""].join("|");
   if (sig === S.inspHistSig) return started;
   S.inspHistSig = sig;
@@ -1817,7 +1827,7 @@ function renderInspectHist(e, row, mode = "", flow = null) {
   const mb = pairedId ? mbByConcept(pairedId) : null;
   const mbHist = useMbFallback ? (S._modbus || []).find((m) => m && m.history === id) : null;
   const chartName = DERIVED[id] && e && e.aria ? inspFieldText(e, "aria", null) : null;
-  const history = (unit, name) => histHtml(id, unit, name, trendSource, false, flow);
+  const history = (unit, name) => histHtml(id, unit, name, trendSource, false, flow, { dhw });
   replaceHistoryHtml(el, !id ? ""
     : pressureChart ? histHtml(id, "bar", inspTitleText(e, null), trendSource, true, null,
                               { pressureDiagnosis: true, finding: pressure?.finding,
@@ -1838,7 +1848,9 @@ function renderInspect(mode = "") {
   // captured plot. scrubEnd resumes every affected host.
   if (S.scrub) return;
   const isFlow = e === INSPECT.flow;
+  const isTank = e === INSPECT.tank;
   const flow = isFlow ? checkupFlowReport() : null;
+  const dhw = isTank ? checkupDhwReport() : null;
   // The chart is decided ahead of the early return below, because its own state moves independently
   // of the card's: the series arrives from an async fetch that changes no live value.
   // inspCurRow refuses a retained X10A row. renderInspectHist may still resolve this target's paired
@@ -1848,18 +1860,31 @@ function renderInspect(mode = "") {
     ? checkupDefrostInspectorRows(S.status, S.transportUnavailable === "status" || S.otaCached)
     : "";
   const row = S.live && e ? inspCurRow(e) : null;
-  renderInspectHist(e, row, mode, flow);
+  renderInspectHist(e, row, mode, flow, dhw);
   // The combined Modbus trend describes historical readings, without supplying a live X10A state.
   const modbusDefrost = defrostInspector && !row && S.inspHistId === "modbus_defrost_state";
+  const trendSource = (e && (typeof e.trendSource === "function" ? e.trendSource(S.live)
+                                                               : e.trendSource)) || "";
+  const dhwView = dhw ? historyView("dhw_tank", trendSource) : null;
+  const hasDhwBands = dhw && dhwView ? dhwCoolingBands(dhwView, dhw).length > 0 : false;
   // Compare the inspector signature before rendering changed live readings; unchanged polls need
   // no DOM writes and preserve the reader's text selection.
   const sig = inspectSig(e, defrostRows, modbusDefrost) + (flow ? JSON.stringify([
     flow.source, flow.minimum, flow.locationsMissing, flow.unsupported, flow.agreement,
+  ]) : "") + (dhw ? JSON.stringify([
+    dhw.source, dhw.maxRate, dhw.blocked, dhw.unsupported, dhw.stale,
+    dhw.timeline?.epoch ?? null, dhw.timeline?.windows?.length ?? 0, hasDhwBands,
   ]) : "");
   if (sig === S.inspSig) return;
   S.inspSig = sig;
-  $("inspFlowDiagnosis").hidden = !flow;
-  setHtml("inspFlowDiagnosis", flow ? checkupFlowBriefHtml(flow) : "", false);
+  if (!flow || flow.minimum === null) S.flowMinSelection = null;
+  if (!dhw || !dhw.timeline?.windows?.some(w => w.rate_k_h >= 0.8) ||
+      (S.dhwCoolSelection && (S.dhwCoolSelection.source !== dhw.source ||
+                              S.dhwCoolSelection.epoch !== dhw.timeline.epoch)))
+    S.dhwCoolSelection = null;
+  $("inspFlowDiagnosis").hidden = !(flow || dhw);
+  setHtml("inspFlowDiagnosis", flow ? checkupFlowBriefHtml(flow)
+    : dhw ? checkupDhwBriefHtml(dhw, hasDhwBands) : "", false);
   // Use the same live-class accordion as the value/Settings tongues. The body stays mounted inside
   // its 0fr clip so the browser has a real closed geometry to transition FROM; toggling `hidden`
   // here painted the full infobox immediately and could never reproduce their pull-out motion.

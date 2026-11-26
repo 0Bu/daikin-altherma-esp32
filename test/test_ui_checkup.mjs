@@ -162,6 +162,9 @@ vm.runInContext(
        diagnostics: { enabled: true },
        health: { source: "x10a", span_s: 86400, full_span: true, source_fresh: true, ...health, checks: [c] },
      }, statusStale),
+     dhwReport: checkupDhwReport,
+     dhwBrief: checkupDhwBriefHtml,
+     dhwExplain: checkupDhwCoolingExplanation,
      chart: checkupCyclingChartHtml,
      timeline: checkupCyclingTimelineHtml,
      periodDetails: (trace, checkObj, from, to, source = "x10a") => {
@@ -242,119 +245,92 @@ for (const lang of locales) {
 }
 ui.setLang("en");
 
-// Current acquisition must not negate completed DHW hours. Energy is an explicit,
-// one-hour illustration from the observed rate, never a meter reading or daily total.
+// DHW tank cooling moved into the Tank inspector: /status.health still carries the dhw_loss
+// observation, while the browser derives only the inspector brief and 4-cause explanation from it.
 const dhw = {
-  id: "dhw_loss", verdict: "info", evidence: "heuristic", reason: "observation_only",
+  id: "dhw_loss", verdict: "ok", evidence: "observation", reason: "observation_only",
   max_k_h: 1.2, windows: 6, high_windows: 2, high_with_pump: 2, high_pump_off: 0,
-  draw_windows: 1, pump_windows: 2, quiet_high_windows: 1,
+  draw_windows: 1, pump_windows: 2, quiet_high_windows: 1, blocked: false,
 };
-assert.equal(ui.metric(dhw), "maximum 1.2 K/h · 2/6 windows: threshold reached");
-assert.equal(ui.metric({ ...dhw, max_k_h: 0.8, windows: 1, high_windows: 1,
-                        high_with_pump: 0, high_pump_off: 0 }),
-             "maximum 0.8 K/h · 1/1 windows: threshold reached");
-const mixedCirculation = { ...dhw, max_k_h: 6, high_pump_off: 1, high_with_pump: 1 };
-assert.equal(ui.metric(mixedCirculation), "maximum 6 K/h · 2/6 windows: threshold reached");
-assert.doesNotMatch(ui.metric(mixedCirculation), /pump|circulation|off|during/,
-  "an off-pump hour among several windows does not identify the maximum hour's context");
-assert.match(ui.detail(dhw), /An observed hint; its limit is explained below/);
-assert.match(ui.detail(dhw), /internal pump 2; draw-like drop 1; unmarked ≥0.8 K\/h 1/);
-assert.match(ui.detail(dhw), /Overlap possible/);
-assert.match(ui.detail(dhw), /Example for one hour: 200 l water cooling uniformly at 1.2 K\/h/);
-assert.match(ui.detail(dhw), /0.28 kWh heat/);
-assert.match(ui.detail(dhw), /0.09–0.11 kWh electricity to replace it at assumed COP 2.5–3 \(heat ÷ electricity\)/);
-assert.match(ui.detail(dhw), /Not measured energy/);
-assert.doesNotMatch(ui.detail(dhw), /24 h:|per day|1.68|6.70/);
-assert.match(ui.detail({ ...dhw, windows: 24 }), /0.28 kWh heat/,
-  "energy illustration must not multiply the maximum by a window count");
-assert.equal(ui.value({ ...dhw, verdict: "ok", evidence: "observation" }), "1.2 K/h");
-assert.equal(ui.value({ ...dhw, verdict: "ok", evidence: "observation", max_k_h: null }), "MEASURED");
-assert.match(ui.detail({ ...dhw, verdict: "ok", evidence: "observation" }), /Observation only; no universal OK\/WARNING limit/);
-// Zero remains a real observation; missing, non-finite and unsupported evidence cannot
-// manufacture a cooling rate or energy. A high marked rate remains visible as MEASURED.
-const zeroDhw = { ...dhw, verdict: "ok", evidence: "observation", max_k_h: 0,
-  high_windows: 0, high_with_pump: 0, high_pump_off: 0, quiet_high_windows: 0 };
-assert.match(ui.metric(zeroDhw), /^maximum 0 K\/h/);
-assert.match(ui.detail(zeroDhw), /0.00 kWh heat/);
+const withDhwStatus = (checkPatch, healthPatch = {}, diagPatch = {}, statePatch = {}) => {
+  const prevStatus = context.S.status;
+  const prevOta = context.S.otaCached;
+  const prevTransport = context.S.transportUnavailable;
+  try {
+    context.S.otaCached = false;
+    context.S.transportUnavailable = null;
+    Object.assign(context.S, statePatch);
+    context.S.status = {
+      diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", ...diagPatch },
+      health: {
+        source: "x10a", source_fresh: true, persist: "fresh",
+        checks: [{ ...dhw, ...checkPatch }],
+        ...healthPatch,
+      },
+    };
+    return ui.dhwReport();
+  } finally {
+    context.S.status = prevStatus;
+    context.S.otaCached = prevOta;
+    context.S.transportUnavailable = prevTransport;
+  }
+};
+assert.equal(withDhwStatus({}, {}, { enabled: false }), null, "disabled diagnostics hides tank cooling");
+assert.equal(withDhwStatus({}, {}, {}, { otaCached: true }), null, "OTA cache hides tank cooling");
+assert.equal(withDhwStatus({}, {}, {}, { transportUnavailable: "status" }), null, "unavailable status hides tank cooling");
+assert.equal(withDhwStatus({}, { persist: "unknown" }), null, "unknown persist hides tank cooling");
+assert.equal(withDhwStatus({}, { checks: [] }), null, "missing dhw_loss hides tank cooling");
+assert.equal(withDhwStatus({}, { source: "env3" }, { effective_source: "env3" }), null, "non-tank source returns null");
+
+const zeroDhwReport = withDhwStatus({ max_k_h: 0, windows: 1 });
+assert.equal(zeroDhwReport.maxRate, 0, "zero cooling rate with completed window stays distinct from null");
+assert.match(ui.dhwBrief(zeroDhwReport, false), /0 °C\/h/);
+assert.ok(!ui.dhwBrief(zeroDhwReport, false).includes(ui.text("en", "check.dhw.locations_missing")),
+  "< 0.8 K/h must not claim missing cooling-band locations");
+
 for (const invalid of [null, undefined, NaN, Infinity, -1, "1.2"]) {
-  assert.equal(ui.metric({ ...dhw, max_k_h: invalid }), "6 windows");
-  assert.doesNotMatch(ui.detail({ ...dhw, max_k_h: invalid }), /200 l|kWh|NaN|Infinity/);
+  assert.equal(withDhwStatus({ max_k_h: invalid }).maxRate, null, `invalid max_k_h (${String(invalid)}) must not fabricate a rate`);
 }
-for (const invalid of [0, null, undefined, NaN, Infinity])
-  assert.doesNotMatch(ui.detail({ ...dhw, windows: invalid }), /200 l|kWh|NaN|Infinity/);
-assert.doesNotMatch(ui.detail({ ...dhw, verdict: "unavailable" }), /200 l|kWh/);
-const markedDhw = { ...dhw, verdict: "ok", evidence: "observation", max_k_h: 2.4,
-  quiet_high_windows: 0 };
-assert.equal(ui.value(markedDhw), "2.4 K/h");
-assert.match(ui.detail(markedDhw), /maximum 2.4 K\/h/);
-assert.match(ui.detail(markedDhw), /Observation only; no universal OK\/WARNING limit/);
-const waiting = {
-  id: "dhw_loss", verdict: "collecting", reason: "no_eligible_windows",
-  observed_s: 7200, required_s: 21600, windows: 2,
-  candidate_s: 0, settle_remaining_s: 0, max_k_h: null,
-};
-detail = ui.detail(waiting);
-assert.match(detail, /Accepted hourly windows: 2; waiting for the next eligible hour/);
-assert.doesNotMatch(detail, /no complete.*window yet/);
-assert.match(ui.detail({ ...waiting, observed_s: 0, candidate_s: 3300, required_s: 0 }), /current candidate: 55 min of 1 h/);
-assert.match(ui.detail({ ...waiting, candidate_s: 0, settle_remaining_s: 1200, required_s: 0 }), /Settling time remaining: 20 min/);
-const blocked = {
-  ...waiting, verdict: "unavailable", windows: 0, blocked: true, aborts: 14,
-  best_aborted_s: 3000, abort_reasons: ["charge", "blind", "unknown_future_reason"],
-};
-detail = ui.detail(blocked);
-assert.match(detail, /Discarded windows: 14 \(tank charging, readings missing: X10A silent or polling paused\)/);
-assert.match(detail, /No completed hour in 24 h/);
-assert.doesNotMatch(detail, /unknown_future_reason|cause dominated|check the X10A wiring|duty cycle/);
-detail = ui.detail({ ...blocked, abort_reasons: ["blind"] });
-assert.match(detail, /required readings were unread too long/);
-assert.match(detail, /Missing replies or board-side polling pauses/);
-assert.match(detail, /establishes nothing about the tank/);
-assert.doesNotMatch(detail, /tank temperature went unread|because the X10A link|resolved|call service/);
-assert.equal(ui.value(blocked), "NO WINDOW");
-assert.equal(ui.value({ ...blocked, verdict: "collecting" }), "NO WINDOW",
-  "legacy collecting+blocked must not promise indefinite waiting");
-assert.doesNotMatch(ui.detail(blocked), /CHECKING|200 l|kWh/);
-assert.equal(ui.value({ ...blocked, verdict: "unavailable", blocked: false }), "N/A");
-assert.match(ui.detail({ ...blocked, verdict: "collecting" }), /No completed hour in 24 h/);
-const noAttempt = { ...blocked, aborts: 0, best_aborted_s: 0, abort_reasons: [] };
-assert.equal(ui.value(noAttempt), "NO WINDOW");
-assert.match(ui.detail(noAttempt), /<div class="vdesc-p">No completed hour in 24 h\.<\/div>/);
-assert.doesNotMatch(ui.detail(noAttempt), /discarded|interrupted|longest|\(\)|CHECKING|kWh/i);
-assert.match(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
-  /Discarded windows: 1 \(R5T unconfirmed\)/);
-assert.doesNotMatch(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
-  /implausible|implausibility/i,
-  "valid but not confirmed endpoint jitter must not be described as an implausible temperature");
+assert.equal(withDhwStatus({ windows: 0 }).maxRate, null, "zero windows cannot establish a maximum rate");
+assert.equal(withDhwStatus({ verdict: "unavailable" }).maxRate, null);
+assert.equal(withDhwStatus({ blocked: true }).maxRate, null);
+
+const activeDhw = withDhwStatus({ max_k_h: 1.2, windows: 6 });
+assert.match(ui.dhwBrief(activeDhw, true), /Strongest tank cooling · X10A.*1\.2 °C\/h/);
+assert.ok(!ui.dhwBrief(activeDhw, true).includes(ui.text("en", "check.dhw.locations_missing")));
+assert.ok(!ui.dhwBrief(activeDhw, true).includes(ui.text("en", "check.dhw.stale")));
+assert.ok(ui.dhwBrief(activeDhw, false).includes(ui.text("en", "check.dhw.locations_missing")),
+  "maxRate >= 0.8 without visible bands explains missing locations");
+assert.ok(ui.dhwBrief(withDhwStatus({}, { source_fresh: false }), true).includes(ui.text("en", "check.dhw.stale")));
+assert.ok(ui.dhwBrief(withDhwStatus({ reason: "source_stale" }), true).includes(ui.text("en", "check.dhw.stale")));
+assert.ok(ui.dhwBrief(withDhwStatus({
+  timeline: { epoch: 1, window_end_s: 10000, since_s: 0, observed_end_s: 9000, live: false, windows: [] },
+}), true).includes(ui.text("en", "check.dhw.stale")));
+
+assert.equal(ui.dhwBrief(withDhwStatus({ verdict: "unavailable", blocked: true, max_k_h: null, windows: 0 }), false),
+  `<p>${ui.text("en", "check.dhw.no_window")}</p>`);
+assert.equal(ui.dhwBrief(withDhwStatus({ verdict: "unavailable", blocked: false, max_k_h: null, windows: 0 }), false),
+  `<p>${ui.text("en", "check.status.unavailable")}</p>`);
+assert.equal(ui.dhwBrief(withDhwStatus({ verdict: "collecting", blocked: false, max_k_h: null, windows: 0 }), false),
+  `<p>${ui.text("en", "check.dhw.waiting")}</p>`);
+assert.equal(ui.dhwBrief(null, false), "");
+
 for (const lang of locales) {
-  const energy = ui.text(lang, "check.detail.dhw_energy", "1.2", "0.28", "0.09", "0.11");
-  assert.ok(energy.includes("200") && energy.includes("COP"), `${lang} retains explicit example assumptions`);
-  for (const value of ["1.2", "0.28", "0.09", "0.11"])
-    assert.ok(energy.includes(value), `${lang} retains example quantity ${value}`);
-  assert.ok(ui.detail(dhw).includes("kWh"), `${lang} renders the energy illustration`);
-  assert.ok(!ui.detail({ ...dhw, max_k_h: null }).includes("kWh"), `${lang} hides energy without a rate`);
-  assert.equal(ui.value(blocked), ui.text(lang, "check.status.no_window"), `${lang} labels the blocked day`);
-  assert.notEqual(ui.value(blocked), ui.text(lang, "check.status.collecting"), `${lang} does not keep waiting`);
-  assert.notEqual(ui.value(blocked), ui.text(lang, "check.status.unavailable"), `${lang} distinguishes unsupported profiles`);
-  const emptyWindow = ui.text(lang, "check.detail.dhw_blocked", 0, "", "0 min");
-  assert.ok(emptyWindow.includes("24"), `${lang} zero-attempt result retains its day scope`);
-  assert.doesNotMatch(emptyWindow, /0 min|\(\)|（）|\b0\b/,
-    `${lang} zero attempts must not invent discarded candidates or a longest attempt`);
-  for (const reasons of [[], ["blind"]]) {
-    const noAttemptDetail = ui.detail({ ...noAttempt, abort_reasons: reasons });
-    assert.ok(noAttemptDetail.includes(emptyWindow), `${lang} zero attempts render the bounded result`);
-    assert.ok(!noAttemptDetail.includes(ui.text(lang, "check.detail.dhw_blocked_link", 0, "0 min")),
-      `${lang} zero attempts do not invent interruptions from a legacy blind flag`);
-    assert.doesNotMatch(noAttemptDetail, /\(\)|（）|kWh/);
+  ui.setLang(lang);
+  const causes = [
+    ui.dhwExplain({ pump_marker: true, draw_marker: true }),
+    ui.dhwExplain({ pump_marker: true, draw_marker: false }),
+    ui.dhwExplain({ pump_marker: false, draw_marker: true }),
+    ui.dhwExplain({ pump_marker: false, draw_marker: false }),
+  ];
+  assert.equal(new Set(causes).size, 4, `${lang}: all 4 DHW cause explanations must be distinct`);
+  for (const text of causes) {
+    assert.ok(text.trim(), `${lang}: DHW cause explanation must be non-empty`);
+    const sentences = text.split(/[.!?。！？]+/).filter(s => s.trim());
+    assert.ok(sentences.length >= 1 && sentences.length <= 3,
+      `${lang}: DHW cause explanation must be <= 3 sentences (saw ${sentences.length})`);
   }
 }
-ui.setLang("de");
-assert.match(ui.detail(noAttempt), /Kein vollständiges Stundenfenster in 24 h\./);
-assert.doesNotMatch(ui.detail(noAttempt), /Verworfen|längster|\(\)/);
-assert.match(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
-  /R5T unbestätigt/);
-assert.doesNotMatch(ui.detail({ ...blocked, aborts: 1, abort_reasons: ["reading"] }),
-  /unplausibel|unplausible/i);
 ui.setLang("en");
 
 detail = ui.detail({ id: "heater", verdict: "ok", evidence: "observation", buh_s: 0,
@@ -1148,11 +1124,11 @@ assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: null, bsh_s: 0 }),
 context.S.status = { health: {
   assessable: 4, evaluated: 2, available: 8,
   span_s: 3600, source_age_s: 5, source_fresh: true, full_span: false,
-  checks: [dhw, pressure, cycling],
+  checks: [{ ...dhw, verdict: "info" }, pressure, cycling, { id: "fault", verdict: "info", active: 0 }],
 } };
 let card = ui.card();
 assert.doesNotMatch(card, /section-badge/);
-assert.doesNotMatch(card, /model:health_pressure/);
+assert.doesNotMatch(card, /model:health_pressure|model:health_dhw_loss/);
 assert.doesNotMatch(card, /2\/4 checks|checks assessed/);
 assert.match(card, /class="vrow-val checkup-val warn"/);
 assert.doesNotMatch(card, /All clear|healthy|8 values|health score/);
@@ -1160,6 +1136,9 @@ context.S.status.health = { assessable: 0, evaluated: 0,
   checks: [{ id: "flow", verdict: "ok", evidence: "observation", min_l_min: 8.4 }] };
 card = ui.card();
 assert.equal(card, "", "a flow-only report belongs in the inspector and cannot create a second card");
+context.S.status.health = { assessable: 0, evaluated: 0,
+  checks: [{ id: "dhw_loss", verdict: "ok", evidence: "observation", max_k_h: 2.1, windows: 2 }] };
+assert.equal(ui.card(), "", "a dhw_loss-only report belongs in the tank inspector and cannot create a Diagnosis card");
 context.S.status.health = { persist: "unknown",
   checks: [{ id: "cycling", verdict: "unavailable" }] };
 for (const lang of locales) {
@@ -1169,7 +1148,7 @@ for (const lang of locales) {
   assert.doesNotMatch(card, /health_cycling|N\/A|NaN/);
 }
 ui.setLang("en");
-context.S.status.health = { checks: [dhw, { ...pressure, verdict: "warn" }] };
+context.S.status.health = { checks: [cycling, { ...dhw, verdict: "warn" }, { ...pressure, verdict: "warn" }] };
 assert.doesNotMatch(ui.card(), /section-badge/);
 context.S.status.health = { checks: [{ id: "fault", verdict: "ok", active: 0 }] };
 assert.doesNotMatch(ui.card(), /section-badge/);
@@ -1290,21 +1269,17 @@ for (const lang of locales) {
   ]) assert.ok(purpose.includes(runRow(lang, label, count, mean)), lang + "/" + label + " purpose row");
   assert.ok(purpose.includes(escapeText(ui.text(lang, "check.cycling.unclear_hint"))));
   assert.doesNotMatch(purpose, /check\.cycling\.|checkup-stop-box|undefined|NaN|Infinity/);
-  const interrupted = { ...dhw, aborts: 3, abort_reasons: ["blind"], best_aborted_s: 2400 };
-  const discarded = ui.text(lang, "check.detail.dhw_aborted", 3,
-    ui.text(lang, "check.detail.dhw_reason.blind"), "40 min").trim();
-  for (const verdict of ["info", "ok"]) {
-    const result = { ...interrupted, verdict,
-      evidence: verdict === "ok" ? "observation" : "heuristic" };
-    assert.ok(ui.detail(result).includes(discarded),
-      `${lang}/${verdict} completed windows retain discarded reading-gap evidence`);
-    assert.ok(!ui.detail({ ...result, aborts: 0 }).includes(discarded),
-      `${lang}/${verdict} must not invent discarded reading-gap evidence`);
+  const briefHtml = ui.dhwBrief({
+    source: "x10a", maxRate: 1.2, timeline: null, blocked: false, unsupported: false, stale: true,
+  }, false);
+  for (const key of ["check.dhw.maximum", "check.dhw.locations_missing", "check.dhw.stale"]) {
+    assert.ok(briefHtml.includes(escapeText(ui.text(lang, key))), `${lang}: DHW brief missing ${key}`);
   }
+  assert.doesNotMatch(briefHtml, /check\.dhw\.|undefined|NaN|Infinity/);
   const localizedDefrost = ui.defrostInspector(defrost, partialReport);
   assert.doesNotMatch(localizedDefrost,
     /check\.defrost\.|undefined|NaN|Infinity/, `missing or misleading ${lang} defrost copy`);
-  for (const c of [dhw, cycling, waiting, partialModeCycling,
+  for (const c of [pressure, cycling, defrost, partialModeCycling,
       { id: "fault", verdict: "info", active: 0 },
       { id: "fault", verdict: "info", active: null, reason: "source_stale" }]) {
     assert.doesNotMatch(ui.detail(c, false, { span_s: 3600, source_age_s: 900, source_fresh: false }),
@@ -1318,10 +1293,9 @@ assert.match(ui.detail(normalCycling), /Die Heizläufe dauern im Schnitt lang ge
 assert.ok(ui.detail(normalCycling).includes(runRow("de", "mode.heat", 12, "16 min")));
 assert.ok(ui.detail(normalCycling).includes(runRow("de", "mode.dhw", 2, "15 min")));
 assert.doesNotMatch(ui.detail(cycling), /Kontext beim Stopp|90 %|im Mittel unter 10 min/);
-assert.match(ui.detail(dhw), /Beobachteter Hinweis; seine Grenze steht unten/);
-assert.match(ui.detail(dhw), /Beispiel für eine Stunde: 200 l Wasser/);
-assert.match(ui.detail(dhw), /0,28 kWh Wärme/);
-assert.match(ui.detail(dhw), /0,09–0,11 kWh Strom/);
+assert.match(ui.dhwBrief({
+  source: "x10a", maxRate: 1.2, timeline: null, blocked: false, unsupported: false, stale: false,
+}, true), /Stärkste Speicherauskühlung · X10A.*1,2 °C\/h/);
 assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursache noch Behebung/);
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6,5 l/min");
 assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "");
@@ -1329,18 +1303,7 @@ assert.equal(ui.value({ id: "fault", verdict: "warn", active: 1, latest: { code:
   "7H-01 · seit 2 min");
 assert.equal(ui.value({ id: "fault", verdict: "info", active: 0, latest: { code: "U4", duration_s: 90, age_s: 10800 } }),
   "U4 · vor 3 h");
-assert.equal(ui.value({ ...dhw, max_k_h: 4.8 }), "4,8 K/h");
 assert.equal(ui.value({ ...cycling, starts: 19 }), "≥19");
-
-// Copy regression pins for corrected diagnosis claims (U3). The DHW loss peak is a highest
-// observed rate, not a bound: no shipped locale may lead it with an "at most" adverb.
-assert.match(ui.text("de", "check.loss_max", "0,8"), /^Höchstwert 0,8 K\/h$/,
-             "de check.loss_max must read as the observed Höchstwert");
-for (const lang of locales) {
-  assert.doesNotMatch(ui.text(lang, "check.loss_max", "0,8"),
-                      /^(?:maximal|enintään|högst|maksimalt|maksymalnie)(?=\s)/u,
-                      `${lang} check.loss_max must name the observed peak, not an upper bound`);
-}
 
 const descriptionContext = {};
 vm.runInNewContext(`${i18nSource}${explanationSource}; this.model = MODEL_DESCRIPTIONS;
@@ -1364,11 +1327,10 @@ for (const id of ["fault", "dhw_loss", "cycling", "defrost", "pressure", "flow",
   }
 }
 const model = descriptionContext.model;
-assert.match(JSON.stringify(model.health_dhw_loss), /one point in a stratified tank/);
-assert.match(model.health_dhw_loss.normal, /Project hint ≥0.8 K\/h without pump\/draw-like markers/);
-assert.match(model.health_dhw_loss.normal, /Missing markers do not prove no draw/);
-assert.match(model.health_dhw_loss.normal, /zero net cooling does not exclude heat loss/);
-assert.match(JSON.stringify(model.health_dhw_loss), /correlation, not cause/);
+assert.match(model.health_dhw_loss.what, /tank inspector/);
+assert.match(model.health_dhw_loss.normal, /Windows ≥0\.8 K\/h are highlighted on the tank chart/);
+assert.match(model.health_dhw_loss.normal, /one point in a stratified tank, not measured tank energy/);
+assert.match(model.health_dhw_loss.normal, /suggest possible causes without proving one or ruling out other losses/);
 for (const copy of [model.health_cycling.what, model.health_cycling.normal,
   ...descriptionContext.modelDe.health_cycling]) {
   assert.ok(copy.length <= 265, "cycling help must fit in a short paragraph");
@@ -1417,18 +1379,6 @@ for (const lang of locales) {
         assert.ok(body.startsWith('<div class="vdesc-p checkup-cycling-total"><span class="vdesc-n">'));
         assert.ok(body.indexOf("checkup-cycling-assessment") < body.indexOf("data-checkup-hours"));
         assert.doesNotMatch(diagnosis, /checkup-stop-box|checkup-cycling-chart/);
-      } else if (id === "health_dhw_loss") {
-        assert.ok(body.startsWith('<div class="checkup-dhw-detail" inert><div class="checkup-dhw-value num">'),
-          `${lang}/${id}: without a rate the status leads the lazily mounted timeline`);
-        assert.match(body, /data-checkup-dhw/);
-        assert.doesNotMatch(body, /data-dhw-window=/, `${lang}/${id}: collapsed rows build no chart`);
-        assert.ok(body.indexOf("checkup-dhw-value") < body.indexOf("checkup-dhw-assessment"));
-        assert.ok(body.indexOf("checkup-dhw-assessment") < body.indexOf("data-checkup-dhw"));
-        assert.match(body, /<details class="checkup-dhw-disclosure" data-dhw-disclosure="timeline"><summary>/,
-          `${lang}/${id}: the named history starts collapsed`);
-        const basis = body.slice(body.indexOf('data-dhw-disclosure="basis"'));
-        assert.ok(basis.includes(ui.text(lang, "check.dhw.limit")), `${lang}/${id}: the sensor limit stays in the data details`);
-        assert.doesNotMatch(body, /check\.dhw\./, `${lang}/${id}: complete dedicated copy`);
       } else {
         assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/${id}/${verdict}`);
         assert.ok(body.startsWith('<div class="vdesc-p"><span class="vdesc-n">'), `${lang}/${id}: value first`);
@@ -1442,32 +1392,6 @@ for (const lang of locales) {
     assert.match(renderedContext.rendered.model("max_alloc", "Memory", "20 kB"),
                  /<span class="vdesc-n">Normal:<\/span>/);
     assert.match(renderedContext.rendered.value(), /<span class="vdesc-n">Normal:<\/span>/);
-  }
-}
-// Exercise the full production accordion: the DHW rule stays reachable in collapsed
-// data details, and the independent energy illustration is explicitly a collapsed example.
-for (const lang of locales) {
-  renderedContext.rendered.lang(lang);
-  ui.setLang(lang);
-  const diagnosis = renderedContext.rendered.model("health_dhw_loss", "DHW", ui.value(dhw),
-    { bodyHtml: ui.detail(dhw) });
-  assert.match(diagnosis, /data-dhw-disclosure="basis"><summary>/,
-    `${lang} rule and detailed evidence start collapsed`);
-  assert.match(diagnosis, /data-dhw-disclosure="energy"><summary>/,
-    `${lang} energy illustration has its own collapsed disclosure`);
-  const energyBody = diagnosis.slice(diagnosis.indexOf('data-dhw-disclosure="energy"'));
-  assert.match(energyBody, /200[\s\S]*COP[\s\S]*kWh|200[\s\S]*kWh[\s\S]*COP/,
-    `${lang} assumed volume, heat and electricity remain inside the example`);
-  assert.match(diagnosis, /0[,.]8/, `${lang} expanded diagnosis retains its project threshold`);
-  assert.match(diagnosis, /200/, `${lang} expanded diagnosis retains the example volume`);
-  assert.match(diagnosis, /COP/, `${lang} expanded diagnosis retains its electricity assumption`);
-  assert.match(diagnosis, /kWh/, `${lang} expanded diagnosis includes the measured-rate energy illustration`);
-  assert.doesNotMatch(diagnosis, /check\.detail\.|undefined|NaN/);
-  if (lang === "en") {
-    assert.match(diagnosis, /Missing markers do not prove no draw/);
-    assert.match(diagnosis, /zero net cooling does not exclude heat loss/);
-    assert.match(diagnosis, /correlation, not cause/);
-    assert.match(diagnosis, /not measured tank energy/);
   }
 }
 
@@ -1489,10 +1413,46 @@ context.S.status = {
 };
 let cardHtml = ui.card(true);
 assert.match(cardHtml, /Plant diagnostics · 24 h · Modbus</);
-for (const shown of ["health_fault", "health_heater", "health_cycling", "health_dhw_loss"])
+for (const shown of ["health_fault", "health_heater", "health_cycling"])
   assert.ok(cardHtml.includes(shown), `Modbus card must render ${shown}`);
-for (const hidden of ["health_defrost", "health_flow", "health_pressure", "health_retries", "refrigerant_service"])
+for (const hidden of ["health_defrost", "health_flow", "health_dhw_loss", "health_pressure", "health_retries", "refrigerant_service"])
   assert.ok(!cardHtml.includes(hidden), `Modbus card must hide ${hidden}`);
+
+// Diagnosis card badge must ignore dhw_loss and flow verdicts and treat h.status === "info" as ok
+// when no visible check has info or warn.
+context.S.status = {
+  diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
+  health: {
+    source: "x10a", status: "info", persist: "fresh", source_fresh: true,
+    checks: [
+      { id: "fault", verdict: "ok", active: 0, observed_s: 3600 },
+      { id: "dhw_loss", verdict: "warn", max_k_h: 4.5, windows: 4, observed_s: 14400 },
+      { id: "cycling", verdict: "ok", starts: 2, observed_s: 3600 },
+      { id: "defrost", verdict: "ok", count: 0, observed_s: 3600 },
+      { id: "pressure", verdict: "ok", current_bar: 1.5, observed_s: 3600 },
+      { id: "flow", verdict: "info", min_l_min: 10.2, observed_s: 60 },
+      { id: "heater", verdict: "ok", buh_s: 0, bsh_s: 0, observed_s: 3600 },
+      { id: "retries", verdict: "ok", seen: false, observed_s: 3600 },
+    ],
+  },
+};
+cardHtml = ui.card(true);
+assert.ok(!cardHtml.includes("health_dhw_loss") && !cardHtml.includes("DHW tank cooling"),
+  "X10A Diagnosis card must omit dhw_loss");
+assert.doesNotMatch(cardHtml, /section-badge/,
+  "Diagnosis card renders no header summary badge");
+
+context.S.status.health.checks[2].verdict = "info";
+cardHtml = ui.card(true);
+assert.doesNotMatch(cardHtml, /section-badge/);
+assert.match(cardHtml, /class="vrow-val checkup-val warn">/,
+  "visible cycling info carries its own row verdict without a card badge");
+
+for (const idx of [0, 2, 3, 6]) context.S.status.health.checks[idx].verdict = "collecting";
+cardHtml = ui.card(true);
+assert.doesNotMatch(cardHtml, /section-badge/);
+assert.match(cardHtml, /class="vrow-val checkup-val dim">CHECKING</,
+  "collecting checks carry their own dimmed row state without a card badge");
 
 context.S.status.health.checks = modbusChecks.map((c) =>
   c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0, hydronic: hydronicFlow.hydronic } : c);
@@ -1513,12 +1473,13 @@ assert.match(ui.card(true), /Plant diagnostics · 24 h · X10A</);
 context.S.status.diagnostics.available_sources = ["x10a"];
 assert.match(ui.card(true), /Plant diagnostics · 24 h</);
 
-const mbDetail = ui.detail(
-  { id: "dhw_loss", verdict: "info", blocked: true, abort_reasons: ["blind", "draw"], aborts: 1, windows: 0, observed_s: 300, required_s: 0 },
-  false, { source: "modbus", source_fresh: false });
-assert.ok(mbDetail.includes(ui.text("en", "check.detail.dhw_reason.blind_modbus")));
-assert.ok(mbDetail.includes(ui.text("en", "check.detail.source_stale_modbus")));
-assert.doesNotMatch(mbDetail, /X10A|HomeHub/);
+const mbBrief = ui.dhwBrief({
+  source: "modbus", maxRate: 1.5, timeline: null, blocked: false, unsupported: false, stale: true,
+}, false);
+assert.ok(mbBrief.includes("Modbus"));
+assert.ok(mbBrief.includes(ui.text("en", "check.dhw.stale")));
+assert.ok(mbBrief.includes(ui.text("en", "check.dhw.locations_missing")));
+assert.doesNotMatch(mbBrief, /X10A|HomeHub/);
 assert.equal(ui.ready({
   diagnostics: { enabled: true, effective_source: "x10a" },
   hp: { connected: false }, modbus: { connected: false },
@@ -1748,22 +1709,19 @@ assert.equal(ui.ready({
   assert.ok(ui.value({ id: "fault", verdict: "info", active: 0, latest: { code: "U4", age_s: 120 } }).includes("U4"));
   assert.ok(ui.value({ id: "fault", verdict: "info", active: null, latest: { code: "H9" } }).includes("H9"));
 
-  // dhw_loss: blocked (blind vs mixed), collecting branches, completed rate + stale reason.
-  const dhwBlockedLink = ui.detail({
-    id: "dhw_loss", verdict: "collecting", blocked: true, aborts: 2,
-    abort_reasons: ["blind"], best_aborted_s: 900, required_s: 14400,
-  }, false, { source: "x10a" });
-  assert.match(dhwBlockedLink, /2/);
-  const dhwBlockedMixed = ui.detail({
-    id: "dhw_loss", verdict: "collecting", blocked: true, aborts: 1,
-    abort_reasons: ["blind", "heating"], best_aborted_s: 600, required_s: 14400,
-  }, false, { source: "modbus" });
-  assert.match(dhwBlockedMixed, /Modbus/);
-  assert.ok(ui.detail({ id: "dhw_loss", verdict: "collecting", windows: 0, required_s: 14400, settle_remaining_s: 120 }, false, {}).length > 0);
-  assert.ok(ui.detail({ id: "dhw_loss", verdict: "collecting", windows: 0, required_s: 14400, candidate_s: 600 }, false, {}).length > 0);
-  assert.equal(ui.value({ id: "dhw_loss", verdict: "ok", max_k_h: 0.4, windows: 3, high_windows: 1 }), "0.4 K/h");
-  assert.equal(ui.value({ id: "dhw_loss", verdict: "collecting", windows: 1 }), "CHECKING");
-  assert.equal(ui.value({ id: "dhw_loss", verdict: "warn", blocked: true, max_k_h: 2.5 }), "NO WINDOW");
+  // dhw_loss brief matrix: blocked, waiting, unavailable, low rate (< 0.8), high rate + stale.
+  assert.ok(ui.dhwBrief({ source: "x10a", maxRate: null, blocked: true, unsupported: false, stale: false }, false)
+    .includes(ui.text("en", "check.dhw.no_window")));
+  assert.ok(ui.dhwBrief({ source: "x10a", maxRate: null, blocked: false, unsupported: false, stale: false }, false)
+    .includes(ui.text("en", "check.dhw.waiting")));
+  assert.ok(ui.dhwBrief({ source: "x10a", maxRate: null, blocked: false, unsupported: true, stale: false }, false)
+    .includes(ui.text("en", "check.status.unavailable")));
+  const lowBrief = ui.dhwBrief({ source: "x10a", maxRate: 0.4, blocked: false, unsupported: false, stale: false }, false);
+  assert.ok(lowBrief.includes("0.4 °C/h") && !lowBrief.includes(ui.text("en", "check.dhw.locations_missing")));
+  const staleHighBrief = ui.dhwBrief({ source: "modbus", maxRate: 2.5, blocked: false, unsupported: false, stale: true }, true);
+  assert.ok(staleHighBrief.includes("2.5 °C/h") && staleHighBrief.includes("Modbus") &&
+    staleHighBrief.includes(ui.text("en", "check.dhw.stale")) &&
+    !staleHighBrief.includes(ui.text("en", "check.dhw.locations_missing")));
 
   // heater, retries, and flow edge inputs.
   assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: 30, bsh_s: 120 }), "Aux <1 · Tank 2 min");

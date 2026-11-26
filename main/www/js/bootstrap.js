@@ -556,6 +556,13 @@ function wireTrendScrub(gv) {
       if (plot) selectFlowMinimum(plot);
       return;
     }
+    const dhwCool = e.target.closest("[data-dhw-cool-show]");
+    if (dhwCool) {
+      e.stopPropagation();
+      const plot = dhwCool.closest(".vhist")?.querySelector("[data-hist=dhw_tank]");
+      if (plot) selectDhwCooling(plot);
+      return;
+    }
     const button = e.target.closest("[data-hist-series]");
     if (!button) return;
     e.stopPropagation();
@@ -614,8 +621,10 @@ function wireTrendScrub(gv) {
       const pointer = S.trendPointer;
       const low = label === "flow" && i >= 0 && Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) <= 8 &&
         selectFlowMinimum(plot, e.clientX, e.clientY, e.pointerType === "touch" ? 18 : 4);
+      const dhwBand = label === "dhw_tank" && i >= 0 && Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) <= 8 &&
+        selectDhwCooling(plot, e.clientX, e.clientY, e.pointerType === "touch" ? 18 : 4);
       scrubEnd(plot);
-      if (i >= 0 && !low)
+      if (i >= 0 && !low && !dhwBand)
         histPinToggle(label, i, plot.dataset.source || "", undefined, plot.dataset.pressureAssessment !== undefined);
     });
   }

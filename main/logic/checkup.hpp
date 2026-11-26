@@ -2082,15 +2082,22 @@ inline const char* checkup_check_id(CheckupCheck c) {
 // observation and only a positive-denominator runtime share is heuristic.
 inline const char* checkup_evidence_name(CheckupCheck c) {
     switch (c) {
-        case CheckupCheck::Fault:    return "device";
-        case CheckupCheck::Pressure:
-            return "heuristic"; // common project boundary, no model-matched limit
-        case CheckupCheck::Cycling:  return "heuristic";
-        case CheckupCheck::DhwLoss:  return "heuristic";
-        case CheckupCheck::Defrost:  return "heuristic";
-        case CheckupCheck::Flow:     return "observation";
-        case CheckupCheck::Heater:   return "observation";
-        case CheckupCheck::Retries:  return "experimental";
+    case CheckupCheck::Fault:
+        return "device";
+    case CheckupCheck::Pressure:
+        return "heuristic"; // common project boundary, no model-matched limit
+    case CheckupCheck::Cycling:
+        return "heuristic";
+    case CheckupCheck::DhwLoss:
+        return "observation";
+    case CheckupCheck::Defrost:
+        return "heuristic";
+    case CheckupCheck::Flow:
+        return "observation";
+    case CheckupCheck::Heater:
+        return "observation";
+    case CheckupCheck::Retries:
+        return "experimental";
     }
     return "";
 }
@@ -2377,7 +2384,7 @@ inline void checkup_summarize(CheckupReport& r) {
         const bool observation =
             checkup_text_equal(checkup_result_evidence_name(id, c), "observation");
         const bool experimental = id == CheckupCheck::Retries;
-        const bool finding_only = id == CheckupCheck::DhwLoss || experimental;
+        const bool finding_only = experimental;
         if (!observation && !finding_only) {
             ++r.assessable;
             if (c.verdict != CheckupVerdict::Collecting) ++r.evaluated;
@@ -2474,20 +2481,17 @@ inline __attribute__((noinline)) CheckupReport checkup_evaluate(
     if (!dhw_supported) {
         set(CheckupCheck::DhwLoss, CheckupVerdict::Unavailable, 0, 0);
     } else {
-        const auto verdict = dhw.quiet_high_windows
-                                 ? CheckupVerdict::Info
-                                 : (dhw.windows ? CheckupVerdict::Ok
-                                                : (r.dhw_blocked ? CheckupVerdict::Unavailable
-                                                                 : CheckupVerdict::Collecting));
+        const auto verdict = dhw.windows ? CheckupVerdict::Ok
+                                         : (r.dhw_blocked ? CheckupVerdict::Unavailable
+                                                          : CheckupVerdict::Collecting);
         set(CheckupCheck::DhwLoss, verdict, dhw.observed_s, 0,
             dhw.max_loss_tenths_k_h == CHECKUP_ABSENT ? -1 : dhw.max_loss_tenths_k_h,
             static_cast<int>(dhw.windows), static_cast<int>(dhw.high_windows),
             static_cast<int>(dhw.high_with_pump), static_cast<int>(dhw.high_pump_off),
             static_cast<int>(dhw.circulation_on_s), static_cast<int>(dhw.circulation_known_s));
         auto& c            = r.checks[static_cast<size_t>(CheckupCheck::DhwLoss)];
-        c.observation_only = !dhw.quiet_high_windows;
+        c.observation_only = true;
         c.reason = dhw.windows ? CheckupReason::ObservationOnly : CheckupReason::NoEligibleWindows;
-        if (dhw.quiet_high_windows) c.reason = CheckupReason::None;
     }
 
     // Only complete, continuously classified space-heating runs decide cycling. Starts and

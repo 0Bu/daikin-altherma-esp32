@@ -1555,8 +1555,98 @@ function pressureFindingIndex(view, finding) {
   return index >= 0 && series.v[index] === Math.round(finding.bar * 10) && !histHeld(series, index) ? index : -1;
 }
 
+function dhwCoolingBands(view, dhw) {
+  const windows = dhw?.timeline?.windows;
+  const span = view ? (view.v.length - 1) * view.dt : 0;
+  if (!windows?.length || span <= 0 ||
+      !histVisibleSeries(view).some(s => s.source === dhw.source &&
+        s.v.some((v, i) => v != null && s.v[i + 1] != null))) return [];
+  const wall = Number.isFinite(view.t0) && Number.isFinite(dhw.timeline.unix_s);
+  const rel = view.t0 == null && !dhw.timeline.unix_s && dhw.timeline.live &&
+    !view.aged && !view.refreshFailed;
+  if (!wall && !rel) return [];
+  const bands = [];
+  for (const w of windows) {
+    if (!(w.rate_k_h >= 0.8)) continue;
+    let from, to, unixFrom = null, unixTo = null;
+    if (wall) {
+      unixFrom = dhw.timeline.unix_s - (dhw.timeline.window_end_s - w.start_s);
+      unixTo = dhw.timeline.unix_s - (dhw.timeline.window_end_s - w.end_s);
+      if (unixTo <= view.t0 || unixFrom >= view.t0 + span) continue;
+      from = Math.max(view.t0, unixFrom) - view.t0;
+      to = Math.min(view.t0 + span, unixTo) - view.t0;
+    } else {
+      const fromRel = span - (dhw.timeline.window_end_s - w.start_s);
+      const toRel = span - (dhw.timeline.window_end_s - w.end_s);
+      if (toRel <= 0 || fromRel >= span) continue;
+      from = Math.max(0, fromRel);
+      to = Math.min(span, toRel);
+    }
+    const x = (from / span) * HIST_W;
+    const width = ((to - from) / span) * HIST_W;
+    if (width <= 0) continue;
+    bands.push({ ...w, unixFrom, unixTo, windowEndS: dhw.timeline.window_end_s, x, width });
+  }
+  if (!bands.length) return [];
+  const peakRate = Math.max(...bands.map(b => b.rate_k_h));
+  return bands.map(b => ({ ...b, isPeak: b.rate_k_h === peakRate }));
+}
+
+function dhwCoolingTime(time, b) {
+  if (b.unixFrom != null && b.unixTo != null) return flowMinimumTime(time, b.unixFrom, b.unixTo);
+  const rel = s => {
+    const ageH = Math.max(0, b.windowEndS - s) / 3600;
+    return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
+  };
+  return `${rel(b.start_s)} – ${rel(b.end_s)}`;
+}
+
+function selectDhwCooling(plot, clientX, clientY, tolerance = 0) {
+  const bands = [...plot.querySelectorAll("[data-dhw-band]")];
+  if (!bands.length) return false;
+  let picked;
+  if (clientX == null) {
+    const cur = bands.findIndex(b => b.classList.contains("selected"));
+    if (cur < 0) {
+      const peaks = bands.filter(b => b.classList.contains("is-peak"));
+      picked = peaks.at(-1) || bands.at(-1);
+    } else {
+      picked = bands[(cur + 1) % bands.length];
+    }
+  } else {
+    const svg = plot.querySelector("svg");
+    const bounds = svg.getBoundingClientRect();
+    const curve = [...svg.querySelectorAll("#dhwCoolingClip path")];
+    if (!bounds.width || !bounds.height) return false;
+    let best = tolerance;
+    for (const b of bands) {
+      const r = b.getBoundingClientRect();
+      const distance = Math.max(0, r.left - clientX, clientX - r.right);
+      if (!r.width || distance > best || (picked && distance === best)) continue;
+      const x = Math.min(r.right, Math.max(r.left, clientX));
+      const point = new DOMPoint((x - bounds.left) / bounds.width * HIST_W,
+        (clientY - bounds.top) / bounds.height * HIST_H);
+      if (!curve.some(area => area.isPointInFill(point))) continue;
+      picked = b;
+      best = distance;
+    }
+  }
+  if (!picked) return false;
+  S.dhwCoolSelection = {
+    end_s: Number(picked.dataset.dhwBand),
+    source: plot.dataset.dhwSource || "",
+    epoch: Number(plot.dataset.dhwEpoch || 0),
+  };
+  for (const b of bands) b.classList.toggle("selected", b === picked);
+  const readout = plot.closest(".vhist").querySelector(".vhist-dhw-readout");
+  readout.hidden = false;
+  readout.querySelector("strong").textContent = picked.dataset.dhwHeader;
+  readout.querySelector("span").textContent = picked.dataset.dhwReadout;
+  return true;
+}
+
 function histHtml(id, unit, name, source = "", identifySource = false, flow = null,
-                  { pressureDiagnosis = false, finding, findingExplanation = "" } = {}) {
+                  { pressureDiagnosis = false, finding, findingExplanation = "", dhw = null } = {}) {
   const offeredX = (!source || source === "x10a") && hasHist(id);
   const offeredM = (!source || source === "modbus") && hasModbusHist(id);
   const offeredE = (!source || source === "env3") && hasEnv3Hist(id);
@@ -1582,6 +1672,7 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   // changed later contributes explicit null gaps, never a shorter axis or fabricated flat data.
   const full  = n * view.dt >= 23.5 * 3600;
   const flowBands = id === "flow" ? flowMinimumBands(view, flow) : [];
+  const dhwBands = id === "dhw_tank" ? dhwCoolingBands(view, dhw) : [];
   const scale = histScale(allPts, n, id);
   const { lo, hi, X, Y } = scale;
   const isPressure = id === "water_pressure";
@@ -1594,12 +1685,13 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   // numeric trend uses the same visual grammar while a gap remains a real gap. Multiple sources use
   // the same geometry and are made more transparent by the wrapper class below. A run of ONE sample
   // still gets a dot because there is no interval whose area or upper edge could honestly be drawn.
-  let line = "", area = "", dots = "", flowCurveArea = "";
+  let line = "", area = "", dots = "", flowCurveArea = "", dhwCurveArea = "";
   for (const s of visible) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
     const [l, a, d] = histRuns(pts, n, X, Y, histSourceClass(s.source), 1.6, isPressure && s.source === "x10a");
     line += l; area += a; dots += d;
     if (flowBands.length && s.source === flow.source) flowCurveArea = a;
+    if (dhwBands.length && s.source === dhw.source) dhwCurveArea = a;
   }
   // The "now" marker is an HTML element, not an SVG circle: the SVG is stretched non-uniformly, so
   // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
@@ -1693,6 +1785,29 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
       `<strong>${selected ? esc(flowMinimumTime(time, selected.from, selected.to)) : ""}</strong>` +
       `<span>${selected ? esc(explanation) : ""}</span></div>`;
   }
+  let dhwSvg = "", dhwAttr = "", dhwReadout = "";
+  if (dhwBands.length && dhwCurveArea) {
+    const time = new Intl.DateTimeFormat(LANG, { dateStyle: "short", timeStyle: "short" });
+    const selectedDhw = S.dhwCoolSelection?.source === dhw.source &&
+      S.dhwCoolSelection?.epoch === dhw.timeline.epoch
+      ? dhwBands.find(b => b.end_s === S.dhwCoolSelection.end_s) : null;
+    const dhwWindows = dhwBands.map(b => {
+      const header = `${dhwCoolingTime(time, b)} · ${checkupFmt1(b.rate_k_h)} °C/h`;
+      const explanation = checkupDhwCoolingExplanation(b);
+      return `<rect class="vhist-dhw-band${b.isPeak ? " is-peak" : ""}${b === selectedDhw ? " selected" : ""}"` +
+        ` x="${b.x.toFixed(3)}" y="0" width="${b.width.toFixed(3)}" height="${HIST_H}"` +
+        ` data-dhw-band="${b.end_s}" data-dhw-rate="${b.rate_k_h}"` +
+        ` data-dhw-header="${esc(header)}" data-dhw-readout="${esc(explanation)}"/>`;
+    }).join("");
+    dhwSvg = `<defs><clipPath id="dhwCoolingClip">${dhwCurveArea}</clipPath></defs>` +
+      `<g clip-path="url(#dhwCoolingClip)">${dhwWindows}</g>`;
+    dhwAttr = ` data-dhw-source="${esc(dhw.source)}" data-dhw-epoch="${esc(String(dhw.timeline.epoch))}"`;
+    legendItems.push(`<button type="button" data-dhw-cool-show class="vhist-source vhist-legend-dhw-cool">` +
+      `<i aria-hidden="true"></i>${esc(t("check.dhw.show"))}</button>`);
+    dhwReadout = `<div class="vhist-flow-readout vhist-dhw-readout" role="status"${selectedDhw ? "" : " hidden"}>` +
+      `<strong>${selectedDhw ? esc(`${dhwCoolingTime(time, selectedDhw)} · ${checkupFmt1(selectedDhw.rate_k_h)} °C/h`) : ""}</strong>` +
+      `<span>${selectedDhw ? esc(checkupDhwCoolingExplanation(selectedDhw)) : ""}</span></div>`;
+  }
   if (isPressure) {
     legendItems.push(
       `<span class="vhist-source vhist-legend-low"><i></i>${esc(t("check.detail.current_label"))}</span>`,
@@ -1739,15 +1854,15 @@ function histHtml(id, unit, name, source = "", identifySource = false, flow = nu
   return wrap(heading + legend +
     `<div class="vhist-graph${grid.yAxis ? " vhist-has-y" : ""}">` + grid.yAxis +
       histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
-      `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${pressureAttr}${histRevision(view)}${flowAttr} data-n="${n}" tabindex="0" role="img"` +
+      `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${pressureAttr}${histRevision(view)}${flowAttr}${dhwAttr} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", chartName || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}"` +
         `${showExplanation ? ' aria-describedby="inspPressureExplanation"' : ""}>` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${phaseBands}${area}${flowSvg}${line}${dots}</svg>` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshBands}${grid.svg}${threshLines}${phaseBands}${area}${flowSvg}${dhwSvg}${line}${dots}</svg>` +
         threshHtml + nowDots + findingMark + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
       `</div>` + axis + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
-    `</div>` + flowReadout +
+    `</div>` + flowReadout + dhwReadout +
     (showExplanation ? `<div class="vhist-note vhist-pressure-explanation" id="inspPressureExplanation">${findingExplanation}</div>` : "") +
     histUnavailableHtml(view) +
     (modbusFlowUnverified(view) ? `<div class="vhist-note">${esc(t("hist.modbus_flow_unverified"))}</div>` : ""),
@@ -2250,43 +2365,6 @@ function historyRowOwner(node, host) {
     ?.querySelector("[data-desc]")?.dataset.desc;
 }
 
-// A DHW aggregate can expire independently of its timed windows. Keep the chart AND its
-// painting ancestors connected when hero/energy, verdict badges or sibling rows change shape.
-function preserveCheckupDhwIsland(host, fresh, slot, nextSlot, compatible, attrs) {
-  if (!slot || !nextSlot || !slot.dataset.dhwScope ||
-      slot.dataset.dhwScope !== nextSlot.dataset.dhwScope) return false;
-  const path = (node, root) => {
-    const result = [];
-    for (; node && node !== root; node = node.parentNode) result.unshift(node);
-    return node === root ? result : null;
-  };
-  const oldPath = path(slot, host), newPath = path(nextSlot, fresh);
-  if (!oldPath || !newPath || oldPath.length !== newPath.length ||
-      oldPath.some((node, i) => node.nodeName !== newPath[i].nodeName)) return false;
-  for (let i = 0; i < oldPath.length; i++) {
-    const a = oldPath[i], b = newPath[i];
-    for (const attr of attrs(a)) if (!b.hasAttribute(attr.name)) a.removeAttribute(attr.name);
-    for (const attr of attrs(b)) if (a.getAttribute(attr.name) !== attr.value)
-      a.setAttribute(attr.name, attr.value);
-  }
-  oldPath.unshift(host); newPath.unshift(fresh);
-  for (let i = 0; i < oldPath.length - 1; i++) {
-    const a = oldPath[i], b = newPath[i], keep = oldPath[i + 1], nextKeep = newPath[i + 1];
-    let cursor = a.firstChild;
-    for (const node of [...b.childNodes]) {
-      if (node === nextKeep) {
-        while (cursor !== keep) { const old = cursor; cursor = old.nextSibling; old.remove(); }
-        cursor = keep.nextSibling;
-      } else if (cursor && cursor !== keep && compatible(cursor, node)) cursor = cursor.nextSibling;
-      else if (cursor && cursor !== keep) {
-        const old = cursor; cursor = old.nextSibling; old.replaceWith(node);
-      } else a.insertBefore(node, cursor);
-    }
-    while (cursor) { const old = cursor; cursor = old.nextSibling; old.remove(); }
-  }
-  return true;
-}
-
 // Structural poll updates may replace card containers or an inspector's history. Preserve the
 // active control in either path so keyboard users can continue exploring the same series.
 function replaceHistoryHtml(host, html) {
@@ -2298,7 +2376,6 @@ function replaceHistoryHtml(host, html) {
     ? "model:health_cycling" : owner(node), node.outerHTML]);
   const focusedOwner = owner(active);
   const cycling = active?.closest?.("[data-cycling]");
-  const dhw = active?.closest?.("[data-dhw-timeline]");
   const focused = host.contains?.(active);
   const diagnosisCard = host.getAttribute?.("data-dashboard-card") === "diagnosis";
   // Also reconcile plain read-only rows. Other hosts without charts keep full writes:
@@ -2336,9 +2413,6 @@ function replaceHistoryHtml(host, html) {
           nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value))) return false;
       // The live cycling chart owns its slot and updates independently of value rows.
       if (a.getAttribute("data-checkup-hours") !== null) return true;
-      // DHW patches its frame and readout on connected nodes. The scope attribute above
-      // must still agree before the slot can outlive a source/boot/reset change.
-      if (a.getAttribute("data-checkup-dhw") !== null) return true;
       const before = text.length;
       if (a.childNodes.length === b.childNodes.length &&
           [...a.childNodes].every((node, index) => same(node, b.childNodes[index]))) return true;
@@ -2371,8 +2445,6 @@ function replaceHistoryHtml(host, html) {
       }
       const slot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-hours]");
       if (slot) template.content.querySelector("[data-checkup-hours]")?.replaceWith(slot);
-      const dhwSlot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-dhw]");
-      const nextDhwSlot = dhwSlot && template.content.querySelector("[data-checkup-dhw]");
       if (host.id === "valueGroups" || host.id === "settingsCards") {
         // A paused slot has no generated markup. Keep its previous chart only for the same
         // disclosure and series in the same card.
@@ -2388,21 +2460,7 @@ function replaceHistoryHtml(host, html) {
           next.replaceWith(old);
         }
       }
-      text.length = scopedUpdates.length = 0;
-      const compatible = (a, b) => {
-        const before = text.length, updates = scopedUpdates.length;
-        if (same(a, b)) return true;
-        text.length = before; scopedUpdates.length = updates;
-        return false;
-      };
-      if (preserveCheckupDhwIsland(host, template.content, dhwSlot, nextDhwSlot, compatible, attrs)) {
-        for (const [node, value] of text) node.nodeValue = value;
-        for (const [a, b] of scopedUpdates) replaceHistoryHtml(a, b.innerHTML);
-      } else {
-        if (dhwSlot && nextDhwSlot && dhwSlot.dataset.dhwScope === nextDhwSlot.dataset.dhwScope)
-          nextDhwSlot.replaceWith(dhwSlot);
-        host.replaceChildren(template.content);
-      }
+      host.replaceChildren(template.content);
     } finally { S.trendRebuilding = rebuilding; }
   }
   if (host.hasAttribute?.("data-checkup-hours") && typeof paintCyclingChart === "function") {
@@ -2412,22 +2470,14 @@ function replaceHistoryHtml(host, html) {
   if (focused && active.isConnected) active.focus({ preventScroll: true });
   else if (focused && active?.hasAttribute?.("data-flow-min-show"))
     host.querySelector("[data-flow-min-show]")?.focus({ preventScroll: true });
+  else if (focused && active?.hasAttribute?.("data-dhw-cool-show"))
+    host.querySelector("[data-dhw-cool-show]")?.focus({ preventScroll: true });
   else if (focused && (hist || histSeries))
     [...host.querySelectorAll(hist ? "[data-hist]" : "[data-hist-series]")].find(node =>
       owner(node) === focusedOwner && (hist
         ? node.dataset.hist === hist && (node.dataset.source || "") === source
         : node.dataset.histId === histId && node.dataset.histSeries === histSeries))
       ?.focus({ preventScroll: true });
-  else if (focused && dhw) {
-    const chart = host.querySelector("[data-dhw-timeline]");
-    const sameScope = chart && chart.dataset.dhwTimeline === dhw.dataset.dhwTimeline;
-    const next = sameScope && (active.dataset.dhwAction
-      ? chart.querySelector(`[data-dhw-action="${active.dataset.dhwAction}"]`)
-      : chart.querySelector(`[data-dhw-window="${active.dataset.dhwWindow}"]`));
-    (next || (sameScope && chart.querySelector("[data-dhw-window][tabindex='0']")) ||
-      [...host.querySelectorAll("[data-desc]")].find(button => button.dataset.desc === focusedOwner) ||
-      host.closest?.(".vitem")?.querySelector("[data-desc]"))?.focus({ preventScroll: true });
-  }
   else if (focused && (cycling || active?.dataset?.desc)) {
     const chart = cycling && host.querySelector("[data-cycling]");
     const sameScope = chart && chart.dataset.cycling === cycling.dataset.cycling;
@@ -2793,8 +2843,8 @@ const MODEL_DESCRIPTIONS = {
   health_fault: {
     what: "Shows error and warning codes reported by the heat pump; short descriptions are general Daikin hints, and a cleared code does not prove the cause was fixed." },
   health_dhw_loss: {
-    what: "Largest accepted hourly temperature drop at tank sensor R5T.",
-    normal: "Project hint ≥0.8 K/h without pump/draw-like markers. R5T is one point in a stratified tank, not measured tank energy. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause." },
+    what: "Largest accepted hourly temperature drop at tank sensor R5T in the tank inspector.",
+    normal: "Windows ≥0.8 K/h are highlighted on the tank chart. R5T is one point in a stratified tank, not measured tank energy. Internal pump and draw-like markers suggest possible causes without proving one or ruling out other losses." },
   health_cycling: {
     what: "Gaps in the readings can leave some starts uncounted.",
     normal: "There is no fixed normal number of starts. With enough data, this check considers completed heating runs averaging at least 10 minutes long enough." },
@@ -2869,8 +2919,7 @@ function toggleDesc(btn) {
   const trend = btn.dataset.trend || "";
   const open = !item.classList.contains("open");
   if (!open && ((S.trendPointer && item.contains(S.trendPointer.plot)) ||
-      (key === "model:health_cycling" && S.scrub === "checkup-cycling") ||
-      (key === "model:health_dhw_loss" && S.scrub === "checkup-dhw"))) cancelHistoryGesture();
+      (key === "model:health_cycling" && S.scrub === "checkup-cycling"))) cancelHistoryGesture();
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);
@@ -2887,11 +2936,6 @@ function toggleDesc(btn) {
   // let the saved closed markup suppress the next render and retain its hidden history SVG.
   const owner = btn.closest("#valueGroups, #settingsCards");
   if (owner) delete _html[owner.id];
-  if (key === "model:health_dhw_loss") {
-    const slot = item.querySelector("[data-checkup-dhw]");
-    if (slot && (!open || (S.stage === "dashboard" && !item.closest("[hidden]"))))
-      renderCheckupDhwChart(slot, open);
-  }
   if (key === "model:health_cycling") {
     const slot = item.querySelector("[data-checkup-hours]");
     if (slot && (!open || (S.stage === "dashboard" && !item.closest("[hidden]"))))

@@ -50,8 +50,8 @@ profile capabilities while adding no observed time.
 Read-time source age, elapsed lifecycle span and per-signal coverage are separate facts. A stopped
 producer cannot retain a current all-clear. Historical findings remain age-bounded; observation-only rows
 do not become reassuring health results. Each check reports its own verdict directly;
-tank-cooling notes and experimental events stay on their own rows without an aggregate card
-status or badge, as explained in [DIAGNOSTICS.md](DIAGNOSTICS.md).
+experimental events stay on their own rows without an aggregate card status or badge,
+as explained in [DIAGNOSTICS.md](DIAGNOSTICS.md).
 
 ### Evidence population
 
@@ -60,12 +60,12 @@ runs cannot dilute that mean. An insufficient heating/classification population 
 observation with an explicit reason. Defrost uses its own paired compressor/defrost population.
 Optional outdoor min/mean belongs only to each accepted population and changes no verdict.
 
-Tank cooling retains completed/high-rate window counts and the greatest one-hour net R5T drop.
-Pump-active and draw-like windows remain measured with separate context counts; only unmarked high
-rates raise a project note. Exclusions explain missing evidence, not a defect. The UI's assumed-tank
-heat/electricity example is not calorimetry or a green loss assessment; [DIAGNOSTICS.md](DIAGNOSTICS.md)
-explains it. A fresh filter waits 45 minutes; software restarts carry the remaining settle. Unseen
-charging can still affect a later window.
+Tank cooling retains completed/high-rate window counts and the greatest one-hour net R5T drop as an
+observation only, without raising a project note or severity verdict; pump-active and draw-like
+windows retain separate context counts, and completed windows with rates ≥ 0.8 K/h are shown on
+the tank chart in the DHW tank inspector. Exclusions explain missing evidence, not a defect. A fresh
+filter waits 45 minutes; software restarts carry the remaining settle. Unseen charging can still
+affect a later window.
 
 ### Optional circulation measurement
 

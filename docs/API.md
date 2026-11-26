@@ -204,9 +204,10 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | `retries` | `seen` |
 
 For `dhw_loss`, `max_k_h` is the maximum completed one-hour **net sensor cooling**, not standing
-heat loss. `high_windows` counts rates ≥0.8 K/h; only the subset `quiet_high_windows` with no
-internal-pump or draw-like marker gives `info`. `draw_windows` and `pump_windows` count all marked
-windows independently and can overlap; they do not identify the maximum's context. `blocked:true`
+heat loss. `high_windows` counts rates ≥0.8 K/h and `quiet_high_windows` retains the count without
+internal-pump or draw-like markers; `dhw_loss` stays observation-only (`ok` / `observation_only` once
+a window completes, never `info`). `draw_windows` and `pump_windows` count all marked windows
+independently and can overlap; they do not identify the maximum's context. `blocked:true`
 with `unavailable`/`no_eligible_windows` means a full DHW evidence day without a completed window,
 even if no candidate could open. It does not establish signal coverage or a cause. The `reading`
 abort reason includes invalid temperatures and an unconfirmed closing endpoint after a 30-second
@@ -254,15 +255,16 @@ Current-boot measurements keep their monotonic frame. See
 `windows:[]` means eligible collection has begun but no accepted timed completion is retained.
 An absent timeline can mean unsupported, reset, disabled, redacted, allocation-denied or unreadable
 state; it is not zero cooling. Scope UI state to `boot_id`, `history.epoch`, `health.source` and
-`timeline.epoch`. Clear the previous chart when the timeline is absent or invalid, the diagnosis
-snapshot is unreadable, or any scope key changes; unlike cycling, omission cannot reuse a cache.
-Hatched intervals indicate time without a completed timed record. Its cooling rate and reason are unknown.
+`timeline.epoch`. Clear the previous chart selection when the timeline is absent or invalid, the
+diagnosis snapshot is unreadable, or any scope key changes; unlike cycling, omission cannot reuse a
+cache. Unshaded intervals on the tank chart do not distinguish excluded, below-threshold, or
+missing windows.
 
 Exact completion-end retention and aggregate hourly expiry differ, so timed and aggregate counts
-can differ in either direction. Bars come from exact windows. A candidate carried across a
-reboot can still contribute aggregate evidence under existing rules. An exact bar needs both
-original endpoints. Source/profile, circulation-identity and consent-generation resets clear
-timed detail. While a circulation reset is pending, snapshots exclude the previous DHW scope's
+can differ in either direction. Shaded cooling windows on the tank chart come from exact windows. A
+candidate carried across a reboot can still contribute aggregate evidence under existing rules. Each
+timed window needs both original endpoints. Source/profile, circulation-identity and consent-generation
+resets clear timed detail. While a circulation reset is pending, snapshots exclude the previous DHW scope's
 evidence and progress. Other checks continue reporting. Same-generation pause/resume preserves
 retained completed windows and leaves a gap for paused time. When both source slots
 observe the factory-forget latch, they stop recording timed samples for that boot, even if erasure

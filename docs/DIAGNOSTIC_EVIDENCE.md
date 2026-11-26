@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: d492023d047585c3af12b6f8e60d15ff5cfac81333f2dc3e3fc213a930db2cce -->
+<!-- diagnostic-evidence-contract: 9129ba25dc46ef80952a60bc51aab02bd209bcf5649b33a3c1bd5ce31ee0c105 -->
 
 For each plant diagnosis, including the measurement in the **Flow rate** inspector, this page
 answers four questions.
@@ -333,38 +333,41 @@ floored to 0.1 K/h; a net rise contributes zero cooling. Each endpoint needs two
 readable temperatures within 0.2 K, rejecting isolated jumps beyond that tolerance. Smaller
 excursions can still affect the rate and threshold crossing. Confirmation starts afresh after a
 reboot. A closing endpoint must confirm within 30 seconds after the hour; later confirmation
-discards the candidate rather than reporting a multi-hour average as an hour. Charging, implausible readings and excessive
-blind time discard a candidate. A charge witnessed for two minutes, or seen after an unmeasured gap,
-arms a 45-minute settle; unread time beside a witness counts toward those two minutes. A fresh
-filter also holds 45 minutes. Both timers advance only with readable valve and tank-heater witnesses.
+discards the candidate rather than reporting a multi-hour average as an hour. Charging, implausible
+readings and excessive blind time discard a candidate. A charge witnessed for two minutes, or seen
+after an unmeasured gap, arms a 45-minute settle; unread time beside a witness counts toward those
+two minutes. A fresh filter also holds 45 minutes. Both timers advance only with readable valve and
+tank-heater witnesses.
 
 Internal water-pump activity and a drop of 0.4 K within a ten-minute anchor mark the completed
-window instead of discarding its measured change. The latter can also be steady rapid cooling;
-it is not proof of a draw. The report retains all/high-rate window counts, their maximum, separate
-pump/draw-like counts (which may overlap), and optional external circulation correlation. Only a
-window at or above 0.8 K/h with neither marker gives **NOTE**; all other completed windows are
-**MEASURED**. Marker absence does not prove that no water was used. With no completed window the
-row is **CHECKING**; after a full DHW scope day with no completed window it becomes **NO WINDOW**,
-even if no candidate could open. This states missing hourly measurements, not full signal coverage,
-a cause or a promise that more waiting will produce a measurement.
+window (`pump_marker` and `draw_marker`) instead of discarding its measured change. The latter can
+also be steady rapid cooling; it is not proof of a draw. `DhwLoss` has evidence class `observation`
+with `observation_only = true`: once at least one completed window exists it emits
+`CheckupVerdict::Ok` (`ObservationOnly`), while without a completed window it emits
+`CheckupVerdict::Collecting` (`NoEligibleWindows`) or, after a full DHW scope day with no
+completed window (`blocked = true`, `NoEligibleWindows`), `CheckupVerdict::Unavailable` (or
+`Unavailable` when required signals are unsupported). It never produces `CheckupVerdict::Info` /
+`NOTE`, and it is excluded from `assessable`/`evaluated` counts and from
+Plant diagnostics card rows.
 
-Each timed bar pairs an accepted window's endpoints, rate, readable duration and markers. An hour
-at the aggregate maximum's rate is an example because multiple windows can share that rate.
-The aggregate can also include a candidate carried across a restart whose exact original start
-was unavailable for plotting.
+The aggregate report retains `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`,
+`draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`,
+`circulation_known_s`, `blocked`, and abort counts/reasons, and can include a candidate carried
+across a restart whose exact original start was unavailable for plotting. Each timed record in
+`timeline.windows` pairs an accepted window's `start_s`/`end_s`, `rate_k_h`, `observed_s`,
+`pump_marker`, and `draw_marker`. In the **DHW tank / thermal store** inspector, completed
+windows with `rate_k_h >= 0.8` K/h are shaded under the active source's `dhw_tank` curve (visually
+distinguishing peak window(s) and selection), and selecting a shaded window or using the legend
+button shows its time range, rate, and an up-to-3-sentence readout bounded to `pump_marker` and
+`draw_marker`. The UI no longer displays the former energy calculation example.
 
-**Project boundary:** These thresholds, endpoint confirmation with a 30-second closing grace,
-one-hour intervals and settling filters are project choices,
-not Daikin limits or the EU standing-loss test. Candidates tolerate at most 120 consecutive blind
-seconds and 10% blind time overall; coverage excludes blind seconds. External circulation overlap
-needs 90% known state and five minutes on; its pump-off label also needs two hours known off.
-It is distinct from the heat pump's internal water pump and establishes no cause.
-
-The UI illustrates one hour at the maximum measured rate using an **assumed** uniformly cooling
-200 l of water: heat = 200 × 0.001163 × K/h kWh per hour; electricity = heat / **assumed COP 2.5–3**.
-The coefficient approximates 1 kg/l and water's heat capacity. COP means heat delivered per unit
-of electricity; that range is an example, not a measured or manufacturer-promised efficiency.
-The maximum is never multiplied by the window count or labelled measured daily consumption.
+**Project boundary:** These thresholds (`0.8` K/h shading/high-rate threshold, `0.4` K / 10-minute
+draw-like anchor), endpoint confirmation with a 30-second closing grace, one-hour intervals and
+settling filters are project choices, not Daikin limits or the EU standing-loss test. Candidates
+tolerate at most 120 consecutive blind seconds and 10% blind time overall; coverage excludes blind
+seconds. External circulation overlap needs 90% known state and five minutes on; its pump-off
+label also needs two hours known off. It is distinct from the heat pump's internal water pump and
+establishes no cause.
 
 **Not established:** R5T is one point in a stratified tank. Net sensor cooling cannot establish
 whole-tank heat loss, wasted energy, actual replacement electricity, a failed valve or a cause.
