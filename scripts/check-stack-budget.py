@@ -2846,6 +2846,170 @@ def trim_elf_function_extents(disassembly: str, data: bytes) -> str:
     return "".join(out)
 
 
+ZERO_PAD_PREDECESSORS = frozenset({"retw", "retw.n", "ret", "ret.n", "j", "jx"})
+INVALID_RESYNC_OPCODES = frozenset({"ill", "ill.n", "unknown", "(bad)"})
+
+
+def resync_zero_alignment_padding(disassembly: str, elf: Path, objdump: str) -> str:
+    """Re-synchronize linear objdump output across 2-byte zero alignment padding after a terminator."""
+    lines = disassembly.splitlines(keepends=True)
+    out: list[str] = []
+    pos = 0
+    total = len(lines)
+    while pos < total:
+        line = lines[pos]
+        header = FUNCTION_RE.match(line)
+        if not header:
+            out.append(line)
+            pos += 1
+            continue
+        func_name = header.group(2)
+        end = pos + 1
+        while end < total and not FUNCTION_RE.match(lines[end]) and not SECTION_RE.match(lines[end]):
+            end += 1
+        insts: list[tuple[int, int, str, str]] = []
+        branch_targets: set[int] = set()
+        target_re = re.compile(r"\b([0-9a-fA-F]{4,8})\s+<" + re.escape(func_name) + r"\+0x[0-9a-fA-F]+>")
+        for line_idx in range(pos + 1, end):
+            inst = INSTRUCTION_RE.match(lines[line_idx])
+            if not inst:
+                continue
+            addr = int(inst.group(1), 16)
+            raw_hex = inst.group(2)
+            mnemonic = (inst.group(3) or "").strip()
+            insts.append((line_idx, addr, raw_hex, mnemonic))
+            for hit in target_re.findall(mnemonic):
+                branch_targets.add(int(hit, 16))
+        if len(insts) < 2:
+            out.extend(lines[pos:end])
+            pos = end
+            continue
+        func_end = insts[-1][1] + len(insts[-1][2]) // 2
+        addr_to_idx = {addr: i for i, (_, addr, _, _) in enumerate(insts)}
+        out.append(line)
+        next_line = pos + 1
+        idx = 1
+        while idx < len(insts):
+            _, prev_addr, prev_raw, prev_mnem = insts[idx - 1]
+            pad_line, pad_addr, pad_raw, _ = insts[idx]
+            prev_op = prev_mnem.split()[0] if prev_mnem else ""
+            target = pad_addr + 2
+            if not (prev_op in ZERO_PAD_PREDECESSORS
+                    and len(prev_raw) % 2 == 0
+                    and prev_addr + len(prev_raw) // 2 == pad_addr
+                    and pad_addr % 4 == 2
+                    and len(pad_raw) == 6
+                    and pad_raw.lower().endswith("0000")
+                    and target in branch_targets
+                    and pad_addr not in branch_targets):
+                idx += 1
+                continue
+            stop_limit = min(target + 64, func_end)
+            if stop_limit <= target:
+                idx += 1
+                continue
+            resync_text = stack_tool_output([
+                objdump, "-d", "-C", f"--start-address=0x{target:x}",
+                f"--stop-address=0x{stop_limit:x}", str(elf),
+            ])
+            cursor = target
+            replacement: list[str] = []
+            matched_k: int | None = None
+            in_insts = False
+            failed = False
+            for r_line in resync_text.splitlines(keepends=True):
+                if r_inst := INSTRUCTION_RE.match(r_line):
+                    in_insts = True
+                    r_addr = int(r_inst.group(1), 16)
+                    r_raw = r_inst.group(2)
+                    r_mnem = (r_inst.group(3) or "").strip()
+                    r_op = r_mnem.split()[0] if r_mnem else ""
+                    if (r_addr != cursor or not r_raw or len(r_raw) % 2 != 0
+                            or not r_mnem or r_mnem.startswith(".")
+                            or r_op in INVALID_RESYNC_OPCODES):
+                        failed = True
+                        break
+                    replacement.append(r_line if r_line.endswith("\n") else r_line + "\n")
+                    cursor += len(r_raw) // 2
+                    if (cand_k := addr_to_idx.get(cursor)) is not None and cand_k > idx:
+                        matched_k = cand_k
+                        break
+                elif in_insts:
+                    failed = True
+                    break
+            if (not failed and matched_k is not None and replacement
+                    and not any(target < bt < cursor for bt in branch_targets)):
+                out.extend(lines[next_line:pad_line])
+                out.extend(replacement)
+                next_line = insts[matched_k][0]
+                idx = matched_k + 1
+            else:
+                idx += 1
+        out.extend(lines[next_line:end])
+        pos = end
+    return "".join(out)
+
+
+def self_test_zero_alignment_resync() -> int:
+    """Verify fail-closed zero-padding resync removes phantom calls and rejects unsafe patterns."""
+    from unittest.mock import patch
+
+    elf = Path("/nonexistent/test.elf")
+    objdump = "xtensa-esp32s3-elf-objdump"
+    controls = 0
+
+    base_listing = (
+        "Disassembly of section .flash.text:\n\n"
+        "42001000 <foo()>:\n"
+        "42001000:\t004136        \tentry\ta1, 32\n"
+        "42001003:\t000016        \tbeqz\ta2, 4200100c <foo()+0xc>\n"
+        "42001006:\t020c          \tmovi.n\ta2, 0\n"
+        "42001008:\tf01d          \tretw.n\n"
+        "4200100a:\t910000        \tsrl\ta0, a0\n"
+        "4200100d:\t55730c        \tcall4\t42002000 <phantom()>\n"
+        "42001010:\t01020304      \tnop\n"
+        "42001014:\t021c          \tmovi.n\ta2, 1\n"
+        "42001016:\tf01d          \tretw.n\n"
+    )
+    resync_listing = (
+        "4200100c <foo()+0xc>:\n"
+        "4200100c:\t735591        \tl32r\ta9, 42000100 <lit>\n"
+        "4200100f:\t123485        \tcall8\t42003000 <real_target()>\n"
+        "42001012:\t020c          \tmovi.n\ta2, 0\n"
+    )
+    called_cmds: list[list[str]] = []
+
+    def fake_tool(cmd: list[str]) -> str:
+        called_cmds.append(cmd)
+        return resync_listing
+
+    with patch.dict(globals(), stack_tool_output=fake_tool):
+        fixed = resync_zero_alignment_padding(base_listing, elf, objdump)
+    assert len(called_cmds) == 1
+    assert "--start-address=0x4200100c" in called_cmds[0]
+    assert "<phantom()>" not in fixed
+    assert "4200100a:" not in fixed
+    assert "<real_target()>" in fixed
+    assert "42001014:" in fixed
+    controls += 1
+
+    # Negative controls: each unsafe or mismatched case must leave the listing untouched.
+    negative_cases = (
+        ("non-terminator predecessor", base_listing.replace("f01d          \tretw.n\n4200100a:", "0020f0        \tnop\n4200100a:", 1)),
+        ("branch targeting pad_addr", base_listing.replace("4200100c <foo()+0xc>", "4200100a <foo()+0xa>", 1)),
+        ("non-zero padding bytes", base_listing.replace("910000", "910001", 1)),
+        ("branch inside desynced window", base_listing.replace("42001003:\t000016        \tbeqz\ta2, 4200100c <foo()+0xc>",
+                                                               "42001003:\t000016        \tbeqz\ta2, 4200100c <foo()+0xc>\n42001014:\t000016        \tbeqz\ta2, 4200100d <foo()+0xd>", 1)),
+    )
+    for label, mutated in negative_cases:
+        called_cmds.clear()
+        with patch.dict(globals(), stack_tool_output=fake_tool):
+            unchanged = resync_zero_alignment_padding(mutated, elf, objdump)
+        assert unchanged == mutated, f"unexpected resync on {label}"
+        controls += 1
+    return controls
+
+
 def disassemble(elf: Path, objdump: str) -> str:
     try:
         data = elf.read_bytes()
@@ -2855,6 +3019,7 @@ def disassemble(elf: Path, objdump: str) -> str:
     try:
         text = stack_tool_output([objdump, "-d", "-C", str(elf)])
         text = trim_elf_function_extents(text, data)
+        text = resync_zero_alignment_padding(text, elf, objdump)
         text = restore_raw_detect(text, data, elf, objdump)
         text = restore_packed_config(text, data, elf, objdump, stack_tool_output, raw_detect_body, BudgetError)
         heater_stack.validate_storage(data, BudgetError)
@@ -5491,6 +5656,7 @@ def self_test() -> None:
             mutated["sdk"]["tls_paths"]["record_cbc_dma"]["multipliers"] = (
                 {} if multiplier is None else {"tls_esp_aes_process_dma": multiplier})
             reject_document("changed bounded DMA recursion", mutated, "one-level/sibling recursion contract")
+    resync_controls = self_test_zero_alignment_resync()
     print(f"stack budget self-test: PASS ({negative_checks} malformed schemas rejected, "
           f"{stop_controls} stop-source/path/callback/shortcut, "
           f"{heater_controls} heater-source/scratch/callback/receipts, "
@@ -5500,6 +5666,7 @@ def self_test() -> None:
           f"{packed_inventory_controls} exact-config/ELF-only controls, "
           f"{inventory_controls} inventory/growth/allocation/reserve controls, "
           f"6 dynamic/first-prologue, {packed_controls} packed SDK, {raw_detect_controls} raw-app controls, "
+          f"{resync_controls} alignment-resync controls, "
           f"{queue_controls} queue-source, {diagnostic_controls} diagnostic-source, "
           f"{tls_source_controls} TLS-client-source, {sdk_recursion_controls} SDK-recursion, "
           f"{integer_disassembly_controls} integer-disassembly, {integer_source_controls} integer-source/path, "

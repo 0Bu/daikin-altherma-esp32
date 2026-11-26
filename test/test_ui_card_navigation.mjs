@@ -103,7 +103,7 @@ const { ui } = context;
 const host = document.getElementById("valueGroups");
 const nav = document.getElementById("cardNav");
 const browser = document.getElementById("cardBrowser");
-const card = (key, label = key) => ui.vcard(label, "<p>Fixture reading</p>", "", "", key);
+const card = (key, label = key) => ui.vcard(label, "<p>Fixture reading</p>", key);
 const keys = () => nav.children.map(button => button.dataset.card);
 const selected = () => nav.children.filter(button => button.getAttribute("aria-pressed") === "true");
 const visible = () => host.children.filter(element => !element.hidden).map(element => element.dataset.dashboardCard);

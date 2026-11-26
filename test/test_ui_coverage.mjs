@@ -366,7 +366,7 @@ try {
     diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
     refrigerant_service: { state: "limited", continuous_s: 60, samples: 5, blocker: null },
     health: {
-      status: "info", source: "x10a", source_fresh: true, full_span: true, span_s: 86400, covered_s: 86400,
+      source: "x10a", source_fresh: true, full_span: true, span_s: 86400, covered_s: 86400,
       persist: "fresh",
       checks: [
         { id: "cycling", verdict: "ok", evidence: "measured", starts: 2, observed_s: 86400, required_s: 86400 },
@@ -380,11 +380,11 @@ try {
   ui.renderApp();
   const freshDiagnosis = ui.checkupCardHtml();
   assert.match(freshDiagnosis, /data-defrost-inspect/);
-  assert.match(freshDiagnosis, />1 note</);
+  assert.doesNotMatch(freshDiagnosis, /section-badge/);
   assert.doesNotMatch(freshDiagnosis, /model:health_defrost/);
   ui.S.status.health.source_fresh = false;
-  assert.doesNotMatch(ui.checkupCardHtml(), /data-defrost-inspect|>1 note</,
-    "a retained X10A report does not expose or count a current defrost note");
+  assert.doesNotMatch(ui.checkupCardHtml(), /data-defrost-inspect|section-badge/,
+    "a retained X10A report does not expose a current defrost shortcut");
   ui.S.status.health.source_fresh = true;
   // Focus inside refrigerant item while live, then mark transportUnavailable so focus hops to active tab.
   const refBtn = appDoc.getElementById("valueGroups").querySelector('[data-desc="service:refrigerant"]');

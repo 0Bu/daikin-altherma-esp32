@@ -1,4 +1,4 @@
-// translation-source: c2571eea4c9e1b1557c03b1681258c3302a5a3ec6e3069de40751f5d837f74b1
+// translation-source: 9d5db6b481e895505e13600d42051d375612a2008f0d31e718bbfbe0f88e9a08
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -407,11 +407,6 @@ I18N.pl = localeValues([
   /* check.detail.minimum_time_label */ "≤0,5 bar krytyczne",
   /* check.detail.coverage_missing */ (a) => `Brakujący czytelny czas: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: pokrycie ${b}`,
-  /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "ostrzeżenie" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "ostrzeżenia" : "ostrzeżeń"}`,
-  /* check.summary.notes */ (n) => `${n} ${n === 1 ? "informacja" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "informacje" : "informacji"}`,
-  /* check.summary.ok */ "Bez wskazówek w ocenionych danych",
-  /* check.summary.collecting */ "Zbieranie danych",
-  /* check.summary.observations */ "Obserwacje",
   /* values.waiting */ "Oczekiwanie na pierwszy odczyt…",
   /* values.sg_x10a_mode */ "Tryb Smart Grid (styki X10A)",
   /* group.Operation */ "Praca",
@@ -422,7 +417,6 @@ I18N.pl = localeValues([
   /* group.Device */ "Urządzenie",
   /* group.Other values */ "Inne wartości",
   /* group.Protection */ "Zabezpieczenia",
-  /* protect.limiting */ "ograniczenie aktywne",
   /* group.Values */ "Wartości",
   /* state.on */ "WŁ.",
   /* state.off */ "WYŁ.",

@@ -2042,7 +2042,7 @@ checkup_modbus_coverage(ModbusProfile      profile,
 
 // ── Verdicts ────────────────────────────────────────────────────────────────────────────────────
 // Five wire-compatible row states. A verdict is not automatically a judgement: observation-only
-// rows can be `Ok` once their value is eligible, then remain outside assessable/evaluated/overall
+// rows can be `Ok` once their value is eligible, then remain outside assessable/evaluated counts
 // below.
 //
 //   Unavailable  this profile cannot supply the inputs. The check is OFF, not degraded — the rule
@@ -2052,15 +2052,6 @@ checkup_modbus_coverage(ModbusProfile      profile,
 //                there would be a result bought with no evidence — the exact failure a fresh
 //                board would show after every one of this project's reboot bursts.
 enum class CheckupVerdict : uint8_t { Unavailable = 0, Ok = 1, Collecting = 2, Info = 3, Warn = 4 };
-
-// The enum's numeric order IS the aggregation order, so `worst` is a max and there is no second
-// table to disagree with it. For rows selected into the aggregate below, read it as: Warn wins; else
-// Info; else Collecting (which must outrank Ok, or a half-observed day would report green); else Ok.
-// Unavailable remains the aggregate when no bounded assessment is available, even if observation
-// rows can still report facts.
-constexpr CheckupVerdict checkup_worse(CheckupVerdict a, CheckupVerdict b) {
-    return static_cast<uint8_t>(a) >= static_cast<uint8_t>(b) ? a : b;
-}
 
 // DECLARATION ORDER IS READING ORDER. /status emits the checks in this order and the card renders
 // them in the order it receives them, so there is exactly one definition of "what does a person read
@@ -2369,7 +2360,6 @@ struct CheckupReport : CheckupCyclingEvidence {
     uint8_t           available = 0; // checks supported by the active profile
     uint8_t           assessable = 0;// supported checks with a bounded judgement (not raw observations)
     uint8_t           evaluated = 0; // assessable checks no longer collecting
-    CheckupVerdict     overall   = CheckupVerdict::Unavailable;
     CheckupCheckResult checks[CHECKUP_CHECK_COUNT];
 
     const CheckupCheckResult& operator[](CheckupCheck c) const {
@@ -2379,7 +2369,6 @@ struct CheckupReport : CheckupCyclingEvidence {
 
 inline void checkup_summarize(CheckupReport& r) {
     r.available = r.assessable = r.evaluated = 0;
-    r.overall                                = CheckupVerdict::Unavailable;
     for (size_t i = 0; i < CHECKUP_CHECK_COUNT; ++i) {
         const auto  id = static_cast<CheckupCheck>(i);
         const auto& c  = r.checks[i];
@@ -2392,9 +2381,6 @@ inline void checkup_summarize(CheckupReport& r) {
         if (!observation && !finding_only) {
             ++r.assessable;
             if (c.verdict != CheckupVerdict::Collecting) ++r.evaluated;
-            r.overall = checkup_worse(r.overall, c.verdict);
-        } else if (c.verdict == CheckupVerdict::Info || c.verdict == CheckupVerdict::Warn) {
-            r.overall = checkup_worse(r.overall, c.verdict);
         }
     }
 }
@@ -2433,7 +2419,7 @@ inline void checkup_apply_freshness(CheckupReport& r, bool fresh, uint32_t age_s
 //
 // `fault_now` is the class read on the LAST cycle, not a window aggregate: a fault that is active
 // right now and one that cleared three hours ago are different findings and must not collapse into
-// one badge.
+// one verdict.
 inline __attribute__((noinline)) CheckupReport checkup_evaluate(
     const CheckupWindow& w, const CheckupCoverage& cov, FaultClass fault_now,
     const DhwLossWindow& dhw = {}, OutdoorSource outdoor_source = OutdoorSource::X10a) {

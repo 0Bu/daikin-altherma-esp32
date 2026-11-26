@@ -49,9 +49,9 @@ profile capabilities while adding no observed time.
 
 Read-time source age, elapsed lifecycle span and per-signal coverage are separate facts. A stopped
 producer cannot retain a current all-clear. Historical findings remain age-bounded; observation-only rows
-do not become reassuring health results. The overall verdict uses eligible bounded assessments;
-tank-cooling notes and experimental events can independently raise its severity. The badge counts
-warning or note rows, as explained in [DIAGNOSTICS.md](DIAGNOSTICS.md).
+do not become reassuring health results. Each check reports its own verdict directly;
+tank-cooling notes and experimental events stay on their own rows without an aggregate card
+status or badge, as explained in [DIAGNOSTICS.md](DIAGNOSTICS.md).
 
 ### Evidence population
 

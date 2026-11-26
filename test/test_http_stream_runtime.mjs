@@ -761,6 +761,7 @@ try {
       assert.deepEqual([doc.env3.temperature_c,doc.env3.humidity_pct,doc.env3.pressure_hpa],[8.5,71.25,1016.75]);
       assert.deepEqual(doc.history.env3_rows.map(row=>row.id),["env3_temperature","env3_humidity","env3_pressure"]);
       assert.ok(doc.health.checks.some(row=>row.id==="dhw_loss"),"ordinary plant diagnostics remain available");
+      assert.equal(Object.hasOwn(doc.health,"status"),false,"Schema 2 omits removed health.status");
     }
     if(name==="retired-room-history"||name==="invalid-mqtt-history"||name==="truncated-history-source")
       assert.deepEqual(doc,{ok:false,error:"unknown source"},name);

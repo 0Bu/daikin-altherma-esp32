@@ -1,4 +1,4 @@
-// translation-source: c2571eea4c9e1b1557c03b1681258c3302a5a3ec6e3069de40751f5d837f74b1
+// translation-source: 9d5db6b481e895505e13600d42051d375612a2008f0d31e718bbfbe0f88e9a08
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -402,11 +402,6 @@ I18N.nb = localeValues([
   /* check.detail.minimum_time_label */ "≤0,5 bar kritisk",
   /* check.detail.coverage_missing */ (a) => `Manglende lesbar tid: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: ${b} dekket`,
-  /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "advarsel" : "advarsler"}`,
-  /* check.summary.notes */ (n) => `${n} ${n === 1 ? "merknad" : "merknader"}`,
-  /* check.summary.ok */ "Ingen hint i vurderte data",
-  /* check.summary.collecting */ "Samler data",
-  /* check.summary.observations */ "Observasjoner",
   /* values.waiting */ "Venter på første avlesning…",
   /* values.sg_x10a_mode */ "Smart Grid-modus (X10A-kontakter)",
   /* group.Operation */ "Drift",
@@ -417,7 +412,6 @@ I18N.nb = localeValues([
   /* group.Device */ "Enhet",
   /* group.Other values */ "Andre verdier",
   /* group.Protection */ "Beskyttelse",
-  /* protect.limiting */ "begrenser",
   /* group.Values */ "Verdier",
   /* state.on */ "PÅ",
   /* state.off */ "AV",

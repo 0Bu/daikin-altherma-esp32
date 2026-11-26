@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 9ba22e7254d4936d3194c2ca7076f085621a12819d4d6032dfe5ce05a0417895 -->
+<!-- user-docs-contract: 9a18e8e3816dc5620c4e71bafd059bae5978fbc56d12a905867d8fb564648cb0 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -21,9 +21,8 @@ switches to the independent affirmatively confirmed HomeHub (`EKRHH`) Modbus win
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
 Open a row to see what was measured and what the result means. The lowest water flow appears
 in the schematic's **Flow rate** inspector. Observation windows can include gaps.
-The summary shows the highest finding severity and the number of affected rows. Without a finding,
-it distinguishes ongoing collection, measurements and completed assessments. It is not a score for
-the installation's health.
+Each row reports its own status directly; there is no aggregate card-header badge or health score
+for the installation.
 
 ## What the statuses mean
 
@@ -321,8 +320,8 @@ Enable **Plant diagnostics** (`X10A`) under **Settings → Firmware** and open *
 this expandable row (the row is X10A-only and hidden when the card displays **Modbus**). The
 observation itself collects ordinary read-only X10A traffic independently of that setting and works
 without a service mode. The row and its API object need a detected profile with evaluated signal
-coverage in the current boot. The observation sits outside `/status.health` and leaves the eight-row
-summary unchanged.
+coverage in the current boot. The observation sits outside `/status.health` and leaves the eight
+diagnosis rows and their counts unchanged.
 
 A window admits only fresh same-sweep values with a running space-heating compressor, non-DHW valve,
 no defrost, readable normal fault rows, no active profile-provided startup/restart/oil-return/pressure-
@@ -359,7 +358,7 @@ instruments.
 ## Performance factor
 
 This expandable row is a rolling 24-hour energy observation inside the active diagnostics card,
-**not a ninth verdict in `/status.health`**; it never changes the eight-row summary badge. It
+**not a ninth verdict in `/status.health`**; it stays independent of the eight diagnosis rows. It
 requires Plant diagnostics opt-in and runs independently on either **X10A** or **HomeHub (EKRHH)
 Modbus** (keeping separate 24-hour windows per bus without mixing them).
 

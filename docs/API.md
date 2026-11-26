@@ -71,9 +71,9 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 
 ### Migrating API clients to status schema 2
 
-Schema 2 omits `heating_curve`, `reference_temperature`, `weather_forecast`, `history.room_rows`
-and `sys.stack_min_free_bytes.weather`. Remove clients' calls to `/set_ref_temp` and `/set_weather`
-and requests for `/history` with `source=room`.
+Schema 2 omits `heating_curve`, `reference_temperature`, `weather_forecast`, `history.room_rows`,
+`sys.stack_min_free_bytes.weather` and `health.status`. Remove clients' calls to `/set_ref_temp`
+and `/set_weather` and requests for `/history` with `source=room`.
 See [plant features after upgrading](PLANT.md#after-upgrading-to-status-schema-2) for the owner-facing
 changes and [MQTT migrations](MQTT.md#migrations) for topic and discovery cleanup.
 
@@ -157,7 +157,7 @@ Individual Modbus/ENV III rings may be retired beside an X10A `accept`. Dwell v4
 blind time itself, so its verdict can be `accept` beside trend age refusals.
 
 `health` fields: `source`, `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
-`available`, `assessable`, `evaluated`, `status`, `checks`. `health.source` is the active display
+`available`, `assessable`, `evaluated`, `checks`. `health.source` is the active display
 source (`"x10a"` or `"modbus"`, matching `diagnostics.effective_source`); X10A and HomeHub Modbus
 accumulate separate 24 h stores in parallel. Disabled diagnostics, a pending whole-source reset or
 an unreadable checkup snapshot yield placeholder checks and suppress cycling and tank-cooling

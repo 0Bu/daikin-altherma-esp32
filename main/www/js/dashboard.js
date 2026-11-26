@@ -336,18 +336,10 @@ function vrow(k, v, opt = {}) {
   return `<div class="vrow"><span class="vrow-label">${esc(k)}</span>` +
     `<span class="vrow-val ${opt.cls || ""}">${val}</span></div>`;
 }
-// `badge` is an optional short status word rendered beside the heading. It carries TEXT, never a
-// bare colour: DESIGN.md §9 forbids conveying status by colour alone, and this one has to survive a
-// reader who cannot tell --warn from --muted.
-// `badgeCls` tints the badge's DOT only ("ok" / "err" / "dim"; the default is --warn). The word
-// itself stays --fg in every state, which is what keeps §9 satisfied: the dot carries the emphasis
-// and the text carries the statement, so a reader who cannot separate the colours loses nothing.
-const vcard = (label, rows, badge, badgeCls, key, navLabel = label) =>
+const vcard = (label, rows, key, navLabel = label) =>
   `<div class="vgroup"${key ? ` data-dashboard-card="${esc(key)}" ` +
     `data-dashboard-label="${esc(navLabel)}"` : ""}><div class="card">` +
-  `<div class="section-label">${esc(label)}` +
-  (badge ? `<span class="section-badge ${badgeCls || ""}">${esc(badge)}</span>` : "") +
-  `</div>${rows}</div></div>`;
+  `<div class="section-label">${esc(label)}</div>${rows}</div></div>`;
 const editIcon = `<svg class="vcard-edit-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 const settingsChevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
 
@@ -1002,7 +994,7 @@ function statusCardsHtml() {
 
   // Model identity is only meaningful while the bus answers — hide the card entirely when the
   // heat-pump link is down instead of naming a unit (or showing a stale capacity) that isn't live.
-  return hp.connected ? vcard(t("card.model"), model, "", "", "model") : "";
+  return hp.connected ? vcard(t("card.model"), model, "model") : "";
 }
 
 // ── The diagnosis card — "is anything worth reporting?" (logic/checkup.hpp, legacy-208/legacy-349) ─────────
@@ -2994,26 +2986,11 @@ function checkupCardHtml(includeHealth = true) {
                                    bodyHtml: detail });
     }
   }
-  // This row remains independent of /status.health and is not counted by the badge below.
-  // renderCards() gates the whole card on the diagnostics opt-in, including this observation.
+  // These rows remain independent of /status.health.
+  // renderCards() gates the whole card on the diagnostics opt-in, including these observations.
   const rows = healthRows + (isModbus ? "" : refrigerantServiceRowHtml()) + workingFigureRowHtml();
   if (!rows) return "";                               // older firmware — no card rather than an empty one
-  if (unreadable || !healthRows || !includeHealth)
-    return vcard(cardTitle, rows, "", "", "diagnosis", t("nav.diagnosis"));
-  // Findings are counts of serialized verdicts, not a health score or a second threshold rule.
-  const warnings = visibleChecks.filter(c => c.verdict === "warn").length;
-  const notes = visibleChecks.filter(c => c.verdict === "info").length;
-  const assessed = visibleChecks.filter(c => c.id !== "dhw_loss" && c.id !== "retries" &&
-    c.evidence !== "observation" && c.evidence !== "experimental");
-  const summary = assessed.some(c => c.verdict === "collecting") ? "collecting"
-                : assessed.some(c => c.verdict === "ok") ? "ok" : "unavailable";
-  const badge = warnings ? t("check.summary.warnings", warnings)
-              : notes ? t("check.summary.notes", notes)
-              : summary === "ok" ? t("check.summary.ok")
-              : summary === "collecting" ? t("check.summary.collecting")
-              : t("check.summary.observations");
-  const badgeCls = warnings ? "err" : notes ? "" : summary === "ok" ? "ok" : "dim";
-  return vcard(cardTitle, rows, badge, badgeCls, "diagnosis", t("nav.diagnosis"));
+  return vcard(cardTitle, rows, "diagnosis", t("nav.diagnosis"));
 }
 
 // A read-only context window for a qualified refrigerant service check.  This is deliberately not a

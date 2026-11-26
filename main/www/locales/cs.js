@@ -1,4 +1,4 @@
-// translation-source: c2571eea4c9e1b1557c03b1681258c3302a5a3ec6e3069de40751f5d837f74b1
+// translation-source: 9d5db6b481e895505e13600d42051d375612a2008f0d31e718bbfbe0f88e9a08
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -402,11 +402,6 @@ I18N.cs = localeValues([
   /* check.detail.minimum_time_label */ "≤0,5 bar kritický",
   /* check.detail.coverage_missing */ (a) => `Chybějící čitelná doba: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: pokrytí ${b}`,
-  /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "varování" : "varování"}`,
-  /* check.summary.notes */ (n) => `${n} ${n === 1 ? "upozornění" : "upozornění"}`,
-  /* check.summary.ok */ "Bez upozornění v hodnocených datech",
-  /* check.summary.collecting */ "Sběr dat",
-  /* check.summary.observations */ "Pozorování",
   /* values.waiting */ "Čekám na první dotaz…",
   /* values.sg_x10a_mode */ "Režim Smart Grid (kontakty X10A)",
   /* group.Operation */ "Provoz",
@@ -417,7 +412,6 @@ I18N.cs = localeValues([
   /* group.Device */ "Zařízení",
   /* group.Other values */ "Ostatní hodnoty",
   /* group.Protection */ "Ochrana",
-  /* protect.limiting */ "právě omezuje",
   /* group.Values */ "Hodnoty",
   /* state.on */ "ZAP",
   /* state.off */ "VYP",
