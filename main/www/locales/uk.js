@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const ukNoun = (n, a, b, c) => n % 10 === 1 && n % 100 !== 11 ? a
   : n % 10 >= 2 && n % 10 <= 4 && !(n % 100 >= 12 && n % 100 <= 14) ? b : c;
 const ukAria = (x) => (l, d) => `${l} — часова шкала ${x}. ${d}. Клавіші зі стрілками озвучують окремі зразки.`;
@@ -940,8 +940,6 @@ I18N.uk = localeValues([
   /* mb.flow_scale_help */ "Непідтверджене масштабування /100 (зонд/відкат); звірте L/min з дисплеєм. Поза анімацією, ΔT, потужністю й 24h-перевіркою.",
   /* hist.modbus_flow_unverified */ "Непідтверджена шкала Modbus /100 (зонд/відкат); звірте з дисплеєм.",
   /* wf.label */ "Коеф. ефективності",
-  /* wf.short.partial */ "попер.",
-  /* wf.short.limited */ "обмеж.",
   /* wf.state.unsupported */ "Не підтримується",
   /* wf.state.collecting */ "Збір",
   /* wf.state.standby */ "Очікування",
@@ -964,8 +962,6 @@ I18N.uk = localeValues([
   /* wf.scale.band */ (p) => `±${p} %`,
   /* wf.scale.cheaper */ "Дешевше →",
   /* wf.scale.expensive */ "← Дорожче",
-  /* wf.cta.tariffs */ "Задати тарифи",
-  /* wf.cta.edit_tariffs */ "Змінити тарифи",
   /* wf.desc.collecting */ (o) => `Перше значення після 2 г · вже ${o}`,
   /* wf.desc.standby */ (o) => `Замало роботи для значення · ${o}`,
   /* wf.desc.unsupported */ "Немає потрібних даних потоку, температури або потужності.",

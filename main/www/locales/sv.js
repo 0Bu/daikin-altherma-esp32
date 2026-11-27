@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const svAria = (x) => (l, d) => `${l} — ${x}. ${d}. Använd piltangenterna.`;
 const svMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.sv = localeValues([
@@ -936,8 +936,6 @@ I18N.sv = localeValues([
   /* mb.flow_scale_help */ "Obekräftad /100-skalning (sökning/reserv); jämför L/min med enheten. Undantagen från flödesanimation, ΔT, effekt och 24h-test.",
   /* hist.modbus_flow_unverified */ "Obekräftad Modbus /100-skalning (väntar/reserv); jämför med enheten.",
   /* wf.label */ "Värmefaktor",
-  /* wf.short.partial */ "prel.",
-  /* wf.short.limited */ "begr.",
   /* wf.state.unsupported */ "Stöds ej",
   /* wf.state.collecting */ "Samlar in",
   /* wf.state.standby */ "Viloläge",
@@ -960,8 +958,6 @@ I18N.sv = localeValues([
   /* wf.scale.band */ (p) => `±${p} %`,
   /* wf.scale.cheaper */ "Billigare →",
   /* wf.scale.expensive */ "← Dyrare",
-  /* wf.cta.tariffs */ "Ange tariffer",
-  /* wf.cta.edit_tariffs */ "Ändra tariffer",
   /* wf.desc.collecting */ (o) => `Första värdet efter 2 h · hittills ${o}`,
   /* wf.desc.standby */ (o) => `För lite drift för ett värde · ${o} observerat`,
   /* wf.desc.unsupported */ "Nödvändiga data för flöde, temperatur eller el saknas.",

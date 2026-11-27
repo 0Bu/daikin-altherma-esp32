@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const frAria = (x) => (l, d) => `${l} — chronologie ${x}. ${d}. Les touches fléchées lisent les échantillons individuels.`;
 const frMb = (a, b = "", p = "au") => (r) => `${a}${r ? ` ${p} registre ${r}` : ""}${b}.`;
 I18N.fr = localeValues([
@@ -936,8 +936,6 @@ I18N.fr = localeValues([
   /* mb.flow_scale_help */ "Échelle /100 non confirmée (sonde/repli) ; comparez L/min à l’afficheur. Exclu du flux, ΔT, puissance et bilan 24 h.",
   /* hist.modbus_flow_unverified */ "Échelle Modbus /100 non vérifiée (sonde/repli) ; comparez à l’unité.",
   /* wf.label */ "Facteur de performance",
-  /* wf.short.partial */ "prov.",
-  /* wf.short.limited */ "lim.",
   /* wf.state.unsupported */ "Non pris en charge",
   /* wf.state.collecting */ "Collecte",
   /* wf.state.standby */ "En veille",
@@ -960,8 +958,6 @@ I18N.fr = localeValues([
   /* wf.scale.band */ (p) => `±${p} %`,
   /* wf.scale.cheaper */ "Moins cher →",
   /* wf.scale.expensive */ "← Plus cher",
-  /* wf.cta.tariffs */ "Définir les tarifs",
-  /* wf.cta.edit_tariffs */ "Modifier les tarifs",
   /* wf.desc.collecting */ (o) => `Premier résultat après 2 h · ${o} jusqu’ici`,
   /* wf.desc.standby */ (o) => `Fonctionnement insuffisant pour un calcul · ${o}`,
   /* wf.desc.unsupported */ "Mesures de débit, température ou électricité indisponibles.",

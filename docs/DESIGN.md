@@ -528,20 +528,21 @@ fingerprint or a configured `Modbus` target; omitted on older firmware). Like
 leave the value blank while `Collecting` (retaining `Performance factor: Collecting` in `aria-label`
 for screen readers), show dimmed `Standby` or `Not supported` (including native Altherma 4 or
 unconfirmed `Probing`/`Fallback` Modbus sweeps) without a figure, or show the computed working
-figure (`~` prefix for estimates, with `prov.`/`lim.` tags, `ok`/`warn` tones, and a words-only
+figure (`~` prefix for estimates, `ok`/`warn` tones, and a words-only
 `aria-label`). Expanded panels
 are grouped into three concise zones without repeating the active card bus or collecting time:
 1. Primary KPI tiles (`Performance factor`, `Heat pump`, `Gas · 88%`, `Delta`, the horizontal
    `±20%` Break-Even scale bar, and `0`/`2`-decimal currency formatting
-   when tariffs are configured; or deduplicated `Performance factor` + `24 h heat` with `Set
-   tariffs` when unconfigured; or a single status line with a 2-hour progress bar during `Collecting`).
+   when tariffs are configured; or deduplicated `Performance factor` + `24 h heat`
+   when unconfigured; or a single status line with a 2-hour progress bar during `Collecting`).
 2. Conditional warning banners (`stale` source, `limited`/`unpaired` BUH, excluded `BSH`, `CT 0 A`
    unwired) followed by structured `.wf-facts` key/value pairs showing only applicable items (`Period`
    when a metric is present, X10A `Power` sensor omitted on `Modbus` because the card title already
    names Modbus, `Outdoor` avg/min when available, and non-zero `Defrost`, `Backup heater`
    `included` when safe, and excluded `Cooling`).
 3. One short basis footer (`24 h heating & hot water · pure water · estimate.`, adding `gas 88%
-   condensing boiler, no fixed fees` when tariffs are configured) and `Edit tariffs`.
+   condensing boiler, no fixed fees` when tariffs are configured). Tariffs are edited solely in the
+   Settings → Diagnostics → Gas comparison row.
 
 Value groups show the exact supported profile rows, units and qualified values. Binary metadata
 renders flags as ON/OFF, known selector bits as Space heating/DHW and Smart Grid as its four-state

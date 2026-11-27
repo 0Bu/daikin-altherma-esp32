@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const zhAria = (x) => (l, d) => `${l} — ${x}。${d}。用方向键逐点读取。`;
 const zhMb = (a) => (r) => `${a}${r ? `（寄存器 ${r}）` : ""}。`;
 I18N.zh = localeValues([
@@ -936,8 +936,6 @@ I18N.zh = localeValues([
   /* mb.flow_scale_help */ "未确认的 /100 流量换算（待定/回退）；请对照机组显示 L/min。已从流向、ΔT、热功率和 24h 检查中排除。",
   /* hist.modbus_flow_unverified */ "未确认的 Modbus /100 换算（待定/回退）；请对照机组显示。",
   /* wf.label */ "性能系数",
-  /* wf.short.partial */ "暂定",
-  /* wf.short.limited */ "受限",
   /* wf.state.unsupported */ "不支持",
   /* wf.state.collecting */ "收集中",
   /* wf.state.standby */ "待机",
@@ -960,8 +958,6 @@ I18N.zh = localeValues([
   /* wf.scale.band */ (p) => `±${p}%`,
   /* wf.scale.cheaper */ "更省 →",
   /* wf.scale.expensive */ "← 更贵",
-  /* wf.cta.tariffs */ "设置电/气价",
-  /* wf.cta.edit_tariffs */ "修改价格",
   /* wf.desc.collecting */ (o) => `满 2 小时起显示 · 已记录 ${o}`,
   /* wf.desc.standby */ (o) => `运行量不足以计算 · 已观察 ${o}`,
   /* wf.desc.unsupported */ "缺少所需的流量、温度或电量输入。",

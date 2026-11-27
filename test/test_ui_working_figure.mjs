@@ -407,10 +407,10 @@ function baseStatus() {
     { state: "similar", supported: true, est: false, az: 3.05, text: "3.05", tone: "", aria: "3.05 · like gas" },
     { state: "more_expensive", supported: true, est: false, az: 2.15, text: "2.15", tone: "warn", aria: "2.15 · costlier than gas" },
     { state: "more_expensive", supported: true, est: true, az: 2.15, text: "~2.15", tone: "warn", aria: "estimated 2.15 · costlier than gas" },
-    { state: "partial", supported: true, est: false, az: 3.60, fullWindow: false, text: "3.60 · prov.", tone: "", aria: "3.60 · provisional" },
-    { state: "partial", supported: true, est: true, az: 3.60, fullWindow: false, text: "~3.60 · prov.", tone: "", aria: "estimated 3.60 · provisional" },
-    { state: "limited", supported: true, est: false, az: 3.25, limitedBuh: true, text: "3.25 · lim.", tone: "warn", aria: "3.25 · limited" },
-    { state: "limited", supported: true, est: true, az: 3.25, limitedBuh: true, text: "~3.25 · lim.", tone: "warn", aria: "estimated 3.25 · limited" },
+    { state: "partial", supported: true, est: false, az: 3.60, fullWindow: false, text: "3.60", tone: "", aria: "3.60 · provisional" },
+    { state: "partial", supported: true, est: true, az: 3.60, fullWindow: false, text: "~3.60", tone: "", aria: "estimated 3.60 · provisional" },
+    { state: "limited", supported: true, est: false, az: 3.25, limitedBuh: true, text: "3.25", tone: "warn", aria: "3.25 · limited" },
+    { state: "limited", supported: true, est: true, az: 3.25, limitedBuh: true, text: "~3.25", tone: "warn", aria: "estimated 3.25 · limited" },
   ];
 
   const baseFoot = "24 h heating &amp; hot water · pure water · estimate.";
@@ -485,9 +485,10 @@ function baseStatus() {
   assert.match(body, /<span class="wf-fact-k">Defrost<\/span><span class="wf-fact-v num">5 min<\/span>/);
   assert.match(body, /<span class="wf-fact-k">Backup heater<\/span><span class="wf-fact-v num">30 min · included<\/span>/);
   assert.match(body, /<span class="wf-fact-k">Cooling<\/span><span class="wf-fact-v num">10 min excluded<\/span>/);
-  assert.match(body, /data-act="gas-comparison">Edit tariffs</);
+  assert.doesNotMatch(body, /data-act="gas-comparison"|wf-actions|wf-btn/,
+    "configured working figure panel must not render inline tariff CTA");
 
-  // (b) Tariffs unconfigured on HomeHub Modbus -> 2 KPI tiles (no duplicate heat kWh) + est. + Set tariffs, NO scale/Power fact
+  // (b) Tariffs unconfigured on HomeHub Modbus -> 2 KPI tiles (no duplicate heat kWh) + est., NO scale/Power fact
   s.working_figure = {
     ...s.working_figure,
     state: "partial",
@@ -515,7 +516,8 @@ function baseStatus() {
   assert.match(body, /<span class="wf-fact-k">Period<\/span><span class="wf-fact-v num">6 h \/ 24 h · 25%<\/span>/);
   assert.match(body, /<span class="wf-fact-k">Outdoor<\/span><span class="wf-fact-v num">2\.0 °C<\/span>/);
   assert.doesNotMatch(body, />Power<\/span>|Defrost|Backup heater|Cooling/);
-  assert.match(body, /data-act="gas-comparison">Set tariffs</);
+  assert.doesNotMatch(body, /data-act="gas-comparison"|wf-actions|wf-btn/,
+    "unconfigured working figure panel must not render inline tariff CTA");
 
   // (c) limited_buh: true -> renders wf.banner.buh_limited & suppresses Backup heater included fact; stale banner shown
   s.working_figure = {
@@ -604,10 +606,17 @@ function baseStatus() {
   fetchState.mode = "ok";
   fetchState.calls.length = 0;
 
-  // Open from dashboard CTA (defaults currency from browser locale when unconfigured)
+  // Dashboard does not open gas-comparison; open from the single Settings entry (defaults currency from browser locale when unconfigured)
   loadRoute("");
   ui.S.stage = "dashboard";
   await document.getElementById("valueGroups").fire("click", {
+    target: delegatedTarget("[data-act]", "act", "gas-comparison"),
+  });
+  assert.equal(document.getElementById("gasComparisonModal").hidden, true);
+
+  loadRoute("#settings");
+  ui.S.stage = "settings";
+  await document.getElementById("settingsCards").fire("click", {
     target: delegatedTarget("[data-act]", "act", "gas-comparison"),
   });
   assert.equal(document.getElementById("gasComparisonModal").hidden, false);

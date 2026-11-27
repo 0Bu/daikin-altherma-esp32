@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const deAria = (x) => (l, d) => `${l} — ${x}. ${d}. Mit den Pfeiltasten einzelne Zeitpunkte ablesen.`;
 const deMb = (a, b = "", p = "an") => (r) => `${a}${r ? ` ${p} Register ${r}` : ""}${b}.`;
 I18N.de = localeValues([
@@ -936,8 +936,6 @@ I18N.de = localeValues([
   /* mb.flow_scale_help */ "Unbestätigte /100-Skalierung (Prüfung/Fallback); L/min am Gerät prüfen. Aus Bewegung, ΔT, Leistung und 24h-Check ausgeschlossen.",
   /* hist.modbus_flow_unverified */ "Unbestätigte /100-Skalierung (Prüfung/Fallback); am Gerät prüfen.",
   /* wf.label */ "Arbeitszahl",
-  /* wf.short.partial */ "vorl.",
-  /* wf.short.limited */ "eingeschr.",
   /* wf.state.unsupported */ "Nicht unterstützt",
   /* wf.state.collecting */ "Sammelt",
   /* wf.state.standby */ "Bereitschaft",
@@ -960,8 +958,6 @@ I18N.de = localeValues([
   /* wf.scale.band */ (p) => `±${p} %`,
   /* wf.scale.cheaper */ "Günstiger →",
   /* wf.scale.expensive */ "← Teurer",
-  /* wf.cta.tariffs */ "Tarife festlegen",
-  /* wf.cta.edit_tariffs */ "Tarife ändern",
   /* wf.desc.collecting */ (o) => `Erster Wert ab 2 h · bisher ${o}`,
   /* wf.desc.standby */ (o) => `Zu wenig Betrieb für einen Wert · bisher ${o}`,
   /* wf.desc.unsupported */ "Erforderliche Durchfluss-, Temperatur- oder Stromdaten fehlen.",

@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -941,8 +941,6 @@ I18N.pl = localeValues([
   /* mb.flow_scale_help */ "Niezweryfikowana skala /100 (sonda/profil zastępczy); porównaj L/min z wyświetlaczem. Poza animacją, ΔT, mocą i testem 24 h.",
   /* hist.modbus_flow_unverified */ "Niezweryfikowana skala Modbus /100 (sonda/profil zastępczy); porównaj z jednostką.",
   /* wf.label */ "Współczynnik efektywności",
-  /* wf.short.partial */ "wst.",
-  /* wf.short.limited */ "ogr.",
   /* wf.state.unsupported */ "Brak obsługi",
   /* wf.state.collecting */ "Zbieranie",
   /* wf.state.standby */ "Czuwanie",
@@ -965,8 +963,6 @@ I18N.pl = localeValues([
   /* wf.scale.band */ (p) => `±${p} %`,
   /* wf.scale.cheaper */ "Taniej →",
   /* wf.scale.expensive */ "← Drożej",
-  /* wf.cta.tariffs */ "Ustaw taryfy",
-  /* wf.cta.edit_tariffs */ "Zmień taryfy",
   /* wf.desc.collecting */ (o) => `Pierwszy wynik po 2 h · dotąd ${o}`,
   /* wf.desc.standby */ (o) => `Za mało pracy na wynik · ${o}`,
   /* wf.desc.unsupported */ "Brak wymaganych pomiarów przepływu, temperatury lub mocy.",

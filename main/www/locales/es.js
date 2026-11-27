@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const esAria = (x) => (l, d) => `${l} — cronología ${x}. ${d}. Las flechas permiten leer muestras individuales.`;
 const esMb = (a, p = "en") => (r) => `${a}${r ? ` ${p} el registro ${r}` : ""}.`;
 I18N.es = localeValues([
@@ -936,8 +936,6 @@ I18N.es = localeValues([
   /* mb.flow_scale_help */ "Escala /100 sin verificar (sondeo/reserva); compare L/min con la pantalla. Excluido de animación, ΔT, potencia y 24 h.",
   /* hist.modbus_flow_unverified */ "Escala Modbus /100 sin verificar (sondeo/reserva); compare con la unidad.",
   /* wf.label */ "Factor de rendimiento",
-  /* wf.short.partial */ "prov.",
-  /* wf.short.limited */ "lim.",
   /* wf.state.unsupported */ "No compatible",
   /* wf.state.collecting */ "Recopilando",
   /* wf.state.standby */ "En espera",
@@ -960,8 +958,6 @@ I18N.es = localeValues([
   /* wf.scale.band */ (p) => `±${p} %`,
   /* wf.scale.cheaper */ "Más barato →",
   /* wf.scale.expensive */ "← Más caro",
-  /* wf.cta.tariffs */ "Definir tarifas",
-  /* wf.cta.edit_tariffs */ "Editar tarifas",
   /* wf.desc.collecting */ (o) => `Primer valor tras 2 h · ${o} hasta ahora`,
   /* wf.desc.standby */ (o) => `Poco funcionamiento para un valor · ${o} observados`,
   /* wf.desc.unsupported */ "Faltan datos necesarios de caudal, temperatura o consumo eléctrico.",

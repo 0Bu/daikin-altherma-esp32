@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const fiAria = (x) => (l, d) => `${l} — ${x}. ${d}. Nuolinäppäimet lukevat näytteet.`;
 const fiMb = (a, p = "rekisterissä") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.fi = localeValues([
@@ -936,8 +936,6 @@ I18N.fi = localeValues([
   /* mb.flow_scale_help */ "Vahvistamaton /100-skaalaus (kesken/vara); vertaa L/min näyttöön. Ei animaatioon, ΔT:hen, tehoon tai 24 h testiin.",
   /* hist.modbus_flow_unverified */ "Vahvistamaton Modbus /100 -skaalaus (kesken/vara); vertaa näyttöön.",
   /* wf.label */ "Lämpökerroin",
-  /* wf.short.partial */ "alust.",
-  /* wf.short.limited */ "raj.",
   /* wf.state.unsupported */ "Ei tuettu",
   /* wf.state.collecting */ "Kerätään",
   /* wf.state.standby */ "Valmiustila",
@@ -960,8 +958,6 @@ I18N.fi = localeValues([
   /* wf.scale.band */ (p) => `±${p} %`,
   /* wf.scale.cheaper */ "Edullisempi →",
   /* wf.scale.expensive */ "← Kalliimpi",
-  /* wf.cta.tariffs */ "Aseta hinnat",
-  /* wf.cta.edit_tariffs */ "Muokkaa hintoja",
   /* wf.desc.collecting */ (o) => `Ensimmäinen arvo 2 h jälkeen · nyt ${o}`,
   /* wf.desc.standby */ (o) => `Liian vähän käyntiä arvolle · havaittu ${o}`,
   /* wf.desc.unsupported */ "Tarvittavat virtaus-, lämpötila- tai sähkömittaukset puuttuvat.",

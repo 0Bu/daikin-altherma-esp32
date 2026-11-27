@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const jaAria = (x) => (l, d) => `${l} — ${x}。${d}。矢印キーで各試料を確認。`;
 const jaMb = (a) => (r) => `${a}${r ? `（レジスタ ${r}）` : ""}。`;
 I18N.ja = localeValues([
@@ -936,8 +936,6 @@ I18N.ja = localeValues([
   /* mb.flow_scale_help */ "未確認の /100 換算（判別中/フォールバック）。L/min を機器表示と比較してください。動画・ΔT・熱出力・24h診断から除外。",
   /* hist.modbus_flow_unverified */ "未確認の Modbus /100 換算（判別中/フォールバック）。機器表示と比較してください。",
   /* wf.label */ "成績係数",
-  /* wf.short.partial */ "暫定",
-  /* wf.short.limited */ "限定",
   /* wf.state.unsupported */ "非対応",
   /* wf.state.collecting */ "収集中",
   /* wf.state.standby */ "待機",
@@ -960,8 +958,6 @@ I18N.ja = localeValues([
   /* wf.scale.band */ (p) => `±${p}%`,
   /* wf.scale.cheaper */ "安い →",
   /* wf.scale.expensive */ "← 高い",
-  /* wf.cta.tariffs */ "料金を設定",
-  /* wf.cta.edit_tariffs */ "料金を変更",
   /* wf.desc.collecting */ (o) => `2時間後から表示 · 現在 ${o}`,
   /* wf.desc.standby */ (o) => `算出に十分な運転がありません · ${o}`,
   /* wf.desc.unsupported */ "必要な流量・温度・電力入力が不足しています。",

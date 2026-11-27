@@ -2955,11 +2955,13 @@ async function assertWorkingFigure(page, context) {
       return {
         kpis: body ? body.querySelectorAll(".wf-kpis-4 .wf-kpi").length : 0,
         hasScale: !!body?.querySelector(".wf-scale"),
+        hasTariffCta: !!body?.querySelector(".wf-actions, [data-act='gas-comparison']"),
         badge,
       };
     })()`);
     assert.equal(cheaperState.kpis, 4, `${context}: tariffs-configured working figure renders 4 KPI tiles`);
     assert.equal(cheaperState.hasScale, true, `${context}: Break-Even scale bar renders when tariffs configured`);
+    assert.equal(cheaperState.hasTariffCta, false, `${context}: configured working figure must omit inline tariff CTA`);
     assert.equal(cheaperState.badge, null,
       `${context}: diagnosis card renders no header summary badge`);
     assertLayout(await page.evaluate(layoutAudit), `${context}/cheaper`);
@@ -2984,13 +2986,13 @@ async function assertWorkingFigure(page, context) {
         val: row?.querySelector(".vrow-val")?.innerText || "",
         kpis: body ? body.querySelectorAll(".wf-kpis .wf-kpi").length : 0,
         hasScale: !!body?.querySelector(".wf-scale"),
-        hasTariffCta: !!body?.querySelector(".wf-actions [data-act='gas-comparison']"),
+        hasTariffCta: !!body?.querySelector(".wf-actions, [data-act='gas-comparison']"),
       };
     })()`);
     assert.ok(measuredState.val.startsWith("~"), `${context}: estimated inverter mode retains ~ prefix`);
     assert.equal(measuredState.kpis, 2, `${context}: unconfigured tariffs render 2 KPI tiles`);
     assert.equal(measuredState.hasScale, false, `${context}: scale bar omitted when tariffs unconfigured`);
-    assert.equal(measuredState.hasTariffCta, true, `${context}: Set-tariffs CTA rendered when unconfigured`);
+    assert.equal(measuredState.hasTariffCta, false, `${context}: unconfigured working figure must omit inline tariff CTA`);
     assertLayout(await page.evaluate(layoutAudit), `${context}/measured`);
 
     await page.evaluate(`(() => {
@@ -3003,11 +3005,17 @@ async function assertWorkingFigure(page, context) {
       return true;
     })()`);
     await page.frame();
-    assert.equal(await page.evaluate(`(() => {
-      const text = document.querySelector("[data-desc='observation:working_figure']")
-        ?.closest(".vitem")?.querySelector(".vdesc-body")?.innerText || "";
-      return text.includes(t("wf.banner.buh_limited"));
-    })()`), true, `${context}: limited BUH warning must appear on backup heater operation`);
+    const limitedState = await page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='observation:working_figure']");
+      const text = row?.closest(".vitem")?.querySelector(".vdesc-body")?.innerText || "";
+      return {
+        val: row?.querySelector(".vrow-val")?.innerText || "",
+        hasBuhLimitedWarning: text.includes(t("wf.banner.buh_limited")),
+      };
+    })()`);
+    assert.equal(limitedState.val.includes("·"), false, `${context}: limited working figure renders only AZ without suffix`);
+    assert.equal(limitedState.hasBuhLimitedWarning, true,
+      `${context}: limited BUH warning must appear on backup heater operation`);
     assertLayout(await page.evaluate(layoutAudit), `${context}/limited`);
 
     await page.evaluate(`(() => {
