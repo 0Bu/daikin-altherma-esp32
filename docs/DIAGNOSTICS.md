@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: f68fd26b732ba7f4859d0c36e321d9293ba0b2d2c92010567eaa9c12ce9ad045 -->
+<!-- user-docs-contract: 6c8faa7dcaff850ad136be46b334d06a04e3062f75723832544960a8eb0eb12e -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -328,19 +328,23 @@ heating-specific. Optional missing comparison data remains an explicit limitatio
 |---|---|
 | **N/A** | The detected profile lacks a required signal. A profile whose only structurally identified refrigerant-pressure reading has no established pressure side counts as lacking one. |
 | **WAITING** | No suitable ordinary heating run now; recording starts automatically when conditions fit. |
-| **RECORDING** | Continuous fresh observation with the complete optional context. |
-| **PARTIAL** | Recording, with optional temperature/pressure-side/outdoor/controller-phase context missing at least once. |
+| **RECORDING** (`RECORDING · <duration>`) | Continuous fresh observation with the complete optional context. |
+| **PARTIAL** (`RECORDING · <duration> · Partial`) | Recording, with optional temperature/pressure-side/outdoor/controller-phase context missing at least once. |
 | **PAUSED** | A required reading/condition, expected sequence or profile-declared phase witness ended continuity. The next suitable run begins at zero. |
 
 Duration and min/mean/max describe **one uninterrupted window**. The permitted poll gap depends on
 profile pages and transport timeout; there is no universal three-second/twenty-minute service rule.
 Source-generation changes also reset continuity.
 
-Each range shows how many readings contributed. A pressure input that was unreadable during part
-of the window can have fewer readings than the total number of sweeps. These counts describe the
-sample population. The range stays unavailable when zero readings qualified. The X10A input shown
-in the API is the profile's selected source, which can be unreadable and needs independent
-physical validation.
+When window data exists, the expanded panel groups the five metrics along the four physical
+circuit stages (**1. Compressor**, **2. High-pressure side**, **3. Expansion valve**, and
+**4. Low-pressure side**) with each stage's mean and min/max range. A pressure input that was
+unreadable during part of the window can have fewer readings than the total number of sweeps;
+inline badges call out differing or zero counts, unselected profile inputs stay labelled **No
+selected input**, and the full per-metric counts sit inside the collapsible **Reading counts &
+limits** section. These counts describe the sample population, not time coverage, and the range
+stays unavailable when zero readings qualified. The X10A input shown in the API is the profile's
+selected source, which can be unreadable and needs independent physical validation.
 
 **Important limit:** It assigns no normal range, refrigerant-charge verdict, full-load state or
 settling claim. EEV pulses are a controller command, not proof of mechanical valve movement.

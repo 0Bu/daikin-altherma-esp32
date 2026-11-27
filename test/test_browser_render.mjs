@@ -2060,6 +2060,53 @@ async function assertPlantDiagnosis(page, context) {
         assert.deepEqual(retriesState.seen, ["high_pressure"], `${context}/${block.id}: increased counter chip marked`);
         continue;
       }
+      if (block.id === "service:refrigerant") {
+        assert.equal(block.count, 1, `${context}/${block.id}: wrapped inside .ref-wrap`);
+        assert.ok(!block.text.some(text => text.includes(normalLabel)),
+          `${context}/${block.id}: refrigerant observation must not render a generic Normal block`);
+        const refState = await page.evaluate(`(() => {
+          const item = document.querySelector("[data-desc='service:refrigerant']")?.closest('.vitem');
+          const wrap = item?.querySelector('.vdesc-body > .ref-wrap');
+          const rowVal = item?.querySelector('.vrow-val')?.innerText?.trim() || "";
+          const flowBoxes = [...(wrap?.querySelectorAll('.ref-flow .ref-flow-box') || [])];
+          const stages = [...(wrap?.querySelectorAll('.ref-stages > .ref-stage') || [])];
+          const badges = [...(wrap?.querySelectorAll('.ref-badge') || [])].map(el => el.innerText.trim());
+          const details = wrap?.querySelector('details[data-ref-disclosure="limits"]');
+          return {
+            hasWrap: !!wrap,
+            rowVal,
+            expectedRowVal: t('service.short.limited', checkupDuration(15)),
+            hasHead: !!wrap?.querySelector('.ref-head .ref-dot'),
+            hasFlow: wrap?.querySelector('.ref-flow')?.getAttribute('aria-hidden') === 'true',
+            flowBoxCount: flowBoxes.length,
+            stageCount: stages.length,
+            hasPair: !!wrap?.querySelector('.ref-stage .ref-pair'),
+            eevNote: wrap?.querySelector('.ref-metric-note')?.innerText?.includes(t('service.eev.note')) === true,
+            lowDim: stages[3]?.classList.contains('dim') === true,
+            badges,
+            hasBanner: !!wrap?.querySelector('.ref-banner'),
+            hasFoot: wrap?.querySelector('.wf-foot')?.innerText?.includes(t('service.common')) === true,
+            hasDetails: !!details,
+            detailsOpen: details?.open === true,
+          };
+        })()`);
+        assert.equal(refState.hasWrap, true, `${context}/${block.id}: .ref-wrap rendered`);
+        assert.equal(refState.rowVal, refState.expectedRowVal, `${context}/${block.id}: collapsed summary shows limited duration`);
+        assert.equal(refState.hasHead, true, `${context}/${block.id}: neutral run header rendered`);
+        assert.equal(refState.hasFlow, true, `${context}/${block.id}: aria-hidden SVG flow rendered`);
+        assert.equal(refState.flowBoxCount, 4, `${context}/${block.id}: 4 flow boxes rendered`);
+        assert.equal(refState.stageCount, 4, `${context}/${block.id}: 4 stage cards rendered`);
+        assert.equal(refState.hasPair, true, `${context}/${block.id}: stage 2 pairs discharge + high pressure`);
+        assert.equal(refState.eevNote, true, `${context}/${block.id}: stage 3 shows command-only note`);
+        assert.equal(refState.lowDim, false, `${context}/${block.id}: populated low pressure is not dimmed`);
+        assert.deepEqual(refState.badges, [await page.evaluate("t('service.metric.samples', 2)")],
+          `${context}/${block.id}: inline sample badge appears only for mismatching count`);
+        assert.equal(refState.hasBanner, true, `${context}/${block.id}: neutral context banner rendered`);
+        assert.equal(refState.hasFoot, true, `${context}/${block.id}: concise scope footer rendered`);
+        assert.equal(refState.hasDetails, true, `${context}/${block.id}: limits disclosure rendered`);
+        assert.equal(refState.detailsOpen, false, `${context}/${block.id}: limits disclosure starts collapsed`);
+        continue;
+      }
       assert.equal(block.count, 3, `${context}/${block.id}: exactly three blocks`);
       assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
@@ -2067,6 +2114,16 @@ async function assertPlantDiagnosis(page, context) {
     }
     const refrigerantText = () => page.evaluate(`document.querySelector("[data-desc='service:refrigerant']")
       .closest('.vitem').innerText`);
+    assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.meta_limit')")),
+      `${context}: meta_limit stays tucked inside closed limits disclosure`);
+    assert.doesNotMatch(await refrigerantText(), /0x62|0x20|source_generation|"conv"/,
+      `${context}: raw source coordinates stay outside the owner-facing explanation`);
+    await clickElement(page, "[data-desc='service:refrigerant'] ~ .vdesc [data-ref-disclosure='limits'] > summary");
+    await page.waitFor("S.descOpen.has('ref:limits') && document.querySelector('[data-ref-disclosure=\"limits\"]')?.open === true && S.clickHold === false");
+    await page.evaluate("renderApp(); true");
+    await page.frame();
+    assert.equal(await page.evaluate("document.querySelector('[data-ref-disclosure=\"limits\"]')?.open === true"), true,
+      `${context}: limits disclosure stays open across renderApp()`);
     for (const [key, args] of [["samples", [2]], ["samples", [4]], ["meta_limit", []]]) {
       const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
         ...${JSON.stringify(args)})`);
@@ -2077,6 +2134,8 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: raw source coordinates stay outside the owner-facing explanation`);
     assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
       `${context}: populated selected metrics do not add a generic source sentence`);
+    await clickElement(page, "[data-desc='service:refrigerant'] ~ .vdesc [data-ref-disclosure='limits'] > summary");
+    await page.waitFor("!S.descOpen.has('ref:limits') && document.querySelector('[data-ref-disclosure=\"limits\"]')?.open === false && S.clickHold === false");
     const openHeaterInspector = async (which, selector) => {
       await page.waitFor(`document.getElementById("inspect").getAnimations({subtree: true})
         .every(animation => !(animation instanceof CSSTransition) || animation.playState !== "running")`);
@@ -2671,12 +2730,17 @@ async function assertPlantDiagnosis(page, context) {
     await page.frame();
     assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-zero`);
     await assertAccessibility(page, `${context}/refrigerant-zero`, { nativeTree: true });
-    for (const [key, args] of [["samples", [0]], ["meta_limit", []]]) {
+    for (const [key, args] of [["samples", [0]]]) {
       const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
         ...${JSON.stringify(args)})`);
       assert.ok((await refrigerantText()).includes(expected),
-        `${context}: zero-count service retains localized metadata ${key}`);
+        `${context}: zero-count service retains localized inline badge ${key}`);
     }
+    await clickElement(page, "[data-desc='service:refrigerant'] ~ .vdesc [data-ref-disclosure='limits'] > summary");
+    await page.waitFor("S.descOpen.has('ref:limits') && document.querySelector('[data-ref-disclosure=\"limits\"]')?.open === true && S.clickHold === false");
+    assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-zero-disclosure`);
+    assert.ok((await refrigerantText()).includes(await page.evaluate("t('service.metric.meta_limit')")),
+      `${context}: zero-count service retains localized meta_limit inside disclosure`);
     assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
       `${context}: a selected zero-count input is not described as unselected`);
     const unavailableInputCount = await page.evaluate(`(() => {
@@ -2703,6 +2767,14 @@ async function assertPlantDiagnosis(page, context) {
     assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-unselected`);
     assert.ok((await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
       `${context}: an unselected low side is explicitly distinguished from a selected unread input`);
+    assert.equal(await page.evaluate(`(() => {
+      const wrap = document.querySelector("[data-desc='service:refrigerant']")?.closest('.vitem')?.querySelector('.ref-wrap');
+      const stages = [...(wrap?.querySelectorAll('.ref-stages > .ref-stage') || [])];
+      const flowBoxes = [...(wrap?.querySelectorAll('.ref-flow .ref-flow-box') || [])];
+      return stages[3]?.classList.contains('dim') === true && flowBoxes[3]?.classList.contains('is-dim') === true;
+    })()`), true, `${context}: unselected low pressure dims stage 4 card and flow box`);
+    assert.doesNotMatch(await refrigerantText(), /0x62|0x20|source_generation|"conv"/,
+      `${context}: unselected view leaks no raw register coordinates`);
     await captureNativeEvidence(page, `${context}/refrigerant-unselected`,
       "[data-desc='service:refrigerant']", ".vitem");
     await page.evaluate(`(() => {

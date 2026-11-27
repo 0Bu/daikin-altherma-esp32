@@ -94,16 +94,19 @@ ui.set(observed);
 let html = ui.card();
 assert.match(html, /Plant diagnostics · 24 h/);
 assert.match(html, /Refrigerant \(heating\)/);
-assert.match(html, />RECORDING</);
+assert.match(html, />RECORDING · &lt;1 min</);
 assert.match(html, /&lt;1 min · 4 readings/);
 assert.match(html, /One space-heating run, separate from 24-hour checks/);
 assert.match(html, /No refrigerant-charge or normal-range diagnosis/);
 assert.match(html, /command, not measured position/);
-assert.match(html, /Compressor: min 20 · mean 27.5 · max 40 rps/);
-assert.match(html, /Discharge temperature: min 46.5 · mean 60.5 · max 81.4 °C/);
-assert.match(html, /Expansion-valve command: min 0 · mean 125 · max 250 pls/);
-assert.match(html, /High pressure: min 18 · mean 20 · max 22 bar/);
-assert.match(html, /Low pressure: min 4 · mean 5 · max 6 bar/);
+assert.doesNotMatch(html, /Normal:/, "must not present a Normal target heading");
+assert.match(html, /class="ref-flow"[^>]*aria-hidden="true"/);
+assert.match(html, /1\. Compressor[\s\S]*2\. High side[\s\S]*3\. Valve[\s\S]*4\. Low side/);
+assert.match(html, /1\. Compressor[\s\S]*mean 27\.5 rps[\s\S]*min 20 · max 40 rps/);
+assert.match(html, /2\. High-pressure side[\s\S]*Discharge temperature[\s\S]*mean 60\.5 °C[\s\S]*min 46\.5 · max 81\.4 °C/);
+assert.match(html, /High pressure[\s\S]*mean 20 bar[\s\S]*min 18 · max 22 bar/);
+assert.match(html, /3\. Expansion valve[\s\S]*Expansion-valve command[\s\S]*mean 125 pls[\s\S]*min 0 · max 250 pls[\s\S]*Command only · not measured position/);
+assert.match(html, /4\. Low-pressure side[\s\S]*Low pressure[\s\S]*mean 5 bar[\s\S]*min 4 · max 6 bar/);
 assert.match(html, /class="vrow vrow-desc"[^>]*data-desc="service:refrigerant"/);
 assert.equal((html.match(/<div class="card">/g) || []).length, 1);
 assert.doesNotMatch(html, /data-action=|<form|<input|>OK</);
@@ -113,7 +116,7 @@ for (const [reason, otaCached] of [["status", false], [null, true]]) {
   assert.equal(ui.card(), "", "an otherwise empty card must disappear");
 }
 ui.transport("values");
-assert.match(ui.row(), />RECORDING</, "a values failure does not invalidate accepted status");
+assert.match(ui.row(), />RECORDING · &lt;1 min</, "a values failure does not invalidate accepted status");
 ui.transport(null);
 ui.set({ state: "interrupted", blocker: "poll_gap", continuous_s: 0, samples: 0 });
 assert.match(ui.row(), />PAUSED</);
@@ -135,16 +138,24 @@ const counted = {
 };
 ui.set(counted);
 html = ui.card();
-assert.match(html, /High pressure: min 18 · mean 20 · max 22 bar · 3 accepted readings/);
-assert.match(html, /Low pressure: min 4 · mean 5 · max 6 bar · 4 accepted readings/);
+assert.match(html, />RECORDING · &lt;1 min · Partial</);
+assert.match(html, />PARTIAL</);
+assert.match(html, /High pressure[\s\S]*<span class="ref-badge num">3 accepted readings<\/span>/);
+assert.equal((html.match(/class="ref-badge num"/g) || []).length, 1,
+             "inline sample badge appears only for mismatching/unreadable metrics");
+assert.match(html, /<details class="ref-disclosure" data-ref-disclosure="limits">/);
+assert.match(html, /Reading counts &amp; limits/);
+assert.match(html, /Compressor: 4 accepted readings/);
+assert.match(html, /High pressure: 3 accepted readings/);
 assert.doesNotMatch(html, /selected input ·|No selected input/,
                     "populated ranges do not repeat a generic source phrase");
-assert.match(html, /<br>Discharge temperature:/,
-             "each metric remains readable as its own line inside the existing explanation block");
 assert.match(html, /not time coverage/);
 assert.match(html, /does not prove a current reading/);
 assert.doesNotMatch(html, /777|0x62|converter|Low pressure: min 0/,
                     "wire-level identity belongs in the API, not the owner-facing row");
+context.S.descOpen.add("ref:limits");
+assert.match(ui.card(), /data-ref-disclosure="limits" open>/, "disclosure persists open attribute from S.descOpen");
+context.S.descOpen.delete("ref:limits");
 ui.set(counted, { diagnostics: { effective_source: "modbus" } });
 assert.equal(ui.card(), "", "Modbus display must hide the X10A-only refrigerant observation row");
 const oneSided = {
@@ -157,13 +168,16 @@ const oneSided = {
   },
 };
 ui.set(oneSided);
-assert.match(ui.card(), /Low pressure: No data · 0 accepted readings · No selected input/);
+html = ui.card();
+assert.match(html, /class="ref-stage dim"[\s\S]*4\. Low-pressure side[\s\S]*Low pressure[\s\S]*—[\s\S]*No data[\s\S]*0 accepted readings[\s\S]*No selected input/);
+assert.match(html, /Low pressure: 0 accepted readings · No selected input/);
 ui.set({ ...oneSided, metric_meta: {
   ...oneSided.metric_meta, low_pressure_bar: { ...counted.metric_meta.low_pressure_bar, samples: 0 },
 } });
 html = ui.card();
 // A selected input without accepted readings stays distinct from the unselected state above.
-assert.match(html, /Low pressure: No data · 0 accepted readings(?:<br>|$)/);
+assert.match(html, /class="ref-stage dim"[\s\S]*Low pressure[\s\S]*—[\s\S]*No data[\s\S]*0 accepted readings/);
+assert.match(html, /<li>Low pressure: 0 accepted readings<\/li>/);
 assert.doesNotMatch(html, /No selected input/);
 assert.doesNotMatch(html, /Low pressure: min 0/);
 ui.set({ ...counted, state: "waiting", samples: 0, continuous_s: 0,
@@ -171,8 +185,8 @@ ui.set({ ...counted, state: "waiting", samples: 0, continuous_s: 0,
   metric_meta: Object.fromEntries(Object.entries(counted.metric_meta)
     .map(([key, meta]) => [key, { ...meta, samples: 0 }])) });
 html = ui.card();
-assert.match(html, /The compressor is not running/);
-assert.doesNotMatch(html, /accepted readings|No selected input|not time coverage/,
+assert.match(html, /class="ref-status"[\s\S]*The compressor is not running/);
+assert.doesNotMatch(html, /ref-stages|accepted readings|No selected input|not time coverage/,
                     "an empty waiting window needs its blocker, not five empty metric lines");
 
 // Absent/malformed metadata is not an accepted zero count or a selected input. Old firmware's
@@ -183,8 +197,8 @@ ui.set({ ...observed, metric_meta: {
   low_pressure_bar: { samples: "0", source: null },
 } });
 html = ui.card();
-assert.match(html, /Expansion-valve command: min 0 · mean 125 · max 250 pls/);
-assert.doesNotMatch(html, /accepted readings|selected input|not time coverage/);
+assert.match(html, /Expansion-valve command[\s\S]*mean 125 pls[\s\S]*min 0 · max 250 pls/);
+assert.doesNotMatch(html, /accepted readings|selected input|not time coverage|ref-disclosure/);
 
 // Unknown/null/incomplete metric data cannot become a zero or partially plausible range.
 ui.set({ ...observed, metrics: {
@@ -193,18 +207,18 @@ ui.set({ ...observed, metrics: {
   low_pressure_bar: { min: NaN, mean: 5, max: 6 },
 } });
 html = ui.card();
-assert.doesNotMatch(html, /Compressor:|Discharge temperature:|High pressure:|Low pressure:/);
+assert.doesNotMatch(html, /class="ref-stages"|class="ref-flow"|Discharge temperature|High pressure|Low pressure/);
 assert.doesNotMatch(html, /NaN|undefined/);
 
 ui.set({ ...observed, state: "limited", special_phases_known: false,
   limitations: ["special_phases_unavailable", "temperature_context_incomplete",
                 "pressure_sides_incomplete", "outdoor_context_incomplete", "future_constraint"] });
 html = ui.card();
-for (const text of ["Controller phases", "Temperature context",
-                   "Pressure side(s)", "Outdoor context"])
+for (const text of ["Incomplete context:", "Controller phase signals", "Suction/liquid temperatures",
+                   "Both pressure sides", "Outdoor air/coil temperatures"])
   assert.ok(html.includes(text), `missing named constraint ${text}`);
 assert.doesNotMatch(html, /future_constraint|service\.limit\./);
-assert.equal((html.match(/Controller phases/g) || []).length, 1);
+assert.equal((html.match(/Controller phase signals/g) || []).length, 1);
 
 ui.set({ kind: "observation", state: "interrupted", continuous_s: 0, samples: 0,
   mode: "heating", blocker: "poll_gap", special_phases_known: false });
@@ -231,7 +245,7 @@ for (const locale of localeNames) {
   ui.set({ ...observed, state: "limited", special_phases_known: false,
     limitations: ["temperature_context_incomplete", "pressure_sides_incomplete", "outdoor_context_incomplete"] });
   html = ui.card();
-  assert.doesNotMatch(html, /service\.(?:metric|limit|common|help)|undefined|NaN/, locale);
+  assert.doesNotMatch(html, /service\.(?:metric|limit|common|help|stage|flow|short|eev|limits)|undefined|NaN/, locale);
   const limitedHelp = ui.t("service.help.limited");
   assert.ok(limitedHelp && limitedHelp !== "service.help.limited", `${locale}: service.help.limited exists`);
   assert.ok(html.includes(limitedHelp), `${locale}: state=limited must render service.help.limited`);
@@ -241,13 +255,15 @@ for (const locale of localeNames) {
     `${locale}: service.title must appear only in row label and aria-label, not in help copy`);
   for (const unit of ["rps", "°C", "pls", "bar"]) assert.ok(html.includes(unit), `${locale} ${unit}`);
   assert.doesNotMatch(html, />OK</);
-  assert.equal((html.match(/class="vdesc-p"/g) || []).length, 3, `${locale}: exactly three blocks`);
+  assert.equal((html.match(/class="ref-stage(?:"| dim")/g) || []).length, 4, `${locale}: 4 grouped stage cards`);
+  assert.match(html, /class="ref-banner"/, `${locale}: neutral context banner`);
+  assert.match(html, /class="wf-foot"/, `${locale}: concise footer`);
 
   ui.set(oneSided);
   const metadata = ui.card();
-  assert.doesNotMatch(metadata, /service\.(?:metric|limit|common)|undefined|NaN|0x62|777/, locale);
+  assert.doesNotMatch(metadata, /service\.(?:metric|limit|common|stage|flow|short|eev|limits)|undefined|NaN|0x62|777/, locale);
   if (locale !== "en") {
-    assert.doesNotMatch(metadata, /accepted readings|Profile-selected X10A input|No selected input|not time coverage/,
+    assert.doesNotMatch(metadata, /accepted readings|Profile-selected X10A input|No selected input|not time coverage|Reading counts &amp; limits|Command only/,
                        `${locale}: metadata and its limit must be localized`);
   }
 }
@@ -255,9 +271,11 @@ ui.lang("de");
 ui.set({ ...observed, state: "limited", special_phases_known: false,
   limitations: ["pressure_sides_incomplete"] });
 html = ui.card();
-assert.match(html, />LÜCKENHAFT</);
-assert.match(html, /Verdichter: min. 20 · Mittel 27,5 · max. 40 rps/);
-assert.match(html, /Druckseite\(n\)/);
+assert.match(html, />LÄUFT · &lt;1 min · Teildaten</);
+assert.match(html, />TEILDATEN</);
+assert.match(html, /1\. Verdichter[\s\S]*Ø 27,5 rps[\s\S]*min\. 20 · max\. 40 rps/);
+assert.match(html, /Beide Druckseiten/);
+assert.match(html, /Steuerbefehl · keine Positionsmessung/);
 assert.match(html, /unabhängig von der 24-h-Diagnose/);
 assert.match(html, /Ventil: Befehl, keine gemessene Stellung/);
 ui.set({ state: "unsupported", continuous_s: 0, samples: 0,

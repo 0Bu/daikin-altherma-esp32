@@ -502,9 +502,23 @@ card is hidden when Plant diagnostics is off, and this X10A row is hidden when `
 active display source. When `X10A` is displayed with opt-in, the row uses the current HTTP status
 after signal coverage is evaluated this boot. A failed status fetch or an OTA snapshot hides it.
 A current status can report waiting or interrupted with limits, including loss of X10A. Older
-firmware omits the row. Copy says ordinary polling cannot command full load, prove
-settling/charge, establish a universal range or confirm mechanical EEV motion. EEV pulses describe
-a command, not measured valve position.
+firmware omits the row. Collapsed rows show neutral `RECORDING · <duration>` or dimmed
+`RECORDING · <duration> · Partial` when duration is available (otherwise `WAITING`, `PAUSED`,
+or `N/A`). Expanded panels group the observation into four neutral zones:
+1. Run header (live indicator dot, state, window duration and sample count, and concise subtitle) or
+   a single status box with the active blocker when no window data is present.
+2. When readable metrics or counted window inputs exist: a compact neutral 4-stage refrigerant-loop
+   SVG and four numbered stage cards (`1. Compressor`, `2. High-pressure side` pairing discharge
+   temperature and high pressure, `3. Expansion valve` noting command rather than measured position,
+   and `4. Low-pressure side` styled dashed/dimmed when unavailable), showing the mean prominently
+   with a `min · max` subline, inline sample-count badges only when a metric differs from the window
+   count or is unreadable, and `No selected input` only when `source` is `null`.
+3. A neutral incomplete-context banner naming any missing optional context.
+4. One concise single-run scope footer (`service.common`, without a `Normal:` heading) and a
+   persistent collapsible `<details>` disclosure (`Reading counts & limits`) holding the
+   sample-coverage caveat and per-metric accepted-reading counts without raw register coordinates.
+Copy says ordinary polling cannot command full load, prove settling/charge, establish a universal
+range or confirm mechanical EEV motion. EEV pulses describe a command, not measured valve position.
 
 A separate neutral **Performance factor** (`Arbeitszahl` in German) observation row presents rolling
 24-hour heating/DHW energy and optional break-even gas comparison when `working_figure` is
