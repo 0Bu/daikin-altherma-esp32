@@ -263,16 +263,26 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     "the fan is vertically centred between the outdoor-unit heading and first pill");
   assert.match(index, /data-insp="comp"[\s\S]*?<circle class="sc-comp" cx="158" cy="231" r="26"/,
     "the compressor shares the fan's vertical centre between heading and first pill");
-  assert.match(index, /id="gQuietState"[\s\S]*?<rect class="sc-pill sc-ou-mode-pill" x="62" y="316" width="104" height="22" rx="11"[\s\S]*?<text class="sc-val" x="114" y="331"/,
+  assert.match(index, /id="gQuietState"[\s\S]*?<rect class="sc-pill sc-ou-mode-pill" x="62" y="319" width="104" height="22" rx="11"[\s\S]*?<text class="sc-val" x="114" y="334"/,
     "Quiet follows the electrical-input row in the outdoor pill column");
-  assert.match(index, /id="gDefrostState"[\s\S]*?<rect class="sc-pill sc-ou-mode-pill" x="62" y="348" width="104" height="22" rx="11"[\s\S]*?<text class="sc-val" x="114" y="363"/,
+  assert.match(index, /id="gDefrostState"[\s\S]*?<rect class="sc-pill sc-ou-mode-pill" x="62" y="351" width="104" height="22" rx="11"[\s\S]*?<text class="sc-val" x="114" y="366"/,
     "Defrost follows Quiet in the single centred outdoor pill column");
-  assert.match(index, /data-insp="out"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="380" width="104" height="22" rx="11"/,
+  assert.match(index, /data-insp="out"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="383" width="104" height="22" rx="11"[\s\S]*?<text class="sc-val" x="114" y="398"/,
     "outdoor air uses the shared outdoor readout geometry");
-  assert.match(index, /data-insp="pel"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="288" width="104" height="22" rx="11"/,
+  assert.match(index, /data-insp="pel"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="287" width="104" height="22" rx="11"[\s\S]*?<text class="sc-val" x="114" y="302"/,
     "electrical input starts the outdoor pill column below the component row");
-  assert.match(index, /data-insp="ouhx"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="412" width="104" height="22" rx="11"/,
+  assert.match(index, /data-insp="ouhx"[\s\S]*?<rect class="sc-pill sc-ou-reading" x="62" y="415" width="104" height="22" rx="11"[\s\S]*?<text class="sc-val" x="114" y="430"/,
     "outdoor heat-exchanger R4T ends the pill column above the outdoor-unit bottom");
+  const ouPills = ["pel", "quiet", "defrost", "out", "ouhx"].map((insp) => {
+    const m = index.match(new RegExp(`data-insp="${insp}"[\\s\\S]*?<rect class="sc-pill[^"]*" x="62" y="(\\d+)" width="104" height="22"`));
+    assert.ok(m, `missing outdoor pill rect for ${insp}`);
+    return Number(m[1]);
+  });
+  const ouGaps = ouPills.slice(1).map((y, i) => y - (ouPills[i] + 22));
+  assert.deepEqual(ouGaps, [10, 10, 10, 10],
+    "all five outdoor pills share equal vertical gaps");
+  assert.equal(ouPills[0] - (231 + 42 + 1), (150 + 300) - (ouPills[ouPills.length - 1] + 22),
+    "outdoor pill column has equal top margin below the fan ring and bottom margin inside the box");
   assert.match(style, /svg \.sc-snow \.sc-pill, svg \.sc-quiet \.sc-pill \{[^}]*fill:\s*var\(--hatch\)[^}]*stroke:\s*var\(--pipe\)/,
     "inactive outdoor-mode pills use the neutral grey treatment");
   assert.match(style, /\.defrost-on \.sc-snow \.sc-pill, \.quiet-on \.sc-quiet \.sc-pill \{[^}]*stroke:\s*var\(--brand\)/,
