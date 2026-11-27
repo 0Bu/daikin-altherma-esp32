@@ -377,15 +377,6 @@ for (const entry of [
   assert.equal(location.hash, `#settings/${ui.POPUP_ROUTES[modal]}`,
     `${value}: visible entry action must add its addressable popup route`);
 }
-for (const [value, modal] of [
-  ["gas-comparison", "gasComparisonModal"],
-]) {
-  loadRoute("");
-  await document.getElementById("valueGroups").fire("click", { target: delegatedTarget("[data-act]", "act", value) });
-  assert.equal(document.getElementById(modal).hidden, false, `${value}: dashboard action must open`);
-  assert.equal(location.hash, `#settings/${ui.POPUP_ROUTES[modal]}`,
-    `${value}: dashboard action must add its addressable popup route`);
-}
 loadRoute("#settings");
 await document.getElementById("footBug").onclick();
 assert.equal(document.getElementById("bugModal").hidden, false, "Report a bug footer action must open");

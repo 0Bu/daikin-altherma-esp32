@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const csAria = (x) => (l, d) => `${l} — časová osa ${x}. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`;
 const csMb = (a, p = "u registru") => (r) => `${a}${r ? ` ${p} ${r}` : ""}.`;
 I18N.cs = localeValues([
@@ -936,8 +936,6 @@ I18N.cs = localeValues([
   /* mb.flow_scale_help */ "Neověřené škálování /100 (čeká sonda/náhradní profil); porovnejte L/min s displejem. Bez animace, ΔT, výkonu a 24h kontroly.",
   /* hist.modbus_flow_unverified */ "Neověřené škálování Modbus /100 (čeká sonda/náhradní profil); porovnejte s displejem.",
   /* wf.label */ "Topný faktor",
-  /* wf.short.partial */ "předb.",
-  /* wf.short.limited */ "omez.",
   /* wf.state.unsupported */ "Nepodporováno",
   /* wf.state.collecting */ "Sběr dat",
   /* wf.state.standby */ "Pohotovost",
@@ -960,8 +958,6 @@ I18N.cs = localeValues([
   /* wf.scale.band */ (p) => `±${p} %`,
   /* wf.scale.cheaper */ "Levnější →",
   /* wf.scale.expensive */ "← Dražší",
-  /* wf.cta.tariffs */ "Nastavit tarify",
-  /* wf.cta.edit_tariffs */ "Upravit tarify",
   /* wf.desc.collecting */ (o) => `První hodnota od 2 h · zatím ${o}`,
   /* wf.desc.standby */ (o) => `Příliš krátký provoz pro výpočet · ${o}`,
   /* wf.desc.unsupported */ "Chybí potřebné údaje o průtoku, teplotě nebo elektřině.",

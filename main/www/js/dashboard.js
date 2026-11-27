@@ -2982,11 +2982,11 @@ function workingFigureRowHtml() {
       verdictWord = rightText;
     }
   } else if (wf.state === "partial") {
-    rightText = `${azStr} · ${t("wf.short.partial")}`;
+    rightText = azStr;
     tone = "";
     verdictWord = t("wf.verdict.partial");
   } else if (wf.state === "limited") {
-    rightText = `${azStr} · ${t("wf.short.limited")}`;
+    rightText = azStr;
     tone = "warn";
     verdictWord = t("wf.verdict.limited");
   } else if (wf.state === "cheaper") {
@@ -3046,8 +3046,7 @@ function workingFigureRowHtml() {
       `<div class="wf-kpi"><div class="wf-kpi-label">${esc(t("wf.kpi.energy"))}</div>` +
         `<div class="wf-kpi-val num">${esc(`${wfFmt(wf.heat_kwh, 1)} kWh`)}</div>` +
         `<div class="wf-kpi-sub num">${esc(t("wf.kpi.heat_elec", `${prefix}${wfFmt(wf.elec_kwh, 1)}`))}</div></div>` +
-      `</div>` +
-      `<div class="wf-actions"><button type="button" class="btn secondary wf-btn" data-act="gas-comparison">${esc(t("wf.cta.tariffs"))}</button></div>`;
+      `</div>`;
   } else if (wf.state === "collecting") {
     const obsS = wfNum(wf.observed_s) ? Math.max(0, wf.observed_s) : 0;
     const obs = checkupDuration(obsS);
@@ -3106,9 +3105,6 @@ function workingFigureRowHtml() {
 
   const footKey = (haveMetrics && wf.tariffs_configured === true) ? "wf.foot.gas" : "wf.foot.base";
   body += `<div class="wf-foot">${esc(t(footKey))}</div>`;
-  if (wf.supported === true && haveMetrics && wf.tariffs_configured === true) {
-    body += `<div class="wf-actions"><button type="button" class="btn secondary wf-btn" data-act="gas-comparison">${esc(t("wf.cta.edit_tariffs"))}</button></div>`;
-  }
   body += `</div>`;
 
   return descAccordion("observation:working_figure", t("wf.label"), esc(rightText), cls, body,

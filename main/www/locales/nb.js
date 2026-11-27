@@ -1,4 +1,4 @@
-// translation-source: 085e4137f6a18ccadf3d2c47a8ed7e474a5f706aa9e812e80a1549df5859cc1c
+// translation-source: 77ca4babacf8c4b7e16312750ff7ba40e6540a6266219ad6f8cd115855c0a897
 const nbAria = (x) => (l, d) => `${l} — ${x}. ${d}. Bruk piltastene.`;
 const nbMb = (a, p = "på") => (r) => `${a}${r ? ` ${p} register ${r}` : ""}.`;
 I18N.nb = localeValues([
@@ -936,8 +936,6 @@ I18N.nb = localeValues([
   /* mb.flow_scale_help */ "Ubekreftet /100-skalering (sondering/reserve); sammenlign L/min med enheten. Utelatt fra bevegelse, ΔT, varmeeffekt og 24h-sjekk.",
   /* hist.modbus_flow_unverified */ "Ubekreftet Modbus /100-skalering (venter/reserve); sammenlign med enheten.",
   /* wf.label */ "Ytelsesfaktor",
-  /* wf.short.partial */ "forel.",
-  /* wf.short.limited */ "begr.",
   /* wf.state.unsupported */ "Ikke støttet",
   /* wf.state.collecting */ "Samler inn",
   /* wf.state.standby */ "Hvile",
@@ -960,8 +958,6 @@ I18N.nb = localeValues([
   /* wf.scale.band */ (p) => `±${p} %`,
   /* wf.scale.cheaper */ "Billigere →",
   /* wf.scale.expensive */ "← Dyrere",
-  /* wf.cta.tariffs */ "Angi priser",
-  /* wf.cta.edit_tariffs */ "Endre priser",
   /* wf.desc.collecting */ (o) => `Første verdi etter 2 t · nå ${o}`,
   /* wf.desc.standby */ (o) => `For lite drift til en verdi · ${o} observert`,
   /* wf.desc.unsupported */ "Nødvendige målinger for strømning, temperatur eller effekt mangler.",

@@ -68,11 +68,6 @@ function wire() {
     // very panel the user was reading. On touch screens the gesture may start on the tooltip strip
     // above the plot, so the whole graph is part of this guard rather than only [data-hist].
     if (e.target.closest(".vhist-graph, .checkup-fault-chart, .checkup-fault-table-wrap")) return;
-    const act = e.target.closest("[data-act]");
-    if (act) {
-      if (act.dataset.act === "gas-comparison") openGasComparison();
-      return;
-    }
     if (e.target.closest("[data-defrost-inspect]")) {
       if (S.insp !== "defrost") inspectPick("defrost");
       S.inspFromDefrostNotice = true;

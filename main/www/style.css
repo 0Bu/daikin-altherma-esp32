@@ -1834,8 +1834,6 @@ svg .sc-val.sc-mb .vrow-unit, svg .sc-sub.sc-mb .vrow-unit { fill: var(--src-mb)
 .wf-fact-k { color: var(--muted); }
 .wf-fact-v { color: var(--muted); font-weight: 600; text-align: right; }
 .wf-foot { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
-.wf-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.wf-btn { flex: 0 1 auto; padding: 7px 12px; font-size: 13px; border-radius: 10px; }
 .wf-preview {
   margin: 4px 0 10px; padding: 9px 11px; border: 1px solid var(--line);
   border-radius: var(--r-input); background: var(--soft);
