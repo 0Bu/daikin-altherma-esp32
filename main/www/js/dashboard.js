@@ -140,7 +140,22 @@ function checkupSourceReadyFor(status = S.status) {
     : status?.hp?.connected === true) || hasRetainedHealth;
 }
 const refrigerantStatusUnavailable = () => S.otaCached || S.transportUnavailable === "status";
+function wireRefDisclosure(host) {
+  if (!host || typeof host.addEventListener !== "function" || host._refDisclosureWired) return;
+  host._refDisclosureWired = true;
+  host.addEventListener("toggle", (e) => {
+    const details = e.target?.closest?.("[data-ref-disclosure]");
+    if (!details || e.target !== details) return;
+    const key = `ref:${details.dataset.refDisclosure}`;
+    const open = details.open === true;
+    if (S.descOpen.has(key) === open) return;
+    if (open) S.descOpen.add(key);
+    else S.descOpen.delete(key);
+    if (host.id) delete _html[host.id];
+  }, true);
+}
 function renderCards(hold = true) {
+  wireRefDisclosure($("valueGroups"));
   if (refrigerantStatusUnavailable()) {
     markCyclingStale();
     // A click or scrub may defer rebuilding the card. Hide its retired status immediately.
@@ -2776,65 +2791,143 @@ function refrigerantServiceRowHtml() {
     "unsupported_or_unknown_mode", "dhw_path", "defrost", "unit_fault",
     "special_controller_phase", "missing_fresh_signal", "poll_gap"];
 
-  const time = [], detail = [];
   const seconds = service.continuous_s, samples = service.samples;
-  if (Number.isFinite(seconds) && seconds >= 0 && Number.isFinite(samples) && samples >= 0)
-    time.push(t("service.window", checkupDuration(seconds), Math.floor(samples)));
-  if (typeof service.blocker === "string") {
-    const reasonKey = reasonSlugs.includes(service.blocker)
-      ? `service.reason.${service.blocker}` : "sys.nodata";
-    detail.push(t(reasonKey));
-  }
-  const metricKeys = [
-    ["compressor_rps", "comp", "rps"], ["discharge_c", "disch", "°C"],
-    ["eev_command_pls", "eev", "pls"], ["high_pressure_bar", "hp", "bar"],
+  const hasDuration = Number.isFinite(seconds) && seconds >= 0;
+  const hasSamples = Number.isFinite(samples) && samples >= 0;
+  const status = state === "unsupported" ? t("check.status.unavailable")
+               : state === "unknown" ? t("sys.nodata") : t(`service.state.${state}`);
+  const collapsedStatus = state === "observing" && hasDuration
+    ? t("service.short.observing", checkupDuration(seconds))
+    : state === "limited" && hasDuration
+    ? t("service.short.limited", checkupDuration(seconds))
+    : status;
+  const windowStr = hasDuration && hasSamples
+    ? t("service.window", checkupDuration(seconds), Math.floor(samples)) : "";
+  const blockerText = typeof service.blocker === "string"
+    ? t(reasonSlugs.includes(service.blocker) ? `service.reason.${service.blocker}` : "sys.nodata") : "";
+  const helpKey = ["observing", "limited", "interrupted"].includes(state)
+    ? `service.help.${state}` : null;
+
+  const metricList = [
+    ["compressor_rps", "comp", "rps"],
+    ["discharge_c", "disch", "°C"],
+    ["eev_command_pls", "eev", "pls"],
+    ["high_pressure_bar", "hp", "bar"],
     ["low_pressure_bar", "lp", "bar"],
   ];
-  let hasMetricMeta = false;
-  for (const [key, inspectorKey, unit] of metricKeys) {
+  const positiveSamples = Number.isInteger(samples) && samples > 0;
+  const number = n => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
+  const byKey = {};
+  const countLines = [];
+  let hasReadable = false, hasCounted = false;
+  for (const [key, inspectorKey, unit] of metricList) {
     const metric = service.metrics?.[key];
-    const readable = metric && [metric.min, metric.mean, metric.max].every(Number.isFinite);
+    const readable = !!(metric && [metric.min, metric.mean, metric.max].every(Number.isFinite));
     const meta = service.metric_meta?.[key];
-    const counted = meta && Number.isInteger(meta.samples) && meta.samples >= 0 && meta.samples <= 0xffffffff;
-    // With no qualifying window, the existing blocker already explains the absence. Within an
-    // observed window, a zero-count optional input remains visible beside the populated ranges.
-    if (!readable && (!counted || !Number.isInteger(samples) || samples <= 0)) continue;
-    const number = n => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
-    const label = t(`service.metric.${inspectorKey}`);
-    let text = `${label}: ${readable ? t("service.metric.range", number(metric.min),
-                              number(metric.mean), number(metric.max), unit) : t("sys.nodata")}`;
-    if (counted) {
-      hasMetricMeta = true;
-      text += ` · ${t("service.metric.samples", meta.samples)}`;
+    const counted = !!(meta && Number.isInteger(meta.samples) && meta.samples >= 0 && meta.samples <= 0xffffffff);
+    const visible = readable || (counted && positiveSamples);
+    if (readable) hasReadable = true;
+    if (counted && visible) {
+      hasCounted = true;
+      let line = `${t(`service.metric.${inspectorKey}`)}: ${t("service.metric.samples", meta.samples)}`;
       // Only the unselected state is named; a selected input with zero readings stays "no data".
-      if (meta.source === null) text += ` · ${t("service.metric.input_none")}`;
+      if (meta.source === null) line += ` · ${t("service.metric.input_none")}`;
+      countLines.push(line);
     }
-    detail.push(text);
+    byKey[key] = { inspectorKey, unit, metric, readable, meta, counted };
   }
-  if (hasMetricMeta) detail.push(t("service.metric.meta_limit"));
+  const hasChain = hasReadable || hasCounted;
+
   const limitations = Array.isArray(service.limitations) ? service.limitations : [];
   const knownLimitations = ["special_phases_unavailable", "temperature_context_incomplete",
-                           "pressure_sides_incomplete", "outdoor_context_incomplete"];
+                            "pressure_sides_incomplete", "outdoor_context_incomplete"];
   const missing = limitations.filter(key => knownLimitations.includes(key))
                             .map(key => t(`service.limit.${key}`));
   // Older additive payloads still expose this one specific missing input.
   if (service.special_phases_known === false && !limitations.includes("special_phases_unavailable"))
     missing.unshift(t("service.limit.special_phases_unavailable"));
-  if (missing.length) detail.push(`${t("service.row.limits")} ${missing.join(" · ")}`);
-  // Waiting/unsupported carry a blocker; partial windows name missing inputs in the explanation.
-  // Recording and interrupted windows add their continuity consequence beside the time.
-  const helpKey = ["observing", "limited", "interrupted"].includes(state)
-                ? `service.help.${state}` : null;
-  const status = state === "unsupported" ? t("check.status.unavailable")
-               : state === "unknown" ? t("sys.nodata") : t(`service.state.${state}`);
-  const body = descParaHtml(`<span class="vdesc-n">${esc(status)}</span>` +
-                 (time.length ? ` · ${esc(time.join(" · "))}` : "") +
-                 ` — ${esc(t(helpKey || "service.title"))}`) +
-               descParaHtml(detail.length
-                 ? hasMetricMeta ? detail.map(esc).join("<br>") : esc(detail.join(" · "))
-                 : esc(t("sys.nodata"))) +
-               descNoteHtml(t("normal.label"), t("service.common"));
-  return descAccordion("service:refrigerant", t("service.title"), esc(status),
+
+  const renderMetric = (entry, showLabel, extraNote = "") => {
+    const { inspectorKey, unit, metric, readable, meta, counted } = entry;
+    const badges = [];
+    if (counted && (!readable || meta.samples !== samples)) {
+      badges.push(t("service.metric.samples", meta.samples));
+      if (!readable && meta.source === null) badges.push(t("service.metric.input_none"));
+    }
+    const headHtml = showLabel
+      ? `<div class="ref-metric-label">${esc(t(`service.metric.${inspectorKey}`))}</div>` : "";
+    const valueHtml = readable
+      ? `<div class="ref-metric-mean num">${esc(t("service.metric.mean", number(metric.mean), unit))}</div>` +
+        `<div class="ref-metric-sub num">${esc(t("service.metric.minmax", number(metric.min), number(metric.max), unit))}</div>`
+      : `<div class="ref-metric-mean dim num">—</div><div class="ref-metric-sub">${esc(t("sys.nodata"))}</div>`;
+    const noteHtml = extraNote ? `<div class="ref-metric-note">${esc(extraNote)}</div>` : "";
+    const badgeHtml = badges.length
+      ? `<div class="ref-badges">${badges.map(b => `<span class="ref-badge num">${esc(b)}</span>`).join("")}</div>` : "";
+    return `<div class="ref-metric">${headHtml}${valueHtml}${noteHtml}${badgeHtml}</div>`;
+  };
+
+  const activeOrData = state === "observing" || state === "limited" || positiveSamples || hasChain;
+  let body = `<div class="ref-wrap">`;
+  const subParts = [helpKey ? t(helpKey) : "", blockerText].filter(Boolean);
+  if (activeOrData) {
+    body += `<div class="ref-head"><div class="ref-head-top">` +
+      `<span class="ref-dot${state === "observing" ? " is-live" : ""}" aria-hidden="true"></span>` +
+      `<span class="vdesc-n">${esc(status)}</span>` +
+      (windowStr ? `<span class="ref-win num">· ${esc(windowStr)}</span>` : "") +
+      `</div>${subParts.length ? `<div class="ref-sub">${esc(subParts.join(" · "))}</div>` : ""}</div>`;
+  } else {
+    body += `<div class="ref-status"><div class="ref-status-head">` +
+      `<span class="vdesc-n">${esc(status)}</span>` +
+      (windowStr ? `<span class="ref-win num">· ${esc(windowStr)}</span>` : "") +
+      `</div>${subParts.length ? `<div class="ref-status-text">${esc(subParts.join(" · "))}</div>` : ""}</div>`;
+  }
+
+  if (hasChain) {
+    const lpDim = !byKey.low_pressure_bar.readable;
+    body += `<svg class="ref-flow" viewBox="0 0 340 84" aria-hidden="true" focusable="false">` +
+      `<rect class="ref-flow-box" x="1" y="2" width="148" height="30" rx="8"/>` +
+      `<text class="ref-flow-lbl" x="75" y="21" text-anchor="middle">${esc(t("service.flow.comp"))}</text>` +
+      `<path class="ref-flow-arrow" d="M153 17H186M181 13L186 17L181 21"/>` +
+      `<rect class="ref-flow-box" x="191" y="2" width="148" height="30" rx="8"/>` +
+      `<text class="ref-flow-lbl" x="265" y="21" text-anchor="middle">${esc(t("service.flow.high"))}</text>` +
+      `<path class="ref-flow-arrow" d="M265 34V49M261 44L265 49L269 44"/>` +
+      `<rect class="ref-flow-box" x="191" y="52" width="148" height="30" rx="8"/>` +
+      `<text class="ref-flow-lbl" x="265" y="71" text-anchor="middle">${esc(t("service.flow.valve"))}</text>` +
+      `<path class="ref-flow-arrow" d="M187 67H154M159 63L154 67L159 71"/>` +
+      `<rect class="ref-flow-box${lpDim ? " is-dim" : ""}" x="1" y="52" width="148" height="30" rx="8"/>` +
+      `<text class="ref-flow-lbl${lpDim ? " is-dim" : ""}" x="75" y="71" text-anchor="middle">${esc(t("service.flow.low"))}</text>` +
+      `<path class="ref-flow-arrow" d="M75 50V35M71 40L75 35L79 40"/>` +
+      `</svg>`;
+    const stage = (titleKey, content, dim = false) =>
+      `<div class="ref-stage${dim ? " dim" : ""}">` +
+      `<div class="ref-stage-head"><span class="ref-stage-title">${esc(t(titleKey))}</span></div>` +
+      `${content}</div>`;
+    body += `<div class="ref-stages">` +
+      stage("service.stage.comp", renderMetric(byKey.compressor_rps, false)) +
+      stage("service.stage.high", `<div class="ref-pair">` +
+        renderMetric(byKey.discharge_c, true) +
+        renderMetric(byKey.high_pressure_bar, true) + `</div>`) +
+      stage("service.stage.valve", renderMetric(byKey.eev_command_pls, true, t("service.eev.note"))) +
+      stage("service.stage.low", renderMetric(byKey.low_pressure_bar, true), lpDim) +
+      `</div>`;
+  }
+
+  if (missing.length) {
+    body += `<div class="ref-banner"><span class="vdesc-n">${esc(t("service.row.limits"))}</span> ${esc(missing.join(" · "))}</div>`;
+  }
+  body += `<div class="wf-foot">${esc(t("service.common"))}</div>`;
+  if (countLines.length) {
+    body += `<details class="ref-disclosure" data-ref-disclosure="limits"` +
+      `${S.descOpen.has("ref:limits") ? " open" : ""}>` +
+      `<summary>${esc(t("service.limits.title"))}${chevIcon}</summary>` +
+      `<div class="ref-disclosure-body">` +
+      `<div class="ref-disclosure-limit">${esc(t("service.metric.meta_limit"))}</div>` +
+      `<ul class="ref-disclosure-counts">${countLines.map(line => `<li>${esc(line)}</li>`).join("")}</ul>` +
+      `</div></details>`;
+  }
+  body += `</div>`;
+
+  return descAccordion("service:refrigerant", t("service.title"), esc(collapsedStatus),
                        `checkup-val${tones[state] ? ` ${tones[state]}` : ""}`, body);
 }
 

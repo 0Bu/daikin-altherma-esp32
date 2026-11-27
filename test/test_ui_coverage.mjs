@@ -294,16 +294,20 @@ try {
   }
   for (const srv of [
     { state: "waiting", continuous_s: null, samples: null, blocker: "compressor_not_running" },
+    { state: "waiting", continuous_s: null, samples: 0, blocker: null },
+    { state: "waiting", continuous_s: null, samples: 5, blocker: null },
     { state: "unsupported", continuous_s: 0, samples: 0, blocker: "unsupported_profile" },
     { state: "future_unknown_state", continuous_s: 0, samples: 0, blocker: "unmapped_blocker_slug" },
     {
-      state: "observing", continuous_s: 60, samples: 12, mode: "heating", blocker: null,
+      state: "observing", continuous_s: null, samples: 12, mode: "heating", blocker: null,
       special_phases_known: true, limitations: [],
       metrics: {
         compressor_rps: { min: 20, mean: 30, max: 40 },
         discharge_c: null,
+        low_pressure_bar: { min: 3, mean: 4, max: 5 },
       },
       metric_meta: {
+        compressor_rps: { samples: 6, source: "selected" },
         discharge_c: { samples: 0, source: null },
         eev_command_pls: { samples: 12, source: "selected" },
       },
@@ -315,7 +319,7 @@ try {
       metric_meta: { compressor_rps: { samples: 0, source: null } },
     },
     {
-      state: "limited", continuous_s: 120, samples: 20, mode: "heating",
+      state: "limited", continuous_s: null, samples: 20, mode: "heating",
       special_phases_known: false,
       limitations: ["special_phases_unavailable", "outdoor_context_incomplete"],
     },
@@ -327,6 +331,17 @@ try {
     ui.setStatus({ refrigerant_service: srv, diagnostics: { enabled: true }, hp: { connected: true } });
     ui.refrigerantServiceRowHtml();
   }
+  ui.S.descOpen.add("ref:limits");
+  ui.setStatus({
+    refrigerant_service: {
+      state: "observing", continuous_s: 60, samples: 4,
+      metrics: { compressor_rps: { min: 20, mean: 30, max: 40 } },
+      metric_meta: { compressor_rps: { samples: 4, source: "selected" } },
+    },
+    diagnostics: { enabled: true }, hp: { connected: true },
+  });
+  assert.match(ui.refrigerantServiceRowHtml(), /data-ref-disclosure="limits" open>/);
+  ui.S.descOpen.delete("ref:limits");
 
   // Exercise renderHeaderMeta across every nullish and IP/version/otaAvail branch.
   ui.S.otaAvail = "";
